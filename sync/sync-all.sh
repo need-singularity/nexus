@@ -85,7 +85,7 @@ bash "$SYNC_DIR/sync-links.sh" 2>/dev/null || echo "  ⚠️ 스킵"
 # 7. 논문
 echo ""
 echo "📄 [7/7] 논문 동기화..."
-bash "$SYNC_DIR/sync-papers.sh" 2>/dev/null || echo "  ⚠️ 스킵"
+python3 "$SYNC_DIR/sync-papers-readme.py" 2>/dev/null || echo "  ⚠️ 스킵"
 
 # 8. DSE 지도
 echo ""
