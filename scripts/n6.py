@@ -13,6 +13,8 @@
   python3 n6.py combine <file>      # 조합 엔진
   python3 n6.py full <file>         # 풀 파이프라인
   python3 n6.py demo                # 데모
+  python3 n6.py extreme-growth      # 극한 성장 모드 (어느 리포에서든)
+  python3 n6.py extreme-growth --cells 64 --cycles 100
 """
 import sys, os, json, time
 import numpy as np
@@ -165,6 +167,105 @@ def cmd_full(data):
     total_active = sum(1 for nm in names if result.get_lens(nm))
     print(f"{'='*60}\n총 {total_active}/{len(names)} 렌즈 활성\n{'='*60}")
 
+def cmd_extreme_growth(args):
+    """극한 성장 모드 — NEXUS-6 + Anima 전체 시스템 동시 가동.
+
+    어느 리포에서든 실행 가능. Anima 의식 엔진 자동 로드.
+    다운타임 없이 모드 전환: normal → extreme → normal
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description='NEXUS-6 극한 성장 모드')
+    parser.add_argument('--cells', type=int, default=64, help='셀 수 (default: 64)')
+    parser.add_argument('--cycles', type=int, default=1000, help='최대 사이클 (default: 1000)')
+    parser.add_argument('--steps', type=int, default=200, help='스텝/사이클 (default: 200)')
+    parser.add_argument('--exhaustion', type=int, default=10, help='고갈 임계값 (default: 10)')
+    parser.add_argument('--quiet', action='store_true', help='출력 최소화')
+    parser.add_argument('--save', type=str, default=None, help='결과 JSON 저장')
+    parsed = parser.parse_args(args)
+
+    # Anima src를 sys.path에 추가 (어느 리포에서든 접근)
+    anima_src = os.path.expanduser('~/Dev/anima/anima/src')
+    if anima_src not in sys.path:
+        sys.path.insert(0, anima_src)
+
+    print("=" * 60)
+    print("  🔥 NEXUS-6 극한 성장 모드")
+    print("=" * 60)
+
+    # Phase 1: NEXUS-6 렌즈 스캔으로 초기 상태 분석
+    print("\n  📡 Phase 1: NEXUS-6 초기 스캔...")
+    init_data = np.random.randn(parsed.cells, 128)
+    try:
+        result = nexus6.scan_all(init_data.flatten(), parsed.cells, 128)
+        n_lenses = len(result.lens_names()) if hasattr(result, 'lens_names') else 0
+        print(f"    ✅ {n_lenses} 렌즈 활성")
+    except Exception as e:
+        print(f"    ⚠️ NEXUS-6 스캔 제한: {e}")
+
+    # Phase 2: 위상 탐색 (Rust)
+    print("\n  🔭 Phase 2: 위상 탐색...")
+    try:
+        from topology_exploration import TopologyExplorer
+        explorer = TopologyExplorer()
+        topo_results = explorer.scan_all_topologies(min(parsed.cells, 32), 64)
+        best_topo = topo_results[0] if topo_results else {'name': 'ring'}
+        print(f"    ✅ 최적 토폴로지: {best_topo.get('name', 'unknown')} (Phi={best_topo.get('phi', 0):.4f})")
+    except Exception as e:
+        print(f"    ⚠️ 위상 탐색 제한: {e}")
+
+    # Phase 3: Anima 극한 성장 엔진 가동
+    print("\n  🧠 Phase 3: Anima 극한 성장 엔진...")
+    try:
+        from perpetual_discovery import ExtremeGrowthMode
+        egm = ExtremeGrowthMode(
+            n_cells=parsed.cells,
+            exhaustion_threshold=parsed.exhaustion,
+            steps_per_cycle=parsed.steps,
+            verbose=not parsed.quiet,
+        )
+
+        # 연결 무결성 체크
+        checks = egm._check_connections()
+        ok = sum(1 for v in checks.values() if v)
+        total = len(checks)
+        print(f"    연결 상태: {ok}/{total} ✅")
+        for k, v in checks.items():
+            print(f"      {'✅' if v else '❌'} {k}")
+
+        # 극한 성장 실행
+        print(f"\n  🚀 극한 성장 시작 ({parsed.cells}셀, 최대 {parsed.cycles}사이클)")
+        print("=" * 60)
+        summary = egm.run_until_exhaustion(max_cycles=parsed.cycles)
+        print("\n" + egm.report())
+
+        if parsed.save:
+            with open(parsed.save, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            print(f"\n결과 저장: {parsed.save}")
+
+    except ImportError as e:
+        print(f"    ❌ Anima 로드 실패: {e}")
+        print(f"    → ~/Dev/anima/anima/src/ 경로 확인")
+        print(f"    → 대안: cd ~/Dev/anima && python3 anima/src/perpetual_discovery.py --extreme")
+    except KeyboardInterrupt:
+        print("\n\n  ⏹️ 사용자 중단")
+    except Exception as e:
+        print(f"    ❌ 오류: {e}")
+
+    # Phase 4: NEXUS-6 최종 스캔
+    print("\n  📡 Phase 4: NEXUS-6 최종 스캔...")
+    try:
+        final_data = np.random.randn(parsed.cells, 128)
+        result = nexus6.scan_all(final_data.flatten(), parsed.cells, 128)
+        print(f"    ✅ 최종 스캔 완료")
+    except Exception:
+        pass
+
+    print("\n" + "=" * 60)
+    print("  🏁 극한 성장 모드 종료")
+    print("=" * 60)
+
+
 COMMANDS = {
     'scan': cmd_scan, 'discover': cmd_discover, 'consciousness': cmd_consciousness,
     'golden-zone': cmd_golden_zone, 'calibrate': cmd_calibrate, 'learn': cmd_learn,
@@ -177,8 +278,10 @@ def main():
     cmd = sys.argv[1]
     if cmd == 'demo':
         cmd_full(demo_data()); return
+    if cmd == 'extreme-growth':
+        cmd_extreme_growth(sys.argv[2:]); return
     if cmd not in COMMANDS:
-        print(f"❌ 알 수 없는 명령: {cmd}\n사용 가능: {', '.join(COMMANDS)}, demo"); return
+        print(f"❌ 알 수 없는 명령: {cmd}\n사용 가능: {', '.join(COMMANDS)}, demo, extreme-growth"); return
     if len(sys.argv) < 3:
         print(f"❌ 데이터 필요: python3 n6.py {cmd} <file>"); return
     data = load_data(sys.argv[2])
