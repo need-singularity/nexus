@@ -314,8 +314,8 @@ fn test_lens_isolation() {
 fn test_registry_core_count() {
     let reg = LensRegistry::new();
     let cores = reg.by_category(LensCategory::Core);
-    assert_eq!(cores.len(), 23, "Registry must contain exactly 28 Core lenses");
-    assert_eq!(reg.len(), 1014, "Total registry size after new()");
+    assert_eq!(cores.len(), 102, "Registry must contain exactly 28 Core lenses");
+    assert_eq!(reg.len(), 1093, "Total registry size after new()");
 }
 
 // ──────────────────────────────────────────────
@@ -357,7 +357,7 @@ fn test_registry_by_category() {
         complementary: vec![],
     });
     assert_eq!(reg.by_category(LensCategory::Extended).len(), 992);
-    assert_eq!(reg.len(), 1015);
+    assert_eq!(reg.len(), 1094);
 }
 
 // ──────────────────────────────────────────────
@@ -423,7 +423,7 @@ fn test_domain_combos() {
 #[test]
 fn test_register_custom() {
     let mut reg = LensRegistry::new();
-    assert_eq!(reg.len(), 1014);
+    assert_eq!(reg.len(), 1093);
 
     reg.register(LensEntry {
         name: "my_custom_lens".into(),
@@ -433,7 +433,7 @@ fn test_register_custom() {
         complementary: vec!["consciousness".into()],
     });
 
-    assert_eq!(reg.len(), 1015);
+    assert_eq!(reg.len(), 1094);
 
     let custom = reg.get("my_custom_lens").unwrap();
     assert_eq!(custom.category, LensCategory::Custom);
@@ -513,7 +513,7 @@ fn test_global_lens_name_uniqueness() {
     }
 
     let total = all_names.len();
-    assert_eq!(total, 1014, "Total lens entries across all categories");
+    assert_eq!(total, 1093, "Total lens entries across all categories");
 
     all_names.sort();
     for i in 1..all_names.len() {
@@ -531,7 +531,7 @@ fn test_global_lens_name_uniqueness() {
 #[test]
 fn test_registry_total_411() {
     let reg = LensRegistry::new();
-    assert_eq!(reg.len(), 1014, "Registry total lenses");
+    assert_eq!(reg.len(), 1093, "Registry total lenses");
 
     let extended = reg.by_category(LensCategory::Extended);
     assert_eq!(extended.len(), 991, "Extended category lenses");
@@ -556,7 +556,7 @@ fn test_tecs_math_lens_names_unique() {
     let total = names.len();
     names.sort();
     names.dedup();
-    assert_eq!(names.len(), total, "All 103 TECS-L math lens names must be unique");
+    assert_eq!(names.len(), total, "All TECS-L math lens names must be unique");
 }
 
 // ──────────────────────────────────────────────

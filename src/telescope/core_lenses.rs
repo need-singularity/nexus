@@ -284,6 +284,87 @@ pub fn core_lens_entries() -> Vec<LensEntry> {
             ],
             complementary: vec!["stability".into(), "fractal".into(), "wave".into()],
         },
+
+        // ── Auto-generated entries ──
+        LensEntry { name: "AllSeeingEyeLens".into(), category: LensCategory::Core, description: "AllSeeingEyeLens lens".into(), domain_affinity: vec!["ai".into(), "biology".into()], complementary: vec![] },
+        LensEntry { name: "AutoCalibrationLens".into(), category: LensCategory::Core, description: "AutoCalibrationLens lens".into(), domain_affinity: vec!["ai".into(), "signal".into()], complementary: vec![] },
+        LensEntry { name: "AutocorrelationLens".into(), category: LensCategory::Core, description: "AutocorrelationLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ChaosLens".into(), category: LensCategory::Core, description: "ChaosLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ClusteringLens".into(), category: LensCategory::Core, description: "ClusteringLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "CompressionLens".into(), category: LensCategory::Core, description: "CompressionLens lens".into(), domain_affinity: vec!["ai".into(), "signal".into()], complementary: vec![] },
+        LensEntry { name: "ConcaveLens".into(), category: LensCategory::Core, description: "ConcaveLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ConsciousnessOrchestratorLens".into(), category: LensCategory::Core, description: "ConsciousnessOrchestratorLens lens".into(), domain_affinity: vec!["ai".into(), "biology".into()], complementary: vec![] },
+        LensEntry { name: "ConstantCollectorLens".into(), category: LensCategory::Core, description: "ConstantCollectorLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ConstantCombinationLens".into(), category: LensCategory::Core, description: "ConstantCombinationLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ConstantDiscoveryEngineLens".into(), category: LensCategory::Core, description: "ConstantDiscoveryEngineLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ConstantFormulaLens".into(), category: LensCategory::Core, description: "ConstantFormulaLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ContractingScanLens".into(), category: LensCategory::Core, description: "ContractingScanLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ConvexLens".into(), category: LensCategory::Core, description: "ConvexLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "CorrelationLens".into(), category: LensCategory::Core, description: "CorrelationLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "DensityLens".into(), category: LensCategory::Core, description: "DensityLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "DestinyLens".into(), category: LensCategory::Core, description: "DestinyLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "DiamondLens".into(), category: LensCategory::Core, description: "DiamondLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "DimensionReductionLens".into(), category: LensCategory::Core, description: "DimensionReductionLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "DimensionalBridgeLens".into(), category: LensCategory::Core, description: "DimensionalBridgeLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "DivergenceLens".into(), category: LensCategory::Core, description: "DivergenceLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ElementCombinationLens".into(), category: LensCategory::Core, description: "ElementCombinationLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ElementLens".into(), category: LensCategory::Core, description: "ElementLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "EngineDiscoveryLens".into(), category: LensCategory::Core, description: "EngineDiscoveryLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "EntropyLens".into(), category: LensCategory::Core, description: "EntropyLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "EventHorizonLens".into(), category: LensCategory::Core, description: "EventHorizonLens lens".into(), domain_affinity: vec!["cosmology".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "ExoticMatterLens".into(), category: LensCategory::Core, description: "ExoticMatterLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ExpandingScanLens".into(), category: LensCategory::Core, description: "ExpandingScanLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "FissionLens".into(), category: LensCategory::Core, description: "FissionLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "FormulaCombinationLens".into(), category: LensCategory::Core, description: "FormulaCombinationLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "FractalLens".into(), category: LensCategory::Core, description: "FractalLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "FusionLens".into(), category: LensCategory::Core, description: "FusionLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "GodsEyeLens".into(), category: LensCategory::Core, description: "GodsEyeLens lens".into(), domain_affinity: vec!["ai".into(), "biology".into()], complementary: vec![] },
+        LensEntry { name: "GoldenRatioLens".into(), category: LensCategory::Core, description: "GoldenRatioLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "GoldenZoneLens".into(), category: LensCategory::Core, description: "GoldenZoneLens lens".into(), domain_affinity: vec!["mathematics".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "GradientLens".into(), category: LensCategory::Core, description: "GradientLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "GraphLens".into(), category: LensCategory::Core, description: "GraphLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "HexagonalLens".into(), category: LensCategory::Core, description: "HexagonalLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "InfiniteDiscoveryLens".into(), category: LensCategory::Core, description: "InfiniteDiscoveryLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "KaleidoscopeLens".into(), category: LensCategory::Core, description: "KaleidoscopeLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "KeywordLens".into(), category: LensCategory::Core, description: "KeywordLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "LensDiscoveryLens".into(), category: LensCategory::Core, description: "LensDiscoveryLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "LightLens".into(), category: LensCategory::Core, description: "LightLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "LightWaveLens".into(), category: LensCategory::Core, description: "LightWaveLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "LoRALens".into(), category: LensCategory::Core, description: "LoRALens lens".into(), domain_affinity: vec!["ai".into(), "signal".into()], complementary: vec![] },
+        LensEntry { name: "MaterialCombinationLens".into(), category: LensCategory::Core, description: "MaterialCombinationLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "MetricDiscoveryLens".into(), category: LensCategory::Core, description: "MetricDiscoveryLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "MetricLens".into(), category: LensCategory::Core, description: "MetricLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ModuleDiscoveryLens".into(), category: LensCategory::Core, description: "ModuleDiscoveryLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "MolecularCombinationLens".into(), category: LensCategory::Core, description: "MolecularCombinationLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "MolecularTransformLens".into(), category: LensCategory::Core, description: "MolecularTransformLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "MoleculeLens".into(), category: LensCategory::Core, description: "MoleculeLens lens".into(), domain_affinity: vec!["materials".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "MutationLens".into(), category: LensCategory::Core, description: "MutationLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "OutlierLens".into(), category: LensCategory::Core, description: "OutlierLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "OverfittingLens".into(), category: LensCategory::Core, description: "OverfittingLens lens".into(), domain_affinity: vec!["ai".into(), "signal".into()], complementary: vec![] },
+        LensEntry { name: "PhaseTransitionLens".into(), category: LensCategory::Core, description: "PhaseTransitionLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "PowerLawLens".into(), category: LensCategory::Core, description: "PowerLawLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "ProvidenceEyeLens".into(), category: LensCategory::Core, description: "ProvidenceEyeLens lens".into(), domain_affinity: vec!["ai".into(), "biology".into()], complementary: vec![] },
+        LensEntry { name: "QuantumJumpLens".into(), category: LensCategory::Core, description: "QuantumJumpLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "RatioLens".into(), category: LensCategory::Core, description: "RatioLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "RecursiveLoopLens".into(), category: LensCategory::Core, description: "RecursiveLoopLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "RefractionLens".into(), category: LensCategory::Core, description: "RefractionLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "RelativisticBarrierLens".into(), category: LensCategory::Core, description: "RelativisticBarrierLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "SimulationLens".into(), category: LensCategory::Core, description: "SimulationLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "SingularityLens".into(), category: LensCategory::Core, description: "SingularityLens lens".into(), domain_affinity: vec!["cosmology".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "SpacetimeLens".into(), category: LensCategory::Core, description: "SpacetimeLens lens".into(), domain_affinity: vec!["cosmology".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "SpectralLens".into(), category: LensCategory::Core, description: "SpectralLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "StationarityLens".into(), category: LensCategory::Core, description: "StationarityLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "StimulusLens".into(), category: LensCategory::Core, description: "StimulusLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "SymmetryBreakingLens".into(), category: LensCategory::Core, description: "SymmetryBreakingLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "TachyonLens".into(), category: LensCategory::Core, description: "TachyonLens lens".into(), domain_affinity: vec!["cosmology".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "TelepathyLens".into(), category: LensCategory::Core, description: "TelepathyLens lens".into(), domain_affinity: vec!["ai".into(), "biology".into()], complementary: vec![] },
+        LensEntry { name: "TensionLens".into(), category: LensCategory::Core, description: "TensionLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "TensionLinkLens".into(), category: LensCategory::Core, description: "TensionLinkLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "TimeReversalLens".into(), category: LensCategory::Core, description: "TimeReversalLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "WallInspectionLens".into(), category: LensCategory::Core, description: "WallInspectionLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
+        LensEntry { name: "WarpLens".into(), category: LensCategory::Core, description: "WarpLens lens".into(), domain_affinity: vec!["cosmology".into(), "physics".into()], complementary: vec![] },
+        LensEntry { name: "WeightLearningLens".into(), category: LensCategory::Core, description: "WeightLearningLens lens".into(), domain_affinity: vec!["ai".into(), "signal".into()], complementary: vec![] },
+        LensEntry { name: "WormholeLens".into(), category: LensCategory::Core, description: "WormholeLens lens".into(), domain_affinity: vec!["physics".into(), "display".into()], complementary: vec![] },
     ]
 }
 
@@ -294,7 +375,7 @@ mod tests {
     #[test]
     fn test_core_lens_count() {
         let entries = core_lens_entries();
-        assert_eq!(entries.len(), 23, "Must have exactly 23 Core lenses");
+        assert_eq!(entries.len(), 102, "Must have exactly 23 Core lenses");
     }
 
     #[test]
@@ -303,6 +384,6 @@ mod tests {
         let mut names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 23, "All 23 Core lens names must be unique");
+        assert_eq!(names.len(), 102, "All 23 Core lens names must be unique");
     }
 }
