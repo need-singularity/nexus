@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+bash "$HOOK_DIR/growth-tick.sh" growth-scan &
 # Growth Scan Hook — nexus6_hook Rust 바이너리로 디스패치
 # UserPromptSubmit 훅에서 호출. 30분 쿨다운 내장.
 

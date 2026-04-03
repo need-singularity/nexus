@@ -6,6 +6,7 @@ pub mod graph;
 pub mod telescope;
 pub mod history;
 pub mod ouroboros;
+pub mod blowup;
 pub mod lens_forge;
 pub mod experiment;
 pub mod science;

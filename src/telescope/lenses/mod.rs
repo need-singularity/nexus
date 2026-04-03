@@ -429,3 +429,18 @@ pub use holonomy_group_lens::HolonomyGroupLens;
 
 pub mod electromagnetic_wave_lens;
 pub use electromagnetic_wave_lens::UelectromagneticUwaveLens;
+
+pub mod maxwell_equation_lens;
+pub use maxwell_equation_lens::UmaxwellUequationLens;
+
+pub mod superconductor_lens_lens;
+pub use superconductor_lens_lens::UsuperconductorUlensLens;
+
+pub mod heat_conduction_lens;
+pub use heat_conduction_lens::UheatUconductionLens;
+
+pub mod faraday_induction_lens;
+pub use faraday_induction_lens::UfaradayUinductionLens;
+
+pub mod magnetic_monopole_lens;
+pub use magnetic_monopole_lens::UmagneticUmonopoleLens;

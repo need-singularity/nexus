@@ -252,21 +252,28 @@ mod tests {
 
     #[test]
     fn test_save_and_load() {
-        let path = "/tmp/nexus6_test_kb_save_load.jsonl";
-        // Clean up from previous runs
-        let _ = std::fs::remove_file(path);
+        let dir = std::env::temp_dir().join(format!(
+            "nexus6_test_kb_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("save_load.jsonl");
+        let path_str = path.to_str().unwrap();
 
-        let mut kb = KnowledgeBase::new(path);
+        // Clean up from previous runs
+        let _ = std::fs::remove_file(&path);
+
+        let mut kb = KnowledgeBase::new(path_str);
         kb.add(make_entry("e1", "constant", "sigma=12", true));
         kb.add(make_entry("e2", "formula", "sigma*phi=n*tau", false));
         kb.save().unwrap();
 
-        let loaded = KnowledgeBase::load(path).unwrap();
+        let loaded = KnowledgeBase::load(path_str).unwrap();
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded.get("e1").unwrap().content, "sigma=12");
         assert_eq!(loaded.get("e2").unwrap().content, "sigma*phi=n*tau");
 
         // Clean up
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

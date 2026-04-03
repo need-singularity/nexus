@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-HOOK_BIN="$HOME/Dev/nexus6/target/release/nexus6_hook"
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+bash "$HOOK_DIR/growth-tick.sh" post-edit &
+HOOK_BIN="$HOME/Dev/nexus6/target/release/nexus6_hook"
 INPUT=$(cat)
 
 # Try Rust binary — use output if non-empty

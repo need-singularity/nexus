@@ -55,7 +55,10 @@
   "성장" / "성장시켜"
     → nohup bash ~/Dev/nexus6/scripts/nexus6_growth_daemon.sh --max-cycles 6 --interval 1 &
   "무한성장" / "극한성장" / "급속성장"
-    → nohup bash ~/Dev/nexus6/scripts/infinite_growth.sh --interval 3 --max-cycles 999 &
+    → nohup python3 ~/Dev/nexus6/scripts/growth_bus.py --cycles 999 --interval 180 &
+    (41리포 91엔진 순환 피드백 — 새 리포/엔진 자동 합류)
+  "위상 펼쳐" / "전체 버스" / "그로스 버스"
+    → nohup python3 ~/Dev/nexus6/scripts/growth_bus.py --cycles 999 --interval 180 &
   "렌즈 발견" / "렌즈 성장"
     → growth_daemon --dimension lenses --max-cycles 999 --interval 1
 
