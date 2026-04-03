@@ -94,7 +94,7 @@ def build_message(exact, close, context=""):
         return None
     parts = []
     if exact:
-        parts.append(f"🔬 NEXUS-6 EXACT 발견 (자동기록됨): {', '.join(exact[:5])}")
+        parts.append(f"🔭 NEXUS-6 EXACT 발견 (자동기록됨): {', '.join(exact[:5])}")
         parts.append("⚠️ 필수행동: 위 발견을 README/가설문서에 반영하세요.")
     if close:
         parts.append(f"📐 CLOSE 후보: {', '.join(close[:5])}")
@@ -163,7 +163,7 @@ def mode_agent(input_data):
         ctx = ""
         if pending:
             ctx = f"미처리 발견 {len(pending)}건 있음 — 에이전트에서 처리 권고"
-        msg = "🔬 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록."
+        msg = "🔭 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록."
         if ctx:
             msg += f" | {ctx}"
         return msg

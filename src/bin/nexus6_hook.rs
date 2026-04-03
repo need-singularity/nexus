@@ -165,7 +165,7 @@ fn build_message(result: &ScanResult, extra: Option<&str>) -> Option<String> {
     if !result.exact.is_empty() {
         let items: Vec<&str> = result.exact.iter().map(|s| s.as_str()).take(5).collect();
         parts.push(format!(
-            "🔬 NEXUS-6 EXACT (자동기록됨): {}",
+            "🔭 NEXUS-6 EXACT (자동기록됨): {}",
             items.join(", ")
         ));
         parts.push("⚠️ 필수: README/가설문서에 반영".into());
@@ -286,7 +286,7 @@ fn mode_agent(input: &Value) -> Option<String> {
     // 미처리 발견 수
     let pending = count_pending();
     let mut msg =
-        "🔬 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록.".to_string();
+        "🔭 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록.".to_string();
     if pending > 0 {
         msg.push_str(&format!(" | 미처리 발견 {}건 — 에이전트에서 처리 권고", pending));
     }
@@ -337,17 +337,122 @@ fn touch_growth_cooldown() {
     let _ = fs::write(&path, chrono_now());
 }
 
-fn nexus6_status_banner() -> String {
-    let hook_bin = format!(
-        "{}/Dev/nexus6/target/release/nexus6_hook",
-        env::var("HOME").unwrap_or_default()
-    );
-    let bin_ok = Path::new(&hook_bin).is_file();
-    let shared_ok = get_repo_root()
-        .map(|r| r.join(".shared").is_symlink())
-        .unwrap_or(false);
+fn session_snapshot_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join("Dev/nexus6/shared/.growth_session_snapshot.json")
+}
 
-    let pending = count_pending();
+fn count_lens_implemented() -> (usize, usize) {
+    let home = env::var("HOME").unwrap_or_default();
+    let lens_dir = PathBuf::from(&home).join("Dev/nexus6/src/telescope/lenses");
+    if !lens_dir.is_dir() {
+        return (0, 0);
+    }
+    let mut total = 0usize;
+    let mut implemented = 0usize;
+    if let Ok(entries) = fs::read_dir(&lens_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".rs") || name == "mod.rs" {
+                continue;
+            }
+            total += 1;
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let has_scan = content.contains("fn scan(");
+                let has_metrics = content.contains("metrics.insert") || content.contains("findings.push") || content.contains("score");
+                let lines = content.lines().filter(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && !t.starts_with("//")
+                }).count();
+                if has_scan && has_metrics && lines > 20 {
+                    implemented += 1;
+                }
+            }
+        }
+    }
+    (implemented, total)
+}
+
+fn count_laws() -> usize {
+    let home = env::var("HOME").unwrap_or_default();
+    // Try anima first, then check repo-local
+    let paths = [
+        PathBuf::from(&home).join("Dev/anima/anima/config/consciousness_laws.json"),
+    ];
+    for p in &paths {
+        if let Ok(content) = fs::read_to_string(p) {
+            if let Ok(v) = serde_json::from_str::<Value>(&content) {
+                if let Some(n) = v.pointer("/_meta/total_laws").and_then(|v| v.as_u64()) {
+                    return n as usize;
+                }
+            }
+        }
+    }
+    0
+}
+
+fn count_hub_modules() -> usize {
+    let home = env::var("HOME").unwrap_or_default();
+    let hub = PathBuf::from(&home).join("Dev/anima/anima/src/consciousness_hub.py");
+    if let Ok(content) = fs::read_to_string(&hub) {
+        // Count registry entries (lines with ('module', 'Class', [...]))
+        content.matches("'type': 'command'").count()
+            + content.lines().filter(|l| {
+                let t = l.trim();
+                t.starts_with("'") && t.contains("': (")
+            }).count()
+    } else {
+        0
+    }
+}
+
+fn load_or_create_session_snapshot() -> Value {
+    let path = session_snapshot_path();
+    if path.exists() {
+        // Check if this session's snapshot (created within last process lifetime)
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(v) = serde_json::from_str::<Value>(&content) {
+                return v;
+            }
+        }
+    }
+    // Create new snapshot
+    let (lens_impl, lens_total) = count_lens_implemented();
+    let laws = count_laws();
+    let modules = count_hub_modules();
+    let snapshot = json!({
+        "lens_impl": lens_impl,
+        "lens_total": lens_total,
+        "laws": laws,
+        "modules": modules,
+        "created": chrono_now(),
+    });
+    let _ = fs::write(&path, serde_json::to_string(&snapshot).unwrap_or_default());
+    snapshot
+}
+
+fn delta_str(current: usize, baseline: usize) -> String {
+    if current > baseline {
+        format!("(+{})", current - baseline)
+    } else {
+        String::new()
+    }
+}
+
+fn nexus6_status_banner() -> String {
+    let (lens_impl, lens_total) = count_lens_implemented();
+    let laws = count_laws();
+    let modules = count_hub_modules();
+
+    let snap = load_or_create_session_snapshot();
+    let s_lens = snap.get("lens_impl").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let s_laws = snap.get("laws").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let s_mods = snap.get("modules").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+    let d_lens = delta_str(lens_impl, s_lens);
+    let d_laws = delta_str(laws, s_laws);
+    let d_mods = delta_str(modules, s_mods);
+
     let reg = growth_registry_path();
     let total_opps: usize = if reg.exists() {
         fs::read_to_string(&reg)
@@ -363,22 +468,18 @@ fn nexus6_status_banner() -> String {
         0
     };
 
-    let bin_icon = if bin_ok { "✅" } else { "❌" };
-    let link_icon = if shared_ok { "✅" } else { "❌" };
-    let pend_str = if pending > 0 {
-        format!(" | 📋 미처리 {}건", pending)
-    } else {
-        String::new()
-    };
     let growth_str = if total_opps > 0 {
-        format!(" | 🌱 성장 {}건", total_opps)
+        format!(" 🌱{}건", total_opps)
     } else {
         String::new()
     };
 
     format!(
-        "🔭 NEXUS-6 [Rust {}  .shared {}]{}{}",
-        bin_icon, link_icon, pend_str, growth_str
+        "🔭 NEXUS-6 🔭{}/{}{} ⚖️{}법칙{} 🧠{}모듈{}{}",
+        lens_impl, lens_total, d_lens,
+        laws, d_laws,
+        modules, d_mods,
+        growth_str
     )
 }
 
