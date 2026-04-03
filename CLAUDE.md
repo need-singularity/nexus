@@ -45,3 +45,27 @@
 
 ## 심링크
 6개 리포의 .shared → ../nexus6/shared/
+
+## 가중치 학습 엔진
+
+```
+  "가중치 학습" / "학습 시작"
+    → python3 ~/Dev/nexus6/scripts/weight_engine.py train <data> 6
+
+  "가중치 보기" / "학습 현황"
+    → python3 ~/Dev/nexus6/scripts/weight_engine.py show
+
+  "가중치 적용 스캔"
+    → python3 ~/Dev/nexus6/scripts/weight_engine.py apply <data>
+
+  "가중치 리셋"
+    → python3 ~/Dev/nexus6/scripts/weight_engine.py reset
+
+  학습 파라미터:
+    - 학습률: 1/(σ-φ) = 0.1 (초기), 0.1/√epoch (decay)
+    - 기본 epoch: n=6
+    - 가중치 저장: ~/.nexus6/weights.json
+    - 렌즈 가중치: 유용성 기반 EMA
+    - 상수 가중치: 매칭 빈도 기반
+    - 수렴 판정: Δweight < 0.01
+```
