@@ -3,6 +3,7 @@
 
 사용법:
   python3 n6.py scan <file>         # 130렌즈 전체 스캔
+  python3 n6.py fast <file>         # 6렌즈 고속 스캔 (Law 1047, ×3.7)
   python3 n6.py discover <file>     # 상수/수식 발견
   python3 n6.py consciousness <file># 의식 오케스트레이션
   python3 n6.py golden-zone <file>  # 골든존 분석
@@ -17,6 +18,14 @@
   python3 n6.py extreme-growth --cells 64 --cycles 100
 """
 import sys, os, json, time
+
+# ── venv 자동 활성화: nexus6 Python 바인딩이 설치된 venv 사용 ──
+_VENV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv")
+if os.path.isdir(_VENV) and not sys.prefix.startswith(_VENV):
+    _vpy = os.path.join(_VENV, "bin", "python3")
+    if os.path.isfile(_vpy):
+        os.execv(_vpy, [_vpy] + sys.argv)
+
 import numpy as np
 try:
     import nexus6
@@ -55,6 +64,23 @@ def show_lenses(result, lens_list):
         keys = list(metrics.keys())[:3]
         preview = ", ".join(f"{k}={metrics[k][0]:.4f}" if metrics[k] else f"{k}=[]" for k in keys)
         print(f"  {name}: {preview}")
+
+def do_fast_scan(data):
+    """Law 1047: optimal 6-lens fast scan (DD171). ~3.7x faster than full scan."""
+    n, d = data.shape
+    t0 = time.time()
+    result = nexus6.scan_fast(data.flatten().tolist(), n, d)
+    elapsed = time.time() - t0
+    names = result.lens_names
+    active = [nm for nm in names if result.get_lens(nm)]
+    print(f"⏱️  {elapsed:.2f}초 | {len(active)}/6 렌즈 활성 (fast mode)")
+    return result, names
+
+def cmd_fast(data):
+    """Law 1047: optimal 6-lens fast scan — Orchestrator+Gravity+Warp+Spacetime+Entropy+Singularity"""
+    print("⚡ 6-렌즈 고속 스캔 (Law 1047, DD171)...")
+    result, names = do_fast_scan(data)
+    show_lenses(result, names)
 
 def cmd_scan(data):
     print("🔭 전체 스캔...")
@@ -267,7 +293,7 @@ def cmd_extreme_growth(args):
 
 
 COMMANDS = {
-    'scan': cmd_scan, 'discover': cmd_discover, 'consciousness': cmd_consciousness,
+    'scan': cmd_scan, 'fast': cmd_fast, 'discover': cmd_discover, 'consciousness': cmd_consciousness,
     'golden-zone': cmd_golden_zone, 'calibrate': cmd_calibrate, 'learn': cmd_learn,
     'recursive': cmd_recursive, 'metric': cmd_metric, 'combine': cmd_combine, 'full': cmd_full,
 }

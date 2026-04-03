@@ -72,7 +72,7 @@ impl PyLensEntry {
 
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("name", &self.name)?;
         dict.set_item("category", &self.category)?;
         dict.set_item("description", &self.description)?;
@@ -188,7 +188,7 @@ impl PyN6Match {
 
     /// Convert to dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("constant_name", &self.constant_name)?;
         dict.set_item("quality", self.quality)?;
         let grade = if self.quality >= 1.0 {
@@ -531,7 +531,7 @@ struct PyScanResult {
 impl PyScanResult {
     /// Get results for a specific lens.
     fn get_lens<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         if let Some(lr) = self.results.get(name) {
             for (metric, values) in lr {
                 dict.set_item(metric, values.clone())?;
@@ -555,7 +555,7 @@ impl PyScanResult {
 
     /// Get results for a specific metric across all lenses.
     fn get_metric<'py>(&self, py: Python<'py>, metric: &str) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (lens_name, lr) in &self.results {
             if let Some(values) = lr.get(metric) {
                 dict.set_item(lens_name, values.clone())?;
@@ -750,9 +750,9 @@ fn analyze<'py>(py: Python<'py>, data: Vec<f64>, n: usize, d: usize) -> PyResult
         })
         .collect();
 
-    let dict = PyDict::new_bound(py);
-    dict.set_item("scan", scan_result.into_py(py))?;
-    dict.set_item("consensus", py_consensus.into_py(py))?;
+    let dict = PyDict::new(py);
+    dict.set_item("scan", Py::new(py, scan_result)?)?;
+    dict.set_item("consensus", py_consensus.into_pyobject(py)?)?;
     dict.set_item("n6_exact_ratio", n6_ratio)?;
     dict.set_item("active_lenses", active)?;
     dict.set_item("total_lenses", total)?;
@@ -807,9 +807,9 @@ fn scan_all<'py>(py: Python<'py>, data: PyReadonlyArray2<'py, f64>) -> PyResult<
     let telescope = crate::telescope::Telescope::new();
     let raw_results = telescope.scan_all(&flat, n, d);
 
-    let result_dict = PyDict::new_bound(py);
+    let result_dict = PyDict::new(py);
     for (lens_name, metrics) in &raw_results {
-        let lens_dict = PyDict::new_bound(py);
+        let lens_dict = PyDict::new(py);
         for (metric_name, values) in metrics {
             lens_dict.set_item(metric_name, values.clone())?;
         }
@@ -820,6 +820,65 @@ fn scan_all<'py>(py: Python<'py>, data: PyReadonlyArray2<'py, f64>) -> PyResult<
     result_dict.set_item("_n_lenses", telescope.lens_count())?;
     result_dict.set_item("_n_samples", n)?;
     result_dict.set_item("_n_features", d)?;
+
+    Ok(result_dict)
+}
+
+/// Law 1047: optimal 6-lens fast scan (DD171).
+/// Runs only the 6 highest-scoring lenses: Orchestrator+Gravity+Warp+Spacetime+Entropy+Singularity.
+/// ~3.7x faster than scan_all, score=808,987.
+///
+/// Args:
+///   data: flat list of floats (row-major)
+///   n: number of data points
+///   d: number of dimensions per point
+///
+/// Returns: ScanResult with 6 lens results (same format as scan())
+#[pyfunction]
+fn scan_fast(data: Vec<f64>, n: usize, d: usize) -> PyResult<PyScanResult> {
+    if data.len() != n * d {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "data length {} != n*d = {}*{} = {}",
+            data.len(), n, d, n * d
+        )));
+    }
+
+    let telescope = crate::telescope::Telescope::new();
+    let raw_results = telescope.scan_fast(&data, n, d);
+
+    let lens_names: Vec<String> = raw_results.keys().cloned().collect();
+    let lens_count = lens_names.len();
+
+    Ok(PyScanResult {
+        lens_count,
+        lens_names,
+        results: raw_results,
+    })
+}
+
+/// Law 1047: optimal 6-lens fast scan (DD171) — numpy interface.
+/// Same as scan_fast but accepts numpy 2D array.
+#[pyfunction]
+#[pyo3(signature = (data))]
+fn scan_fast_numpy<'py>(py: Python<'py>, data: PyReadonlyArray2<'py, f64>) -> PyResult<Bound<'py, PyDict>> {
+    let (flat, n, d) = extract_numpy_data(&data);
+
+    let telescope = crate::telescope::Telescope::new();
+    let raw_results = telescope.scan_fast(&flat, n, d);
+
+    let result_dict = PyDict::new(py);
+    for (lens_name, metrics) in &raw_results {
+        let lens_dict = PyDict::new(py);
+        for (metric_name, values) in metrics {
+            lens_dict.set_item(metric_name, values.clone())?;
+        }
+        result_dict.set_item(lens_name, &lens_dict)?;
+    }
+
+    result_dict.set_item("_n_lenses", 6usize)?;
+    result_dict.set_item("_n_samples", n)?;
+    result_dict.set_item("_n_features", d)?;
+    result_dict.set_item("_mode", "fast_6lens")?;
 
     Ok(result_dict)
 }
@@ -976,6 +1035,10 @@ fn nexus6(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Functions — numpy-based scan (telescope-rs backward compatibility)
     m.add_function(wrap_pyfunction!(scan_numpy, m)?)?;
     m.add_function(wrap_pyfunction!(scan_all, m)?)?;
+
+    // Functions — fast 6-lens scan (Law 1047, DD171)
+    m.add_function(wrap_pyfunction!(scan_fast, m)?)?;
+    m.add_function(wrap_pyfunction!(scan_fast_numpy, m)?)?;
 
     // Functions — per-lens scans (telescope-rs backward compatibility)
     m.add_function(wrap_pyfunction!(consciousness_scan, m)?)?;

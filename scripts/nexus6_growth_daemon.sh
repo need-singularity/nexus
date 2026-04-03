@@ -165,6 +165,12 @@ measure_all_dimensions() {
     fi
     calc_count=$((calc_count + shared_calc))
 
+    # CalcTuning: count calculators that have __name__ test + n6 metric
+    local calc_tuned=0
+    if [[ -d "$NEXUS_ROOT/shared/calc" ]]; then
+        calc_tuned=$(grep -rl "if __name__" "$NEXUS_ROOT/shared/calc/"*.py 2>/dev/null | xargs grep -l "n.6\|n=6\|nexus" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
     # CrossResonance: count documented cross-domain connections
     local resonance_count=0
     if ls "$REPO_ROOT"/docs/cross-domain-resonance*.md >/dev/null 2>&1; then
@@ -223,7 +229,7 @@ measure_all_dimensions() {
 
     # Output JSON
     cat <<EOF
-{"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","performance":${performance},"architecture":${arch_pct},"lenses":${lenses_impl},"modules":${maturity},"tests":${test_fns},"hypotheses":${bt_count},"dse":${dse_count},"experiments":${exp_count},"calculators":${calc_count},"cross_resonance":${resonance_count},"knowledge_graph":${graph_nodes},"red_team":${red_team_count},"atlas":${atlas_count},"documentation":${doc_pct},"integration":${integration_tests},"warnings":${warnings},"code_lines":${code_lines}}
+{"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","performance":${performance},"architecture":${arch_pct},"lenses":${lenses_impl},"modules":${maturity},"tests":${test_fns},"hypotheses":${bt_count},"dse":${dse_count},"experiments":${exp_count},"calculators":${calc_count},"calc_tuning":${calc_tuned},"cross_resonance":${resonance_count},"knowledge_graph":${graph_nodes},"red_team":${red_team_count},"atlas":${atlas_count},"documentation":${doc_pct},"integration":${integration_tests},"warnings":${warnings},"code_lines":${code_lines}}
 EOF
 }
 
@@ -254,6 +260,7 @@ targets = {
     'dse':               322,
     'experiments':        50,
     'calculators':        50,
+    'calc_tuning':        50,
     'cross_resonance':   100,
     'knowledge_graph':   500,
     'red_team':          100,
@@ -277,6 +284,7 @@ weights = {
     'atlas':           0.05,
     'experiments':      0.05,
     'calculators':     0.04,
+    'calc_tuning':     0.04,
     'modules':         0.04,
     'documentation':   0.03,
 }
@@ -351,8 +359,34 @@ grow_experiments() {
 }
 
 grow_calculators() {
-    log_info "  Action: Create new calculator"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/, check .shared/calc/ and tools/ for coverage gaps. Identify a domain that needs a calculator (e.g., a BT that lacks numerical verification). Create a Rust calculator in tools/ following CALCULATOR_RULES.md." \
+    log_info "  Action: Create new calculator (lens→calc pipeline)"
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/nexus6/:
+1. Read shared/discovery_log.jsonl for recent lens discoveries that lack calculators.
+2. Read shared/calc/ to see existing calculators.
+3. For each new lens discovery without a matching calculator:
+   - Create a Python calculator in shared/calc/ that VERIFIES the lens finding numerically.
+   - Calculator must: take data, reproduce the lens metric, assert n=6 connection.
+   - Follow naming: {domain}_{concept}.py (e.g., consciousness_entropy_period6.py)
+4. Run the new calculator to confirm it passes.
+5. Log the new calculator to shared/discovery_log.jsonl with type='calculator_created'.
+Priority: focus on discoveries with n6_significance tags first." \
+        --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
+}
+
+grow_calc_tuning() {
+    log_info "  Action: Tune existing calculators (accuracy + coverage)"
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/nexus6/:
+1. List shared/calc/*.py and run each with --check or a quick smoke test.
+2. For any calculator that:
+   a) Fails or errors → fix the bug
+   b) Has low precision (hardcoded tolerances > 1e-6) → tighten
+   c) Lacks n=6 connection metric → add one
+   d) Has no unit test block → add if __name__ test
+   e) Duplicates another calc → merge and remove duplicate
+3. For each tuned calculator, log to shared/discovery_log.jsonl:
+   {\"type\":\"calc_tuned\",\"name\":\"<filename>\",\"improvement\":\"<what changed>\"}
+4. Summary: report how many tuned, how many still need work.
+Focus on the 6 most impactful (highest usage or most errors) first." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
@@ -407,6 +441,7 @@ execute_dimension_growth() {
         dse)             grow_dse ;;
         experiments)     grow_experiments ;;
         calculators)     grow_calculators ;;
+        calc_tuning)     grow_calc_tuning ;;
         cross_resonance) grow_cross_resonance ;;
         knowledge_graph) grow_knowledge_graph ;;
         red_team)        grow_red_team ;;
@@ -444,6 +479,7 @@ targets = {
     'dse':               322,
     'experiments':        50,
     'calculators':        50,
+    'calc_tuning':        50,
     'cross_resonance':   100,
     'knowledge_graph':   500,
     'red_team':          100,
@@ -459,35 +495,40 @@ print('+--------------+---------+---------+--------------+----------------+')
 print('| Dimension    |Current  |Target   |Progress      | Health         |')
 print('+--------------+---------+---------+--------------+----------------+')
 
-dims_sorted = sorted(targets.keys(), key=lambda d: -(1.0 - min(float(m.get(d, 0)) / max(targets[d], 0.001), 1.0)))
+dims_sorted = sorted(targets.keys(), key=lambda d: -(float(m.get(d, 0)) / max(targets[d], 0.001)))
 
 for d in dims_sorted:
     cur = float(m.get(d, 0))
     tgt = targets[d]
-    pct = min(cur / max(tgt, 0.001), 1.0) * 100
-    filled = int(pct / 100 * 12)
+    pct = cur / max(tgt, 0.001) * 100
+    filled = min(int(pct / 100 * 12), 12)
     bar = '#' * filled + '.' * (12 - filled)
 
     if pct < 25:
         health = '[!!] Critical'
     elif pct < 50:
         health = '[ =] Stagnant'
-    elif pct >= 90:
-        health = '[++] Thriving'
-    else:
+    elif pct < 100:
         health = '[ +] OnTrack '
+    elif pct < 200:
+        health = '[++] Thriving'
+    elif pct < 500:
+        health = '[**] Overflow'
+    else:
+        health = '[!!] BEYOND  '
 
     cur_s = f'{cur:.0f}' if cur >= 10 else f'{cur:.1f}'
     tgt_s = f'{tgt:.0f}' if tgt >= 10 else f'{tgt:.1f}'
     marker = ' <<' if d == dim else '   '
 
-    print(f'| {d:<12} | {cur_s:>7} | {tgt_s:>7} | {bar} {pct:>3.0f}% | {health}{marker} |')
+    print(f'| {d:<12} | {cur_s:>7} | {tgt_s:>7} | {bar} {pct:>5.0f}% | {health}{marker} |')
 
 print('+--------------+---------+---------+--------------+----------------+')
 
-total_pct = sum(min(float(m.get(d, 0)) / max(targets[d], 0.001), 1.0) for d in targets) / len(targets) * 100
+total_pct = sum(float(m.get(d, 0)) / max(targets[d], 0.001) for d in targets) / len(targets) * 100
 critical = sum(1 for d in targets if float(m.get(d, 0)) / max(targets[d], 0.001) < 0.25)
-print(f'| Overall: {total_pct:>5.1f}% | Critical: {critical} | Focus: {dim:<20}  |')
+overflow = sum(1 for d in targets if float(m.get(d, 0)) / max(targets[d], 0.001) >= 2.0)
+print(f'| Overall: {total_pct:>5.0f}% | Critical: {critical} | Overflow: {overflow} | Focus: {dim} |')
 print('+' + '-'*65 + '+')
 print()
 " 2>/dev/null

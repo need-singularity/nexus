@@ -23,7 +23,7 @@ loops back to measurement for the next iteration.
 |---|-----------------|-----------|---------|--------|-----------------------------------------------------|
 | 1 | Performance     | 10000     | ops/sec | 0.08   | Telescope scan throughput and latency                |
 | 2 | Architecture    | 100%      | percent | 0.10   | Module structure completeness, no orphans/stubs      |
-| 3 | Lenses          | 200       | count   | 0.10   | Implemented Lens trait impls (from ~24)              |
+| 3 | Lenses          | 213       | count   | 0.10   | Implemented Lens trait impls (from ~24)              |
 | 4 | Modules         | 4.0/5.0   | score   | 0.04   | Mean module maturity level                           |
 | 5 | Tests           | 1000      | count   | 0.12   | Total test count across all modules                  |
 | 6 | Hypotheses      | 150       | count   | 0.08   | Breakthrough theorem count                           |

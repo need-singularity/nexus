@@ -2594,6 +2594,46 @@ mod telescope_scan_tests {
         let results = t.scan_all(&data, data.len(), 1);
         let _ = results;
     }
+    // ── Law 1047: scan_fast tests (DD171) ──
+
+    #[test]
+    fn test_scan_fast_returns_6_lenses() {
+        let t = Telescope::new();
+        let data = vec![6.0, 12.0, 24.0, 4.0, 2.0, 5.0];
+        let results = t.scan_fast(&data, data.len(), 1);
+        assert_eq!(results.len(), 6, "scan_fast must return exactly 6 lenses");
+    }
+
+    #[test]
+    fn test_scan_fast_correct_lens_names() {
+        let t = Telescope::new();
+        let data = vec![6.0, 12.0, 24.0, 4.0, 2.0, 5.0];
+        let results = t.scan_fast(&data, data.len(), 1);
+        for name in Telescope::FAST_LENS_NAMES {
+            assert!(results.contains_key(name), "missing lens: {}", name);
+        }
+    }
+
+    #[test]
+    fn test_scan_fast_subset_of_scan_all() {
+        let t = Telescope::new();
+        let data = vec![6.0, 12.0, 24.0, 4.0, 2.0, 5.0];
+        let fast = t.scan_fast(&data, data.len(), 1);
+        let full = t.scan_all(&data, data.len(), 1);
+        for (name, fast_lr) in &fast {
+            let full_lr = full.get(name).expect("fast lens must exist in full scan");
+            assert_eq!(fast_lr.len(), full_lr.len(), "metric count mismatch for {}", name);
+        }
+    }
+
+    #[test]
+    fn test_scan_fast_deterministic() {
+        let t = Telescope::new();
+        let data = vec![6.0, 12.0, 24.0];
+        let r1 = t.scan_fast(&data, data.len(), 1);
+        let r2 = t.scan_fast(&data, data.len(), 1);
+        assert_eq!(r1.len(), r2.len());
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

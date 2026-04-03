@@ -253,7 +253,7 @@ fn test_telescope_scan_all() {
         results.contains_key("BarrierLens"),
         "Missing BarrierLens results"
     );
-    assert_eq!(telescope.lens_count(), 137);
+    assert_eq!(telescope.lens_count(), 207);
 }
 
 // ──────────────────────────────────────────────
@@ -315,7 +315,7 @@ fn test_registry_core_count() {
     let reg = LensRegistry::new();
     let cores = reg.by_category(LensCategory::Core);
     assert_eq!(cores.len(), 102, "Registry must contain exactly 28 Core lenses");
-    assert_eq!(reg.len(), 1093, "Total registry size after new()");
+    assert_eq!(reg.len(), 1099, "Total registry size after new()");
 }
 
 // ──────────────────────────────────────────────
@@ -343,8 +343,8 @@ fn test_registry_get() {
 fn test_registry_by_category() {
     let mut reg = LensRegistry::new();
 
-    // 991 Extended, no Custom or DomainCombo
-    assert_eq!(reg.by_category(LensCategory::Extended).len(), 991);
+    // 997 Extended, no Custom or DomainCombo
+    assert_eq!(reg.by_category(LensCategory::Extended).len(), 997);
     assert_eq!(reg.by_category(LensCategory::Custom).len(), 0);
     assert_eq!(reg.by_category(LensCategory::DomainCombo).len(), 0);
 
@@ -356,8 +356,8 @@ fn test_registry_by_category() {
         domain_affinity: vec![],
         complementary: vec![],
     });
-    assert_eq!(reg.by_category(LensCategory::Extended).len(), 992);
-    assert_eq!(reg.len(), 1094);
+    assert_eq!(reg.by_category(LensCategory::Extended).len(), 998);
+    assert_eq!(reg.len(), 1100);
 }
 
 // ──────────────────────────────────────────────
@@ -423,7 +423,7 @@ fn test_domain_combos() {
 #[test]
 fn test_register_custom() {
     let mut reg = LensRegistry::new();
-    assert_eq!(reg.len(), 1093);
+    assert_eq!(reg.len(), 1099);
 
     reg.register(LensEntry {
         name: "my_custom_lens".into(),
@@ -433,7 +433,7 @@ fn test_register_custom() {
         complementary: vec!["consciousness".into()],
     });
 
-    assert_eq!(reg.len(), 1094);
+    assert_eq!(reg.len(), 1100);
 
     let custom = reg.get("my_custom_lens").unwrap();
     assert_eq!(custom.category, LensCategory::Custom);
@@ -513,7 +513,7 @@ fn test_global_lens_name_uniqueness() {
     }
 
     let total = all_names.len();
-    assert_eq!(total, 1093, "Total lens entries across all categories");
+    assert_eq!(total, 1099, "Total lens entries across all categories");
 
     all_names.sort();
     for i in 1..all_names.len() {
@@ -531,10 +531,10 @@ fn test_global_lens_name_uniqueness() {
 #[test]
 fn test_registry_total_411() {
     let reg = LensRegistry::new();
-    assert_eq!(reg.len(), 1093, "Registry total lenses");
+    assert_eq!(reg.len(), 1099, "Registry total lenses");
 
     let extended = reg.by_category(LensCategory::Extended);
-    assert_eq!(extended.len(), 991, "Extended category lenses");
+    assert_eq!(extended.len(), 997, "Extended category lenses");
 }
 
 // ──────────────────────────────────────────────
@@ -695,8 +695,8 @@ fn test_all_22_core_lenses_run() {
 fn test_telescope_has_all_24_lenses() {
     let telescope = Telescope::new();
     assert_eq!(
-        telescope.lens_count(), 137,
-        "Telescope::new() should register 60 lenses (28 Core + Renormalization + Mi + Void + Barrier)"
+        telescope.lens_count(), 207,
+        "Telescope::new() should register 207 lenses"
     );
 }
 
@@ -721,8 +721,8 @@ fn test_telescope_scan_all_24() {
     let results = telescope.scan_all(&data, 20, 3);
 
     assert_eq!(
-        results.len(), 137,
-        "scan_all should return results for all 60 lenses, got {}",
+        results.len(), 207,
+        "scan_all should return results for all 207 lenses, got {}",
         results.len()
     );
 

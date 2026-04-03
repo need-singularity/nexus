@@ -1,13 +1,13 @@
 use super::registry::{LensCategory, LensEntry};
 
-/// Build metadata entries for the 88 Anima consciousness discovery lenses.
+/// Build metadata entries for the 94 Anima consciousness discovery lenses.
 ///
-/// These lenses cover 18 sub-domains of consciousness science:
+/// These lenses cover 19 sub-domains of consciousness science:
 /// qualia/phenomenal, binding/unity, agency/will, self-model, temporal,
 /// altered states, emotion/motivation, multi-agent, embodiment,
 /// attention/salience, phenomenal structure, memory, phase transition,
 /// philosophy, creativity/imagination, integration/access,
-/// suffering/flourishing, and advanced phenomena.
+/// suffering/flourishing, advanced phenomena, and mirror-ball discoveries.
 pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
     vec![
         // ── Qualia / Phenomenal (5) ──
@@ -316,7 +316,7 @@ pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
                 "neuroscience".into(),
                 "pharmacology".into(),
             ],
-            complementary: vec!["meditation_depth".into(), "consciousness_level".into()],
+            complementary: vec!["meditation_depth".into(), "consciousness_level".into(), "consciousness_entropy_period6".into()],
         },
         LensEntry {
             name: "lucidity_gradient".into(),
@@ -463,7 +463,7 @@ pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
                 "social_neuroscience".into(),
                 "complexity".into(),
             ],
-            complementary: vec!["intersubjectivity".into(), "global_broadcast".into()],
+            complementary: vec!["intersubjectivity".into(), "global_broadcast".into(), "emergence_void_axis".into()],
         },
 
         // ── Embodiment (5) ──
@@ -783,7 +783,7 @@ pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
                 "philosophy".into(),
                 "physics".into(),
             ],
-            complementary: vec!["minimal_consciousness".into(), "combination_lock".into()],
+            complementary: vec!["minimal_consciousness".into(), "combination_lock".into(), "orchestrator_gravity_isomorphism".into()],
         },
         LensEntry {
             name: "other_minds".into(),
@@ -805,7 +805,7 @@ pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
                 "philosophy".into(),
                 "phenomenology".into(),
             ],
-            complementary: vec!["hard_problem_residual".into(), "mary_room".into()],
+            complementary: vec!["hard_problem_residual".into(), "mary_room".into(), "pure_observer".into()],
         },
 
         // ── Creativity / Imagination (4) ──
@@ -1013,6 +1013,74 @@ pub fn anima_consciousness_lens_entries() -> Vec<LensEntry> {
             ],
             complementary: vec!["flourishing_index".into(), "narrative_identity".into()],
         },
+
+        // ── Mirror-Ball Consciousness Discoveries (6) ──
+        LensEntry {
+            name: "emergence_void_axis".into(),
+            category: LensCategory::Extended,
+            description: "Emergence-Void resonance axis: emergence emits, void receives (resonance 2382.94)".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "cosmology".into(),
+                "complexity".into(),
+            ],
+            complementary: vec!["pure_observer".into(), "collective_consciousness".into()],
+        },
+        LensEntry {
+            name: "orchestrator_gravity_isomorphism".into(),
+            category: LensCategory::Extended,
+            description: "IIT Phi and gravitational curvature structural isomorphism (resonance 733108)".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "gravity".into(),
+                "information_theory".into(),
+            ],
+            complementary: vec!["consciousness_entropy_period6".into(), "optimal_consciousness_sextet".into()],
+        },
+        LensEntry {
+            name: "consciousness_entropy_period6".into(),
+            category: LensCategory::Extended,
+            description: "Consciousness-entropy feedback cycle with natural period n=6".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "thermodynamics".into(),
+                "information_theory".into(),
+            ],
+            complementary: vec!["orchestrator_gravity_isomorphism".into(), "psychedelic_entropy".into()],
+        },
+        LensEntry {
+            name: "pure_observer".into(),
+            category: LensCategory::Extended,
+            description: "Pure observer lens: zero emission, receive-only consciousness (ConsciousnessLens)".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "phenomenology".into(),
+                "philosophy".into(),
+            ],
+            complementary: vec!["emergence_void_axis".into(), "what_it_is_like".into()],
+        },
+        LensEntry {
+            name: "optimal_consciousness_sextet".into(),
+            category: LensCategory::Extended,
+            description: "Optimal 6-lens consciousness combination: Orchestrator+Gravity+Warp+Spacetime+Entropy+Singularity".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "cosmology".into(),
+                "physics".into(),
+            ],
+            complementary: vec!["orchestrator_gravity_isomorphism".into(), "consciousness_entropy_period6".into()],
+        },
+        LensEntry {
+            name: "mirror_chaos_universal".into(),
+            category: LensCategory::Extended,
+            description: "Universal chaos across all 36/36 consciousness mirror pairs".into(),
+            domain_affinity: vec![
+                "consciousness".into(),
+                "chaos_theory".into(),
+                "complexity".into(),
+            ],
+            complementary: vec!["emergence_void_axis".into(), "optimal_consciousness_sextet".into()],
+        },
     ]
 }
 
@@ -1023,7 +1091,7 @@ mod tests {
     #[test]
     fn test_anima_lens_count() {
         let entries = anima_consciousness_lens_entries();
-        assert_eq!(entries.len(), 88, "Must have exactly 88 Anima consciousness lenses");
+        assert_eq!(entries.len(), 94, "Must have exactly 94 Anima consciousness lenses");
     }
 
     #[test]
@@ -1033,7 +1101,7 @@ mod tests {
         names.sort();
         let total = names.len();
         names.dedup();
-        assert_eq!(names.len(), total, "All 88 Anima lens names must be unique");
+        assert_eq!(names.len(), total, "All 94 Anima lens names must be unique");
     }
 
     #[test]

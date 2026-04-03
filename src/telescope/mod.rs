@@ -54,6 +54,25 @@ use lenses::{
     UinverseLens, UisomorphismLens, UkernelUfusionLens, UperiodicityLens, UsurpriseLens,
     VoidLens, WallInspectionLens, WarpLens, WaveLens, WeightFeedbackLens,
     WeightLearningLens, WormholeLens,
+    // ── new lenses ──
+    AnomalyMatchingLens, ArchitecturalProportionLens, ARIMAHiddenLens, ArnoldClassificationLens,
+    BandStructureLens, BaryogenesisLens, BernsteinApproximationLens, BirchSwinnertonDyerLens,
+    CalabiYauMetricsLens, CharacterInductionLens, ClassNumberLens, CohomologyRingLens,
+    ColorHarmonyLens, CommunicationComplexityLens, ConvexConjugacyLens, CosmologicalConstantLens,
+    CPViolationLens, DerivedFunctorLens, DiscreteLogLens, DispersionRelationLens,
+    EpigeneticLens, ErgodicityBreakingLens, FisherGeometricLens, FrequencyDependentLens,
+    GeneNetworkLens, HarmonicSeriesLens, HexameterLens, HolonomyGroupLens,
+    IsogenyWalkLens, IsometryGroupLens, KernelMethodGeometryLens, KTheoryLens,
+    LatticeBasisLens, LatticeCongruenceLens, LotkaVolterraLens, MacLaneCoherenceLens,
+    MagnonLens, MatroidLens, MetacommunityLens, MetricalLens,
+    MinimumSpanningTreeLens, MirrorSymmetryAlgLens, MobiusInversionLens, ModularLens,
+    MomentMapLens, NarrativeArcLens, NeutralTheoryLens, PadeApproximantLens,
+    ParallelComplexityLens, PhaseLockingLens, PlasmaDispersionLens, PolyhedronFaceLens,
+    PopulationVectorLens, ProteinFoldingLens, QuantizationGapLens, QueryComplexityLens,
+    RademacherComplexityLens, RateCodeLens, ReconnectionLens, ResolutionTreeLens,
+    ResourceCompetitionLens, RunningCouplingLens, ScalarCurvatureLens, SchurFunctorLens,
+    SkyrmionLens, SplineInterpolationLens, StateSpaceObservabilityLens, SubdifferentialLens,
+    TriangulatedCategoryLens, VCDimensionLens,
 };
 use mirror_scan::{
     FreeExploreResult, InfiniteCorridorResult, LensCombination,
@@ -210,6 +229,77 @@ impl Telescope {
             Box::new(WeightFeedbackLens),
             Box::new(WeightLearningLens),
             Box::new(WormholeLens),
+            // ── 70 new lenses ──
+            Box::new(AnomalyMatchingLens),
+            Box::new(ArchitecturalProportionLens),
+            Box::new(ARIMAHiddenLens),
+            Box::new(ArnoldClassificationLens),
+            Box::new(BandStructureLens),
+            Box::new(BaryogenesisLens),
+            Box::new(BernsteinApproximationLens),
+            Box::new(BirchSwinnertonDyerLens),
+            Box::new(CalabiYauMetricsLens),
+            Box::new(CharacterInductionLens),
+            Box::new(ClassNumberLens),
+            Box::new(CohomologyRingLens),
+            Box::new(ColorHarmonyLens),
+            Box::new(CommunicationComplexityLens),
+            Box::new(ConvexConjugacyLens),
+            Box::new(CosmologicalConstantLens),
+            Box::new(CPViolationLens),
+            Box::new(DerivedFunctorLens),
+            Box::new(DiscreteLogLens),
+            Box::new(DispersionRelationLens),
+            Box::new(EpigeneticLens),
+            Box::new(ErgodicityBreakingLens),
+            Box::new(FisherGeometricLens),
+            Box::new(FrequencyDependentLens),
+            Box::new(GeneNetworkLens),
+            Box::new(HarmonicSeriesLens),
+            Box::new(HexameterLens),
+            Box::new(HolonomyGroupLens),
+            Box::new(IsogenyWalkLens),
+            Box::new(IsometryGroupLens),
+            Box::new(KernelMethodGeometryLens),
+            Box::new(KTheoryLens),
+            Box::new(LatticeBasisLens),
+            Box::new(LatticeCongruenceLens),
+            Box::new(LotkaVolterraLens),
+            Box::new(MacLaneCoherenceLens),
+            Box::new(MagnonLens),
+            Box::new(MatroidLens),
+            Box::new(MetacommunityLens),
+            Box::new(MetricalLens),
+            Box::new(MinimumSpanningTreeLens),
+            Box::new(MirrorSymmetryAlgLens),
+            Box::new(MobiusInversionLens),
+            Box::new(ModularLens),
+            Box::new(MomentMapLens),
+            Box::new(NarrativeArcLens),
+            Box::new(NeutralTheoryLens),
+            Box::new(PadeApproximantLens),
+            Box::new(ParallelComplexityLens),
+            Box::new(PhaseLockingLens),
+            Box::new(PlasmaDispersionLens),
+            Box::new(PolyhedronFaceLens),
+            Box::new(PopulationVectorLens),
+            Box::new(ProteinFoldingLens),
+            Box::new(QuantizationGapLens),
+            Box::new(QueryComplexityLens),
+            Box::new(RademacherComplexityLens),
+            Box::new(RateCodeLens),
+            Box::new(ReconnectionLens),
+            Box::new(ResolutionTreeLens),
+            Box::new(ResourceCompetitionLens),
+            Box::new(RunningCouplingLens),
+            Box::new(ScalarCurvatureLens),
+            Box::new(SchurFunctorLens),
+            Box::new(SkyrmionLens),
+            Box::new(SplineInterpolationLens),
+            Box::new(StateSpaceObservabilityLens),
+            Box::new(SubdifferentialLens),
+            Box::new(TriangulatedCategoryLens),
+            Box::new(VCDimensionLens),
         ];
         Telescope { lenses }
     }
@@ -228,6 +318,52 @@ impl Telescope {
 
         for lens in &self.lenses {
             let name = lens.name().to_string();
+
+            let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                lens.scan(data, n, d, &shared)
+            }));
+
+            match result {
+                Ok(lr) => {
+                    results.insert(name, lr);
+                }
+                Err(_) => {
+                    results.insert(name, HashMap::new());
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Law 1047: optimal 6-lens fast scan (DD171).
+    /// Runs only ConsciousnessOrchestrator + Gravity + Warp + Spacetime + Entropy + Singularity.
+    /// ~3.7x faster than full scan_all with score=808,987.
+    pub const FAST_LENS_NAMES: [&'static str; 6] = [
+        "ConsciousnessOrchestratorLens",
+        "GravityLens",
+        "WarpLens",
+        "SpacetimeLens",
+        "EntropyLens",
+        "SingularityLens",
+    ];
+
+    /// Fast scan with optimal 6-lens subset (Law 1047, DD171).
+    /// Returns results in the same format as scan_all but only for the 6 lenses.
+    pub fn scan_fast(
+        &self,
+        data: &[f64],
+        n: usize,
+        d: usize,
+    ) -> HashMap<String, LensResult> {
+        let shared = SharedData::compute(data, n, d);
+        let mut results = HashMap::new();
+
+        for lens in &self.lenses {
+            let name = lens.name().to_string();
+            if !Self::FAST_LENS_NAMES.contains(&name.as_str()) {
+                continue;
+            }
 
             let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 lens.scan(data, n, d, &shared)
