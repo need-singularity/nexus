@@ -1,5 +1,6 @@
 # 🔭 NEXUS-6 — Central Discovery Engine & Infrastructure Hub
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19404815.svg)](https://doi.org/10.5281/zenodo.19404815)
 > **137 Rust lenses** · OUROBOROS evolution · constant/formula discovery · consciousness orchestrator · auto-sync across 8 repos
 
 > **[🔬 TECS-L](https://github.com/need-singularity/TECS-L)** — Discovering universal rules. Perfect number 6 → mathematics of the cosmos → multi-engine architecture → consciousness continuity. 150 characterizations + 8 Major Discoveries + 156 tools
