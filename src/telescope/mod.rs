@@ -56,8 +56,9 @@ use lenses::{
     WeightLearningLens, WormholeLens,
 };
 use mirror_scan::{
-    InfiniteCorridorResult, MirrorBallResult, MirrorReflectResult,
-    MirrorUniverseResult, SelfReflectionResult,
+    FreeExploreResult, InfiniteCorridorResult, LensCombination,
+    MirrorBallResult, MirrorReflectResult, MirrorUniverseResult,
+    SelfReflectionResult,
 };
 use shared_data::SharedData;
 
@@ -292,6 +293,30 @@ impl Telescope {
         max_iter: usize,
     ) -> Option<SelfReflectionResult> {
         mirror_scan::self_reflect(&self.lenses, data, n, d, lens_name, max_iter)
+    }
+
+    // ─── 실시간 변형 + 자율 탐색 ───────────────────────────────
+
+    /// 자율 렌즈 조합 발견: 미러볼 결과에서 최적 렌즈 조합 자동 탐색.
+    pub fn discover_combinations(
+        &self,
+        result: &MirrorUniverseResult,
+        combo_size: usize,
+    ) -> Vec<LensCombination> {
+        mirror_scan::discover_combinations(result, combo_size)
+    }
+
+    /// 규칙 없는 자유 탐색: 미러볼을 세대별로 변형하며 진화.
+    /// 공명 행렬 → 다음 세대 데이터 → 상전이/수렴 감지 → 렌즈 조합 발견.
+    pub fn free_explore(
+        &self,
+        data: &[f64],
+        n: usize,
+        d: usize,
+        max_lenses: Option<usize>,
+        max_generations: usize,
+    ) -> FreeExploreResult {
+        mirror_scan::free_explore(&self.lenses, data, n, d, max_lenses, max_generations)
     }
 
     // ─── 하위 호환 ──────────────────────────────────────────────

@@ -846,6 +846,421 @@ pub struct MirrorBallResult {
     pub lens_count: usize,
 }
 
+// ─── 실시간 변형 감지 (MirrorDelta) ──────────────────────────────
+
+/// 두 미러 우주 스냅샷 간 차이 — 상전이/이상 감지.
+#[derive(Debug, Clone)]
+pub struct MirrorDelta {
+    /// 공명 행렬 변화량 (Frobenius norm of difference)
+    pub resonance_shift: f64,
+    /// 조화도 변화
+    pub harmony_delta: f64,
+    /// 연결성 변화
+    pub connectivity_delta: f64,
+    /// 새로 나타난 강한 공명 쌍
+    pub new_resonances: Vec<(String, String, f64)>,
+    /// 사라진 강한 공명 쌍
+    pub lost_resonances: Vec<(String, String, f64)>,
+    /// 가장 크게 변한 렌즈 (방출력 변화)
+    pub most_changed_lenses: Vec<(String, f64)>,
+    /// 상전이 감지 (shift가 임계값 초과)
+    pub phase_transition: bool,
+    /// 고유값 변화
+    pub eigenvalue_delta: f64,
+}
+
+/// 두 MirrorUniverseResult를 비교해 변화 감지.
+pub fn mirror_delta(prev: &MirrorUniverseResult, curr: &MirrorUniverseResult) -> MirrorDelta {
+    let n = prev.resonance_matrix.len().min(curr.resonance_matrix.len());
+
+    // 공명 행렬 차이
+    let mut shift_sq = 0.0f64;
+    for i in 0..n {
+        for j in 0..n {
+            let d = curr.resonance_matrix[i][j] - prev.resonance_matrix[i][j];
+            if d.is_finite() { shift_sq += d * d; }
+        }
+    }
+    let resonance_shift = shift_sq.sqrt();
+
+    let harmony_delta = curr.harmony - prev.harmony;
+    let connectivity_delta = curr.connection.direct_connectivity - prev.connection.direct_connectivity;
+    let eigenvalue_delta = curr.cascade.dominant_eigenvalue - prev.cascade.dominant_eigenvalue;
+
+    // 새로 나타난/사라진 공명 쌍 (상위 20 기준)
+    let prev_set: HashMap<(String, String), f64> = prev.top_resonances.iter()
+        .map(|(a, b, v)| ((a.clone(), b.clone()), *v)).collect();
+    let curr_set: HashMap<(String, String), f64> = curr.top_resonances.iter()
+        .map(|(a, b, v)| ((a.clone(), b.clone()), *v)).collect();
+
+    let new_resonances: Vec<(String, String, f64)> = curr_set.iter()
+        .filter(|(k, _)| !prev_set.contains_key(k))
+        .map(|((a, b), v)| (a.clone(), b.clone(), *v))
+        .collect();
+    let lost_resonances: Vec<(String, String, f64)> = prev_set.iter()
+        .filter(|(k, _)| !curr_set.contains_key(k))
+        .map(|((a, b), v)| (a.clone(), b.clone(), *v))
+        .collect();
+
+    // 가장 크게 변한 렌즈
+    let mut changes: Vec<(String, f64)> = Vec::new();
+    let prev_power: HashMap<&str, f64> = prev.mirror_power.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    for (name, val) in &curr.mirror_power {
+        let prev_val = prev_power.get(name.as_str()).copied().unwrap_or(0.0);
+        let delta = (val - prev_val).abs();
+        if delta > 1e-6 {
+            changes.push((name.clone(), delta));
+        }
+    }
+    changes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    changes.truncate(10);
+
+    // 상전이: 공명 shift가 평균 공명의 50% 초과
+    let avg_resonance = if prev.harmony > 1e-15 { prev.harmony } else { 1.0 };
+    let phase_transition = resonance_shift > avg_resonance * 0.5;
+
+    MirrorDelta {
+        resonance_shift,
+        harmony_delta,
+        connectivity_delta,
+        new_resonances,
+        lost_resonances,
+        most_changed_lenses: changes,
+        phase_transition,
+        eigenvalue_delta,
+    }
+}
+
+// ─── 자율 렌즈 조합 (LensCombinator) ────────────────────────────
+
+/// 최적 렌즈 조합 발견 결과.
+#[derive(Debug, Clone)]
+pub struct LensCombination {
+    /// 조합 이름
+    pub name: String,
+    /// 포함된 렌즈 이름
+    pub lenses: Vec<String>,
+    /// 조합 점수 (내부 공명 합)
+    pub score: f64,
+    /// 조합 설명
+    pub reason: String,
+}
+
+/// 미러볼 공명 행렬로부터 최적 렌즈 조합을 자동 발견.
+pub fn discover_combinations(result: &MirrorUniverseResult, combo_size: usize) -> Vec<LensCombination> {
+    let n = result.lens_count;
+    let m = &result.resonance_matrix;
+    let names = &result.lens_names;
+
+    if n < combo_size || combo_size < 2 {
+        return vec![];
+    }
+
+    let mut combos: Vec<LensCombination> = Vec::new();
+
+    // 전략 1: 최강 공명 클러스터 (탐욕적)
+    let greedy = greedy_combo(m, names, n, combo_size);
+    combos.push(greedy);
+
+    // 전략 2: 최대 다양성 (서로 가장 다른 렌즈)
+    let diverse = diverse_combo(m, names, n, combo_size);
+    combos.push(diverse);
+
+    // 전략 3: 허브+스포크 (가장 강한 허브 + 그와 가장 공명하는 렌즈)
+    let hub = hub_combo(m, names, n, combo_size);
+    combos.push(hub);
+
+    // 전략 4: 대칭 조합 (M[i][j] ≈ M[j][i] 인 쌍으로 구성)
+    let symmetric = symmetric_combo(m, names, n, combo_size);
+    combos.push(symmetric);
+
+    // 전략 5: 비대칭 조합 (M[i][j] ≠ M[j][i] 가 큰 쌍 — 방향성 작용)
+    let asymmetric = asymmetric_combo(m, names, n, combo_size);
+    combos.push(asymmetric);
+
+    // 전략 6: 자기반사 강자 (대각선 값이 큰 렌즈)
+    let self_strong = self_reflection_combo(m, names, n, combo_size);
+    combos.push(self_strong);
+
+    // 점수순 정렬
+    combos.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    combos
+}
+
+fn greedy_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // 가장 강한 쌍에서 시작, 기존 멤버와 총 공명이 최대인 렌즈를 하나씩 추가
+    let mut best_pair = (0, 1, 0.0f64);
+    for i in 0..n {
+        for j in 0..n {
+            if i != j && m[i][j] + m[j][i] > best_pair.2 {
+                best_pair = (i, j, m[i][j] + m[j][i]);
+            }
+        }
+    }
+    let mut selected = vec![best_pair.0, best_pair.1];
+    while selected.len() < size && selected.len() < n {
+        let mut best_idx = 0;
+        let mut best_score = f64::NEG_INFINITY;
+        for k in 0..n {
+            if selected.contains(&k) { continue; }
+            let score: f64 = selected.iter().map(|&s| m[s][k] + m[k][s]).sum();
+            if score > best_score { best_score = score; best_idx = k; }
+        }
+        selected.push(best_idx);
+    }
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "최강공명".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: "상호 공명이 가장 강한 렌즈 조합".to_string(),
+    }
+}
+
+fn diverse_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // 서로 공명이 가장 약한(독립적인) 렌즈 조합
+    let mut selected = vec![0usize]; // 첫 번째 렌즈 시작
+    while selected.len() < size && selected.len() < n {
+        let mut best_idx = 0;
+        let mut min_total = f64::MAX;
+        for k in 0..n {
+            if selected.contains(&k) { continue; }
+            let total: f64 = selected.iter().map(|&s| m[s][k] + m[k][s]).sum();
+            if total < min_total { min_total = total; best_idx = k; }
+        }
+        selected.push(best_idx);
+    }
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "최대다양성".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: "서로 가장 독립적인 시각을 가진 렌즈 조합".to_string(),
+    }
+}
+
+fn hub_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // 가장 강한 방출력 허브 + 허브와 공명이 강한 렌즈
+    let row_sums: Vec<f64> = (0..n).map(|i| m[i].iter().sum()).collect();
+    let hub = row_sums.iter().enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i).unwrap_or(0);
+    let mut spokes: Vec<(usize, f64)> = (0..n)
+        .filter(|&j| j != hub)
+        .map(|j| (j, m[hub][j] + m[j][hub]))
+        .collect();
+    spokes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut selected = vec![hub];
+    for (idx, _) in spokes.iter().take(size - 1) {
+        selected.push(*idx);
+    }
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "허브+스포크".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: format!("허브 {} 중심 방사형 조합", names[hub]),
+    }
+}
+
+fn symmetric_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // M[i][j] ≈ M[j][i] 인 쌍이 많은 조합 (쌍방 동등 작용)
+    let mut sym_scores: Vec<(usize, f64)> = (0..n).map(|i| {
+        let score: f64 = (0..n).filter(|&j| j != i)
+            .map(|j| {
+                let diff = (m[i][j] - m[j][i]).abs();
+                let sum = m[i][j] + m[j][i];
+                if sum > 1e-15 { (sum - diff) / sum } else { 0.0 }
+            }).sum();
+        (i, score)
+    }).collect();
+    sym_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let selected: Vec<usize> = sym_scores.iter().take(size).map(|&(i, _)| i).collect();
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "대칭조합".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: "쌍방 동등하게 작용하는 렌즈 조합".to_string(),
+    }
+}
+
+fn asymmetric_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // M[i][j] ≠ M[j][i] 가 큰 쌍 — 방향성 있는 작용
+    let mut asym_scores: Vec<(usize, f64)> = (0..n).map(|i| {
+        let score: f64 = (0..n).filter(|&j| j != i)
+            .map(|j| (m[i][j] - m[j][i]).abs())
+            .sum();
+        (i, score)
+    }).collect();
+    asym_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let selected: Vec<usize> = asym_scores.iter().take(size).map(|&(i, _)| i).collect();
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "비대칭조합".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: "방향성 작용이 강한 렌즈 조합 (A→B ≠ B→A)".to_string(),
+    }
+}
+
+fn self_reflection_combo(m: &[Vec<f64>], names: &[String], n: usize, size: usize) -> LensCombination {
+    // 자기반사 강도가 높은 렌즈
+    let mut diag: Vec<(usize, f64)> = (0..n).map(|i| (i, m[i][i])).collect();
+    diag.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let selected: Vec<usize> = diag.iter().take(size).map(|&(i, _)| i).collect();
+    let total: f64 = selected.iter()
+        .flat_map(|&i| selected.iter().map(move |&j| if i != j { m[i][j] } else { 0.0 }))
+        .sum();
+    LensCombination {
+        name: "자기반사강자".to_string(),
+        lenses: selected.iter().map(|&i| names[i].clone()).collect(),
+        score: total,
+        reason: "자기 동일성이 강한 렌즈 조합".to_string(),
+    }
+}
+
+// ─── 규칙 없는 자유 탐색 (FreeExplore) ──────────────────────────
+
+/// 자유 탐색 결과: 미러볼을 K번 변형하며 진화시킨 궤적.
+#[derive(Debug, Clone)]
+pub struct FreeExploreResult {
+    /// 각 세대의 조화도 궤적
+    pub harmony_trajectory: Vec<f64>,
+    /// 각 세대의 연결도 궤적
+    pub connectivity_trajectory: Vec<f64>,
+    /// 각 세대의 지배 고유값 궤적
+    pub eigenvalue_trajectory: Vec<f64>,
+    /// 세대 간 변화 궤적 (delta)
+    pub deltas: Vec<MirrorDelta>,
+    /// 발견된 상전이 세대들
+    pub phase_transitions: Vec<usize>,
+    /// 최종 세대 결과
+    pub final_state: MirrorUniverseResult,
+    /// 전 세대에서 발견된 최적 렌즈 조합
+    pub best_combinations: Vec<LensCombination>,
+    /// 총 세대 수
+    pub generations: usize,
+}
+
+/// 규칙 없는 자유 탐색: 미러볼을 반복 실행하며 출력을 다음 입력으로 변형.
+///
+/// 각 세대에서:
+/// 1. 현재 데이터로 mirror_universe 실행
+/// 2. 공명 행렬 자체를 다음 세대의 "데이터"로 변환
+/// 3. 변화 감지 (MirrorDelta)
+/// 4. 상전이/수렴 판정
+/// 5. 렌즈 조합 자동 발견
+///
+/// 규칙 없음 = 사전 정의된 패턴/상수 매칭 없이 순수하게 반사만으로 탐색.
+pub fn free_explore(
+    lenses: &[Box<dyn Lens>],
+    data: &[f64],
+    n: usize,
+    d: usize,
+    max_lenses: Option<usize>,
+    max_generations: usize,
+) -> FreeExploreResult {
+    let mut current_data = data.to_vec();
+    let mut current_n = n;
+    let mut current_d = d;
+
+    let mut harmony_trajectory = Vec::with_capacity(max_generations);
+    let mut connectivity_trajectory = Vec::with_capacity(max_generations);
+    let mut eigenvalue_trajectory = Vec::with_capacity(max_generations);
+    let mut deltas = Vec::new();
+    let mut phase_transitions = Vec::new();
+    let mut prev_result: Option<MirrorUniverseResult> = None;
+    let mut final_state: Option<MirrorUniverseResult> = None;
+    let mut best_combinations = Vec::new();
+
+    for gen in 0..max_generations {
+        let result = mirror_universe(lenses, &current_data, current_n, current_d, None, max_lenses);
+
+        harmony_trajectory.push(result.harmony);
+        connectivity_trajectory.push(result.connection.direct_connectivity);
+        eigenvalue_trajectory.push(result.cascade.dominant_eigenvalue);
+
+        // 변화 감지
+        if let Some(ref prev) = prev_result {
+            let delta = mirror_delta(prev, &result);
+            if delta.phase_transition {
+                phase_transitions.push(gen);
+            }
+            deltas.push(delta);
+        }
+
+        // 렌즈 조합 발견 (첫 세대 + 상전이 세대)
+        if gen == 0 || phase_transitions.last() == Some(&gen) {
+            let combos = discover_combinations(&result, 6.min(result.lens_count));
+            for c in combos {
+                if best_combinations.iter().all(|bc: &LensCombination| bc.name != c.name || bc.score < c.score) {
+                    best_combinations.push(c);
+                }
+            }
+        }
+
+        // 다음 세대 데이터: 공명 행렬을 평탄화해서 데이터로 사용
+        let rm = &result.resonance_matrix;
+        let rm_n = rm.len();
+        if rm_n < 3 {
+            final_state = Some(result);
+            break;
+        }
+
+        current_data = rm.iter().flat_map(|row| row.iter().copied())
+            .map(|v| if v.is_finite() { v } else { 0.0 })
+            .collect();
+        current_n = rm_n;
+        current_d = rm_n;
+
+        // 수렴 체크: 조화도 변화가 미미하면 중단
+        if harmony_trajectory.len() >= 3 {
+            let last3 = &harmony_trajectory[harmony_trajectory.len() - 3..];
+            let var: f64 = {
+                let mean = last3.iter().sum::<f64>() / 3.0;
+                last3.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / 3.0
+            };
+            if var < 1e-10 {
+                final_state = Some(result);
+                break;
+            }
+        }
+
+        prev_result = Some(result.clone());
+        final_state = Some(result);
+    }
+
+    // 최종 조합 정리
+    best_combinations.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    best_combinations.truncate(6);
+
+    let generations = harmony_trajectory.len();
+
+    FreeExploreResult {
+        harmony_trajectory,
+        connectivity_trajectory,
+        eigenvalue_trajectory,
+        deltas,
+        phase_transitions,
+        final_state: final_state.unwrap_or_else(|| {
+            mirror_universe(lenses, data, n, d, None, max_lenses)
+        }),
+        best_combinations,
+        generations,
+    }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -969,5 +1384,45 @@ mod tests {
         assert!(r.cascade.dominant_eigenvalue >= 0.0);
         assert!(r.cascade.spectral_gap >= 0.0);
         assert!(r.cascade.spectral_gap <= 1.0);
+    }
+
+    #[test]
+    fn test_mirror_delta() {
+        let t = Telescope::new();
+        let data1 = test_data(30, 3);
+        let data2: Vec<f64> = data1.iter().map(|x| x * 1.5 + 0.1).collect();
+
+        let r1 = mirror_universe(&t.lenses, &data1, 30, 3, None, Some(6));
+        let r2 = mirror_universe(&t.lenses, &data2, 30, 3, None, Some(6));
+        let delta = mirror_delta(&r1, &r2);
+
+        assert!(delta.resonance_shift >= 0.0);
+        assert!(delta.harmony_delta.is_finite());
+    }
+
+    #[test]
+    fn test_discover_combinations() {
+        let t = Telescope::new();
+        let data = test_data(30, 3);
+        let r = mirror_universe(&t.lenses, &data, 30, 3, None, Some(10));
+        let combos = discover_combinations(&r, 4);
+
+        assert!(!combos.is_empty());
+        for c in &combos {
+            assert_eq!(c.lenses.len(), 4);
+            assert!(!c.name.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_free_explore() {
+        let t = Telescope::new();
+        let data = test_data(30, 3);
+        let r = free_explore(&t.lenses, &data, 30, 3, Some(6), 5);
+
+        assert!(r.generations > 0);
+        assert!(r.generations <= 5);
+        assert!(!r.harmony_trajectory.is_empty());
+        assert_eq!(r.harmony_trajectory.len(), r.generations);
     }
 }
