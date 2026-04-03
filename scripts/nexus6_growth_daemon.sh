@@ -50,6 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --interval MIN     Sleep between cycles (default: 5)"
             echo "  --max-cycles N     Maximum cycles to run (default: 6)"
             echo "  --dimension DIM    Force a specific dimension each cycle"
+            echo "  --mirror           Run mirror scan before each cycle"
             echo "  --dry-run          Analyze only, no code generation or commits"
             echo "  --skip-commit      Generate code but don't commit"
             echo "  --auto-push        Auto-push to origin after successful growth"
@@ -60,9 +61,11 @@ while [[ $# -gt 0 ]]; do
             echo "  red_team, atlas, documentation, integration"
             exit 0
             ;;
+        --mirror)      MIRROR_SCAN=true; shift ;;
         *) echo "Unknown flag: $1"; exit 1 ;;
     esac
 done
+MIRROR_SCAN="${MIRROR_SCAN:-false}"
 
 # ── Utility functions ────────────────────────────────────────────────
 log_info()  { echo "[$(date +%H:%M:%S)] INFO:  $*"; }
@@ -522,6 +525,13 @@ for cycle in $(seq 1 "$MAX_CYCLES"); do
     echo "  Cycle $cycle / $MAX_CYCLES"
     echo "  ========================================"
     echo ""
+
+    # ── Step 0: Mirror scan (if enabled) ────────────────────────────
+    if $MIRROR_SCAN; then
+        log_info "🔭 Mirror scan running..."
+        python3 "$SCRIPT_DIR/mirror_growth.py" --lenses 10 --quiet 2>/dev/null || true
+        log_info "Mirror scan complete → mirror_log.jsonl + growth-registry.json"
+    fi
 
     # ── Step 1: Measure all dimensions ────────────────────────────────
     log_info "Step 1/5: Measuring all 15 dimensions..."

@@ -52,6 +52,15 @@
 
   "리포트" / "리포트 줘" / "성장 리포트" / "넥서스 리포트"
     → python3 ~/Dev/nexus6/scripts/nexus6_report.py
+
+  "미러볼" / "거울 우주" / "미러 스캔"
+    → python3 ~/Dev/nexus6/scripts/mirror_growth.py --lenses 20
+
+  "미러볼 진화" / "자유 탐색"
+    → python3 ~/Dev/nexus6/scripts/mirror_growth.py --lenses 10 --evolve 6
+
+  "미러볼 성장" / "거울 성장"
+    → nohup bash ~/Dev/nexus6/scripts/nexus6_growth_daemon.sh --mirror --max-cycles 6 &
 ```
 
 ## 구조
