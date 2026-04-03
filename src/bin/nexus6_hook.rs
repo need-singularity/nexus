@@ -337,10 +337,55 @@ fn touch_growth_cooldown() {
     let _ = fs::write(&path, chrono_now());
 }
 
+fn nexus6_status_banner() -> String {
+    let hook_bin = format!(
+        "{}/Dev/nexus6/target/release/nexus6_hook",
+        env::var("HOME").unwrap_or_default()
+    );
+    let bin_ok = Path::new(&hook_bin).is_file();
+    let shared_ok = get_repo_root()
+        .map(|r| r.join(".shared").is_symlink())
+        .unwrap_or(false);
+
+    let pending = count_pending();
+    let reg = growth_registry_path();
+    let total_opps: usize = if reg.exists() {
+        fs::read_to_string(&reg)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.as_object().map(|o| {
+                o.values()
+                    .filter_map(|v| v.get("opportunities").and_then(|n| n.as_u64()))
+                    .sum::<u64>() as usize
+            }))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let bin_icon = if bin_ok { "✅" } else { "❌" };
+    let link_icon = if shared_ok { "✅" } else { "❌" };
+    let pend_str = if pending > 0 {
+        format!(" | 📋 미처리 {}건", pending)
+    } else {
+        String::new()
+    };
+    let growth_str = if total_opps > 0 {
+        format!(" | 🌱 성장 {}건", total_opps)
+    } else {
+        String::new()
+    };
+
+    format!(
+        "🔭 NEXUS-6 [Rust {}  .shared {}]{}{}",
+        bin_icon, link_icon, pend_str, growth_str
+    )
+}
+
 fn mode_growth_scan(_input: &Value) -> Option<String> {
-    // 30분 쿨다운
+    // 30분 쿨다운 — 배너만 출력
     if is_growth_cooldown_active(1800) {
-        return None;
+        return Some(nexus6_status_banner());
     }
 
     let repo = get_repo_root()?;
@@ -383,7 +428,10 @@ fn mode_growth_scan(_input: &Value) -> Option<String> {
         let repo_name = repo.file_name()?.to_str()?;
         update_registry(repo_name, opps.len(), &chrono_now());
 
-        let mut lines = vec![format!("🌱 성장 기회 {}건 발견:", opps.len())];
+        let mut lines = vec![
+            nexus6_status_banner(),
+            format!("🌱 성장 기회 {}건:", opps.len()),
+        ];
         for opp in opps.iter().take(5) {
             let typ = opp.get("type").and_then(|v| v.as_str()).unwrap_or("?");
             let desc = opp.get("description").and_then(|v| v.as_str()).unwrap_or("?");
