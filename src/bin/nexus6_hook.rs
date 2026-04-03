@@ -1,0 +1,395 @@
+//! NEXUS-6 Hook Engine (Rust) — ~5ms per invocation
+//!
+//! 모든 Claude Code 훅에서 호출되는 단일 바이너리.
+//! - 심링크 체크 + 자동 복구
+//! - 숫자 n6_check + EXACT 자동 기록
+//! - 미처리 발견 조회
+//!
+//! Usage:
+//!   cat $INPUT | nexus6_hook --mode pre-commit
+//!   cat $INPUT | nexus6_hook --mode post-edit
+//!   cat $INPUT | nexus6_hook --mode post-bash
+//!   cat $INPUT | nexus6_hook --mode agent
+//!   nexus6_hook --mode pending
+
+use std::env;
+use std::fs;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use nexus6::verifier::n6_check::n6_match;
+use serde_json::{json, Value};
+
+// ═══ 심링크 체크 ═══
+
+fn get_repo_root() -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        Some(PathBuf::from(
+            String::from_utf8_lossy(&output.stdout).trim(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn ensure_symlinks() -> Option<String> {
+    let repo = get_repo_root()?;
+    let shared = repo.join(".shared");
+    let nexus_shared = repo.join("../nexus6/shared");
+
+    if shared.is_symlink() && shared.exists() {
+        return None; // OK
+    }
+
+    if shared.is_symlink() && !shared.exists() {
+        // 깨진 심링크
+        let _ = fs::remove_file(&shared);
+        if nexus_shared.exists() {
+            #[cfg(unix)]
+            {
+                let _ = std::os::unix::fs::symlink("../nexus6/shared", &shared);
+            }
+            return Some("🔧 NEXUS-6: 깨진 .shared 심링크 자동 복구 완료".into());
+        }
+        return Some(
+            "❌ NEXUS-6: .shared 심링크 깨짐 + nexus6 없음. bash ~/Dev/nexus6/setup-symlinks.sh 실행 후 세션 재시작 필요"
+                .into(),
+        );
+    }
+
+    if !shared.exists() {
+        if nexus_shared.exists() {
+            #[cfg(unix)]
+            {
+                let _ = std::os::unix::fs::symlink("../nexus6/shared", &shared);
+            }
+            return Some("🔧 NEXUS-6: .shared 심링크 자동 생성 완료".into());
+        }
+        return Some(
+            "❌ NEXUS-6: .shared 없음 + nexus6 없음. bash ~/Dev/nexus6/setup-symlinks.sh 실행 후 세션 재시작 필요"
+                .into(),
+        );
+    }
+
+    None
+}
+
+// ═══ 숫자 추출 ═══
+
+fn extract_numbers(text: &str) -> Vec<f64> {
+    let re_pattern = regex_lite::Regex::new(r"\b(\d+\.?\d*)\b").unwrap();
+    let mut nums: Vec<f64> = re_pattern
+        .find_iter(text)
+        .filter_map(|m| m.as_str().parse::<f64>().ok())
+        .filter(|&v| v > 1.0 && v < 100000.0)
+        .collect();
+    nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    nums.dedup();
+    nums.truncate(20);
+    nums
+}
+
+// ═══ 발견 기록 ═══
+
+fn discovery_log_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join("Dev/nexus6/shared/discovery_log.jsonl")
+}
+
+fn record_discovery(value: f64, constant: &str, source: &str) {
+    let path = discovery_log_path();
+    let entry = json!({
+        "timestamp": chrono_now(),
+        "value": format!("{}", value),
+        "constant": constant,
+        "source": source,
+        "processed": false
+    });
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", entry);
+    }
+}
+
+fn chrono_now() -> String {
+    // 간단한 타임스탬프 (외부 crate 없이)
+    let output = Command::new("date")
+        .args(["+%Y-%m-%dT%H:%M:%S"])
+        .output();
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Err(_) => "unknown".into(),
+    }
+}
+
+// ═══ 스캔 + 자동 기록 ═══
+
+struct ScanResult {
+    exact: Vec<String>,
+    close: Vec<String>,
+}
+
+fn scan_numbers(numbers: &[f64], source: &str) -> ScanResult {
+    let mut exact = Vec::new();
+    let mut close = Vec::new();
+
+    for &v in numbers {
+        let (name, quality) = n6_match(v);
+        if quality >= 1.0 {
+            exact.push(format!("{}={}", v, name));
+            record_discovery(v, name, source);
+        } else if quality >= 0.8 {
+            close.push(format!("{}≈{}", v, name));
+        }
+    }
+
+    ScanResult { exact, close }
+}
+
+fn build_message(result: &ScanResult, extra: Option<&str>) -> Option<String> {
+    if result.exact.is_empty() && result.close.is_empty() && extra.is_none() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+
+    if !result.exact.is_empty() {
+        let items: Vec<&str> = result.exact.iter().map(|s| s.as_str()).take(5).collect();
+        parts.push(format!(
+            "🔬 NEXUS-6 EXACT (자동기록됨): {}",
+            items.join(", ")
+        ));
+        parts.push("⚠️ 필수: README/가설문서에 반영".into());
+    }
+
+    if !result.close.is_empty() {
+        let items: Vec<&str> = result.close.iter().map(|s| s.as_str()).take(5).collect();
+        parts.push(format!("📐 CLOSE: {}", items.join(", ")));
+    }
+
+    if let Some(e) = extra {
+        parts.push(e.to_string());
+    }
+
+    Some(parts.join(" | "))
+}
+
+// ═══ 모드별 처리 ═══
+
+fn mode_pre_commit(input: &Value) -> Option<String> {
+    let cmd = input
+        .pointer("/tool_input/command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !cmd.starts_with("git commit") {
+        return None;
+    }
+    let output = Command::new("git")
+        .args(["diff", "--cached", "--numstat"])
+        .output()
+        .ok()?;
+    let diff = String::from_utf8_lossy(&output.stdout);
+    let nums = extract_numbers(&diff);
+    if nums.is_empty() {
+        return None;
+    }
+    let result = scan_numbers(&nums, "pre-commit");
+    build_message(&result, None)
+}
+
+fn mode_post_edit(input: &Value) -> Option<String> {
+    let fp = input
+        .pointer("/tool_input/file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if fp.is_empty() {
+        return None;
+    }
+    let path = Path::new(fp);
+    if !path.is_file() {
+        return None;
+    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !["md", "json", "toml", "yaml", "yml", "py"].contains(&ext) {
+        return None;
+    }
+    let content = fs::read_to_string(path).ok()?;
+    let nums = extract_numbers(&content);
+    if nums.is_empty() {
+        return None;
+    }
+    let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+    let result = scan_numbers(&nums, &format!("post-edit:{}", fname));
+    build_message(&result, None)
+}
+
+fn mode_post_bash(input: &Value) -> Option<String> {
+    let cmd = input
+        .pointer("/tool_input/command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // python/cargo만
+    if !cmd.contains("python3") && !cmd.contains("python") && !cmd.contains("cargo run") {
+        return None;
+    }
+    // nexus6 자체 실행이면 스킵
+    if cmd.contains("nexus6") {
+        return None;
+    }
+
+    let stdout = input
+        .pointer("/tool_response/stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if stdout.is_empty() {
+        return None;
+    }
+
+    let nums = extract_numbers(stdout);
+    if nums.is_empty() {
+        return None;
+    }
+
+    let src = if cmd.len() > 50 { &cmd[..50] } else { cmd };
+    let result = scan_numbers(&nums, &format!("post-bash:{}", src));
+    build_message(&result, None)
+}
+
+fn mode_agent(input: &Value) -> Option<String> {
+    let prompt = input
+        .pointer("/tool_input/prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let keywords = [
+        "탐색", "분석", "검증", "scan", "analyze", "verify", "발견", "패턴", "상수", "가설",
+        "hypothesis", "proof", "n=6", "golden", "bridge", "DFS", "렌즈",
+    ];
+
+    let prompt_lower = prompt.to_lowercase();
+    let matched = keywords.iter().any(|kw| prompt_lower.contains(&kw.to_lowercase()));
+
+    if !matched {
+        return None;
+    }
+
+    // 미처리 발견 수
+    let pending = count_pending();
+    let mut msg =
+        "🔬 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록.".to_string();
+    if pending > 0 {
+        msg.push_str(&format!(" | 미처리 발견 {}건 — 에이전트에서 처리 권고", pending));
+    }
+
+    Some(msg)
+}
+
+fn count_pending() -> usize {
+    let path = discovery_log_path();
+    if !path.exists() {
+        return 0;
+    }
+    fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v.get("processed").and_then(|p| p.as_bool()) == Some(false))
+        .count()
+}
+
+fn mode_pending() -> Option<String> {
+    let path = discovery_log_path();
+    if !path.exists() {
+        return None;
+    }
+
+    let entries: Vec<Value> = fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v.get("processed").and_then(|p| p.as_bool()) == Some(false))
+        .collect();
+
+    if entries.is_empty() {
+        return None;
+    }
+
+    let mut lines = vec![format!("⚠️ 미처리 NEXUS-6 발견 {}건:", entries.len())];
+    for e in entries.iter().rev().take(10) {
+        let val = e.get("value").and_then(|v| v.as_str()).unwrap_or("?");
+        let con = e.get("constant").and_then(|v| v.as_str()).unwrap_or("?");
+        let src = e.get("source").and_then(|v| v.as_str()).unwrap_or("?");
+        let ts = e.get("timestamp").and_then(|v| v.as_str()).unwrap_or("?");
+        lines.push(format!("  {}={} ({}, {})", val, con, src, &ts[..10.min(ts.len())]));
+    }
+    lines.push("필수: atlas/README에 반영 후 processed=true로 갱신".into());
+
+    Some(lines.join("\n"))
+}
+
+// ═══ 메인 ═══
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let mode = args
+        .iter()
+        .position(|a| a == "--mode")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    // 1. 심링크 체크 (항상)
+    if let Some(symlink_msg) = ensure_symlinks() {
+        let out = json!({"systemMessage": symlink_msg});
+        println!("{}", out);
+        if symlink_msg.contains("❌") {
+            // 복구 불가 → 여기서 종료
+            return;
+        }
+    }
+
+    // 2. pending 모드는 stdin 불필요
+    if mode == "pending" {
+        if let Some(msg) = mode_pending() {
+            println!("{}", json!({"systemMessage": msg}));
+        }
+        return;
+    }
+
+    // 3. stdin 읽기
+    let mut input_str = String::new();
+    if io::stdin().read_to_string(&mut input_str).is_err() {
+        return;
+    }
+
+    let input: Value = match serde_json::from_str(&input_str) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // 4. 모드 디스패치
+    let msg = match mode {
+        "pre-commit" => mode_pre_commit(&input),
+        "post-edit" => mode_post_edit(&input),
+        "post-bash" => mode_post_bash(&input),
+        "agent" => mode_agent(&input),
+        _ => None,
+    };
+
+    if let Some(m) = msg {
+        println!("{}", json!({"systemMessage": m}));
+    }
+}
