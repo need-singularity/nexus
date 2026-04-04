@@ -547,18 +547,28 @@ for cycle in $(seq 1 "$MAX_CYCLES"); do
     echo "  ========================================"
     echo ""
 
+    # ── Step 0: Sync all projects + bridge ──────────────────────────
+    log_info "Step 0/6: Syncing bridge + projects..."
+    bash "$SCRIPT_DIR/growth_bridge.sh" full 2>/dev/null || log_warn "Bridge sync failed (continuing)"
+    python3 "$NEXUS_ROOT/nexus-bridge/bridge.py" sync 2>/dev/null || log_warn "Nexus-bridge sync failed (continuing)"
+    # Sync shared resources if available
+    if [[ -f "$NEXUS_ROOT/.shared/sync-nexus6-lenses.sh" ]]; then
+        bash "$NEXUS_ROOT/.shared/sync-nexus6-lenses.sh" 2>/dev/null || true
+    fi
+    log_info "  Sync complete."
+
     # ── Step 1: Measure all dimensions ────────────────────────────────
-    log_info "Step 1/5: Measuring all 15 dimensions..."
+    log_info "Step 1/6: Measuring all 15 dimensions..."
     metrics_json=$(measure_all_dimensions)
     log_info "  Metrics collected."
 
     # ── Step 2: Pick weakest dimension ────────────────────────────────
     if [[ -n "$FORCE_DIM" ]]; then
         dimension="$FORCE_DIM"
-        log_info "Step 2/5: Forced dimension: $dimension"
+        log_info "Step 2/6: Forced dimension: $dimension"
     else
         dimension=$(pick_weakest_dimension "$metrics_json")
-        log_info "Step 2/5: Weakest dimension: $dimension"
+        log_info "Step 2/6: Weakest dimension: $dimension"
     fi
 
     # ── Consult growth intelligence ─────────────────────────────────
@@ -602,7 +612,7 @@ print(json.dumps(d))
     fi
 
     # ── Step 3: Execute growth action ─────────────────────────────────
-    log_info "Step 3/5: Executing growth for '$dimension'..."
+    log_info "Step 3/6: Executing growth for '$dimension'..."
     gen_ok=true
     if ! execute_dimension_growth "$dimension"; then
         log_warn "Growth action failed for $dimension."
@@ -610,7 +620,7 @@ print(json.dumps(d))
     fi
 
     # ── Step 4: Validate ──────────────────────────────────────────────
-    log_info "Step 4/5: Validating changes..."
+    log_info "Step 4/6: Validating changes..."
     validate_ok=true
 
     if $gen_ok; then
@@ -659,7 +669,7 @@ print(json.dumps(d))
 
     # ── Step 5: Commit + Log ──────────────────────────────────────────
     if $validate_ok && ! $SKIP_COMMIT; then
-        log_info "Step 5/5: Committing + logging..."
+        log_info "Step 5/6: Committing + logging..."
         commit_msg="growth(nexus6): ${dimension} -- cycle ${cycle}"
         (cd "$REPO_ROOT" && git add tools/nexus6/src/ && git commit -m "$commit_msg") 2>/dev/null || {
             log_warn "Nothing to commit or commit failed."
@@ -674,10 +684,16 @@ print(json.dumps(d))
             }
         fi
     elif $validate_ok; then
-        log_info "Step 5/5: Logging (commit skipped)..."
+        log_info "Step 5/6: Logging (commit skipped)..."
     else
-        log_info "Step 5/5: Logging (validation failed)..."
+        log_info "Step 5/6: Logging (validation failed)..."
     fi
+
+    # ── Step 6: Post-cycle sync (bridge + growth registry) ──────────
+    log_info "Step 6/6: Post-cycle sync..."
+    bash "$SCRIPT_DIR/growth_bridge.sh" --digest 2>/dev/null || true
+    bash "$SCRIPT_DIR/growth_bridge.sh" --grow 2>/dev/null || true
+    log_info "  Post-sync complete."
 
     # Collect after-metrics and log
     after_metrics=$(measure_all_dimensions)
