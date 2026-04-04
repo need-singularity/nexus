@@ -16,6 +16,7 @@ INTERVAL="${INTERVAL:-30}"
 NEXUS6_ROOT="${NEXUS6_ROOT:-$HOME/Dev/nexus6}"
 PROJECTS_JSON="${PROJECTS_JSON:-$NEXUS6_ROOT/shared/projects.json}"
 SCAN_SCRIPT="$NEXUS6_ROOT/shared/scan_math_atlas.py"
+SYNC_SCRIPT="$NEXUS6_ROOT/shared/sync-math-atlas.sh"
 STAMP_FILE="$HOME/.config/n6-watch-atlas.stamp"
 LOG="$HOME/Library/Logs/nexus6/watch-atlas.log"
 mkdir -p "$(dirname "$LOG")" "$(dirname "$STAMP_FILE")"
@@ -70,19 +71,28 @@ while true; do
         log "📡 $CHANGE_COUNT .md file(s) changed → running scan_math_atlas.py"
         echo "$CHANGED" | head -5 | while read -r f; do log "   $f"; done
 
-        # Atlas 재빌드
-        if python3 "$SCAN_SCRIPT" --save --summary >> "$LOG" 2>&1; then
+        # Atlas 재빌드 + README 동기화 (sync-math-atlas.sh가 둘 다 수행)
+        RUN_OK=false
+        if [ -f "$SYNC_SCRIPT" ] && bash "$SYNC_SCRIPT" >> "$LOG" 2>&1; then
+            RUN_OK=true
+        elif python3 "$SCAN_SCRIPT" --save --summary >> "$LOG" 2>&1; then
+            # 폴백: sync-math-atlas.sh 없거나 실패 시 scan만
+            RUN_OK=true
+        fi
+
+        if [ "$RUN_OK" = true ]; then
             ATLAS="$NEXUS6_ROOT/shared/math_atlas.json"
             if [ -f "$ATLAS" ]; then
-                ENTRIES=$(python3 -c "import json;print(len(json.load(open('$ATLAS')).get('entries',{})))" 2>/dev/null || echo '?')
-                log "✅ atlas rebuilt — $ENTRIES entries"
+                # stats.*.total 합산으로 총 항목 수 계산
+                ENTRIES=$(python3 -c "import json;d=json.load(open('$ATLAS'));s=d.get('stats',{});print(sum(v.get('total',0) for v in s.values()) if isinstance(s,dict) else '?')" 2>/dev/null || echo '?')
+                log "✅ atlas+readme synced — $ENTRIES hypotheses"
             fi
             # macOS 알림
             if command -v osascript &>/dev/null; then
                 osascript -e "display notification \"Math Atlas 갱신 (+$CHANGE_COUNT files)\" with title \"NEXUS-6 Atlas\"" 2>/dev/null || true
             fi
         else
-            log "⚠️ scan_math_atlas.py 실패"
+            log "⚠️ atlas sync 실패"
         fi
 
         # stamp 갱신
