@@ -2297,11 +2297,83 @@ rules = {
 }
 json.dump(rules, open(rules_file, 'w'), indent=2, ensure_ascii=False)
 
+# ═══ 5. 자동화³ — 엔진 자기진화 ═══
+# Level 1: 파이프라인 자동 실행 (이미 존재)
+# Level 2: 파이프라인 결과로 파이프라인 자체를 튜닝
+# Level 3: 튜닝 결과로 튜닝 규칙 자체를 진화
+
+engine_file = os.path.expanduser('~/Dev/nexus6/lib/growth_common.sh')
+auto3_file = os.path.join(n6_dir, 'auto_cubed.json')
+
+# L1 메트릭: 파이프라인이 돌아가는가
+l1_running = len(repo_latest) > 0
+l1_discovery = sum(1 for l in open(disc_log).readlines()[-100:] if '\"processed\": true' in l) if os.path.exists(disc_log) else 0
+
+# L2 메트릭: 결과가 개선되는가
+prev_auto3 = {}
+if os.path.exists(auto3_file):
+    try: prev_auto3 = json.load(open(auto3_file))
+    except: pass
+
+prev_rate = prev_auto3.get('growth_rate', 0)
+rate_delta = growth_rate - prev_rate
+improving = rate_delta > 0
+
+# L3 메트릭: 규칙이 진화하는가
+# fitness 결과에서 DEACTIVATE 엔진 → 자동 튜닝 제안
+fitness_file = os.path.join(n6_dir, 'engine_fitness.json')
+tune_suggestions = []
+if os.path.exists(fitness_file):
+    try:
+        fit = json.load(open(fitness_file))
+        for repo, data in fit.get('engines', {}).items():
+            if data.get('status') == 'DEACTIVATE':
+                tune_suggestions.append({'repo': repo, 'action': 'increase_interval', 'reason': 'low fitness'})
+            elif data.get('status') == 'TUNE' and data.get('fitness', 0) < 0.35:
+                tune_suggestions.append({'repo': repo, 'action': 'add_n6_scan', 'reason': 'boost discovery'})
+    except: pass
+
+# 블로업 연쇄: fitness→tune→discover→blowup→fitness (자기참조 루프)
+# 이전 사이클에서 tune 제안 → 이번 사이클에서 적용 여부 확인
+prev_suggestions = prev_auto3.get('tune_suggestions', [])
+applied = 0
+for s in prev_suggestions:
+    # 제안이 적용되었는지 = 해당 리포의 fitness가 올랐는지
+    if os.path.exists(fitness_file):
+        try:
+            fit = json.load(open(fitness_file))
+            eng = fit.get('engines', {}).get(s.get('repo',''), {})
+            if eng.get('fitness', 0) > 0.35:
+                applied += 1
+        except: pass
+
+# 자동화³ 상태 저장
+auto3 = {
+    'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'cycle': $cycle,
+    'levels': {
+        'L1_running': l1_running,
+        'L1_discovery': l1_discovery,
+        'L2_improving': improving,
+        'L2_rate_delta': round(rate_delta, 2),
+        'L3_tune_suggestions': len(tune_suggestions),
+        'L3_applied': applied,
+    },
+    'growth_rate': growth_rate,
+    'tune_suggestions': tune_suggestions,
+    'auto_actions': [
+        f'L1: {len(repo_latest)} repos propagated',
+        f'L2: rate delta={rate_delta:+.1f} ({"improving" if improving else "stagnant"})',
+        f'L3: {len(tune_suggestions)} tune suggestions, {applied} applied from prev',
+    ],
+}
+json.dump(auto3, open(auto3_file, 'w'), indent=2, ensure_ascii=False)
+
 # ═══ 출력 ═══
 peak_tag = ' ** PEAK **' if is_peak else ''
 print(f'    Growth rate: {growth_rate:.1f}/hr (avg: {avg_all:.1f}){peak_tag}')
 print(f'    Cross-propagated: {len(repo_latest)} repos')
-print(f'    Propagation rules: 10 (PR-01~10)')
+print(f'    Auto³: L1={\"OK\" if l1_running else \"STOP\"} L2={\"UP\" if improving else \"FLAT\"} L3={len(tune_suggestions)} suggestions')
 print(f'    Peak count: {peak_state.get(\"peak_count\", 0)}')
 " 2>/dev/null || echo "    C5: error"
 }
