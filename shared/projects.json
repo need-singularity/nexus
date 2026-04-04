@@ -2,7 +2,26 @@
   "_meta": {
     "description": "NEXUS-6 프로젝트 레지스트리 — watch-atlas, scan_math_atlas, sync, bundle-query 공용 소스",
     "updated": "2026-04-05",
-    "schema_version": 2,
+    "schema_version": 3,
+    "universal_completion_criterion": {
+      "name": "closed_form",
+      "principle": "수학적으로 완전히 떨어짐 — n=6 원시값(σ=12, φ=2, τ=4, n=6)의 유한 조합으로 환원",
+      "description": "전 프로젝트 공통 완성 기준. grade_field 이름은 프로젝트마다 달라도 궁극 의미는 동일.",
+      "forbidden": [
+        "infinite_series (무한급수, 수렴 근사)",
+        "numerical_fit (경험식, curve fitting)",
+        "free_parameter (자유 파라미터, 튜닝 값)",
+        "fudge_factor (맞춤 보정 상수)"
+      ],
+      "allowed": [
+        "finite_expr(σ, φ, τ, n)",
+        "integer_combinations",
+        "elementary_functions (exp/log/sqrt/trig)"
+      ],
+      "verify_type": "symbolic_reduction",
+      "verify_artifact": "verify.py — 실행 시 모든 EXACT 상수 재현 + PASS 출력",
+      "violation": "verify 없는 max_grade 주장은 무효, 1단계 강등"
+    },
     "schema_notes": {
       "bundles": "각 프로젝트의 묶음 단위를 선언. scripts/bundle_query.py가 읽어서 통계/대시보드 생성",
       "bundle_formats": {
@@ -18,6 +37,9 @@
         "max_grade": "등급 최댓값 (완성 판정 기준)",
         "grade_map": "이모지/문자열 → 숫자 매핑",
         "completion_flag": "완성 여부 bool 필드",
+        "completion_criterion": "완성 기준 (기본: closed_form)",
+        "verify_field": "verify artifact 경로 필드명 (예: verify_script)",
+        "verify_rule": "프로젝트별 verify 요건 구체 기술",
         "children": "하위 묶음명",
         "children_path": "하위로 내려가는 jq 경로"
       }
@@ -40,14 +62,20 @@
           "grade_map": {
             "⭐": 10, "🟩": 9, "🟧": 8, "🟦": 7, "🟨": 6,
             "🟥": 5, "🟪": 4, "⚪": 3, "⬛": 2, "★": 1
-          }
+          },
+          "max_grade": 10,
+          "completion_criterion": "closed_form",
+          "verify_rule": "⭐ 등급(=10) 주장 시 핵심 관계식이 n=6 원시값의 닫힌 형식 + SymPy/Python 검증 통과 + 수치 근사/자유 파라미터 0"
         },
         "constants": {
           "source": "shared/math_atlas.json",
           "format": "json",
           "path": ".entries[]",
           "key": "id",
-          "grade_field": "grade"
+          "grade_field": "grade",
+          "max_grade": 10,
+          "completion_criterion": "closed_form",
+          "verify_rule": "EXACT 등급 상수는 n=6 원시값의 닫힌 형식 유도 필수 (scan_math_atlas.py가 자동 검증)"
         }
       }
     },
@@ -91,6 +119,8 @@
           "grade_field": "alien_index",
           "max_grade": 10,
           "completion_flag": "ceiling",
+          "completion_criterion": "closed_form",
+          "verify_rule": "섹션 내 모든 products의 verify.py 존재 + PASS (Python 재현)",
           "children": "products",
           "children_path": ".products[]"
         },
@@ -102,12 +132,17 @@
           "label_field": "name",
           "grade_field": "ufo",
           "max_grade": 10,
-          "completion_flag": "ceiling"
+          "completion_flag": "ceiling",
+          "completion_criterion": "closed_form",
+          "verify_rule": "ufo==10 주장 시 verify.py 필수 + 모든 EXACT 상수 Python으로 재현 + 실행 시 PASS",
+          "verify_field": "verify_script"
         },
         "mk_stages": {
           "source_glob": "docs/*/evolution/*/mk-*.md",
           "format": "files",
-          "key_from_path": "relative"
+          "key_from_path": "relative",
+          "completion_criterion": "closed_form",
+          "verify_rule": "parent product의 verify.py가 Mk.II~V의 EXACT 상수까지 커버 (독립 🛸10 주장 불가, 상속만)"
         }
       }
     },
@@ -124,13 +159,17 @@
           "label_field": "pattern",
           "grade_field": "confidence",
           "max_grade": 12,
-          "categories_path": ".kind"
+          "categories_path": ".kind",
+          "completion_criterion": "closed_form",
+          "verify_rule": "confidence=12 (12+ lens 합의) 달성 시 발견 패턴이 닫힌 형식이어야 확정 — 수치 경향만으론 부족"
         },
         "lenses": {
           "source_file": "src/telescope/mod.rs",
           "format": "grep",
           "pattern": "Box::new\\(",
-          "description": "1028+ lens registry (카테고리: Core, n6산업, TECS-L수학, SEDI신호, anima의식, 교차메타, ML, 물리, 공학, 인문)"
+          "description": "1028+ lens registry (카테고리: Core, n6산업, TECS-L수학, SEDI신호, anima의식, 교차메타, ML, 물리, 공학, 인문)",
+          "completion_criterion": "closed_form",
+          "verify_rule": "렌즈는 닫힌 형식 메트릭을 출력해야 함 (numerical fit 금지)"
         }
       }
     },
