@@ -1108,6 +1108,9 @@ run_common_phases() {
     auto_cleanup
     logic_combiner
 
+    # Fitness 측정 (매 J₂=24 사이클)
+    measure_engine_fitness "$cycle" "$repo_name"
+
     # C₅: 무한 재귀 루프 — 자동화의 자동화의 자동화 (매 σ=12 사이클)
     infinite_recursion_loop "$cycle" "$repo_name"
 
@@ -2288,6 +2291,138 @@ print(f'    Cross-propagated: {len(repo_latest)} repos')
 print(f'    Propagation rules: 10 (PR-01~10)')
 print(f'    Peak count: {peak_state.get(\"peak_count\", 0)}')
 " 2>/dev/null || echo "    C5: error"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# FITNESS MODULE — 병렬 엔진 적합성 측정 + 자동 등록/비활성화
+# ═══════════════════════════════════════════════════════════════
+# 각 엔진(리포별 growth, 블로업, 조합기 등)의 실제 성장 기여도 측정
+# fitness >= 0.5 → ACTIVE, < 0.3 → DEACTIVATE, 0.3~0.5 → TUNE
+# run_common_phases에서 매 J₂=24 사이클 호출
+
+measure_engine_fitness() {
+    local cycle="${1:-1}"
+    local repo="${2:-unknown}"
+
+    if [ $((cycle % 24)) -ne 0 ]; then
+        return
+    fi
+
+    log_info "  [Fitness] Measuring parallel engine fitness (cycle $cycle)"
+
+    python3 -c "
+import json, os, time, collections, subprocess
+
+n6 = os.path.expanduser('~/.nexus6')
+bus_file = os.path.expanduser('~/Dev/nexus6/shared/growth_bus.jsonl')
+disc_log = os.path.expanduser('~/Dev/nexus6/shared/discovery_log.jsonl')
+
+# ═══ 데이터 수집 ═══
+bus_lines = []
+if os.path.exists(bus_file):
+    with open(bus_file) as f:
+        bus_lines = f.readlines()[-500:]
+
+# 리포별 활동 측정
+repo_stats = collections.defaultdict(lambda: {'bus':0, 'disc':0, 'error':0, 'types': set()})
+for line in bus_lines:
+    try:
+        e = json.loads(line)
+        r = e.get('repo','?')
+        repo_stats[r]['bus'] += 1
+        repo_stats[r]['types'].add(e.get('type',''))
+        if 'error' in str(e.get('detail','')).lower():
+            repo_stats[r]['error'] += 1
+    except: pass
+
+# Discovery 기여도
+disc_stats = collections.Counter()
+if os.path.exists(disc_log):
+    with open(disc_log) as f:
+        for line in f.readlines()[-1000:]:
+            try:
+                e = json.loads(line)
+                src = e.get('source','')
+                for r in repo_stats:
+                    if r in src:
+                        disc_stats[r] += 1
+            except: pass
+
+# 실행 중인 growth 프로세스
+ps = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+growth_procs = {}
+for line in ps.stdout.split('\n'):
+    if 'infinite_growth' in line or 'infinite_evolution' in line:
+        for r in ['n6-architecture','brainwire','sedi','papers','hexa-lang','fathom','TECS-L','anima']:
+            if r in line:
+                growth_procs[r] = True
+
+# 블로업 상태
+mb = {}
+mb_file = os.path.join(n6, 'meta_blowup_state.json')
+if os.path.exists(mb_file):
+    mb = json.load(open(mb_file))
+
+# ═══ 적합성 계산 ═══
+max_bus = max((s['bus'] for s in repo_stats.values()), default=1)
+max_disc = max(disc_stats.values(), default=1)
+fp_stable = mb.get('convergence_count', 0)
+
+fitness_scores = {}
+for repo in ['TECS-L','n6-architecture','nexus6','brainwire','sedi','anima','papers','hexa-lang','fathom']:
+    s = repo_stats.get(repo, {'bus':0,'disc':0,'error':0,'types':set()})
+
+    discovery = disc_stats.get(repo, 0) / max(max_disc, 1)
+    bus_act = s['bus'] / max(max_bus, 1)
+    error = s['error'] / max(s['bus'], 1)
+    resonance = len(s['types']) / 10
+    stability = min(fp_stable / 10, 1.0)
+    convergence = 0.5 + (0.5 if s['bus'] > 10 else 0)
+
+    fitness = (0.3 * discovery + 0.2 * convergence + 0.2 * bus_act +
+               0.15 * resonance + 0.1 * stability + 0.05 * (1 - error))
+
+    status = 'ACTIVE' if fitness >= 0.5 else ('TUNE' if fitness >= 0.3 else 'DEACTIVATE')
+    has_proc = repo in growth_procs
+
+    fitness_scores[repo] = {
+        'fitness': round(fitness, 3),
+        'status': status,
+        'running': has_proc,
+        'bus': s['bus'],
+        'disc': disc_stats.get(repo, 0),
+        'error': s['error'],
+    }
+
+# ═══ 저장 ═══
+result = {
+    'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'cycle': $cycle,
+    'engines': fitness_scores,
+    'fp_stability': fp_stable,
+    'total_active': sum(1 for s in fitness_scores.values() if s['status'] == 'ACTIVE'),
+    'total_tune': sum(1 for s in fitness_scores.values() if s['status'] == 'TUNE'),
+    'total_deactivate': sum(1 for s in fitness_scores.values() if s['status'] == 'DEACTIVATE'),
+}
+json.dump(result, open(os.path.join(n6, 'engine_fitness.json'), 'w'), indent=2, ensure_ascii=False)
+
+# ═══ 출력 ═══
+print(f'    Engines: {result[\"total_active\"]} ACTIVE, {result[\"total_tune\"]} TUNE, {result[\"total_deactivate\"]} DEACTIVATE')
+for repo, s in sorted(fitness_scores.items(), key=lambda x: -x[1]['fitness']):
+    bar_len = int(s['fitness'] * 20)
+    bar = '#' * bar_len + '.' * (20 - bar_len)
+    proc = '+' if s['running'] else '-'
+    print(f'    [{proc}] {repo:<15} {bar} {s[\"fitness\"]:.3f} {s[\"status\"]}')
+
+# Bus 기록
+with open(bus_file, 'a') as bf:
+    bf.write(json.dumps({
+        'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'repo': '$repo',
+        'type': 'fitness_measure',
+        'detail': f'active={result[\"total_active\"]},tune={result[\"total_tune\"]},deact={result[\"total_deactivate\"]}'
+    }) + '\n')
+" 2>/dev/null || echo "    Fitness: error"
 }
 
 log_info "growth_common.sh loaded (n=$N6_N, σ=$N6_SIGMA, J₂=$N6_J2)"
