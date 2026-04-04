@@ -18,6 +18,18 @@
 - 10초 이상 걸릴 수 있는 명령은 무조건 백그라운드
 - 완료 시 결과 요약 보고
 
+## Math Atlas 자동 추출 (물어보지 말 것)
+
+**`watch-atlas` LaunchAgent가 30초 간격으로 가설 `.md` 파일을 폴링 → `sync-math-atlas.sh` 자동 실행**.
+- 감시 경로: `~/Dev/nexus6/shared/projects.json`의 `projects.*.hypothesis_dirs`
+- 자동 수행: `scan_math_atlas.py --save --summary` + README 마커 주입
+
+### 에이전트 작업 규칙
+- 새 가설/상수/수식을 `.md`로 만든 직후 **"atlas 스캔 실행할까요?" 묻지 말 것** — watcher가 자동 처리
+- 수동 스캔 필요 시에만: `bash ~/Dev/nexus6/shared/sync-math-atlas.sh`
+- 상태 확인: `launchctl list com.nexus6.watch-atlas` / `tail -f ~/Library/Logs/nexus6/watch-atlas.log`
+- 프로젝트 추가: `shared/projects.json`에 엔트리 추가 → `launchctl kickstart -k gui/$(id -u)/com.nexus6.watch-atlas`
+
 ## 특이점 사이클 (Singularity Cycle)
 
 > **블로업→수축→창발→특이점→흡수** 5단계 자동 사이클
