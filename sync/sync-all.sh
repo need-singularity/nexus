@@ -17,24 +17,29 @@ echo "  NEXUS-6 전체 동기화"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "════════════════════════════════════════"
 
-# 0. 심링크 검증 + 복구
+# 0. 훅 + 심링크 + growth_lib 일괄 검증 (install-hooks.sh --verify)
 echo ""
-echo "🔗 [0/7] 심링크 검증..."
-for repo in "${REPOS[@]}"; do
-  [ "$repo" = "nexus6" ] && continue
-  LINK="$DEV/$repo/.shared"
-  if [ -L "$LINK" ] && [ -d "$LINK" ]; then
-    echo "  ✅ $repo"
-  elif [ -d "$DEV/$repo" ]; then
-    rm -rf "$LINK" 2>/dev/null
-    ln -sf ../nexus6/shared "$LINK"
-    echo "  🔧 $repo (복구됨)"
-  fi
-done
+echo "🔗 [0/8] 훅/심링크/라이브러리 검증..."
+if [ -f "$SYNC_DIR/install-hooks.sh" ]; then
+  bash "$SYNC_DIR/install-hooks.sh" --verify 2>/dev/null && echo "  ✅ 전체 통과" || echo "  ⚠️ 일부 누락 (install-hooks.sh 실행 필요)"
+else
+  # fallback: 심링크만 검증
+  for repo in "${REPOS[@]}"; do
+    [ "$repo" = "nexus6" ] && continue
+    LINK="$DEV/$repo/.shared"
+    if [ -L "$LINK" ] && [ -d "$LINK" ]; then
+      echo "  ✅ $repo"
+    elif [ -d "$DEV/$repo" ]; then
+      rm -rf "$LINK" 2>/dev/null
+      ln -sf ../nexus6/shared "$LINK"
+      echo "  🔧 $repo (복구됨)"
+    fi
+  done
+fi
 
 # 1. CLAUDE.md 전파
 echo ""
-echo "📋 [1/7] CLAUDE.md 동기화..."
+echo "📋 [1/8] CLAUDE.md 동기화..."
 if [ -f "$SYNC_DIR/sync-claude-rules.sh" ]; then
   bash "$SYNC_DIR/sync-claude-rules.sh" 2>/dev/null && echo "  ✅ 완료" || echo "  ⚠️ 스킵"
 else
@@ -43,7 +48,7 @@ fi
 
 # 2. 수학 아틀라스
 echo ""
-echo "🗺️ [2/7] Math Atlas 동기화..."
+echo "🗺️ [2/8] Math Atlas 동기화..."
 if [ -f "$SYNC_DIR/sync-math-atlas.sh" ]; then
   bash "$SYNC_DIR/sync-math-atlas.sh" 2>/dev/null && echo "  ✅ 완료" || echo "  ⚠️ 스킵"
 else
@@ -52,7 +57,7 @@ fi
 
 # 3. 계산기 레지스트리
 echo ""
-echo "🧮 [3/7] 계산기 동기화..."
+echo "🧮 [3/8] 계산기 동기화..."
 if [ -f "$SYNC_DIR/sync-calculators.sh" ]; then
   bash "$SYNC_DIR/sync-calculators.sh" 2>/dev/null && echo "  ✅ 완료" || echo "  ⚠️ 스킵"
 else
@@ -61,7 +66,7 @@ fi
 
 # 4. README 자동 생성
 echo ""
-echo "📖 [4/7] README 동기화..."
+echo "📖 [4/8] README 동기화..."
 if [ -f "$SYNC_DIR/sync-readmes.sh" ]; then
   bash "$SYNC_DIR/sync-readmes.sh" 2>/dev/null && echo "  ✅ 완료" || echo "  ⚠️ 스킵"
 else
@@ -70,7 +75,7 @@ fi
 
 # 5. 렌즈 수 동기화
 echo ""
-echo "🔭 [5/7] 렌즈 동기화..."
+echo "🔭 [5/8] 렌즈 동기화..."
 if [ -f "$SYNC_DIR/sync-nexus6-lenses.sh" ]; then
   bash "$SYNC_DIR/sync-nexus6-lenses.sh" 2>/dev/null && echo "  ✅ 완료" || echo "  ⚠️ 스킵"
 else
@@ -79,12 +84,12 @@ fi
 
 # 6. 리포간 링크
 echo ""
-echo "🔗 [6/7] 링크 동기화..."
+echo "🔗 [6/8] 링크 동기화..."
 bash "$SYNC_DIR/sync-links.sh" 2>/dev/null || echo "  ⚠️ 스킵"
 
 # 7. 논문
 echo ""
-echo "📄 [7/7] 논문 동기화..."
+echo "📄 [7/8] 논문 동기화..."
 python3 "$SYNC_DIR/sync-papers-readme.py" 2>/dev/null || echo "  ⚠️ 스킵"
 
 # 8. DSE 지도
