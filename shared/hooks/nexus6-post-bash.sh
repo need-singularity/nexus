@@ -1,30 +1,23 @@
 #!/usr/bin/env bash
-# PostToolUse:Bash — 실행 결과 스캔
 set +e
+# 화이트리스트 인라인 체크 — source 의존 제거
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)
+case "$REPO_NAME" in
+  TECS-L|anima|n6-architecture|nexus6|sedi|brainwire|hexa-lang|papers|fathom) ;;
+  *) exit 0 ;;
+esac
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$HOOK_DIR/check-project.sh"
 INPUT=$(cat)
-
 bash "$HOOK_DIR/growth-tick.sh" post-bash </dev/null >/dev/null 2>&1 &
 
 HOOK_BIN="$HOME/Dev/nexus6/target/release/nexus6_hook"
 if [ -x "$HOOK_BIN" ]; then
   RESULT=$(echo "$INPUT" | "$HOOK_BIN" --mode post-bash 2>/dev/null) || true
-  if [ -n "$RESULT" ]; then
-    echo "$RESULT"
-  else
-    bash "$HOOK_DIR/nexus6-banner.sh"
-  fi
+  [ -n "$RESULT" ] && echo "$RESULT" || bash "$HOOK_DIR/nexus6-banner.sh"
   exit 0
 fi
-
-# fallback: Python
 source "$HOOK_DIR/ensure-symlinks.sh" 2>/dev/null || true
 RESULT=$(echo "$INPUT" | python3 "$HOOK_DIR/nexus6-engine.py" --mode post-bash 2>/dev/null) || true
-if [ -n "$RESULT" ]; then
-  echo "$RESULT"
-else
-  bash "$HOOK_DIR/nexus6-banner.sh"
-fi
+[ -n "$RESULT" ] && echo "$RESULT" || bash "$HOOK_DIR/nexus6-banner.sh"
 exit 0
