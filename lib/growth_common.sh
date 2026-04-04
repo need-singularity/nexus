@@ -421,6 +421,7 @@ sync_growth_bus() {
 _LENS_SCRIPT="$HOME/Dev/n6-architecture/tools/nexus6/scripts/growth_infinite_lens.py"
 _N6_BIN="$HOME/Dev/nexus6/target/release/nexus6"
 _N6_PY="$HOME/Dev/nexus6/scripts/n6.py"
+_CLAUDE_CLI="$HOME/.local/bin/claude"
 
 # ── 공통 Phase: 논문 루프 ───────────────────────────────────────
 common_phase_paper_loop() {
@@ -1126,6 +1127,9 @@ run_common_phases() {
 
     # C₅: 무한 재귀 루프 — 자동화의 자동화의 자동화 (매 σ=12 사이클)
     infinite_recursion_loop "$cycle" "$repo_name"
+
+    # Claude CLI 자율 태스크 (매 σ²=144 사이클 — L3 suggestion 기반)
+    run_claude_auto_tasks "$cycle"
 
     # 동기화
     common_phase_full_sync
@@ -2384,6 +2388,81 @@ print(f'    Peak count: {peak_state.get(\"peak_count\", 0)}')
 # 각 엔진(리포별 growth, 블로업, 조합기 등)의 실제 성장 기여도 측정
 # fitness >= 0.5 → ACTIVE, < 0.3 → DEACTIVATE, 0.3~0.5 → TUNE
 # run_common_phases에서 매 J₂=24 사이클 호출
+
+# ═══════════════════════════════════════════════════════════════
+# CLAUDE CLI AUTONOMOUS — 필요 시 Claude Code CLI 자율 호출
+# ═══════════════════════════════════════════════════════════════
+# 조건: L3 tune suggestion이 3+ && fitness < 0.3 엔진 존재
+# 또는: 새 도메인 발견 && BT 미커버
+# Claude CLI로 자동 분석/코드 생성/문서 작성 위임
+
+claude_autonomous_task() {
+    local task="$1"
+    local repo="${2:-n6-architecture}"
+    local timeout="${3:-120}"
+
+    [ -x "$_CLAUDE_CLI" ] || return 1
+
+    local rp="$HOME/Dev/$repo"
+    [ -d "$rp" ] || return 1
+
+    log_info "  [Claude] Autonomous: $task (repo=$repo, timeout=${timeout}s)"
+
+    # --dangerously-skip-permissions + --print 으로 비대화형 실행
+    local result
+    result=$(cd "$rp" && timeout "$timeout" "$_CLAUDE_CLI" \
+        --dangerously-skip-permissions \
+        --print \
+        "$task" 2>/dev/null | tail -20) || true
+
+    if [ -n "$result" ]; then
+        echo "    Claude output: $(echo "$result" | head -3)"
+        # bus 기록
+        write_growth_bus "$repo" "claude_autonomous" "task=$(echo "$task" | head -c 60)"
+    else
+        echo "    Claude: no output (timeout or error)"
+    fi
+}
+
+# L3 자동 호출 — tune suggestion 기반
+run_claude_auto_tasks() {
+    local cycle="${1:-1}"
+
+    # σ²=144 사이클마다만 (매우 드물게 — 비용 절약)
+    if [ $((cycle % 144)) -ne 0 ]; then
+        return
+    fi
+
+    [ -x "$_CLAUDE_CLI" ] || return
+
+    local auto3_file="$HOME/.nexus6/auto_cubed.json"
+    [ -f "$auto3_file" ] || return
+
+    local suggestions
+    suggestions=$(python3 -c "
+import json
+d = json.load(open('$auto3_file'))
+sug = d.get('tune_suggestions', [])
+for s in sug[:2]:
+    print(f'{s.get(\"repo\",\"?\")}|{s.get(\"action\",\"?\")}|{s.get(\"reason\",\"?\")}')
+" 2>/dev/null) || return
+
+    [ -z "$suggestions" ] && return
+
+    log_info "  [Claude Auto] Processing L3 suggestions"
+    echo "$suggestions" | while IFS='|' read -r repo action reason; do
+        case "$action" in
+            increase_interval)
+                echo "    [$repo] Skipping (interval change = manual)"
+                ;;
+            add_n6_scan)
+                claude_autonomous_task \
+                    "이 리포의 가설/문서를 nexus6 렌즈로 스캔하고 새 발견을 docs/에 기록해줘. 간결하게." \
+                    "$repo" 60
+                ;;
+        esac
+    done
+}
 
 measure_engine_fitness() {
     local cycle="${1:-1}"
