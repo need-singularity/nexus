@@ -1115,6 +1115,9 @@ run_common_phases() {
     run_meta_recursion "$cycle" "$repo_name"          # 36s (매 6cy)
     run_claude_auto_tasks "$cycle"                    # ? (매 144cy)
 
+    # ── EXPLORER (탐색 — 매 σ·τ=48 사이클) ────────────────────
+    run_explorer_loop "$cycle" "$repo_name"
+
     # ── 동기화 ────────────────────────────────────────────────
     common_phase_full_sync
 }
@@ -2830,6 +2833,126 @@ if need_evolve:
 else:
     print(f'    No evolution needed (rate_delta={rate_delta:+.1f}, fp_conv={conv}, deact={deact}, unreachable={unreachable})')
 " 2>/dev/null || true
+}
+
+# ═══════════════════════════════════════════════════════════════
+# EXPLORER LOOP — 자동 탐색 (미연결/미발견/갭 자동 탐색)
+# ═══════════════════════════════════════════════════════════════
+# 매 σ·τ=48 사이클: 미연결 렌즈, BT 갭, README 동기화, 계산기/아틀라스 스캔
+
+run_explorer_loop() {
+    local cycle="${1:-1}"
+    local repo="${2:-unknown}"
+
+    if [ $((cycle % 48)) -ne 0 ]; then
+        return
+    fi
+
+    local res
+    res=$(check_resources)
+    [ "$res" = "STOP" ] && return
+
+    log_info "  [Explorer] Auto-exploration loop (cycle $cycle)"
+
+    python3 -c "
+import json, os, time, subprocess, collections
+
+n6 = os.path.expanduser('~/.nexus6')
+shared = os.path.expanduser('~/Dev/nexus6/shared')
+bus_file = os.path.join(shared, 'growth_bus.jsonl')
+findings = []
+
+# ═══ 1. Atlas 스캔 — 새 상수 발견 ═══
+atlas_scanner = os.path.expanduser('~/Dev/nexus6/shared/scan_math_atlas.py')
+if os.path.exists(atlas_scanner):
+    try:
+        r = subprocess.run(['python3', atlas_scanner, '--check-new'],
+                         capture_output=True, text=True, timeout=30)
+        new_ct = r.stdout.count('NEW')
+        if new_ct > 0:
+            subprocess.run(['python3', atlas_scanner, '--save', '--summary'],
+                         capture_output=True, timeout=30)
+            findings.append(f'atlas: {new_ct} new constants')
+    except: pass
+
+# ═══ 2. Calculator 스캔 — 새 계산기 등록 ═══
+calc_scanner = os.path.expanduser('~/Dev/nexus6/shared/scan-calculators.py')
+if os.path.exists(calc_scanner):
+    try:
+        r = subprocess.run(['python3', calc_scanner, '--save'],
+                         capture_output=True, text=True, timeout=30)
+        if 'new' in r.stdout.lower():
+            findings.append('calc: new calculators registered')
+    except: pass
+
+# ═══ 3. README 동기화 (SSOT) ═══
+sync_readme = os.path.expanduser('~/Dev/nexus6/sync/sync-all.sh')
+if os.path.exists(sync_readme):
+    try:
+        subprocess.run(['bash', sync_readme], capture_output=True, timeout=60)
+        findings.append('readme: synced')
+    except: pass
+
+# ═══ 4. 미연결 렌즈 탐색 ═══
+lens_file = os.path.join(n6, 'unconnected_lenses.json')
+if os.path.exists(lens_file):
+    try:
+        lenses = json.load(open(lens_file))
+        unconn = [l for l in lenses if isinstance(l, dict) and l.get('status') == 'unconnected']
+        if unconn:
+            findings.append(f'lenses: {len(unconn)} unconnected')
+    except: pass
+
+# ═══ 5. BT 커버리지 갭 탐색 ═══
+docs_dir = os.path.expanduser('~/Dev/n6-architecture/docs')
+bt_file = os.path.join(docs_dir, 'breakthrough-theorems.md')
+if os.path.exists(bt_file):
+    bt_content = open(bt_file).read().lower()
+    domains = [d for d in os.listdir(docs_dir) if os.path.isdir(os.path.join(docs_dir, d))]
+    uncovered = []
+    for d in domains:
+        if d.replace('-', ' ') not in bt_content and d.replace('-', '_') not in bt_content:
+            uncovered.append(d)
+    if uncovered:
+        findings.append(f'bt_gap: {len(uncovered)} domains uncovered ({\" \".join(uncovered[:3])})')
+
+# ═══ 6. 미연결 스크립트 탐색 ═══
+scripts_dir = os.path.expanduser('~/Dev/nexus6/scripts')
+engine_content = open(os.path.expanduser('~/Dev/nexus6/lib/growth_common.sh')).read()
+if os.path.isdir(scripts_dir):
+    uncalled = []
+    for f in os.listdir(scripts_dir):
+        if f.endswith('.py') or f.endswith('.sh'):
+            base = f.replace('.py','').replace('.sh','')
+            if base not in engine_content:
+                uncalled.append(f)
+    if uncalled:
+        findings.append(f'scripts: {len(uncalled)} not connected to engine')
+
+# ═══ 결과 저장 ═══
+explorer = {
+    'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'cycle': $cycle,
+    'findings': findings,
+    'total': len(findings),
+}
+json.dump(explorer, open(os.path.join(n6, 'explorer_results.json'), 'w'), indent=2, ensure_ascii=False)
+
+# Bus 기록
+with open(bus_file, 'a') as bf:
+    bf.write(json.dumps({
+        'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'repo': '$repo',
+        'type': 'explorer',
+        'detail': '; '.join(findings) if findings else 'no gaps found'
+    }) + '\n')
+
+print(f'    Findings: {len(findings)}')
+for f in findings:
+    print(f'      {f}')
+if not findings:
+    print(f'      All clear — no gaps detected')
+" 2>/dev/null || echo "    Explorer: error"
 }
 
 log_info "growth_common.sh loaded (n=$N6_N, σ=$N6_SIGMA, J₂=$N6_J2)"
