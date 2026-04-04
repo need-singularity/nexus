@@ -1131,6 +1131,9 @@ run_common_phases() {
     # Claude CLI 자율 태스크 (매 σ²=144 사이클 — L3 suggestion 기반)
     run_claude_auto_tasks "$cycle"
 
+    # 위상 체크 + 리포트 + 미연결 발견 (매 J₂=24 사이클)
+    engine_topology_check "$cycle" "$repo_name"
+
     # 동기화
     common_phase_full_sync
 }
@@ -2587,6 +2590,153 @@ with open(bus_file, 'a') as bf:
         'detail': f'active={result[\"total_active\"]},tune={result[\"total_tune\"]},deact={result[\"total_deactivate\"]}'
     }) + '\n')
 " 2>/dev/null || echo "    Fitness: error"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# ENGINE TOPOLOGY CHECK — 위상 불변량 + 미연결 발견 + 리포트
+# ═══════════════════════════════════════════════════════════════
+# 매 J₂=24 사이클: 엔진 호출 그래프의 위상 구조 측정
+# 미도달 함수 발견 → 자동 연결 시도 → 대발견 시 코드 반영
+
+engine_topology_check() {
+    local cycle="${1:-1}"
+    local repo="${2:-unknown}"
+
+    if [ $((cycle % 24)) -ne 0 ]; then
+        return
+    fi
+
+    log_info "  [Topology] Engine topology check (cycle $cycle)"
+
+    python3 -c "
+import re, collections, json, os, time, hashlib
+
+engine = os.path.expanduser('~/Dev/nexus6/lib/growth_common.sh')
+n6_dir = os.path.expanduser('~/.nexus6')
+bus_file = os.path.expanduser('~/Dev/nexus6/shared/growth_bus.jsonl')
+
+with open(engine) as f:
+    content = f.read()
+    lines = content.split('\n')
+
+# 함수+호출 추출
+funcs = set()
+edges = []
+adj = collections.defaultdict(set)
+current = None
+for line in lines:
+    m = re.match(r'^([a-z_]+)\(\)\s*\{', line)
+    if m:
+        current = m.group(1)
+        funcs.add(current)
+
+for fname in funcs:
+    for line in lines:
+        if current != fname and re.search(r'\b' + re.escape(fname) + r'\b', line):
+            # 이 line이 어느 함수 안에 있는지
+            pass
+    # 간단하게: 함수 본문에서 다른 함수 호출
+for fname in funcs:
+    in_func = False
+    for line in lines:
+        if f'{fname}()' in line and '{' in line:
+            in_func = True
+            continue
+        if in_func:
+            for other in funcs:
+                if other != fname and re.search(r'\b' + re.escape(other) + r'\b', line):
+                    edges.append((fname, other))
+                    adj[fname].add(other)
+            if line.strip() == '}':
+                in_func = False
+
+V = len(funcs)
+E = len(set(edges))
+
+# BFS from run_common_phases
+dist = {'run_common_phases': 0}
+queue = ['run_common_phases']
+while queue:
+    node = queue.pop(0)
+    for nb in adj.get(node, set()):
+        if nb not in dist:
+            dist[nb] = dist[node] + 1
+            queue.append(nb)
+
+reachable = set(dist.keys())
+unreachable = funcs - reachable
+
+# 위상 불변량
+components = 0
+visited = set()
+for node in funcs:
+    if node not in visited:
+        components += 1
+        q = [node]
+        while q:
+            n = q.pop(0)
+            if n in visited: continue
+            visited.add(n)
+            for nb in adj.get(n, set()):
+                q.append(nb)
+            for f, t in edges:
+                if t == n: q.append(f)
+
+beta1 = E - V + components
+topo_fp = hashlib.md5(json.dumps(sorted(set(edges))).encode()).hexdigest()[:12]
+
+# 이전 상태 비교
+prev_file = os.path.join(n6_dir, 'engine_topology.json')
+prev = {}
+if os.path.exists(prev_file):
+    try: prev = json.load(open(prev_file))
+    except: pass
+
+prev_fp = prev.get('topology_fingerprint', '')
+changed = topo_fp != prev_fp
+
+# 리포트
+print(f'    V={V} E={E} comp={components} beta1={beta1} fp={topo_fp}')
+print(f'    Reachable: {len(reachable)}/{V}, Unreachable: {len(unreachable)}')
+
+if unreachable:
+    print(f'    Disconnected: {\" \".join(sorted(unreachable)[:6])}')
+
+if changed:
+    print(f'    TOPOLOGY CHANGED: {prev_fp}→{topo_fp}')
+else:
+    print(f'    Topology stable')
+
+# 대발견: n=6 매칭 체크
+discoveries = []
+if V % 6 == 0:
+    discoveries.append(f'V={V}={V//6}*n')
+if E % 6 == 0:
+    discoveries.append(f'E={E}={E//6}*n')
+if beta1 == 6:
+    discoveries.append(f'beta1={beta1}=n EXACT!')
+
+if discoveries:
+    print(f'    N6 DISCOVERY: {\" | \".join(discoveries)}')
+    # bus 기록
+    with open(bus_file, 'a') as bf:
+        bf.write(json.dumps({
+            'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'repo': '$repo',
+            'type': 'topology_discovery',
+            'detail': '; '.join(discoveries)
+        }) + '\n')
+
+# 저장
+topo = {
+    'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'V': V, 'E': E, 'components': components,
+    'beta1': beta1, 'topology_fingerprint': topo_fp,
+    'reachable': len(reachable), 'unreachable': sorted(unreachable),
+    'changed': changed, 'discoveries': discoveries,
+}
+json.dump(topo, open(prev_file, 'w'), indent=2, ensure_ascii=False)
+" 2>/dev/null || echo "    Topology: error"
 }
 
 log_info "growth_common.sh loaded (n=$N6_N, σ=$N6_SIGMA, J₂=$N6_J2)"
