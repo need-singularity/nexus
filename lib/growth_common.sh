@@ -1098,14 +1098,14 @@ run_common_phases() {
     common_phase_domain_explore                      # 439ms
 
     # ── MEDIUM (500ms~2s, 매 사이클) ──────────────────────────
-    process_discovery_log "$cycle" "$repo_name"      # 918ms
-    common_phase_paper_loop                          # 704ms
-    common_phase_nexus6_scan                         # 837ms
-    common_phase_doc_update                          # 1860ms
+    process_discovery_log "$cycle" "$repo_name"      # 1.1s
+    common_phase_paper_loop                          # 0.7s
+    common_phase_nexus6_scan                         # 1.1s
 
     # ── HEAVY (2s+, 주기적) ───────────────────────────────────
-    run_convergence_step "$cycle"                     # 17s (매 사이클, 5중 1개)
-    meta_blowup_emergence "$cycle" "$repo_name"      # 2.3s (매 24cy)
+    common_phase_doc_update                          # 4.2s (매 사이클)
+    run_convergence_step "$cycle"                     # 0.1s (매 사이클, 5중 1개)
+    meta_blowup_emergence "$cycle" "$repo_name"      # 2.2s (매 24cy)
     parallel_breakthrough_attempt "$cycle" "$repo_name" # 4.9s (매 10cy)
     engine_topology_check "$cycle" "$repo_name"      # 4.4s (매 24cy)
     measure_engine_fitness "$cycle" "$repo_name"      # 0.5s (매 24cy)
