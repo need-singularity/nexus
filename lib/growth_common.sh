@@ -1088,56 +1088,34 @@ run_common_phases() {
         return
     fi
 
-    # 정상 모드: 기본 인프라
-    common_phase_doc_update
-    common_phase_domain_explore
-    common_phase_paper_loop
-    common_phase_bus_sync
+    # ── FAST (< 500ms, 매 사이클) ────────────────────────────────
+    common_phase_bus_sync                           #  87ms
+    run_personality_phase "$repo_name" "$cycle"      # 120ms
+    conditional_evolution "$cycle" "$repo_name"      # 133ms
+    auto_cleanup                                     # 141ms
+    logic_combiner                                   # 150ms
+    check_disconnected "$cycle"                      # 432ms
+    common_phase_domain_explore                      # 439ms
 
-    # NEXUS-6 발견 엔진 (매 사이클 — scan + discover)
-    common_phase_nexus6_scan
+    # ── MEDIUM (500ms~2s, 매 사이클) ──────────────────────────
+    process_discovery_log "$cycle" "$repo_name"      # 918ms
+    common_phase_paper_loop                          # 704ms
+    common_phase_nexus6_scan                         # 837ms
+    common_phase_doc_update                          # 1860ms
 
-    # C₂: 수렴 파이프라인 (라운드 로빈)
-    run_convergence_step "$cycle"
+    # ── HEAVY (2s+, 주기적) ───────────────────────────────────
+    run_convergence_step "$cycle"                     # 17s (매 사이클, 5중 1개)
+    meta_blowup_emergence "$cycle" "$repo_name"      # 2.3s (매 24cy)
+    parallel_breakthrough_attempt "$cycle" "$repo_name" # 4.9s (매 10cy)
+    engine_topology_check "$cycle" "$repo_name"      # 4.4s (매 24cy)
+    measure_engine_fitness "$cycle" "$repo_name"      # 0.5s (매 24cy)
+    infinite_recursion_loop "$cycle" "$repo_name"     # 1.9s (매 12cy)
 
-    # C₀: 리포별 개성 phase
-    run_personality_phase "$repo_name" "$cycle"
+    # ── RARE (매우 드문) ──────────────────────────────────────
+    run_meta_recursion "$cycle" "$repo_name"          # 36s (매 6cy)
+    run_claude_auto_tasks "$cycle"                    # ? (매 144cy)
 
-    # C₃: 메타 재귀 (매 n=6 사이클)
-    run_meta_recursion "$cycle" "$repo_name"
-
-    # C₄: 메타(메타(메타)) 블로업 — 창발 흡수 (매 J₂=24 사이클)
-    meta_blowup_emergence "$cycle" "$repo_name"
-
-    # 병렬 돌파 시도 (매 σ-φ=10 사이클마다)
-    parallel_breakthrough_attempt "$cycle" "$repo_name"
-
-    # Discovery Log 처리 (매 사이클 — 미처리 0 유지)
-    process_discovery_log "$cycle" "$repo_name"
-
-    # 미연결 체크 (매 n=6 사이클)
-    check_disconnected "$cycle"
-
-    # 자동정리 + 로직 조합 (매 사이클)
-    auto_cleanup
-    logic_combiner
-
-    # Fitness 측정 (매 J₂=24 사이클)
-    measure_engine_fitness "$cycle" "$repo_name"
-
-    # C₅: 무한 재귀 루프 — 자동화의 자동화의 자동화 (매 σ=12 사이클)
-    infinite_recursion_loop "$cycle" "$repo_name"
-
-    # Claude CLI 자율 태스크 (매 σ²=144 사이클 — L3 suggestion 기반)
-    run_claude_auto_tasks "$cycle"
-
-    # 위상 체크 + 리포트 + 미연결 발견 (매 J₂=24 사이클)
-    engine_topology_check "$cycle" "$repo_name"
-
-    # 조건부 진화 (정체 감지 시 자동 트리거)
-    conditional_evolution "$cycle" "$repo_name"
-
-    # 동기화
+    # ── 동기화 ────────────────────────────────────────────────
     common_phase_full_sync
 }
 
