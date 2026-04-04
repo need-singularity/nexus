@@ -50,6 +50,8 @@ pub struct MetaLoopResult {
     pub meta_cycles_completed: usize,
     /// Per-meta-cycle summaries.
     pub meta_cycle_summaries: Vec<MetaCycleSummary>,
+    /// Final registry state (includes all forged lenses).
+    pub final_registry: LensRegistry,
 }
 
 /// Summary for one meta-cycle.
@@ -67,6 +69,8 @@ pub struct MetaLoop {
     pub config: MetaLoopConfig,
     pub domain: String,
     pub seeds: Vec<String>,
+    /// Optional pre-populated registry (carries lenses from prior cycles).
+    pub initial_registry: Option<LensRegistry>,
     /// Callback for progress reporting (meta_cycle, ouroboros_cycle, message).
     pub on_progress: Option<Box<dyn Fn(usize, usize, &str)>>,
 }
@@ -77,6 +81,7 @@ impl MetaLoop {
             config,
             domain,
             seeds,
+            initial_registry: None,
             on_progress: None,
         }
     }
@@ -87,7 +92,7 @@ impl MetaLoop {
         let mut all_forged_lenses: Vec<String> = Vec::new();
         let mut total_discoveries: usize = 0;
         let mut meta_cycle_summaries: Vec<MetaCycleSummary> = Vec::new();
-        let mut registry = LensRegistry::new();
+        let mut registry = self.initial_registry.clone().unwrap_or_else(LensRegistry::new);
 
         // Accumulated scan records for LensForge gap analysis
         let mut accumulated_records: Vec<ScanRecord> = Vec::new();
@@ -241,6 +246,7 @@ impl MetaLoop {
             total_discoveries,
             meta_cycles_completed: meta_cycle_summaries.len(),
             meta_cycle_summaries,
+            final_registry: registry,
         }
     }
 

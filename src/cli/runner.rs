@@ -1324,6 +1324,8 @@ fn run_loop(domain: Option<String>, cycles: usize) -> Result<(), String> {
     let mut bridge_sync_total = 0usize;
     let mut phase_times: Vec<(String, f64)> = Vec::new();
     let mut discovery_curve: Vec<usize> = Vec::new();
+    // Carry forged lenses across cycles so growth accumulates
+    let mut carry_registry = LensRegistry::new();
 
     for cycle in 1..=cycles {
         if cycles > 1 {
@@ -1341,9 +1343,10 @@ fn run_loop(domain: Option<String>, cycles: usize) -> Result<(), String> {
         scan_active = scan_total; // all registered lenses are active
         phase_times.push(("Scan".to_string(), pt.elapsed().as_secs_f64()));
 
-        // Phase 2: Auto (evolve + forge)
+        // Phase 2: Auto (evolve + forge) — carry_registry feeds forged lenses forward
         let pt = Instant::now();
-        println!("  [2/4] 🐍 Auto: {} (3 meta × 3 ouro)", domain_str);
+        let carry_len = carry_registry.len();
+        println!("  [2/4] 🐍 Auto: {} (3 meta × 3 ouro) [registry: {}]", domain_str, carry_len);
         let seeds = vec![format!("n=6 in {}", domain_str)];
         let config = MetaLoopConfig {
             max_ouroboros_cycles: 3,
@@ -1352,6 +1355,7 @@ fn run_loop(domain: Option<String>, cycles: usize) -> Result<(), String> {
             ..MetaLoopConfig::default()
         };
         let mut meta_loop = MetaLoop::new(domain_str.to_string(), seeds, config);
+        meta_loop.initial_registry = Some(carry_registry.clone());
         meta_loop.on_progress = Some(Box::new(|mc, oc, msg| {
             if oc == 0 {
                 println!("    [Meta-{}] {}", mc, msg);
@@ -1360,6 +1364,8 @@ fn run_loop(domain: Option<String>, cycles: usize) -> Result<(), String> {
             }
         }));
         let result = meta_loop.run();
+        // Update carry_registry with forged lenses for next cycle
+        carry_registry = result.final_registry.clone();
         total_discoveries += result.total_discoveries;
         total_forged.extend(result.forged_lenses.clone());
         // Build discovery curve from per-meta summaries
