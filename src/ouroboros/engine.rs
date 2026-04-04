@@ -250,6 +250,14 @@ impl EvolutionEngine {
         result
     }
 
+    /// Return accumulated scan records for all domains.
+    ///
+    /// These contain the full discovery details that `CycleResult` summaries
+    /// omit, and are needed by the LensForge gap analyzer.
+    pub fn scan_records(&self) -> Vec<ScanRecord> {
+        self.scan_records.values().flat_map(|v| v.clone()).collect()
+    }
+
     /// Run the evolution loop for up to max_iterations cycles.
     ///
     /// Stops early if the convergence checker signals Saturated or if no

@@ -31,7 +31,7 @@ impl Default for MetaLoopConfig {
         Self {
             max_ouroboros_cycles: 6, // n=6
             max_meta_cycles: 6,     // n=6
-            forge_after_n_cycles: 0, // only on saturation
+            forge_after_n_cycles: 3, // forge every 3 cycles
             forge_config: ForgeConfig::default(),
         }
     }
@@ -150,16 +150,46 @@ impl MetaLoop {
                     && ouro_cycle % self.config.forge_after_n_cycles == 0
                     && status != ConvergenceStatus::Saturated
                 {
-                    let forge_result = self.try_forge(&registry, &accumulated_records);
+                    let forge_result = self.try_forge(&registry, &accumulated_records, meta_cycle);
                     if let Some(fr) = forge_result {
                         for entry in &fr.new_lenses {
                             all_forged_lenses.push(entry.name.clone());
                             registry.register(entry.clone());
+                            // Feed forged lens back into the running engine immediately
+                            engine.config.all_lenses.push(entry.name.clone());
                         }
                     }
                 }
 
                 if status == ConvergenceStatus::Saturated {
+                    // Pre-saturation forge trigger: if approaching saturation,
+                    // attempt forge before declaring final saturation.
+                    // Check if last 2 cycles had 0 discoveries.
+                    let recent_zero = engine.history.len() >= 2
+                        && engine.history[engine.history.len() - 2].new_discoveries == 0
+                        && engine.history[engine.history.len() - 1].new_discoveries == 0;
+
+                    if recent_zero {
+                        self.report(meta_cycle, ouro_cycle,
+                            "Pre-saturation forge trigger: last 2 cycles had 0 discoveries");
+                        let pre_sat_forge = self.try_forge(&registry, &accumulated_records, meta_cycle);
+                        if let Some(fr) = pre_sat_forge {
+                            if !fr.new_lenses.is_empty() {
+                                for entry in &fr.new_lenses {
+                                    all_forged_lenses.push(entry.name.clone());
+                                    registry.register(entry.clone());
+                                    engine.config.all_lenses.push(entry.name.clone());
+                                }
+                                self.report(meta_cycle, ouro_cycle, &format!(
+                                    "Pre-saturation forge produced {} new lenses, continuing",
+                                    fr.new_lenses.len()
+                                ));
+                                // Don't break — continue OUROBOROS with new lenses
+                                continue;
+                            }
+                        }
+                    }
+
                     self.report(meta_cycle, ouro_cycle, "OUROBOROS saturated");
                     break;
                 }
@@ -182,7 +212,7 @@ impl MetaLoop {
             // Forge new lenses after OUROBOROS saturation or completion
             let mut lenses_forged_this_cycle: Vec<String> = Vec::new();
 
-            let forge_result = self.try_forge(&registry, &accumulated_records);
+            let forge_result = self.try_forge(&registry, &accumulated_records, meta_cycle);
             if let Some(fr) = forge_result {
                 for entry in &fr.new_lenses {
                     lenses_forged_this_cycle.push(entry.name.clone());
@@ -227,8 +257,11 @@ impl MetaLoop {
         &self,
         registry: &LensRegistry,
         history: &[ScanRecord],
+        meta_cycle: usize,
     ) -> Option<ForgeResult> {
-        let result = forge_engine::forge_cycle(registry, history, &self.config.forge_config);
+        let mut forge_config = self.config.forge_config.clone();
+        forge_config.cycle_number = meta_cycle;
+        let result = forge_engine::forge_cycle(registry, history, &forge_config);
         Some(result)
     }
 

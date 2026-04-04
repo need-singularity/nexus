@@ -495,7 +495,7 @@ fn run_auto(domain: &str, max_meta_cycles: usize, max_ouroboros_cycles: usize) -
     let config = MetaLoopConfig {
         max_ouroboros_cycles,
         max_meta_cycles,
-        forge_after_n_cycles: 0,
+        forge_after_n_cycles: 3,
         ..MetaLoopConfig::default()
     };
 
@@ -1326,7 +1326,7 @@ fn run_loop(domain: Option<String>, cycles: usize) -> Result<(), String> {
 
         // Phase 2: nexus6 evolve (OUROBOROS 1 cycle)
         println!("  [2/4] 🐍 Evolve: {}", domain_str);
-        if let Err(e) = run_evolve(domain_str, 1, vec![format!("n=6 in {}", domain_str)]) {
+        if let Err(e) = run_auto(domain_str, 3, 3) {
             println!("  ⚠️  evolve error: {}", e);
         }
         println!();

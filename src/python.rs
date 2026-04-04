@@ -467,6 +467,7 @@ fn forge_lenses(max_candidates: usize, min_confidence: f64) -> PyForgeResult {
         max_candidates,
         min_confidence,
         similarity_threshold: 0.8,
+        cycle_number: 1,
     };
 
     let result = forge_engine::forge_cycle(&registry, &history, &config);
