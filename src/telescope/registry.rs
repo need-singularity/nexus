@@ -31,6 +31,7 @@ pub struct LensEntry {
 /// relationships. The actual scan logic lives in the `Lens` trait implementors.
 /// The registry enables discovery ("which lenses suit domain X?") and
 /// incremental growth toward the full 411-lens set.
+#[derive(Debug, Clone)]
 pub struct LensRegistry {
     entries: HashMap<String, LensEntry>,
 }
