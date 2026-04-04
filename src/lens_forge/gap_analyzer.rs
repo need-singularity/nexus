@@ -76,6 +76,13 @@ pub fn analyze_gaps(
             continue;
         }
 
+        // Minimum lens threshold: domains with fewer than 8 lenses are weak
+        if lens_count < 8 {
+            let low_coverage = lens_count as f64 / 8.0 * 0.3; // scale to 0..0.3
+            weak_domains.push((domain_str.clone(), low_coverage));
+            continue;
+        }
+
         // Compute coverage score: weighted combination of lens density and hit rate
         let lens_density = (lens_count as f64).min(20.0) / 20.0; // normalize to 0..1
         let hit_rate = if scans > 0 {

@@ -12,10 +12,13 @@ use super::validator::{validate, Recommendation, ValidationResult};
 pub struct ForgeConfig {
     /// Maximum candidates to consider per strategy.
     pub max_candidates: usize,
-    /// Minimum confidence threshold for candidates.
+    /// Minimum confidence threshold for candidates (base value).
     pub min_confidence: f64,
     /// Jaccard similarity threshold for uniqueness (reject if >= this).
     pub similarity_threshold: f64,
+    /// Current cycle number — used for dynamic confidence threshold.
+    /// Cycles 1-3: 0.2, cycles 4-6: 0.1, cycles 7+: 0.05.
+    pub cycle_number: usize,
 }
 
 impl Default for ForgeConfig {
@@ -24,6 +27,19 @@ impl Default for ForgeConfig {
             max_candidates: 20,
             min_confidence: 0.2,
             similarity_threshold: 0.8,
+            cycle_number: 1,
+        }
+    }
+}
+
+impl ForgeConfig {
+    /// Compute effective min_confidence based on cycle progression.
+    /// As cycles advance, the threshold decreases to allow more speculative lenses.
+    pub fn effective_min_confidence(&self) -> f64 {
+        match self.cycle_number {
+            1..=3 => 0.2,
+            4..=6 => 0.1,
+            _ => 0.05,
         }
     }
 }
@@ -82,8 +98,9 @@ pub fn forge_cycle(
     mutation.truncate(config.max_candidates);
     all_candidates.extend(mutation);
 
-    // Filter by minimum confidence
-    all_candidates.retain(|c| c.confidence >= config.min_confidence);
+    // Filter by dynamic minimum confidence (decreases as cycles progress)
+    let effective_threshold = config.effective_min_confidence();
+    all_candidates.retain(|c| c.confidence >= effective_threshold);
 
     let candidates_generated = all_candidates.len();
 

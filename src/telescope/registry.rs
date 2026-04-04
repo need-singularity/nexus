@@ -40,8 +40,8 @@ impl LensRegistry {
     /// 58 n6-industry lenses, 40 cross-project lenses, 103 TECS-L math
     /// lenses, 88 Anima consciousness lenses, 100 SEDI signal lenses,
     /// 58 accel ML lenses, 57 accel physics/neuro lenses, 55 accel
-    /// engineering lenses, 63 accel humanities lenses, and 49 physics-deep
-    /// lenses (693 total).
+    /// engineering lenses, 63 accel humanities lenses, 49 physics-deep
+    /// lenses, and 10 domain combos (703 total).
     pub fn new() -> Self {
         let mut reg = LensRegistry {
             entries: HashMap::new(),
@@ -80,6 +80,22 @@ impl LensRegistry {
             reg.entries.insert(entry.name.clone(), entry);
         }
         for entry in super::physics_deep_lenses::physics_deep_lens_entries() {
+            reg.entries.insert(entry.name.clone(), entry);
+        }
+        // Register the 10 domain combos as DomainCombo-category entries
+        for combo in super::domain_combos::default_combos() {
+            let entry = LensEntry {
+                name: format!("combo_{}", combo.name),
+                category: LensCategory::DomainCombo,
+                description: format!(
+                    "Domain combo '{}' combining [{}] for [{}]",
+                    combo.name,
+                    combo.lenses.join(", "),
+                    combo.target_domains.join(", "),
+                ),
+                domain_affinity: combo.target_domains,
+                complementary: combo.lenses,
+            };
             reg.entries.insert(entry.name.clone(), entry);
         }
         reg
