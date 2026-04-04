@@ -2363,46 +2363,135 @@ fn run_loop(domain: Option<String>, cycles: usize, nexus_cfg: &NexusConfig) -> R
         }
         phase_times.push(("Discover".to_string(), pt.elapsed().as_secs_f64()));
 
-        // Phase 2: Scan
+        // Phase 2+3: 모든 프로젝트 병렬 Scan+Auto (완료 시그널 방식)
         let pt = Instant::now();
-        info!(cycle, domain = %domain_str, "Phase 2/8: Scan");
-        if let Err(e) = run_scan(&domain_str, None, false) {
-            warn!(error = %e, "scan error");
+        let all_projects = load_projects();
+        let project_domains: Vec<String> = if all_projects.is_empty() {
+            vec![domain_str.clone()]
+        } else {
+            all_projects.iter().map(|p| p.domain.clone()).collect()
+        };
+        let project_names: Vec<String> = if all_projects.is_empty() {
+            vec![domain_str.clone()]
+        } else {
+            all_projects.iter().map(|p| p.name.clone()).collect()
+        };
+        let n_projects = project_domains.len();
+        info!(cycle, projects = n_projects, "Phase 2+3/8: 병렬 Scan+Auto (시그널 방식)");
+
+        let base_mlc = nexus_cfg.meta_loop_config();
+        {
+            use std::sync::mpsc;
+            use std::thread;
+
+            #[derive(Debug)]
+            enum ProjectSignal {
+                Started { name: String },
+                ScanDone { name: String, ok: bool },
+                AutoDone { name: String, discoveries: usize, forged: Vec<String>, curve: Vec<usize>, registry: LensRegistry, elapsed: f64 },
+                Error { name: String, msg: String },
+            }
+
+            let (tx, rx) = mpsc::channel::<ProjectSignal>();
+
+            // 각 프로젝트를 독립 스레드로 실행
+            for (dom, name) in project_domains.iter().zip(project_names.iter()) {
+                let dom = dom.clone();
+                let name = name.clone();
+                let tx = tx.clone();
+                let initial_reg = carry_registry.clone();
+                let forge_after = base_mlc.forge_after_n_cycles;
+                let forge_cfg = base_mlc.forge_config.clone();
+
+                thread::spawn(move || {
+                    let t0 = Instant::now();
+                    let _ = tx.send(ProjectSignal::Started { name: name.clone() });
+
+                    // Scan
+                    let scan_ok = match run_scan(&dom, None, false) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            let _ = tx.send(ProjectSignal::Error { name: name.clone(), msg: format!("scan: {}", e) });
+                            false
+                        }
+                    };
+                    let _ = tx.send(ProjectSignal::ScanDone { name: name.clone(), ok: scan_ok });
+
+                    // Auto
+                    let seeds = vec![format!("n=6 in {}", dom)];
+                    let config = MetaLoopConfig {
+                        max_ouroboros_cycles: 3,
+                        max_meta_cycles: 3,
+                        forge_after_n_cycles: forge_after,
+                        forge_config: forge_cfg,
+                    };
+                    let proj_name = name.clone();
+                    let mut meta_loop = MetaLoop::new(dom.clone(), seeds, config);
+                    meta_loop.initial_registry = Some(initial_reg);
+                    meta_loop.on_progress = Some(Box::new(move |mc, oc, msg| {
+                        if oc == 0 {
+                            tracing::debug!(project = %proj_name, meta_cycle = mc, "{}", msg);
+                        } else {
+                            tracing::debug!(project = %proj_name, meta_cycle = mc, ouro_cycle = oc, "{}", msg);
+                        }
+                    }));
+                    let result = meta_loop.run();
+                    let curve: Vec<usize> = result.meta_cycle_summaries.iter().map(|s| s.discoveries).collect();
+
+                    let _ = tx.send(ProjectSignal::AutoDone {
+                        name,
+                        discoveries: result.total_discoveries,
+                        forged: result.forged_lenses.clone(),
+                        curve,
+                        registry: result.final_registry.clone(),
+                        elapsed: t0.elapsed().as_secs_f64(),
+                    });
+                });
+            }
+            drop(tx); // sender 닫아서 rx 종료 조건 성립
+
+            // 메인 스레드: 시그널 수신 + 집계
+            let mut done_count = 0usize;
+            for signal in rx {
+                match signal {
+                    ProjectSignal::Started { name } => {
+                        info!(project = %name, "[{}/{}] 시작", done_count + 1, n_projects);
+                    }
+                    ProjectSignal::ScanDone { name, ok } => {
+                        if ok {
+                            debug!(project = %name, "Scan ✓");
+                        } else {
+                            warn!(project = %name, "Scan ✗");
+                        }
+                    }
+                    ProjectSignal::AutoDone { name, discoveries, forged, curve, registry, elapsed } => {
+                        done_count += 1;
+                        total_discoveries += discoveries;
+                        total_forged.extend(forged.clone());
+                        discovery_curve.extend(curve);
+                        carry_registry = registry;
+                        info!(project = %name, discoveries, elapsed_s = format!("{:.1}", elapsed).as_str(),
+                              "[{}/{}] 완료 ✓", done_count, n_projects);
+                        // 즉시 미니 리포트 출력
+                        println!("  ┌─ {} ── [{}/{}] ─────────────────────────┐", name, done_count, n_projects);
+                        println!("  │  발견: {}건 | Forge: {}건 | {:.1}s", discoveries, forged.len(), elapsed);
+                        if !forged.is_empty() {
+                            for f in &forged {
+                                println!("  │    + {}", f);
+                            }
+                        }
+                        println!("  └──────────────────────────────────────────┘");
+                    }
+                    ProjectSignal::Error { name, msg } => {
+                        warn!(project = %name, error = %msg, "에러");
+                    }
+                }
+            }
         }
         let reg = LensRegistry::new();
         scan_total = reg.iter().count();
         scan_active = scan_total;
-        phase_times.push(("Scan".to_string(), pt.elapsed().as_secs_f64()));
-
-        // Phase 3: Auto (evolve + forge)
-        let pt = Instant::now();
-        let carry_len = carry_registry.len();
-        info!(cycle, domain = %domain_str, carry_lenses = carry_len, "Phase 3/8: Auto (3m x 3o)");
-        let seeds = vec![format!("n=6 in {}", domain_str)];
-        let base_mlc = nexus_cfg.meta_loop_config();
-        let config = MetaLoopConfig {
-            max_ouroboros_cycles: 3,
-            max_meta_cycles: 3,
-            forge_after_n_cycles: base_mlc.forge_after_n_cycles,
-            forge_config: base_mlc.forge_config,
-        };
-        let mut meta_loop = MetaLoop::new(domain_str.to_string(), seeds, config);
-        meta_loop.initial_registry = Some(carry_registry.clone());
-        meta_loop.on_progress = Some(Box::new(|mc, oc, msg| {
-            if oc == 0 {
-                tracing::debug!(meta_cycle = mc, "{}", msg);
-            } else {
-                tracing::debug!(meta_cycle = mc, ouro_cycle = oc, "{}", msg);
-            }
-        }));
-        let result = meta_loop.run();
-        carry_registry = result.final_registry.clone();
-        total_discoveries += result.total_discoveries;
-        total_forged.extend(result.forged_lenses.clone());
-        for s in &result.meta_cycle_summaries {
-            discovery_curve.push(s.discoveries);
-        }
-        phase_times.push(("Auto".to_string(), pt.elapsed().as_secs_f64()));
+        phase_times.push(("Scan+Auto(par)".to_string(), pt.elapsed().as_secs_f64()));
 
         // Phase 4: Mirror Scan (거울 우주)
         let pt = Instant::now();
@@ -2560,7 +2649,7 @@ fn run_loop(domain: Option<String>, cycles: usize, nexus_cfg: &NexusConfig) -> R
     L!("  │  🚀 NEXUS-6 루프 리포트 — {:<pad$}│", now, pad = w - 28);
     L!("  ├{}┤", line);
     L!("  │  {:<w$}│", "");
-    L!("  │  {:<w$}│", format!("■ 스캔: {} 도메인", domain_str));
+    L!("  │  {:<w$}│", format!("■ 스캔: {} 프로젝트 병렬", load_projects().len().max(1)));
     L!("  │  {:<w$}│", format!("  Active lenses: {}/{} | n6 ratio: 100.0%", scan_active, scan_total));
     L!("  │  {:<w$}│", "");
     rpt.push(sep_line.clone());
