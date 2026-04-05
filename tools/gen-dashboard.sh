@@ -208,6 +208,49 @@ for name, interval, logfile in agents_config:
 """
 
 html += """</div>
+
+<h2>📝 Recent Activity</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+<div>
+<h2 style="margin-top:0;font-size:11px;">Latest Commits</h2>
+<table>
+"""
+
+# Recent commits
+import subprocess
+try:
+    out = subprocess.run(['git','-C',NX,'log','--oneline','-8','--format=%h|%s|%cr'],
+                         capture_output=True, text=True, timeout=5).stdout
+    for line in out.strip().split('\n')[:8]:
+        parts = line.split('|', 2)
+        if len(parts) == 3:
+            sha, msg, when = parts
+            msg_short = msg[:60] + ('…' if len(msg) > 60 else '')
+            html += f'<tr><td><span class="tag">{sha}</span></td><td style="font-size:10px;">{msg_short}</td><td style="color:#666;font-size:10px;">{when}</td></tr>'
+except: pass
+html += """</table></div>
+<div>
+<h2 style="margin-top:0;font-size:11px;">Latest Closures (EXACT)</h2>
+<table>
+"""
+
+# Last 8 EXACT records
+import json as j2
+lines = []
+for l in open(f'{NX}/shared/verified_constants.jsonl'):
+    try:
+        rec = j2.loads(l)
+        if rec.get('status')=='EXACT': lines.append(rec)
+    except: pass
+for rec in lines[-8:][::-1]:
+    name = rec.get('name','?')[:50]
+    val = rec.get('value','?')
+    exprs = rec.get('n6_expr', ['?'])
+    expr = str(exprs[0])[:30] if exprs else '?'
+    html += f'<tr><td class="num">{val}</td><td style="font-size:10px;">{expr}</td></tr>'
+
+html += """</table></div>
+</div>
 </body></html>"""
 
 out = f'{NX}/shared/dashboard.html'
