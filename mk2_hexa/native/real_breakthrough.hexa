@@ -136,8 +136,6 @@ fn known_n6_name(idx: i64) -> string {
     return ""
 }
 
-comptime const N6_COUNT = 27
-
 fn physics_val(idx: i64) -> f64 {
     if idx == 0 { return 137.036 }
     if idx == 1 { return 1836.15 }
@@ -166,17 +164,12 @@ fn physics_name(idx: i64) -> string {
     return ""
 }
 
-comptime const PHYS_COUNT = 10
-
 fn is_known_n6(v: f64) -> bool {
     let mut i: i64 = 0
-    while i < N6_COUNT {
+    while i < 27 {
         let c = known_n6_val(i)
-        if c > 0.001 {
-            if abs_f(v - c) / max_f(abs_f(c), 0.001) < 0.001 { return true }
-        } else {
-            if abs_f(v - c) < 0.0005 { return true }
-        }
+        if c > 0.001 && abs_f(v - c) / max_f(abs_f(c), 0.001) < 0.001 { return true }
+        if c <= 0.001 && abs_f(v - c) < 0.0005 { return true }
         i = i + 1
     }
     return false
@@ -187,11 +180,14 @@ fn nearest_n6(v: f64) -> string {
     let mut best_d = 999999.0
     let mut best_name = "?"
     let mut i: i64 = 0
-    while i < N6_COUNT {
+    while i < 27 {
         let c = known_n6_val(i)
         if c != 0.0 {
             let d = abs_f(v - c) / max_f(abs_f(c), 0.001)
-            if d < best_d { best_d = d; best_name = known_n6_name(i) }
+            if d < best_d {
+                best_d = d
+                best_name = known_n6_name(i)
+            }
         }
         i = i + 1
     }
@@ -206,11 +202,17 @@ fn nearest_n6(v: f64) -> string {
                 if vb != 0.0 {
                     let ratio = va / vb
                     let d_r = abs_f(v - ratio) / max_f(abs_f(ratio), 0.001)
-                    if d_r < best_d { best_d = d_r; best_name = known_n6_name(i) + "/" + known_n6_name(j) }
+                    if d_r < best_d {
+                        best_d = d_r
+                        best_name = known_n6_name(i) + "/" + known_n6_name(j)
+                    }
                     let prod = va * vb
                     if prod < 10000.0 {
                         let d_p = abs_f(v - prod) / max_f(abs_f(prod), 0.001)
-                        if d_p < best_d { best_d = d_p; best_name = known_n6_name(i) + "*" + known_n6_name(j) }
+                        if d_p < best_d {
+                            best_d = d_p
+                            best_name = known_n6_name(i) + "*" + known_n6_name(j)
+                        }
                     }
                 }
             }
@@ -225,11 +227,14 @@ fn nearest_physics(v: f64) -> string {
     let mut best_d = 999999.0
     let mut best_name = "?"
     let mut i: i64 = 0
-    while i < PHYS_COUNT {
+    while i < 10 {
         let c = physics_val(i)
         if c != 0.0 {
             let d = abs_f(v - c) / max_f(abs_f(c), 0.001)
-            if d < best_d { best_d = d; best_name = physics_name(i) }
+            if d < best_d {
+                best_d = d
+                best_name = physics_name(i)
+            }
         }
         i = i + 1
     }
@@ -878,11 +883,14 @@ fn compute_surprises(all_vals: list, all_srcs: list, all_labels: list) -> list {
                 let mut best_n6_d = 999999.0
                 let mut best_n6_name = ""
                 let mut ni: i64 = 0
-                while ni < N6_COUNT {
+                while ni < 27 {
                     let c = known_n6_val(ni)
                     if c != 0.0 {
                         let d = abs_f(v - c) / max_f(abs_f(c), 0.001)
-                        if d < best_n6_d { best_n6_d = d; best_n6_name = known_n6_name(ni) }
+                        if d < best_n6_d {
+                            best_n6_d = d
+                            best_n6_name = known_n6_name(ni)
+                        }
                     }
                     ni = ni + 1
                 }
@@ -898,11 +906,17 @@ fn compute_surprises(all_vals: list, all_srcs: list, all_labels: list) -> list {
                             if vb != 0.0 {
                                 let ratio = va / vb
                                 let d_r = abs_f(v - ratio) / max_f(abs_f(ratio), 0.001)
-                                if d_r < best_n6_d { best_n6_d = d_r; best_n6_name = known_n6_name(ni) + "/" + known_n6_name(nj) }
+                                if d_r < best_n6_d {
+                                    best_n6_d = d_r
+                                    best_n6_name = known_n6_name(ni) + "/" + known_n6_name(nj)
+                                }
                                 let prod = va * vb
                                 if prod < 10000.0 {
                                     let d_p = abs_f(v - prod) / max_f(abs_f(prod), 0.001)
-                                    if d_p < best_n6_d { best_n6_d = d_p; best_n6_name = known_n6_name(ni) + "*" + known_n6_name(nj) }
+                                    if d_p < best_n6_d {
+                                        best_n6_d = d_p
+                                        best_n6_name = known_n6_name(ni) + "*" + known_n6_name(nj)
+                                    }
                                 }
                             }
                         }
@@ -915,11 +929,14 @@ fn compute_surprises(all_vals: list, all_srcs: list, all_labels: list) -> list {
                 let mut best_phys_d = 999999.0
                 let mut best_phys_name = ""
                 let mut pi: i64 = 0
-                while pi < PHYS_COUNT {
+                while pi < 10 {
                     let c = physics_val(pi)
                     if c != 0.0 {
                         let d = abs_f(v - c) / max_f(abs_f(c), 0.001)
-                        if d < best_phys_d { best_phys_d = d; best_phys_name = physics_name(pi) }
+                        if d < best_phys_d {
+                            best_phys_d = d
+                            best_phys_name = physics_name(pi)
+                        }
                     }
                     pi = pi + 1
                 }
