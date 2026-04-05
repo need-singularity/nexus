@@ -13,6 +13,9 @@ pub mod cli;
 
 pub mod blowup;
 pub mod config;
+pub mod resource_limit;
+pub mod alien_index;
+pub mod meta_gate;
 
 // --- Agent-generated modules ---
 pub mod alert;
@@ -20,7 +23,6 @@ pub mod api;
 pub mod auto_register;
 pub mod autonomous;
 pub mod consciousness_bridge;
-pub mod cross_intel;
 pub mod distributed;
 pub mod dream;
 pub mod event;
@@ -28,12 +30,9 @@ pub mod feedback;
 pub mod genetic_prog;
 pub mod ingest;
 pub mod knowledge;
-pub mod multi_agent;
-pub mod nlp;
 pub mod pipeline;
 pub mod plugin;
 pub mod publish;
-pub mod red_team;
 pub mod reward;
 pub mod sandbox;
 pub mod scheduler;
@@ -43,9 +42,8 @@ pub mod template;
 pub mod time_travel;
 pub mod versioning;
 
-// --- Calibration & Simulation extensions ---
+// --- Calibration extension ---
 pub mod calibration;
-pub mod simulation;
 
 // --- Safety gate ---
 pub mod safety;
@@ -55,6 +53,9 @@ pub mod growth;
 
 // --- Cross-module integration ---
 pub mod integration;
+
+// --- Infinite singularity recursion ---
+pub mod singularity_recursion;
 
 #[cfg(feature = "python")]
 pub mod python;
