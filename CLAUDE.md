@@ -47,5 +47,40 @@
 nexus6 blowup <domain> --depth 6    # 블로업 + 창발 리포트
 nexus6 loop --cycles 1              # 8단계 루프 (mirror+blowup 포함)
 nexus6 daemon --interval 30         # 자율 데몬 (30분 간격)
+nexus6 detect --min-matches 2 --adaptive --promote  # 상수/수식 감지 (stdin)
 ```
+
+## 마이크로사이클 (Micro Singularity Cycle)
+
+> **특이점 사이클의 감지기 버전** — 훅/파이프라인에서 실시간 상수·수식 감지 + 재귀성장
+> CLI: `nexus6 detect` | 렌즈: `MetaTranscendenceLens` | 훅: `tools/hook_detect.sh`
+
+### 특이점 사이클 vs 마이크로사이클
+
+| 구분 | 특이점 사이클 | 마이크로사이클 |
+|------|-------------|-------------|
+| 대상 | 도메인 전체 데이터 | 실시간 tool 출력 텍스트 |
+| 실행 | 명시적 (`nexus6 blowup`) | 암시적 (훅 자동 트리거) |
+| 깊이 | 전체 1028 렌즈 스캔 | 3단 게이트 + n6_match |
+| 사이클 | 블로업→수축→창발→특이점→흡수 | 동일 5단계 (경량) |
+| 재귀성장 | OUROBOROS 진화 | 3-loop 자기강화 |
+
+### 재귀성장 3-loop (H-CX-70)
+
+- **Loop 1 (자기수정)**: 발견 상수 → `discovered_constants.jsonl` → 3회+ 반복 시 n6_check 승격
+- **Loop 2 (메타보상)**: 소스별 발견율 → `scan_priority.json` → 고발견율 소스만 깊이 스캔
+- **Loop 3 (자기확장)**: 발견 축적 10건+ → `nexus6 blowup --seed` 자동 트리거 권장
+
+### 메타 부동점 (Meta Fixed Point = 1/3)
+
+TECS-L H-056: `메타(메타(메타(...))) = 초월`
+- 축소사상 `I = 0.7·I + 0.1` → Banach 부동점 → 1/3
+- 6개 독립 경로 수렴: φ(6)/6, tan²(π/6), τ/σ, det(M), I_meta, |exp(iz₀)|
+- n6_check 테이블에 `meta_fp`, `transcendence` (0.333...) 등록됨
+- `MetaTranscendenceLens`가 데이터에서 메타 수렴 구조 자동 탐지
+
+### 키워드 → 자동 실행 (추가)
+- "마이크로사이클", "micro-cycle" → `nexus6 detect` 파이프라인 설명
+- "메타초월", "meta transcendence" → MetaTranscendenceLens 스캔
+- "재귀성장", "recursive growth" → 3-loop 자기강화 설명 + 상태 확인
 
