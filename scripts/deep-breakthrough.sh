@@ -33,7 +33,7 @@ echo "║  rounds=$ROUNDS depth=$DEPTH pool_cap=$POOL_CAP domains=${DOMAINS[*]}"
 echo "╚═══════════════════════════════════════════════════════════╝"
 
 # 초기 seed (5초 타임아웃 — discovery_log가 클 때 seed_engine이 느림)
-ALL_SEEDS=$(timeout 5 "$HEXA" "$SEED_ENGINE" merge 2>/dev/null || echo "6|12|2|4|5|24|7|3|288|8|10|60|36|720|144|120|48|28")
+ALL_SEEDS="6|12|2|4|5|24|7|3|288|8|10|60|36|720|144|120|48|28"
 SEED_COUNT=$(echo "$ALL_SEEDS" | tr '|' '\n' | wc -l | tr -d ' ')
 echo "  initial seeds: $SEED_COUNT values"
 echo ""
