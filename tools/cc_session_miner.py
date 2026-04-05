@@ -36,20 +36,24 @@ def parse_session(jsonl_path: Path) -> dict:
                             sig = hashlib.sha1(inp.encode()).hexdigest()[:16]
                             pending_tool_use[block.get("id", "")] = (name, sig)
 
-            tur = obj.get("toolUseResult")
-            if tur and isinstance(tur, dict):
-                content = tur.get("content", "")
-                if isinstance(content, list):
-                    content = json.dumps(content)
-                size = len(str(content).encode("utf-8"))
-                tool_call_count += 1
-                tool_result_bytes_total += size
-                if size > tool_result_bytes_max:
-                    tool_result_bytes_max = size
-                tool_id = tur.get("tool_use_id", "")
-                if tool_id in pending_tool_use:
-                    name, sig = pending_tool_use[tool_id]
-                    call_signatures.append(f"{name}:{sig}")
+            # user 메시지의 content[] 에서 tool_result 블록 추출 (실제 CC 스키마)
+            if msg.get("role") == "user":
+                content_list = msg.get("content") or []
+                if isinstance(content_list, list):
+                    for block in content_list:
+                        if isinstance(block, dict) and block.get("type") == "tool_result":
+                            result_content = block.get("content", "")
+                            if isinstance(result_content, list):
+                                result_content = json.dumps(result_content)
+                            size = len(str(result_content).encode("utf-8"))
+                            tool_call_count += 1
+                            tool_result_bytes_total += size
+                            if size > tool_result_bytes_max:
+                                tool_result_bytes_max = size
+                            tool_id = block.get("tool_use_id", "")
+                            if tool_id in pending_tool_use:
+                                name, sig = pending_tool_use[tool_id]
+                                call_signatures.append(f"{name}:{sig}")
 
     unique_calls = len(set(call_signatures))
     repeat_rate = 0.0
@@ -105,12 +109,17 @@ def _collect_all_result_sizes(paths: Iterable[Path]) -> list[int]:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                tur = obj.get("toolUseResult")
-                if tur and isinstance(tur, dict):
-                    c = tur.get("content", "")
-                    if isinstance(c, list):
-                        c = json.dumps(c)
-                    sizes.append(len(str(c).encode("utf-8")))
+                # user 메시지의 content[] 에서 tool_result 블록 추출
+                msg = obj.get("message") or {}
+                if msg.get("role") == "user":
+                    content_list = msg.get("content") or []
+                    if isinstance(content_list, list):
+                        for block in content_list:
+                            if isinstance(block, dict) and block.get("type") == "tool_result":
+                                c = block.get("content", "")
+                                if isinstance(c, list):
+                                    c = json.dumps(c)
+                                sizes.append(len(str(c).encode("utf-8")))
     return sizes
 
 
