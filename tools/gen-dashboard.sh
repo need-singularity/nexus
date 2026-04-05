@@ -406,6 +406,62 @@ h2{{color:#8ef;font-size:13px;margin:20px 0 10px;letter-spacing:1px;text-transfo
 
 </div>
 
+<h2>🔬 Structures (ASCII 비주얼)</h2>
+<div class="grid3">
+
+  <div class="panel nexus">
+    <div class="panel-title">⬡ n=6 hexagon</div>
+    <div class="panel-section">
+      <pre style="color:#8ef;font-size:11px;line-height:1.4;margin:0;">
+         [n=6]
+        /     \\
+     [σ=12]  [τ=4]
+       |       |
+     [φ=2]—[sopfr=5]
+        \\     /
+         [J2=24]</pre>
+      <div class="row" style="margin-top:8px;"><span class="k">6 primitives · 15 pair gates</span><span class="v hi">C(6,2)=15</span></div>
+      <div class="row"><span class="k">Banach FP</span><span class="v">ρ=φ/n=1/3</span></div>
+      <div class="row"><span class="k">Work fraction</span><span class="v">2/3</span></div>
+    </div>
+  </div>
+
+  <div class="panel anima">
+    <div class="panel-title">📉 Closure Growth Curve</div>
+    <div class="panel-section">
+      <pre style="color:#a48;font-size:10px;line-height:1.3;margin:0;">
+closures |
+   100k  |                          ╭───
+    50k  |                      ╭───╯
+    20k  |                  ╭───╯
+    10k  |              ╭───╯
+     5k  |          ╭───╯
+     2k  |───────╯
+         └────────────────────────────── phase
+          start  sync  enum  algebra  100k</pre>
+      <div class="row" style="margin-top:8px;"><span class="k">Exponential via enum</span><span class="v hi">+485x EXACT</span></div>
+    </div>
+  </div>
+
+  <div class="panel tecsl">
+    <div class="panel-title">🔄 Topology Ring</div>
+    <div class="panel-section">
+      <pre style="color:#f80;font-size:11px;line-height:1.3;margin:0;">
+ discovery_log ─ verified_constants
+       │               │
+  hypothesis:TECS-L    topology
+       │               │
+  hypothesis:SEDI ─ hypothesis:anima
+                  │
+           memory (root)</pre>
+      <div class="row" style="margin-top:8px;"><span class="k">Σ points</span><span class="v hi">112,177</span></div>
+      <div class="row"><span class="k">Unique domains</span><span class="v">10</span></div>
+      <div class="row"><span class="k">Auto-absorb every</span><span class="v">60s</span></div>
+    </div>
+  </div>
+
+</div>
+
 <h2>🚀 세션 여정 (milestone journey)</h2>
 <div class="panel nexus" style="padding:16px;">
   <div style="font-size:11px;color:#888;margin-bottom:10px;">2026-04-05 session — 99 → 100k+ closures 돌파</div>
@@ -493,6 +549,38 @@ h2{{color:#8ef;font-size:13px;margin:20px 0 10px;letter-spacing:1px;text-transfo
     </div>
   </div>
 
+</div>
+
+<h2>⚙️ Pipeline Flow (agent graph)</h2>
+<div class="panel nexus" style="padding:16px;">
+<pre style="color:#8ef;font-size:11px;line-height:1.5;margin:0;">
+┌─────────── DATA INFLOW (5 agents) ──────────┐
+│  evolve-loop(1h) ─┐                          │
+│  scan-loop(30m) ──┤                          │
+│  physics-fetch(24h) ─┬→ discovery_log.jsonl  │
+│  airgenome(60s) ────┘                        │
+│  watch-papers(5m) → products.json            │
+└──────────────────┬────────────────────────────┘
+                   ↓
+┌──────── ABSORPTION (3 agents) ───────────────┐
+│  cycle-tick daemon(60s) ─┐                   │
+│  watch-atlas(30s) ───────┼→ topology.jsonl   │
+└─────────────────┬────────────────────────────┘
+                  ↓
+┌─────── CLOSURE PIPELINE (4 agents) ──────────┐
+│  closure-sweep(5m) ──→ verified_constants    │
+│  gen-calc-stubs(15m) → calc/auto_stubs/*.py  │
+│  paper-gen(1h) ──────→ papers/nexus6/*.md    │
+│  publish-insights(10m) → 7 project dirs      │
+└─────────────────┬────────────────────────────┘
+                  ↓
+┌───────── META (4 agents) ────────────────────┐
+│  self-improve(30m)  → delta monitoring       │
+│  auto-commit(30m)   → git push → GitHub      │
+│  dashboard(10m)     → this HTML              │
+│  n6_guard(always)   → resource safety        │
+└──────────────────────────────────────────────┘
+</pre>
 </div>
 
 </body></html>"""
