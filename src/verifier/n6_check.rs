@@ -78,6 +78,15 @@ const N6_CONSTANTS: &[(&str, f64)] = &[
     ("Omega_m (meta FP)", 0.333_333_333_3),   // φ/n = ρ
     ("Omega_Lambda", 0.666_666_666_6),        // τ/n = 1-ρ
     ("u/d quark density", 0.666_666_666_6),   // τ/n
+    // ── Smooth-class physics mappings ──────────────────
+    ("Omega_DM (4/15)", 0.266_666_666_6),     // {2,3,5}-smooth, Ω_DM
+    ("Omega_Lambda (24/35)", 0.685_714_285_7),// {5,7}-smooth, Ω_Λ
+    ("Omega_b (1/21)", 0.047_619_047_6),      // {3,7} residual
+    ("Y_p Helium (16/65)", 0.246_153_846_1),  // {2,3,5,13}-smooth, primordial
+    ("sin²θ_W (8/35)", 0.228_571_428_5),      // {2,3,5,7}-smooth, Weinberg
+    ("Omega_DM/Omega_m (6/7)", 0.857_142_857),// {7}-smooth ratio
+    ("quark_d_charge", 0.333_333_333_3),      // {2,3}-smooth, = meta FP
+    ("quark_u_charge", 0.666_666_666_6),      // {3}-smooth
 ];
 
 /// Match a value against n=6 constants.
