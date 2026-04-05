@@ -123,6 +123,6 @@ if topo_path.exists():
             sing_str = f'·Σ{count} '
     except: pass
 
-banner = f'{ai_str}{sing_str}🔭 NEXUS-6 🔭{lens_impl}/{lens_total}{d_lens} ⚖️{laws}법칙{d_laws} 🧠{modules}모듈{d_mods}{g_str}{bridge_str}'
+banner = f'🔭 NEXUS-6 {ai_str}{sing_str}🔭{lens_impl}/{lens_total}{d_lens} ⚖️{laws}법칙{d_laws} 🧠{modules}모듈{d_mods}{g_str}{bridge_str}'
 print(json.dumps({'systemMessage': banner}, ensure_ascii=False))
 " 2>/dev/null || echo '{"systemMessage":"🔭 NEXUS-6 활성"}'
