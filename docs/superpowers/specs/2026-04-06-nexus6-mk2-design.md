@@ -136,33 +136,48 @@ Layer 1 (1 prime):     n=2   n=3   n=5   n=7
 
 ---
 
-## Ceiling 체크리스트 (결정 필요)
+## Ceiling 체크리스트 (권고안)
 
 ### 타입 결정
-- [ ] **Prime**: `u64` primes.rs Sieve (max 10^9?) or `BigUint`?
-- [ ] **Rational**: `num_rational::Ratio<u128>` vs custom `(u64, u64)`?
-- [ ] **PrimeSet**: `BTreeSet<u64>` vs bitmask (처음 16개 소수만)?
-- [ ] **n의 상한**: u64? u128? 무제한?
+
+| 항목 | 권고 | 이유 |
+|---|---|---|
+| **Prime** | `u64` + `primes` crate Sieve, max=10⁹ | 99.9% 물리상수는 소수 1000 이하. BigUint 오버킬 |
+| **Rational** | `num_rational::Ratio<i128>` | i128이면 분모 10¹⁸까지 안전. Planck scale 커버 |
+| **PrimeSet** | bitmask `u64` (처음 64개 소수, 2~311까지) | O(1) 부분집합 연산, 충분한 범위 |
+| **n의 상한** | u64 (10¹⁹) | 양자 → 우주 스케일 전부 포함 |
 
 ### 아키텍처 결정
-- [ ] **Sector enum**: 고정 {Strong, EW, Cosmology, Primordial, Unknown} vs extensible?
-- [ ] **Divisibility lattice**: materialized (미리 계산) vs lazy (on-demand)?
-- [ ] **Layer indexing**: |prime_set| 기준 vs Ω(n) 기준?
+
+| 항목 | 권고 | 이유 |
+|---|---|---|
+| **Sector enum** | Hybrid: core + dynamic registry | {Strong, EW, Cosmology, Primordial, Unknown} 고정 + `Custom(String)` variant |
+| **Divisibility lattice** | Lazy + LRU cache (1K entries) | materialize는 n=10⁶까지 10⁸ edges. 불필요. |
+| **Layer indexing** | `|prime_set|` (소수 개수) | 물리 sector와 직결 (prime count = 복잡도) |
 
 ### 역호환성
-- [ ] mk1 topology.jsonl → mk2 자동 upgrade path?
-- [ ] 기존 17K+ point prime_signature 추출 cost?
-- [ ] mk1 CLI (singularity-convergence 등) 유지 vs 재구현?
+
+| 항목 | 권고 | 이유 |
+|---|---|---|
+| **mk1 → mk2 migration** | 1회 배치 스크립트 + idempotent | `nexus6 mk2 migrate --from topology.jsonl` |
+| **Prime signature 추출** | 텍스트 scan + 값 감지 후 factorize | 17K point 전체 ~30초 예상 |
+| **mk1 CLI 유지** | 유지 (read-only wrapper) + mk2 네임스페이스 추가 | `nexus6 mk2 <subcommand>` 분리 |
 
 ### 저장 형식
-- [ ] Point JSON schema 확장 vs 새 binary format?
-- [ ] Divisibility lattice: 별도 파일 vs topology에 embedding?
-- [ ] Sector registry: 하드코딩 vs yaml/toml config?
+
+| 항목 | 권고 | 이유 |
+|---|---|---|
+| **Point schema** | JSON schema 확장 (backward-compat) | `prime_signature` 등 신규 필드만 추가 |
+| **Lattice 저장** | 별도 `shared/cycle/lattice.jsonl` | topology와 독립, lazy load |
+| **Sector registry** | `shared/cycle/sectors.yaml` (+ defaults.yaml) | 사용자 편집 가능 |
 
 ### 물리 연동
-- [ ] Physics constants DB: 하드코딩 vs external CODATA fetcher?
-- [ ] Tolerance per sector: 고정 vs adaptive?
-- [ ] 자동 sector classification: 매 new point 시 vs 배치?
+
+| 항목 | 권고 | 이유 |
+|---|---|---|
+| **Constants DB** | `shared/cycle/physics_db.yaml` + CODATA fetcher (optional) | 기본 100개 하드코딩, 확장 가능 |
+| **Tolerance per sector** | Adaptive: sector별 기본값 + override | Strong 0.1%, EW 2%, Cosmology 5%, Primordial 10% |
+| **Classification timing** | New point 시 즉시 (tick 내부) | mk1 daemon 흐름 유지 |
 
 ---
 
