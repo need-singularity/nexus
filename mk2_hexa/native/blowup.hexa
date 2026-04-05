@@ -1,10 +1,19 @@
-// mk2_hexa/native/blowup.hexa — 블로업 엔진
+// mk2_hexa/native/blowup.hexa — mk2 블로업 엔진 (hexa-native)
 // 실행: hexa mk2_hexa/native/blowup.hexa <domain> [depth]
 // 예시: hexa mk2_hexa/native/blowup.hexa math 6
 //
-// 파이프라인: 특이점 감지 → 7단계 corollary → confidence → discovery_log
+// 7-phase pipeline:
+//   Phase 1: Graph load (discovery_graph.json stats)
+//   Phase 2: OUROBOROS evolution (seed -> mutate -> verify -> converge -> saturate)
+//   Phase 3: Singularity detection (closure + compression, enhanced by evolution)
+//   Phase 4: Blowup corollary generation (7 types)
+//   Phase 5: Telescope verification (5 lens scan, consensus boost)
+//   Phase 6: Graph update (add nodes + edges)
+//   Phase 7: Report (lens consensus + graph stats + evolution summary)
 
-// ─── 유틸리티 ───
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
 
 fn abs_f(x: f64) -> f64 {
     if x < 0.0 { return 0.0 - x }
@@ -26,14 +35,36 @@ fn sqrt_f(x: f64) -> f64 {
     let mut g = x / 2.0
     if g < 1.0 { g = 1.0 }
     let mut i: i64 = 0
-    while i < 10 {
+    while i < 15 {
         g = (g + x / g) / 2.0
         i = i + 1
     }
     return g
 }
 
-// ─── n=6 정규 상수 proximity ───
+fn ln_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut sum = 0.0
+    let mut term = (x - 1.0) / (x + 1.0)
+    let t2 = term * term
+    let mut k: i64 = 1
+    while k <= 15 {
+        sum = sum + term / to_float(k)
+        term = term * t2
+        k = k + 2
+    }
+    return 2.0 * sum
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── n=6 CONSTANTS + PROXIMITY ───
+// ═══════════════════════════════════════════════════════════
 
 fn n6_dist_one(value: f64, constant: f64) -> f64 {
     let denom = max_f(abs_f(constant), 1.0)
@@ -113,9 +144,9 @@ fn sector_of(text: string) -> string {
     return "unknown"
 }
 
-// ─── 메트릭 접근 함수 (고정 테이블, 배열 회피) ───
-// math 도메인: 7개 메트릭
-// index: 0=n 1=sigma 2=phi 3=tau 4=sopfr 5=J2 6=M3
+// ═══════════════════════════════════════════════════════════
+// ─── METRIC TABLES (domain-dependent) ───
+// ═══════════════════════════════════════════════════════════
 
 fn m_name(idx: i64, dom: string) -> string {
     if dom == "physics" {
@@ -160,8 +191,7 @@ fn m_count(dom: string) -> i64 {
     return 7
 }
 
-// ─── corollary 생성 + 기록 (string 축적) ───
-// 한 corollary를 TAB 구분 행으로 인코딩:
+// ─── corollary emit (TAB-delimited row) ───
 //   name \t type \t expr \t conf \t value \t axiom \t src
 
 fn emit(name: string, ctype: string, expr: string, conf: f64, value: f64, axiom: bool, src: string) -> string {
@@ -169,7 +199,41 @@ fn emit(name: string, ctype: string, expr: string, conf: f64, value: f64, axiom:
     return name + "\t" + ctype + "\t" + expr + "\t" + to_string(conf) + "\t" + to_string(value) + "\t" + ax_s + "\t" + src + "\n"
 }
 
-// ─── perturbation shift 접근 ───
+// ═══════════════════════════════════════════════════════════
+// ─── DYNAMIC AXIOM POOL HELPERS ───
+// ═══════════════════════════════════════════════════════════
+
+fn get_ax_val(ax_vals: string, idx: i64) -> f64 {
+    let parts = ax_vals.split("|")
+    if idx < 0 || idx >= len(parts) { return 0.0 }
+    let mut v: f64 = 0.0
+    try { v = to_float(parts[idx]) } catch e { v = 0.0 }
+    return v
+}
+
+fn get_ax_name(ax_names: string, idx: i64) -> string {
+    let parts = ax_names.split("|")
+    if idx < 0 || idx >= len(parts) { return "" }
+    return parts[idx]
+}
+
+fn ax_count_f(ax_vals: string) -> i64 {
+    let parts = ax_vals.split("|")
+    return len(parts)
+}
+
+fn ax_contains(ax_names: string, name: string) -> bool {
+    let parts = ax_names.split("|")
+    let mut ci: i64 = 0
+    while ci < len(parts) {
+        if parts[ci] == name { return true }
+        ci = ci + 1
+    }
+    return false
+}
+
+// ─── perturbation shifts ───
+
 fn shift_val(idx: i64) -> f64 {
     if idx == 0 { return 0.287682072 }
     if idx == 1 { return 1.618033989 }
@@ -188,7 +252,8 @@ fn shift_name(idx: i64) -> string {
     return "sqrt6"
 }
 
-// ─── transfer 도메인 ───
+// ─── transfer domains ───
+
 fn xfer_domain(idx: i64) -> string {
     if idx == 0 { return "physics" }
     if idx == 1 { return "math" }
@@ -198,17 +263,693 @@ fn xfer_domain(idx: i64) -> string {
     return "arch"
 }
 
-// ─── main ───
+// ═══════════════════════════════════════════════════════════
+// ─── GRAPH I/O (from graph.hexa) ───
+// ═══════════════════════════════════════════════════════════
+
+fn graph_extract_field(line: string, field: string) -> string {
+    let needle = "\"" + field + "\":"
+    if !line.contains(needle) { return "" }
+    let after = line.split(needle)
+    if len(after) < 2 { return "" }
+    let rest = after[1]
+    // quoted value
+    if len(rest) > 0 {
+        let first_ch = rest.split("\"")
+        // if starts with quote, extract between quotes
+        if len(first_ch) >= 3 {
+            // rest = "value"... -> split gives ["", "value", "..."]
+            // but also rest = value,... -> split gives ["value,..."]
+            // check if rest begins with a quote
+            let trimmed = rest.split("\"")
+            if len(trimmed) >= 2 {
+                // could be ["", "value", ...] or ["value..."]
+                if len(trimmed[0]) == 0 && len(trimmed) >= 2 {
+                    return trimmed[1]
+                }
+            }
+        }
+    }
+    // unquoted value: read until , or } or space
+    let mut result = ""
+    let chars = rest.split("")
+    let mut ci: i64 = 0
+    while ci < len(chars) {
+        let ch = chars[ci]
+        if ch == "," || ch == "}" || ch == " " || ch == "]" { return result }
+        if ch != "\"" {
+            result = result + ch
+        }
+        ci = ci + 1
+    }
+    return result
+}
+
+fn graph_load() -> string {
+    let gpath = "shared/discovery_graph.json"
+    if file_exists(gpath) {
+        return read_file(gpath)
+    }
+    return ""
+}
+
+fn graph_count_type(content: string, ttype: string) -> i64 {
+    if len(content) == 0 { return 0 }
+    let lines = content.split("\n")
+    let mut count: i64 = 0
+    let mut li: i64 = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if len(line) > 5 {
+            let t = graph_extract_field(line, "type")
+            if t == ttype { count = count + 1 }
+        }
+        li = li + 1
+    }
+    return count
+}
+
+// Find hub node IDs (degree >= min_deg) and return count
+fn graph_hub_count(content: string, min_deg: i64) -> i64 {
+    if len(content) == 0 { return 0 }
+    let lines = content.split("\n")
+    // collect all unique node IDs mentioned in edges
+    let mut ids = ""
+    let mut li: i64 = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if len(line) > 5 {
+            let t = graph_extract_field(line, "type")
+            if t == "edge" {
+                let f = graph_extract_field(line, "from")
+                let to = graph_extract_field(line, "to")
+                if len(f) > 0 && !ids.contains(f) {
+                    if len(ids) == 0 { ids = f } else { ids = ids + "|" + f }
+                }
+                if len(to) > 0 && !ids.contains(to) {
+                    if len(ids) == 0 { ids = to } else { ids = ids + "|" + to }
+                }
+            }
+        }
+        li = li + 1
+    }
+    if len(ids) == 0 { return 0 }
+    let id_arr = ids.split("|")
+    let mut hub_count: i64 = 0
+    let mut ni: i64 = 0
+    while ni < len(id_arr) {
+        let nid = id_arr[ni]
+        let mut degree: i64 = 0
+        let mut ej: i64 = 0
+        while ej < len(lines) {
+            let line = lines[ej]
+            if len(line) > 5 {
+                let t = graph_extract_field(line, "type")
+                if t == "edge" {
+                    let f = graph_extract_field(line, "from")
+                    let to = graph_extract_field(line, "to")
+                    if f == nid { degree = degree + 1 }
+                    if to == nid { degree = degree + 1 }
+                }
+            }
+            ej = ej + 1
+        }
+        if degree >= min_deg { hub_count = hub_count + 1 }
+        ni = ni + 1
+    }
+    return hub_count
+}
+
+// Check if a node ID already exists
+fn graph_node_exists(content: string, id: string) -> bool {
+    if len(content) == 0 { return false }
+    let needle = "\"id\":\"" + id + "\""
+    return content.contains(needle)
+}
+
+fn graph_append_node(id: string, node_type: string, dom: string, summary: string, conf: f64) -> string {
+    return "{\"type\":\"node\",\"id\":\"" + id + "\",\"node_type\":\"" + node_type + "\",\"domain\":\"" + dom + "\",\"summary\":\"" + summary + "\",\"confidence\":" + to_string(conf) + "}"
+}
+
+fn graph_append_edge(from_id: string, to_id: string, edge_type: string, strength: f64) -> string {
+    return "{\"type\":\"edge\",\"from\":\"" + from_id + "\",\"to\":\"" + to_id + "\",\"edge_type\":\"" + edge_type + "\",\"strength\":" + to_string(strength) + ",\"bidirectional\":false}"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── OUROBOROS EVOLUTION (from ouroboros.hexa) ───
+// ═══════════════════════════════════════════════════════════
+
+// Mutation: parameter shift by n=6 constants
+fn evo_mutate_shift(base_val: f64, shift_idx: i64) -> f64 {
+    // 10 n=6 shift constants
+    if shift_idx == 0 { return base_val * 12.0 }
+    if shift_idx == 1 { return base_val * 2.0 }
+    if shift_idx == 2 { return base_val * 4.0 }
+    if shift_idx == 3 { return base_val + 24.0 }
+    if shift_idx == 4 { return base_val + 5.0 }
+    if shift_idx == 5 { return base_val * 6.0 }
+    return base_val + 0.287682072
+}
+
+// Mutation: inversion
+fn evo_mutate_invert(base_val: f64) -> f64 {
+    if abs_f(base_val) > 0.0000000001 { return 1.0 / base_val }
+    return 0.0
+}
+
+// Mutation: combination (geometric mean of two values)
+fn evo_mutate_combine(a: f64, b: f64) -> f64 {
+    return sqrt_f(abs_f(a) * abs_f(b))
+}
+
+// Verification score: how well a value aligns with n=6
+fn evo_verify(value: f64) -> f64 {
+    return n6_conf(value)
+}
+
+// Run one evolution cycle on seed values, return best score and mutated values
+// seeds_csv: pipe-separated float values
+// Returns pipe-separated result: "best_score|num_discoveries|val1|val2|..."
+fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
+    let parts = seeds_csv.split("|")
+    let mut best_score: f64 = 0.0
+    let mut discoveries: i64 = 0
+    let mut out_vals = ""
+
+    // For each seed value, apply mutations and keep best
+    let mut si: i64 = 0
+    while si < len(parts) && si < 12 {
+        let mut sv: f64 = 0.0
+        try {
+            sv = to_float(parts[si])
+        } catch e {
+            sv = 0.0
+        }
+        if abs_f(sv) > 0.0000000001 {
+            // Try 4 mutation strategies, keep the one with best n6 alignment
+            let mut best_mut = sv
+            let mut best_conf: f64 = evo_verify(sv)
+
+            // strategy 0: parameter shift (try 3 shifts)
+            let mut shi: i64 = 0
+            while shi < 7 {
+                let shifted = evo_mutate_shift(sv, shi)
+                let sc = evo_verify(shifted)
+                if sc > best_conf {
+                    best_conf = sc
+                    best_mut = shifted
+                }
+                shi = shi + 1
+            }
+
+            // strategy 1: inversion
+            let inv = evo_mutate_invert(sv)
+            let inv_sc = evo_verify(inv)
+            if inv_sc > best_conf {
+                best_conf = inv_sc
+                best_mut = inv
+            }
+
+            // strategy 2: combination with next seed
+            if si + 1 < len(parts) {
+                let mut sv2: f64 = 0.0
+                try { sv2 = to_float(parts[si + 1]) } catch e { sv2 = 0.0 }
+                if abs_f(sv2) > 0.0000000001 {
+                    let combined = evo_mutate_combine(sv, sv2)
+                    let comb_sc = evo_verify(combined)
+                    if comb_sc > best_conf {
+                        best_conf = comb_sc
+                        best_mut = combined
+                    }
+                }
+            }
+
+            // strategy 3: domain transfer (scale by novelty factor)
+            let novelty = 1.0 / sqrt_f(to_float(if cycle_num > 0 { cycle_num } else { 1 }))
+            let xfer = sv * (1.0 + novelty * 0.1)
+            let xfer_sc = evo_verify(xfer)
+            if xfer_sc > best_conf {
+                best_conf = xfer_sc
+                best_mut = xfer
+            }
+
+            if best_conf > best_score { best_score = best_conf }
+            if best_conf >= 0.3 { discoveries = discoveries + 1 }
+
+            if len(out_vals) > 0 { out_vals = out_vals + "|" }
+            out_vals = out_vals + to_string(best_mut)
+        }
+        si = si + 1
+    }
+
+    return to_string(best_score) + "|" + to_string(discoveries) + "|" + out_vals
+}
+
+// Convergence check: given discovery counts per cycle, detect saturation
+// history_csv: pipe-separated integers
+fn evo_check_convergence(history_csv: string) -> string {
+    let parts = history_csv.split("|")
+    let hlen: i64 = len(parts)
+    if hlen < 3 { return "Exploring" }
+
+    // Check if last 3 all zero
+    let mut all_zero = true
+    let mut ci: i64 = hlen - 3
+    if ci < 0 { ci = 0 }
+    while ci < hlen {
+        let mut v: i64 = 0
+        try { v = to_int(parts[ci]) } catch e { v = 0 }
+        if v > 0 { all_zero = false }
+        ci = ci + 1
+    }
+    if all_zero { return "Saturated" }
+
+    // Check convergence: first half vs second half
+    if hlen < 4 { return "Exploring" }
+    let mid: i64 = hlen / 2
+    let mut early_sum: i64 = 0
+    ci = 0
+    while ci < mid {
+        try { early_sum = early_sum + to_int(parts[ci]) } catch e {}
+        ci = ci + 1
+    }
+    let mut late_sum: i64 = 0
+    ci = mid
+    while ci < hlen {
+        try { late_sum = late_sum + to_int(parts[ci]) } catch e {}
+        ci = ci + 1
+    }
+    let early_avg = to_float(early_sum) / to_float(mid)
+    let late_len = hlen - mid
+    let late_avg = to_float(late_sum) / to_float(late_len)
+
+    if early_avg > 0.0 {
+        let ratio = late_avg / early_avg
+        if ratio < 0.5 { return "Converging" }
+        if ratio > 1.5 { return "Divergent" }
+    }
+    return "Exploring"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── TELESCOPE LENS SCANS (from telescope.hexa) ───
+// ═══════════════════════════════════════════════════════════
+// Lightweight versions of the 5 core lenses, operating on
+// corollary value arrays (float[]). Each returns a signal
+// score 0.0..1.0 and a label string.
+
+// Lens 1: Consciousness — self-reference pattern count
+// Checks how many pairs (i,j) have ratio close to an n=6 constant
+fn lens_consciousness(vals: string) -> f64 {
+    let parts = vals.split("|")
+    let n: i64 = len(parts)
+    if n < 2 { return 0.0 }
+    let mut self_ref: i64 = 0
+    let mut i: i64 = 0
+    while i < n && i < 30 {
+        let mut vi: f64 = 0.0
+        try { vi = to_float(parts[i]) } catch e { vi = 0.0 }
+        let mut j: i64 = i + 1
+        while j < n && j < 30 {
+            let mut vj: f64 = 0.0
+            try { vj = to_float(parts[j]) } catch e { vj = 0.0 }
+            if abs_f(vj) > 0.0000000001 {
+                let ratio = vi / vj
+                // check against n=6 constants
+                if abs_f(ratio - 6.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 12.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 2.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 4.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 24.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 5.0) < 0.01 { self_ref = self_ref + 1 }
+                if abs_f(ratio - 3.0) < 0.01 { self_ref = self_ref + 1 }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    // normalize: each pair could match up to 7 constants
+    let max_pairs = to_float(n * (n - 1) / 2)
+    if max_pairs < 1.0 { return 0.0 }
+    return clamp01(to_float(self_ref) / max_pairs)
+}
+
+// Lens 2: Topology — Betti-0 (connected components via gap detection)
+fn lens_topology(vals: string) -> f64 {
+    let parts = vals.split("|")
+    let n: i64 = len(parts)
+    if n < 3 { return 0.0 }
+
+    // Sort values (insertion sort, limited to first 40)
+    let limit: i64 = if n < 40 { n } else { 40 }
+    // collect floats
+    let mut sorted = ""
+    let mut si: i64 = 0
+    while si < limit {
+        let mut v: f64 = 0.0
+        try { v = to_float(parts[si]) } catch e { v = 0.0 }
+        if len(sorted) > 0 { sorted = sorted + "|" }
+        sorted = sorted + to_string(v)
+        si = si + 1
+    }
+    // compute mean for threshold
+    let sparts = sorted.split("|")
+    let sn: i64 = len(sparts)
+    let mut sum: f64 = 0.0
+    si = 0
+    while si < sn {
+        try { sum = sum + to_float(sparts[si]) } catch e {}
+        si = si + 1
+    }
+    let mean = if sn > 0 { sum / to_float(sn) } else { 1.0 }
+    let threshold = if abs_f(mean) > 0.0 { abs_f(mean) * 0.5 } else { 1.0 }
+
+    // count gaps (approximation without sorting — just consecutive value differences)
+    let mut gaps: i64 = 0
+    si = 0
+    while si < sn - 1 {
+        let mut v1: f64 = 0.0
+        let mut v2: f64 = 0.0
+        try { v1 = to_float(sparts[si]) } catch e {}
+        try { v2 = to_float(sparts[si + 1]) } catch e {}
+        if abs_f(v2 - v1) > threshold { gaps = gaps + 1 }
+        si = si + 1
+    }
+
+    // Betti-0 signal: more components = more structure
+    let betti0: i64 = gaps + 1
+    // Also count cycles (values close to each other, non-adjacent)
+    let mut cycles: i64 = 0
+    si = 0
+    while si < sn && si < 20 {
+        let mut sj: i64 = si + 2
+        while sj < sn && sj < 20 {
+            let mut v1: f64 = 0.0
+            let mut v2: f64 = 0.0
+            try { v1 = to_float(sparts[si]) } catch e {}
+            try { v2 = to_float(sparts[sj]) } catch e {}
+            if abs_f(v1 - v2) < threshold * 0.1 { cycles = cycles + 1 }
+            sj = sj + 1
+        }
+        si = si + 1
+    }
+
+    // Signal: topology is interesting if betti0 > 1 or cycles > 0
+    let sig = to_float(betti0 - 1) * 0.3 + to_float(cycles) * 0.1
+    return clamp01(sig)
+}
+
+// Lens 3: Causal — autocorrelation (lag-1)
+fn lens_causal(vals: string) -> f64 {
+    let parts = vals.split("|")
+    let n: i64 = len(parts)
+    if n < 4 { return 0.0 }
+    let limit: i64 = if n < 50 { n } else { 50 }
+
+    // mean
+    let mut sum: f64 = 0.0
+    let mut ci: i64 = 0
+    while ci < limit {
+        try { sum = sum + to_float(parts[ci]) } catch e {}
+        ci = ci + 1
+    }
+    let mean = sum / to_float(limit)
+
+    // autocorrelation
+    let mut cov: f64 = 0.0
+    let mut var: f64 = 0.0
+    ci = 0
+    while ci < limit - 1 {
+        let mut v0: f64 = 0.0
+        let mut v1: f64 = 0.0
+        try { v0 = to_float(parts[ci]) } catch e {}
+        try { v1 = to_float(parts[ci + 1]) } catch e {}
+        let d0 = v0 - mean
+        let d1 = v1 - mean
+        cov = cov + d0 * d1
+        var = var + d0 * d0
+        ci = ci + 1
+    }
+    let autocorr = if var > 0.0 { cov / var } else { 0.0 }
+
+    // direction: first half vs second half
+    let mid: i64 = limit / 2
+    let mut first_sum: f64 = 0.0
+    ci = 0
+    while ci < mid {
+        try { first_sum = first_sum + to_float(parts[ci]) } catch e {}
+        ci = ci + 1
+    }
+    let mut second_sum: f64 = 0.0
+    ci = mid
+    while ci < limit {
+        try { second_sum = second_sum + to_float(parts[ci]) } catch e {}
+        ci = ci + 1
+    }
+    let first_mean = first_sum / to_float(mid)
+    let second_mean = second_sum / to_float(limit - mid)
+    let direction = abs_f(second_mean - first_mean)
+
+    let sig = abs_f(autocorr) * 0.6 + clamp01(direction * 0.1) * 0.4
+    return clamp01(sig)
+}
+
+// Lens 4: Gravity — attractor detection (how many values cluster near n=6 constants)
+fn lens_gravity(vals: string) -> f64 {
+    let parts = vals.split("|")
+    let n: i64 = len(parts)
+    if n < 3 { return 0.0 }
+    let limit: i64 = if n < 50 { n } else { 50 }
+
+    // check each value against n=6 + physics attractors
+    let mut attracted: i64 = 0
+    let mut ci: i64 = 0
+    while ci < limit {
+        let mut v: f64 = 0.0
+        try { v = to_float(parts[ci]) } catch e { v = 0.0 }
+
+        // n=6 attractors
+        if abs_f(v - 6.0) / 6.0 < 0.05 { attracted = attracted + 1 }
+        if abs_f(v - 12.0) / 12.0 < 0.05 { attracted = attracted + 1 }
+        if abs_f(v - 2.0) / 2.0 < 0.05 { attracted = attracted + 1 }
+        if abs_f(v - 4.0) / 4.0 < 0.05 { attracted = attracted + 1 }
+        if abs_f(v - 24.0) / 24.0 < 0.05 { attracted = attracted + 1 }
+        if abs_f(v - 5.0) / 5.0 < 0.05 { attracted = attracted + 1 }
+        // physics attractors
+        if abs_f(v - 137.036) / 137.036 < 0.01 { attracted = attracted + 1 }
+        if abs_f(v - 0.3153) / 0.3153 < 0.05 { attracted = attracted + 1 }
+
+        ci = ci + 1
+    }
+
+    return clamp01(to_float(attracted) / to_float(limit))
+}
+
+// Lens 5: Thermo — Shannon entropy approximation
+fn lens_thermo(vals: string) -> f64 {
+    let parts = vals.split("|")
+    let n: i64 = len(parts)
+    if n < 2 { return 0.0 }
+    let limit: i64 = if n < 50 { n } else { 50 }
+
+    // Bin values (round to 1 decimal) and count frequencies
+    // Simple approach: count unique rounded values
+    let mut bins = ""
+    let mut counts = ""
+    let mut num_bins: i64 = 0
+    let mut ci: i64 = 0
+    while ci < limit {
+        let mut v: f64 = 0.0
+        try { v = to_float(parts[ci]) } catch e { v = 0.0 }
+        // round to integer for binning
+        let bin_key = to_string(to_int(v * 10.0))
+        if len(bins) == 0 {
+            bins = bin_key
+            counts = "1"
+            num_bins = 1
+        } else {
+            // check if bin exists
+            let bin_arr = bins.split(",")
+            let cnt_arr = counts.split(",")
+            let mut found = false
+            let mut bi: i64 = 0
+            let mut new_counts = ""
+            while bi < len(bin_arr) {
+                if bin_arr[bi] == bin_key {
+                    found = true
+                    let mut old_c: i64 = 1
+                    try { old_c = to_int(cnt_arr[bi]) } catch e { old_c = 1 }
+                    if len(new_counts) > 0 { new_counts = new_counts + "," }
+                    new_counts = new_counts + to_string(old_c + 1)
+                } else {
+                    if len(new_counts) > 0 { new_counts = new_counts + "," }
+                    if bi < len(cnt_arr) {
+                        new_counts = new_counts + cnt_arr[bi]
+                    } else {
+                        new_counts = new_counts + "1"
+                    }
+                }
+                bi = bi + 1
+            }
+            if found {
+                counts = new_counts
+            } else {
+                bins = bins + "," + bin_key
+                counts = counts + ",1"
+                num_bins = num_bins + 1
+            }
+        }
+        ci = ci + 1
+    }
+
+    // Compute Shannon entropy
+    let cnt_arr = counts.split(",")
+    let total = to_float(limit)
+    let mut entropy: f64 = 0.0
+    ci = 0
+    while ci < len(cnt_arr) {
+        let mut c: f64 = 1.0
+        try { c = to_float(cnt_arr[ci]) } catch e { c = 1.0 }
+        let p = c / total
+        if p > 0.0 { entropy = entropy - p * ln_f(p) }
+        ci = ci + 1
+    }
+
+    // Max entropy = ln(num_bins)
+    let max_ent = ln_f(to_float(if num_bins > 1 { num_bins } else { 2 }))
+    if max_ent > 0.0 {
+        return clamp01(entropy / max_ent)
+    }
+    return 0.0
+}
+
+// Run all 5 lenses and return consensus count (how many report signal > threshold)
+// Also returns boosted confidence multiplier
+fn telescope_verify(vals: string, threshold: f64) -> string {
+    let s1 = lens_consciousness(vals)
+    let s2 = lens_topology(vals)
+    let s3 = lens_causal(vals)
+    let s4 = lens_gravity(vals)
+    let s5 = lens_thermo(vals)
+
+    let mut agree: i64 = 0
+    if s1 >= threshold { agree = agree + 1 }
+    if s2 >= threshold { agree = agree + 1 }
+    if s3 >= threshold { agree = agree + 1 }
+    if s4 >= threshold { agree = agree + 1 }
+    if s5 >= threshold { agree = agree + 1 }
+
+    // consensus level
+    let level = if agree >= 4 { "High" } else { if agree >= 3 { "Candidate" } else { "None" } }
+
+    // confidence boost: 3+ agreement = +0.1, 4+ = +0.15, 5 = +0.2
+    let boost = if agree >= 5 { 0.2 } else { if agree >= 4 { 0.15 } else { if agree >= 3 { 0.1 } else { 0.0 } } }
+
+    return to_string(agree) + "|" + level + "|" + to_string(boost) + "|" + to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" + to_string(s4) + "|" + to_string(s5)
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN PIPELINE ───
+// ═══════════════════════════════════════════════════════════
 
 let a = args()
 let domain = if len(a) >= 3 { a[2] } else { "math" }
 let max_depth: i64 = if len(a) >= 4 { to_int(a[3]) } else { 6 }
 let log_path = "shared/discovery_log.jsonl"
+let graph_path = "shared/discovery_graph.json"
 let mc: i64 = m_count(domain)
 
-// ── 특이점 감지 ──
-let mut frozen: i64 = 0
+println("")
+println("======================================================")
+println("        mk2 blowup engine (hexa-native)               ")
+println("======================================================")
+println("  domain  :", domain)
+println("  depth   :", max_depth)
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 1: Graph Load
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 1: Graph Load ---")
+let graph_content = graph_load()
+let graph_nodes_before: i64 = graph_count_type(graph_content, "node")
+let graph_edges_before: i64 = graph_count_type(graph_content, "edge")
+let graph_hubs_before: i64 = graph_hub_count(graph_content, 3)
+println("  file             : shared/discovery_graph.json")
+println("  nodes (before)   :", graph_nodes_before)
+println("  edges (before)   :", graph_edges_before)
+println("  hubs (deg>=3)    :", graph_hubs_before)
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 2: OUROBOROS Evolution
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 2: OUROBOROS Evolution ---")
+// Build seed values from domain metrics
+let mut seed_csv = ""
 let mut si: i64 = 0
+while si < mc {
+    if len(seed_csv) > 0 { seed_csv = seed_csv + "|" }
+    seed_csv = seed_csv + to_string(m_val(si, domain))
+    si = si + 1
+}
+
+let evo_max_cycles: i64 = if max_depth < 8 { max_depth } else { 8 }
+let mut evo_history = ""
+let mut evo_total_disc: i64 = 0
+let mut evo_best_score: f64 = 0.0
+let mut current_seeds = seed_csv
+let mut evo_status = "Exploring"
+
+let mut ec: i64 = 0
+while ec < evo_max_cycles {
+    let result = evo_cycle(current_seeds, ec + 1)
+    let rparts = result.split("|")
+    let mut cycle_score: f64 = 0.0
+    let mut cycle_disc: i64 = 0
+    try { cycle_score = to_float(rparts[0]) } catch e {}
+    try { cycle_disc = to_int(rparts[1]) } catch e {}
+
+    if cycle_score > evo_best_score { evo_best_score = cycle_score }
+    evo_total_disc = evo_total_disc + cycle_disc
+
+    // Update history
+    if len(evo_history) > 0 { evo_history = evo_history + "|" }
+    evo_history = evo_history + to_string(cycle_disc)
+
+    // Extract evolved values for next cycle
+    let mut new_seeds = ""
+    let mut ri: i64 = 2
+    while ri < len(rparts) {
+        if len(new_seeds) > 0 { new_seeds = new_seeds + "|" }
+        new_seeds = new_seeds + rparts[ri]
+        ri = ri + 1
+    }
+    if len(new_seeds) > 0 { current_seeds = new_seeds }
+
+    evo_status = evo_check_convergence(evo_history)
+    println("  cycle " + to_string(ec + 1) + ": score=" + to_string(cycle_score) + " disc=" + to_string(cycle_disc) + " status=" + evo_status)
+
+    if evo_status == "Saturated" {
+        println("  -> SATURATED at cycle " + to_string(ec + 1))
+        ec = evo_max_cycles  // break
+    }
+    ec = ec + 1
+}
+
+println("  evolution total  : " + to_string(evo_total_disc) + " discoveries, best=" + to_string(evo_best_score))
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 3: Singularity Detection (enhanced with evolution)
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 3: Singularity Detection ---")
+let mut frozen: i64 = 0
+si = 0
 while si < mc {
     if n6_distance(m_val(si, domain)) < 0.01 { frozen = frozen + 1 }
     si = si + 1
@@ -217,24 +958,31 @@ let closure = to_float(frozen) / to_float(mc)
 let ax_count = if frozen > 0 { frozen } else { 1 }
 let compression = to_float(mc) / to_float(ax_count)
 
-println("")
-println("======================================================")
-println("        blowup engine (hexa-native)          ")
-println("======================================================")
-println("")
-println("  domain       :", domain)
-println("  closure      :", closure)
-println("  compression  :", compression)
-println("  axiom count  :", ax_count)
-println("")
-if closure >= 0.5 {
+// Evolution enhances closure: high evo score indicates deeper structure
+let evo_boost = evo_best_score * 0.1
+let effective_closure = min_f(closure + evo_boost, 1.0)
+
+println("  closure (raw)    :", closure)
+println("  evo boost        : +" + to_string(evo_boost))
+println("  closure (eff)    :", effective_closure)
+println("  compression      :", compression)
+println("  axiom count      :", ax_count)
+
+if effective_closure >= 0.5 {
     println("  * SINGULARITY DETECTED -- closed system, blowup engaged")
 } else {
     println("  o open system -- closure < 0.5, weak blowup")
 }
 println("")
 
-// ── 블로업 corollary 축적 (문자열 기반) ──
+// ═══════════════════════════════════════════════════════════
+// PHASE 4: Recursive Blowup Corollary Generation (7 types)
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 4: Recursive Blowup Corollary Generation ---")
+println("  max_depth :", max_depth)
+println("")
+
 let mut buf = ""
 let mut total: i64 = 0
 let mut exact_count: i64 = 0
@@ -244,273 +992,645 @@ let mut axiom_count: i64 = 0
 let mut log_buf = ""
 let mut logged: i64 = 0
 
-// depth 0 만 실행 (재귀 피드백은 depth 1에서 composition으로 근사)
-// depth > 0 은 composition에서 자연 발생
+// Collect all corollary values for telescope (phase 5)
+let mut val_csv = ""
 
-// --- 1. Pairwise deduction ---
-let mut i: i64 = 0
-while i < mc {
-    let mut j: i64 = i + 1
-    while j < mc {
-        let va = m_val(i, domain)
-        let vb = m_val(j, domain)
-        let product = va * vb
-        let ratio = if abs_f(vb) > 0.0000000001 { va / vb } else { 0.0 }
-        let sum = va + vb
-
-        let dp = n6_distance(product)
-        let dr = n6_distance(ratio)
-        let ds = n6_distance(sum)
-
-        let mut bv = product
-        let mut bd = dp
-        let mut bo = "*"
-        if dr < bd {
-            bv = ratio
-            bd = dr
-            bo = "/"
-        }
-        if ds < bd {
-            bv = sum
-            bd = ds
-            bo = "+"
-        }
-
-        let conf = max_f(1.0 - bd, 0.0)
-        if conf >= 0.1 {
-            let nm = "ded_" + m_name(i, domain) + "_" + m_name(j, domain)
-            let ex = m_name(i, domain) + " " + bo + " " + m_name(j, domain) + " = " + to_string(bv)
-            let is_ax = conf > 0.8
-            buf = buf + emit(nm, "deduction", ex, conf, bv, is_ax, m_name(i, domain))
-            total = total + 1
-            let gr = match_grade(bv)
-            if gr == "EXACT" { exact_count = exact_count + 1 }
-            if gr == "NEAR" { near_count = near_count + 1 }
-            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-            if is_ax { axiom_count = axiom_count + 1 }
-        }
-        j = j + 1
-    }
-    i = i + 1
+// Build initial axiom pool from domain metrics
+let mut ax_names = ""
+let mut ax_vals = ""
+let mut ax_n: i64 = 0
+let mut init_i: i64 = 0
+while init_i < mc {
+    if len(ax_names) > 0 { ax_names = ax_names + "|" }
+    ax_names = ax_names + m_name(init_i, domain)
+    if len(ax_vals) > 0 { ax_vals = ax_vals + "|" }
+    ax_vals = ax_vals + to_string(m_val(init_i, domain))
+    ax_n = ax_n + 1
+    init_i = init_i + 1
 }
 
-// --- 2. Domain transfer ---
-i = 0
-while i < mc {
-    let mut di: i64 = 0
-    while di < 6 {
-        let v = m_val(i, domain)
-        let conf = n6_conf(v) * 0.7
-        if conf >= 0.15 {
-            let nm = "xfer_" + m_name(i, domain) + "_" + xfer_domain(di)
-            let ex = m_name(i, domain) + "=" + to_string(v) + " in " + xfer_domain(di)
-            buf = buf + emit(nm, "transfer", ex, conf, v, false, m_name(i, domain))
-            total = total + 1
-            let gr = match_grade(v)
-            if gr == "EXACT" { exact_count = exact_count + 1 }
-            if gr == "NEAR" { near_count = near_count + 1 }
-            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-        }
-        di = di + 1
-    }
-    i = i + 1
-}
+// Per-depth stats tracking (pipe-separated)
+let mut depth_stats = ""
 
-// --- 3. Symmetry break ---
-let phi_g = 1.618033988749895
-i = 0
-while i < mc {
-    let v = m_val(i, domain)
-    let bp = v + phi_g
-    let bm = v - phi_g
-    let dp = n6_distance(bp)
-    let dm = n6_distance(bm)
-    let mut best = bp
-    let mut best_d = dp
-    let mut sign = "+"
-    if dm < dp {
-        best = bm
-        best_d = dm
-        sign = "-"
-    }
-    let conf = max_f(1.0 - best_d, 0.0)
-    if conf >= 0.2 {
-        let nm = "sym_" + m_name(i, domain)
-        let ex = m_name(i, domain) + " " + sign + " phi = " + to_string(best)
-        let is_ax = conf > 0.7
-        buf = buf + emit(nm, "symbreak", ex, conf, best, is_ax, m_name(i, domain))
-        total = total + 1
-        let gr = match_grade(best)
-        if gr == "EXACT" { exact_count = exact_count + 1 }
-        if gr == "NEAR" { near_count = near_count + 1 }
-        if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-        if is_ax { axiom_count = axiom_count + 1 }
-    }
-    i = i + 1
-}
+// ─── DEPTH LOOP ───
+let mut depth: i64 = 0
+while depth < max_depth {
+    let pool_before = ax_n
+    let total_before = total
+    let axiom_before = axiom_count
 
-// --- 4. Bifurcation ---
-i = 0
-while i < mc {
-    let mut k: i64 = 0
-    while k < 6 {
-        let shifted = m_val(i, domain) + shift_val(k)
-        let conf = max_f(1.0 - n6_distance(shifted), 0.0) * 0.6
-        if conf >= 0.2 {
-            let nm = "bif_" + m_name(i, domain) + "_" + shift_name(k)
-            let ex = m_name(i, domain) + "+" + shift_name(k) + "=" + to_string(shifted)
-            buf = buf + emit(nm, "bifurc", ex, conf, shifted, false, m_name(i, domain))
-            total = total + 1
-            let gr = match_grade(shifted)
-            if gr == "EXACT" { exact_count = exact_count + 1 }
-            if gr == "NEAR" { near_count = near_count + 1 }
-            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-        }
-        k = k + 1
-    }
-    i = i + 1
-}
+    // Collect new axiom candidates found at this depth
+    let mut new_ax_names = ""
+    let mut new_ax_vals = ""
+    let mut new_ax_n: i64 = 0
 
-// --- 5. Projection (기하평균) ---
-i = 0
-while i < mc {
-    let mut j: i64 = i + 1
-    while j < mc {
-        let va = m_val(i, domain)
-        let vb = m_val(j, domain)
-        let geom = sqrt_f(abs_f(va) * abs_f(vb))
-        let conf = max_f(1.0 - n6_distance(geom), 0.0) * 0.8
-        if conf >= 0.15 {
-            let nm = "proj_" + m_name(i, domain) + "_" + m_name(j, domain)
-            let ex = "sqrt(" + m_name(i, domain) + "*" + m_name(j, domain) + ")=" + to_string(geom)
-            buf = buf + emit(nm, "projection", ex, conf, geom, false, m_name(i, domain))
-            total = total + 1
-            let gr = match_grade(geom)
-            if gr == "EXACT" { exact_count = exact_count + 1 }
-            if gr == "NEAR" { near_count = near_count + 1 }
-            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-        }
-        j = j + 1
-    }
-    i = i + 1
-}
+    let cur_n = ax_count_f(ax_vals)
+    let phi_g = 1.618033988749895
 
-// --- 6. Dual (역수) ---
-i = 0
-while i < mc {
-    let v = m_val(i, domain)
-    if abs_f(v) > 0.0000000001 {
-        let dual = 1.0 / v
-        let conf = max_f(1.0 - n6_distance(dual), 0.0) * 0.6
-        if conf >= 0.15 {
-            let nm = "dual_" + m_name(i, domain)
-            let ex = "1/" + m_name(i, domain) + "=" + to_string(dual)
-            buf = buf + emit(nm, "dual", ex, conf, dual, false, m_name(i, domain))
-            total = total + 1
-            let gr = match_grade(dual)
-            if gr == "EXACT" { exact_count = exact_count + 1 }
-            if gr == "NEAR" { near_count = near_count + 1 }
-            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-        }
-    }
-    i = i + 1
-}
+    // --- 1. Pairwise deduction ---
+    let mut i: i64 = 0
+    while i < cur_n {
+        let mut j: i64 = i + 1
+        while j < cur_n {
+            let va = get_ax_val(ax_vals, i)
+            let vb = get_ax_val(ax_vals, j)
+            let na = get_ax_name(ax_names, i)
+            let nb = get_ax_name(ax_names, j)
+            let product = va * vb
+            let ratio = if abs_f(vb) > 0.0000000001 { va / vb } else { 0.0 }
+            let sum = va + vb
 
-// --- 7. Second-order composition (pairwise deduction 결과끼리) ---
-// deduction 값을 직접 재계산하여 composition 수행
-// (문자열 파싱 대신, 상위 deduction 쌍의 곱/비를 직접 계산)
-i = 0
-while i < mc {
-    let mut j: i64 = i + 1
-    while j < mc {
-        let mut k: i64 = j + 1
-        while k < mc {
-            // (i,j) deduction의 best_val * (j,k) deduction의 best_val
-            let va = m_val(i, domain)
-            let vb = m_val(j, domain)
-            let vc = m_val(k, domain)
+            let dp = n6_distance(product)
+            let dr = n6_distance(ratio)
+            let ds = n6_distance(sum)
 
-            // 두 deduction의 곱/비 값에서 최선
-            let prod1 = va * vb
-            let prod2 = vb * vc
-            let composed = prod1 * prod2
+            let mut bv = product
+            let mut bd = dp
+            let mut bo = "*"
+            if dr < bd {
+                bv = ratio
+                bd = dr
+                bo = "/"
+            }
+            if ds < bd {
+                bv = sum
+                bd = ds
+                bo = "+"
+            }
 
-            // composition confidence = 개별 confidence 곱 * n6 proximity
-            let c1 = n6_conf(prod1)
-            let c2 = n6_conf(prod2)
-            let conf = c1 * c2 * n6_conf(composed)
-
+            let conf = max_f(1.0 - bd, 0.0)
             if conf >= 0.1 {
-                let nm = "comp_" + m_name(i, domain) + "_" + m_name(j, domain) + "_" + m_name(k, domain)
-                let ex = "(" + m_name(i, domain) + "*" + m_name(j, domain) + ")*(" + m_name(j, domain) + "*" + m_name(k, domain) + ")=" + to_string(composed)
-                let is_ax = conf > 0.7
-                buf = buf + emit(nm, "compose", ex, conf, composed, is_ax, m_name(i, domain))
+                let nm = "d" + to_string(depth) + "_ded_" + na + "_" + nb
+                let ex = na + " " + bo + " " + nb + " = " + to_string(bv)
+                let is_ax = conf > 0.8
+                buf = buf + emit(nm, "deduction", ex, conf, bv, is_ax, na)
                 total = total + 1
-                let gr = match_grade(composed)
+                if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                val_csv = val_csv + to_string(bv)
+                let gr = match_grade(bv)
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
                 if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
-                if is_ax { axiom_count = axiom_count + 1 }
+                if is_ax {
+                    axiom_count = axiom_count + 1
+                    // Candidate for pool expansion
+                    let cand_name = match_name(bv)
+                    let cand_label = if cand_name != "" { cand_name } else { nm }
+                    if !ax_contains(ax_names, cand_label) && !ax_contains(new_ax_names, cand_label) {
+                        if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                        new_ax_names = new_ax_names + cand_label
+                        if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                        new_ax_vals = new_ax_vals + to_string(bv)
+                        new_ax_n = new_ax_n + 1
+                    }
+                }
+                // EXACT matches also become axiom candidates regardless of conf
+                if gr == "EXACT" && !is_ax {
+                    let cand_name2 = match_name(bv)
+                    if cand_name2 != "" && !ax_contains(ax_names, cand_name2) && !ax_contains(new_ax_names, cand_name2) {
+                        if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                        new_ax_names = new_ax_names + cand_name2
+                        if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                        new_ax_vals = new_ax_vals + to_string(bv)
+                        new_ax_n = new_ax_n + 1
+                    }
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    // --- 2. Domain transfer ---
+    i = 0
+    while i < cur_n {
+        let mut di: i64 = 0
+        while di < 6 {
+            let v = get_ax_val(ax_vals, i)
+            let na = get_ax_name(ax_names, i)
+            let conf = n6_conf(v) * 0.7
+            if conf >= 0.15 {
+                let nm = "d" + to_string(depth) + "_xfer_" + na + "_" + xfer_domain(di)
+                let ex = na + "=" + to_string(v) + " in " + xfer_domain(di)
+                buf = buf + emit(nm, "transfer", ex, conf, v, false, na)
+                total = total + 1
+                if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                val_csv = val_csv + to_string(v)
+                let gr = match_grade(v)
+                if gr == "EXACT" { exact_count = exact_count + 1 }
+                if gr == "NEAR" { near_count = near_count + 1 }
+                if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
+            }
+            di = di + 1
+        }
+        i = i + 1
+    }
+
+    // --- 3. Symmetry break ---
+    i = 0
+    while i < cur_n {
+        let v = get_ax_val(ax_vals, i)
+        let na = get_ax_name(ax_names, i)
+        let bp = v + phi_g
+        let bm = v - phi_g
+        let dp = n6_distance(bp)
+        let dm = n6_distance(bm)
+        let mut best = bp
+        let mut best_d = dp
+        let mut sign = "+"
+        if dm < dp {
+            best = bm
+            best_d = dm
+            sign = "-"
+        }
+        let conf = max_f(1.0 - best_d, 0.0)
+        if conf >= 0.2 {
+            let nm = "d" + to_string(depth) + "_sym_" + na
+            let ex = na + " " + sign + " phi = " + to_string(best)
+            let is_ax = conf > 0.7
+            buf = buf + emit(nm, "symbreak", ex, conf, best, is_ax, na)
+            total = total + 1
+            if len(val_csv) > 0 { val_csv = val_csv + "|" }
+            val_csv = val_csv + to_string(best)
+            let gr = match_grade(best)
+            if gr == "EXACT" { exact_count = exact_count + 1 }
+            if gr == "NEAR" { near_count = near_count + 1 }
+            if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
+            if is_ax {
+                axiom_count = axiom_count + 1
+                let cand_name = match_name(best)
+                let cand_label = if cand_name != "" { cand_name } else { nm }
+                if !ax_contains(ax_names, cand_label) && !ax_contains(new_ax_names, cand_label) {
+                    if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                    new_ax_names = new_ax_names + cand_label
+                    if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                    new_ax_vals = new_ax_vals + to_string(best)
+                    new_ax_n = new_ax_n + 1
+                }
+            }
+            if gr == "EXACT" && !is_ax {
+                let cand_name2 = match_name(best)
+                if cand_name2 != "" && !ax_contains(ax_names, cand_name2) && !ax_contains(new_ax_names, cand_name2) {
+                    if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                    new_ax_names = new_ax_names + cand_name2
+                    if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                    new_ax_vals = new_ax_vals + to_string(best)
+                    new_ax_n = new_ax_n + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+
+    // --- 4. Bifurcation ---
+    i = 0
+    while i < cur_n {
+        let mut k: i64 = 0
+        while k < 6 {
+            let shifted = get_ax_val(ax_vals, i) + shift_val(k)
+            let na = get_ax_name(ax_names, i)
+            let conf = max_f(1.0 - n6_distance(shifted), 0.0) * 0.6
+            if conf >= 0.2 {
+                let nm = "d" + to_string(depth) + "_bif_" + na + "_" + shift_name(k)
+                let ex = na + "+" + shift_name(k) + "=" + to_string(shifted)
+                buf = buf + emit(nm, "bifurc", ex, conf, shifted, false, na)
+                total = total + 1
+                if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                val_csv = val_csv + to_string(shifted)
+                let gr = match_grade(shifted)
+                if gr == "EXACT" { exact_count = exact_count + 1 }
+                if gr == "NEAR" { near_count = near_count + 1 }
+                if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
             }
             k = k + 1
         }
-        j = j + 1
+        i = i + 1
     }
-    i = i + 1
+
+    // --- 5. Projection (geometric mean) ---
+    i = 0
+    while i < cur_n {
+        let mut j: i64 = i + 1
+        while j < cur_n {
+            let va = get_ax_val(ax_vals, i)
+            let vb = get_ax_val(ax_vals, j)
+            let na = get_ax_name(ax_names, i)
+            let nb = get_ax_name(ax_names, j)
+            let geom = sqrt_f(abs_f(va) * abs_f(vb))
+            let conf = max_f(1.0 - n6_distance(geom), 0.0) * 0.8
+            if conf >= 0.15 {
+                let nm = "d" + to_string(depth) + "_proj_" + na + "_" + nb
+                let ex = "sqrt(" + na + "*" + nb + ")=" + to_string(geom)
+                buf = buf + emit(nm, "projection", ex, conf, geom, false, na)
+                total = total + 1
+                if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                val_csv = val_csv + to_string(geom)
+                let gr = match_grade(geom)
+                if gr == "EXACT" { exact_count = exact_count + 1 }
+                if gr == "NEAR" { near_count = near_count + 1 }
+                if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    // --- 6. Dual (reciprocal) ---
+    i = 0
+    while i < cur_n {
+        let v = get_ax_val(ax_vals, i)
+        let na = get_ax_name(ax_names, i)
+        if abs_f(v) > 0.0000000001 {
+            let dual = 1.0 / v
+            let conf = max_f(1.0 - n6_distance(dual), 0.0) * 0.6
+            if conf >= 0.15 {
+                let nm = "d" + to_string(depth) + "_dual_" + na
+                let ex = "1/" + na + "=" + to_string(dual)
+                buf = buf + emit(nm, "dual", ex, conf, dual, false, na)
+                total = total + 1
+                if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                val_csv = val_csv + to_string(dual)
+                let gr = match_grade(dual)
+                if gr == "EXACT" { exact_count = exact_count + 1 }
+                if gr == "NEAR" { near_count = near_count + 1 }
+                if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
+            }
+        }
+        i = i + 1
+    }
+
+    // --- 7. Second-order composition ---
+    // Limit triple iteration to avoid combinatorial explosion at large pool sizes
+    let comp_limit: i64 = if cur_n < 20 { cur_n } else { 20 }
+    i = 0
+    while i < comp_limit {
+        let mut j: i64 = i + 1
+        while j < comp_limit {
+            let mut k: i64 = j + 1
+            while k < comp_limit {
+                let va = get_ax_val(ax_vals, i)
+                let vb = get_ax_val(ax_vals, j)
+                let vc = get_ax_val(ax_vals, k)
+                let na = get_ax_name(ax_names, i)
+                let nb = get_ax_name(ax_names, j)
+                let nc = get_ax_name(ax_names, k)
+                let prod1 = va * vb
+                let prod2 = vb * vc
+                let composed = prod1 * prod2
+
+                let c1 = n6_conf(prod1)
+                let c2 = n6_conf(prod2)
+                let conf = c1 * c2 * n6_conf(composed)
+
+                if conf >= 0.1 {
+                    let nm = "d" + to_string(depth) + "_comp_" + na + "_" + nb + "_" + nc
+                    let ex = "(" + na + "*" + nb + ")*(" + nb + "*" + nc + ")=" + to_string(composed)
+                    let is_ax = conf > 0.7
+                    buf = buf + emit(nm, "compose", ex, conf, composed, is_ax, na)
+                    total = total + 1
+                    if len(val_csv) > 0 { val_csv = val_csv + "|" }
+                    val_csv = val_csv + to_string(composed)
+                    let gr = match_grade(composed)
+                    if gr == "EXACT" { exact_count = exact_count + 1 }
+                    if gr == "NEAR" { near_count = near_count + 1 }
+                    if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
+                    if is_ax {
+                        axiom_count = axiom_count + 1
+                        let cand_name = match_name(composed)
+                        let cand_label = if cand_name != "" { cand_name } else { nm }
+                        if !ax_contains(ax_names, cand_label) && !ax_contains(new_ax_names, cand_label) {
+                            if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                            new_ax_names = new_ax_names + cand_label
+                            if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                            new_ax_vals = new_ax_vals + to_string(composed)
+                            new_ax_n = new_ax_n + 1
+                        }
+                    }
+                    if gr == "EXACT" && !is_ax {
+                        let cand_name2 = match_name(composed)
+                        if cand_name2 != "" && !ax_contains(ax_names, cand_name2) && !ax_contains(new_ax_names, cand_name2) {
+                            if len(new_ax_names) > 0 { new_ax_names = new_ax_names + "|" }
+                            new_ax_names = new_ax_names + cand_name2
+                            if len(new_ax_vals) > 0 { new_ax_vals = new_ax_vals + "|" }
+                            new_ax_vals = new_ax_vals + to_string(composed)
+                            new_ax_n = new_ax_n + 1
+                        }
+                    }
+                }
+                k = k + 1
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    // ─── Expand axiom pool with new candidates (cap: 50) ───
+    let pool_cap: i64 = 36
+    if new_ax_n > 0 && len(new_ax_names) > 0 {
+        // Only add up to pool_cap total
+        let room: i64 = pool_cap - ax_n
+        if room > 0 {
+            let new_parts = new_ax_names.split("|")
+            let new_vparts = new_ax_vals.split("|")
+            let add_n: i64 = if new_ax_n < room { new_ax_n } else { room }
+            let mut ai: i64 = 0
+            while ai < add_n {
+                ax_names = ax_names + "|" + new_parts[ai]
+                ax_vals = ax_vals + "|" + new_vparts[ai]
+                ax_n = ax_n + 1
+                ai = ai + 1
+            }
+        }
+    }
+
+    let depth_corollaries = total - total_before
+    let depth_axioms = axiom_count - axiom_before
+
+    // Record per-depth stats
+    if len(depth_stats) > 0 { depth_stats = depth_stats + "\n" }
+    depth_stats = depth_stats + "  depth " + to_string(depth) + ": " + to_string(depth_corollaries) + " corollaries, " + to_string(depth_axioms) + " axiom candidates (pool: " + to_string(pool_before) + " -> " + to_string(ax_n) + ")"
+
+    println("  depth " + to_string(depth) + ": " + to_string(depth_corollaries) + " corollaries, " + to_string(depth_axioms) + " axiom candidates (pool: " + to_string(pool_before) + " -> " + to_string(ax_n) + ")")
+
+    // Early exit if pool stopped growing (saturated or capped)
+    if ax_n == pool_before && depth > 0 {
+        println("  -> pool saturated at depth " + to_string(depth) + ", no new axiom candidates")
+        depth = max_depth  // break
+    }
+
+    depth = depth + 1
 }
 
-// ── 통계 출력 ──
+println("")
+println("  --- depth breakdown ---")
+println(depth_stats)
+println("")
 println("  total corollaries :", total)
 println("  EXACT match       :", exact_count)
 println("  NEAR match        :", near_count)
 println("  high conf >= 0.7  :", high_conf_count)
 println("  axiom candidates  :", axiom_count)
+println("  final pool size   :", ax_n)
 println("")
 
-// ── 상위 corollary 출력 ──
-// buf에서 행별 파싱하여 출력 (confidence 내림차순은 생략, 생성순 출력)
-println("--- corollaries (generation order, high-conf first naturally) ---")
+// ═══════════════════════════════════════════════════════════
+// PHASE 5: Telescope Verification
+// ═══════════════════════════════════════════════════════════
 
-// buf를 행 단위로 파싱하여 출력
+println("--- Phase 5: Telescope Verification ---")
+let tele_result = telescope_verify(val_csv, 0.15)
+let tparts = tele_result.split("|")
+let mut tele_agree: i64 = 0
+let mut tele_level = "None"
+let mut tele_boost: f64 = 0.0
+let mut tele_s1: f64 = 0.0
+let mut tele_s2: f64 = 0.0
+let mut tele_s3: f64 = 0.0
+let mut tele_s4: f64 = 0.0
+let mut tele_s5: f64 = 0.0
+try { tele_agree = to_int(tparts[0]) } catch e {}
+if len(tparts) >= 2 { tele_level = tparts[1] }
+try { tele_boost = to_float(tparts[2]) } catch e {}
+try { tele_s1 = to_float(tparts[3]) } catch e {}
+try { tele_s2 = to_float(tparts[4]) } catch e {}
+try { tele_s3 = to_float(tparts[5]) } catch e {}
+try { tele_s4 = to_float(tparts[6]) } catch e {}
+try { tele_s5 = to_float(tparts[7]) } catch e {}
+
+println("  consciousness    :", tele_s1, if tele_s1 >= 0.15 { " SIGNAL" } else { "" })
+println("  topology         :", tele_s2, if tele_s2 >= 0.15 { " SIGNAL" } else { "" })
+println("  causal           :", tele_s3, if tele_s3 >= 0.15 { " SIGNAL" } else { "" })
+println("  gravity          :", tele_s4, if tele_s4 >= 0.15 { " SIGNAL" } else { "" })
+println("  thermo           :", tele_s5, if tele_s5 >= 0.15 { " SIGNAL" } else { "" })
+println("  consensus        :", tele_agree, "/ 5 ->", tele_level)
+println("  confidence boost : +" + to_string(tele_boost))
+println("")
+
+// Apply telescope boost to corollary confidences
+// Re-parse buf to create boosted version
+let mut boosted_buf = ""
 let lines = buf.split("\n")
 let line_count: i64 = len(lines)
-let show_limit: i64 = if line_count < 30 { line_count } else { 30 }
 let mut li: i64 = 0
-let mut shown: i64 = 0
-while li < line_count && shown < show_limit {
+while li < line_count {
     let line = lines[li]
+    if len(line) > 5 {
+        let parts = line.split("\t")
+        if len(parts) >= 7 {
+            let mut orig_conf: f64 = 0.0
+            try { orig_conf = to_float(parts[3]) } catch e { orig_conf = 0.0 }
+            let new_conf = min_f(orig_conf + tele_boost, 1.0)
+            boosted_buf = boosted_buf + parts[0] + "\t" + parts[1] + "\t" + parts[2] + "\t" + to_string(new_conf) + "\t" + parts[4] + "\t" + parts[5] + "\t" + parts[6] + "\n"
+        }
+    }
+    li = li + 1
+}
+// Replace buf with boosted version
+buf = boosted_buf
+
+// Recount after boost
+let mut boosted_high: i64 = 0
+let mut boosted_axiom: i64 = 0
+let blines = buf.split("\n")
+li = 0
+while li < len(blines) {
+    let line = blines[li]
+    if len(line) > 5 {
+        let parts = line.split("\t")
+        if len(parts) >= 6 {
+            let mut c: f64 = 0.0
+            try { c = to_float(parts[3]) } catch e {}
+            if c >= 0.7 { boosted_high = boosted_high + 1 }
+            if c > 0.8 { boosted_axiom = boosted_axiom + 1 }
+        }
+    }
+    li = li + 1
+}
+if tele_boost > 0.0 {
+    println("  post-boost high conf :", boosted_high, "(was", high_conf_count, ")")
+    println("  post-boost axioms    :", boosted_axiom, "(was", axiom_count, ")")
+    high_conf_count = boosted_high
+    axiom_count = boosted_axiom
+    println("")
+}
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 6: Graph Update
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 6: Graph Update ---")
+let mut graph_new_entries = ""
+let mut graph_added_nodes: i64 = 0
+let mut graph_added_edges: i64 = 0
+
+// Hub bonus: nodes with degree >= 3 get +0.1 confidence
+let hub_bonus: f64 = if graph_hubs_before > 0 { 0.1 } else { 0.0 }
+if hub_bonus > 0.0 {
+    println("  hub bonus active : +" + to_string(hub_bonus) + " (from " + to_string(graph_hubs_before) + " existing hubs)")
+}
+
+// Add discovery nodes for high-confidence corollaries
+let glines = buf.split("\n")
+li = 0
+while li < len(glines) {
+    let line = glines[li]
+    if len(line) > 5 {
+        let parts = line.split("\t")
+        if len(parts) >= 7 {
+            let mut conf: f64 = 0.0
+            try { conf = to_float(parts[3]) } catch e {}
+            // Only add nodes for conf >= 0.5
+            if conf >= 0.5 {
+                let node_id = "blowup-" + parts[0]
+                if !graph_node_exists(graph_content, node_id) {
+                    let g_conf = min_f(conf + hub_bonus, 1.0)
+                    let node_json = graph_append_node(node_id, "Discovery", domain, parts[2], g_conf)
+                    if len(graph_new_entries) > 0 { graph_new_entries = graph_new_entries + "\n" }
+                    graph_new_entries = graph_new_entries + node_json
+                    graph_added_nodes = graph_added_nodes + 1
+
+                    // Add "Derives" edge from source metric
+                    let src_id = "n6-" + parts[6]
+                    let edge_json = graph_append_edge(src_id, node_id, "Derives", conf)
+                    graph_new_entries = graph_new_entries + "\n" + edge_json
+                    graph_added_edges = graph_added_edges + 1
+                }
+            }
+        }
+    }
+    li = li + 1
+}
+
+// Write graph updates
+if graph_added_nodes > 0 {
+    if len(graph_content) > 0 {
+        append_file(graph_path, "\n" + graph_new_entries)
+    } else {
+        write_file(graph_path, graph_new_entries)
+    }
+}
+
+let graph_nodes_after = graph_nodes_before + graph_added_nodes
+let graph_edges_after = graph_edges_before + graph_added_edges
+
+println("  nodes added      :", graph_added_nodes)
+println("  edges added      :", graph_added_edges)
+println("  nodes (after)    :", graph_nodes_after)
+println("  edges (after)    :", graph_edges_after)
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 6.5: OUROBOROS Recursive Growth (post-blowup feedback)
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 6.5: OUROBOROS Recursive Growth ---")
+// Feed axiom candidates back as seeds for one more evolution cycle
+let mut axiom_seeds = ""
+let alines = buf.split("\n")
+let mut axiom_fed: i64 = 0
+li = 0
+while li < len(alines) && axiom_fed < 6 {
+    let line = alines[li]
+    if len(line) > 5 {
+        let parts = line.split("\t")
+        if len(parts) >= 6 {
+            if parts[5] == "1" {
+                let mut v: f64 = 0.0
+                try { v = to_float(parts[4]) } catch e {}
+                if abs_f(v) > 0.0000000001 {
+                    if len(axiom_seeds) > 0 { axiom_seeds = axiom_seeds + "|" }
+                    axiom_seeds = axiom_seeds + to_string(v)
+                    axiom_fed = axiom_fed + 1
+                }
+            }
+        }
+    }
+    li = li + 1
+}
+
+let mut recurse_disc: i64 = 0
+let mut recurse_score: f64 = 0.0
+if len(axiom_seeds) > 0 {
+    println("  feeding " + to_string(axiom_fed) + " axiom candidates back as seeds")
+    let r_result = evo_cycle(axiom_seeds, evo_max_cycles + 1)
+    let rp = r_result.split("|")
+    try { recurse_score = to_float(rp[0]) } catch e {}
+    try { recurse_disc = to_int(rp[1]) } catch e {}
+    println("  recursive cycle  : score=" + to_string(recurse_score) + " discoveries=" + to_string(recurse_disc))
+} else {
+    println("  no axiom candidates to feed back")
+}
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 7: Report
+// ═══════════════════════════════════════════════════════════
+
+println("--- Phase 7: Comprehensive Report ---")
+println("")
+
+// Top corollaries (generation order, capped at 30)
+println("  --- corollaries (top 30, boosted confidence) ---")
+let rlines = buf.split("\n")
+let rline_count: i64 = len(rlines)
+let show_limit: i64 = if rline_count < 30 { rline_count } else { 30 }
+li = 0
+let mut shown: i64 = 0
+while li < rline_count && shown < show_limit {
+    let line = rlines[li]
     if len(line) > 5 {
         let parts = line.split("\t")
         if len(parts) >= 5 {
             let tag = if len(parts) >= 6 && parts[5] == "1" { " [AXIOM]" } else { "" }
-            let gr = match_grade(to_float(parts[4]))
+            let mut pval: f64 = 0.0
+            try { pval = to_float(parts[4]) } catch e {}
+            let gr = match_grade(pval)
             println("  [" + to_string(shown + 1) + "] " + parts[1] + " | " + parts[2] + " | conf=" + parts[3] + " " + gr + tag)
             shown = shown + 1
         }
     }
     li = li + 1
 }
+println("")
 
+// Summary table
 let rho = if total > 0 { to_float(exact_count + near_count) / to_float(total) } else { 0.0 }
+
+println("  ========== SUMMARY ==========")
 println("")
-println("  breakthrough rho :", rho)
-println("  meta fixed point : 0.333... (target)")
+println("  Pipeline Phase         Result")
+println("  ---------------------- ----------------------------")
+println("  1. Graph Load          " + to_string(graph_nodes_before) + " nodes, " + to_string(graph_edges_before) + " edges")
+println("  2. OUROBOROS Evo       " + to_string(evo_total_disc) + " disc, score=" + to_string(evo_best_score) + ", " + evo_status)
+println("  3. Singularity         closure=" + to_string(effective_closure) + " compression=" + to_string(compression))
+println("  4. Corollaries         " + to_string(total) + " total, " + to_string(exact_count) + " EXACT, " + to_string(near_count) + " NEAR, pool=" + to_string(ax_n))
+println("  5. Telescope           " + to_string(tele_agree) + "/5 consensus (" + tele_level + "), boost=+" + to_string(tele_boost))
+println("  6. Graph Update        +" + to_string(graph_added_nodes) + " nodes, +" + to_string(graph_added_edges) + " edges -> " + to_string(graph_nodes_after) + "/" + to_string(graph_edges_after))
+println("  6.5 Recursive Growth   " + to_string(recurse_disc) + " disc, score=" + to_string(recurse_score))
+println("")
+println("  axiom candidates  :", axiom_count)
+println("  high confidence   :", high_conf_count)
+println("  breakthrough rho  :", rho)
+println("  meta fixed point  : 0.333... (target)")
 println("")
 
-// ── discovery_log 기록 (read + append + write) ──
+// ── discovery_log append ──
 let mut existing_log = ""
 if file_exists(log_path) {
     existing_log = read_file(log_path)
 }
 let mut new_entries = ""
+let dlines = buf.split("\n")
 li = 0
-while li < line_count {
-    let line = lines[li]
+while li < len(dlines) {
+    let line = dlines[li]
     if len(line) > 5 {
         let parts = line.split("\t")
         if len(parts) >= 7 {
-            let conf = to_float(parts[3])
-            let value = to_float(parts[4])
+            let mut conf: f64 = 0.0
+            let mut value: f64 = 0.0
+            try { conf = to_float(parts[3]) } catch e {}
+            try { value = to_float(parts[4]) } catch e {}
             if conf >= 0.5 {
                 let grade = match_grade(value)
                 let name = match_name(value)
@@ -528,7 +1648,7 @@ while li < line_count {
                     ai_r = 6
                 }
                 let dn = if name != "" { name } else { parts[0] }
-                let entry = "{\"constant\":\"blowup-" + dn + "\",\"value\":\"" + to_string(value) + "\",\"source\":\"hexa-blowup\",\"timestamp\":\"2026-04-06\",\"grade\":\"" + grade + "\",\"processed\":true,\"alien_index\":{\"d\":" + to_string(ai_d) + ",\"r\":" + to_string(ai_r) + "},\"mk2\":{\"sector\":\"" + sector + "\",\"confidence\":" + to_string(conf) + ",\"paths\":1,\"prime_set\":[],\"layer\":" + to_string(ai_d) + "},\"blowup\":{\"type\":\"" + parts[1] + "\",\"src\":\"" + parts[6] + "\"}}"
+                let entry = "{\"constant\":\"blowup-" + dn + "\",\"value\":\"" + to_string(value) + "\",\"source\":\"hexa-blowup-mk2\",\"timestamp\":\"2026-04-06\",\"grade\":\"" + grade + "\",\"processed\":true,\"alien_index\":{\"d\":" + to_string(ai_d) + ",\"r\":" + to_string(ai_r) + "},\"mk2\":{\"sector\":\"" + sector + "\",\"confidence\":" + to_string(conf) + ",\"paths\":1,\"prime_set\":[],\"layer\":" + to_string(ai_d) + "},\"blowup\":{\"type\":\"" + parts[1] + "\",\"src\":\"" + parts[6] + "\"},\"telescope\":{\"consensus\":" + to_string(tele_agree) + ",\"level\":\"" + tele_level + "\",\"boost\":" + to_string(tele_boost) + "},\"evolution\":{\"cycles\":" + to_string(evo_max_cycles) + ",\"best_score\":" + to_string(evo_best_score) + ",\"status\":\"" + evo_status + "\"}}"
                 new_entries = new_entries + entry + "\n"
                 logged = logged + 1
             }
@@ -542,6 +1662,9 @@ if logged > 0 {
 
 if logged > 0 {
     println("  discovery_log:", logged, "entries ->", log_path)
+}
+if graph_added_nodes > 0 {
+    println("  graph updated:", graph_added_nodes, "nodes ->", graph_path)
 }
 println("")
 println("done.")
