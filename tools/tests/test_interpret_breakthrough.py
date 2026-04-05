@@ -7,6 +7,10 @@ from interpret_breakthrough import load_and_rank
 FIX = Path(__file__).parent / "fixtures"
 
 class TestInterpret(unittest.TestCase):
+    def setUp(self):
+        from interpret_breakthrough import reset_rule_counter
+        reset_rule_counter()
+
     def test_load_and_rank(self):
         result = load_and_rank(
             FIX / "sample_breakthrough.json",
@@ -20,6 +24,26 @@ class TestInterpret(unittest.TestCase):
         self.assertGreater(result[0]["strength"], result[1]["strength"])
         # discovery note가 연결됨
         self.assertIn("note", result[0])
+
+    def test_translate_to_rule(self):
+        from interpret_breakthrough import translate_to_rule
+        pattern = {
+            "name": "reuse_dominance", "strength": 0.82,
+            "constants_matched": ["1/3"],
+            "note": "tool repeat rate matches meta fixed point",
+        }
+        rule = translate_to_rule(pattern, source_hypothesis="H1")
+        self.assertIn("R", rule["id"])
+        self.assertIn("reuse_dominance", rule["rationale"])
+        self.assertIn("0.82", rule["rationale"])
+        self.assertIn("H1", rule["source"])
+        self.assertTrue(len(rule["text"]) > 10)
+
+    def test_translate_unknown_pattern_fallback(self):
+        from interpret_breakthrough import translate_to_rule
+        pattern = {"name": "unknown_xyz", "strength": 0.6, "constants_matched": []}
+        rule = translate_to_rule(pattern, source_hypothesis="H?")
+        self.assertIn("unknown_xyz", rule["text"])
 
 if __name__ == "__main__":
     unittest.main()
