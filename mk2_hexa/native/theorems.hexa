@@ -1,0 +1,60 @@
+// mk2_hexa/native/theorems.hexa — HEXA theorem/proof 블록 활용
+// BT-344, BT-345, BT-346 + σ·φ=n·τ ⇔ n=6 유일성.
+
+theorem perfect_n6_uniqueness {
+    // 완전수 유일성: σ(n)·φ(n) = n·τ(n) 은 n=6 에서만 성립.
+    forall n: int where n > 0,
+        (sigma(n) * phi(n) == n * tau(n)) <=> (n == 6)
+}
+
+theorem bt_344_gate_axis_necessity {
+    // τ + φ = n = 6 → 4 관문이 필연 (8/8 EXACT)
+    tau(6) + phi(6) == 6
+    and tau(6) == 4
+}
+
+theorem bt_345_breakthrough_perturbation {
+    // 2401 = (σ-sopfr)^τ = 7^4 돌파 주기 (6/6 EXACT)
+    (sigma(6) - sopfr(6)) == 7
+    and tau(6) == 4
+    and pow(7, 4) == 2401
+}
+
+theorem bt_346_fp_lower_bound {
+    // σ·J₂ = 288 오탐률 하한 (5/5 EXACT)
+    sigma(6) * j2(6) == 288
+    and sigma(6) == 12
+    and j2(6) == 24
+}
+
+theorem meta_fixed_point_one_third {
+    // I_{k+1} = 0.7·I_k + 0.1 → 부동점 1/3 (Banach 수축)
+    // lim_{k→∞} iterate(x, 0.7, 0.1) = 1/3 for all x
+    forall x: float,
+        exists k: int where k <= 200,
+            abs(iterate_step_k(x, 0.7, 0.1, k) - (1.0/3.0)) < 1e-12
+}
+
+theorem alien_index_self_similarity {
+    // (d, 10) → (d+1, 0) 자기유사 승격
+    forall d: int where d >= 0,
+        breakthrough(AlienIndex { d: d, r: 10 }) == AlienIndex { d: d+1, r: 0 }
+}
+
+theorem d_monotonic_non_decreasing {
+    // record update 에서 d 는 단조 비감소
+    forall rec: AlienIndexRecord, next: AlienIndex,
+        update(rec, next) is Ok => next.d >= rec.current.d
+}
+
+invariant registry_custom_dirty_consistency {
+    // dirty=false 이면 디스크 내용 == 메모리 Custom 렌즈 집합
+    (not registry.custom_dirty) =>
+        (hash(disk.custom_lenses) == hash(memory.custom_category))
+}
+
+invariant discovery_log_monotonic_growth {
+    // discovery_log 는 단조 증가 (레코드 삭제 없음)
+    forall t1, t2: timestamp where t1 < t2,
+        |records_at(t1)| <= |records_at(t2)|
+}
