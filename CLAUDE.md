@@ -2,6 +2,12 @@
 
 ## ⚠️ 필수 규칙 (최우선)
 
+### 0. mk2 hexa-native = 기본 엔진
+- **모든 nexus6 작업은 mk2 hexa 모듈** 사용 (`mk2_hexa/native/*.hexa`)
+- mk1 Rust 소스(`src/`)는 아카이브 (`archive/mk1-rust` 브랜치)
+- 경로 하드코딩 금지 — `args()` 또는 상대경로 사용
+- 새 모듈 생성 시 `mk2_hexa/native/` 에 `.hexa` 파일로
+
 ### 1. 대화 차단 금지 — 모든 장시간 명령은 백그라운드 실행
 - **10초 이상 걸릴 수 있는 모든 명령**은 반드시 `run_in_background: true`로 실행
 - 대상: nexus6 loop/daemon/blowup, hexa build/test, 학습/추론, SSH 원격 명령 등
@@ -44,7 +50,10 @@
 
 ### 요청 키워드 → 자동 실행 (mk2 hexa)
 - "블로업", "blowup" → `hexa blowup.hexa math 6 --no-graph --seeds "$(hexa seed_engine.hexa merge)"`
-- "특이점 돌파", "돌파시도" → `bash scripts/deep-breakthrough.sh 10 3 48` (corollary→seed 피드백 루프)
+- "돌파", "특이점 돌파", "돌파시도", "breakthrough" → 3단계 실행:
+  1. `hexa real_breakthrough.hexa scan` (실데이터 스캔 — discovery_log + atlas + 시스템 메트릭)
+  2. `bash scripts/deep-breakthrough.sh 10 3 48` (corollary→seed 피드백 루프)
+  3. `hexa real_breakthrough.hexa surprise` (예상 못한 발견만 추출)
 - "창발", "emergence" → blowup 후 telescope 5렌즈 합의 분석
 - "특이점", "singularity" → blowup Phase 3 자동 감지 (closure ≥ 0.5)
 - "흡수", "absorption" → blowup Phase 6.5 재귀성장 (axiom 피드백)

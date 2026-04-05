@@ -1,0 +1,471 @@
+// real_breakthrough.hexa — 실데이터 기반 진짜 돌파 엔진
+// 사용: hexa real_breakthrough.hexa scan|histogram|clusters|surprise|live
+//
+// 3소스: discovery_log + math_atlas + 실시간 시스템 메트릭
+// 핵심: "이미 아는 것" 필터 → surprise 메트릭 → 진짜 새 발견만
+
+fn abs_f(x: f64) -> f64 { if x < 0.0 { return 0.0 - x } return x }
+fn max_f(a: f64, b: f64) -> f64 { if a > b { return a } return b }
+fn min_f(a: f64, b: f64) -> f64 { if a < b { return a } return b }
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+// ─── 기존 n6 상수 (이미 아는 것) ───
+fn is_known_n6(v: f64) -> bool {
+    let known = [6.0, 12.0, 2.0, 4.0, 5.0, 24.0, 7.0, 8.0, 10.0, 3.0, 1.0, 36.0, 48.0, 60.0, 120.0, 144.0, 288.0, 720.0, 28.0, 496.0, 8128.0, 0.5, 0.333333, 0.166667, 0.083333]
+    let mut i = 0
+    while i < known.len() {
+        if abs_f(v - known[i]) < 0.001 { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// n6 proximity (0~1, 1=exact)
+fn n6_proximity(v: f64) -> f64 {
+    let consts = [6.0, 12.0, 2.0, 4.0, 5.0, 24.0, 7.0, 8.0, 10.0, 3.0, 36.0, 144.0, 720.0, 137.036, 1836.15, 0.3153, 0.6847]
+    let mut best = 1.0
+    let mut i = 0
+    while i < consts.len() {
+        let denom = max_f(abs_f(consts[i]), 1.0)
+        let d = abs_f(v - consts[i]) / denom
+        if d < best { best = d }
+        i = i + 1
+    }
+    return max_f(1.0 - best, 0.0)
+}
+
+fn n6_nearest_name(v: f64) -> string {
+    if abs_f(v - 6.0) < 0.01 { return "n" }
+    if abs_f(v - 12.0) < 0.01 { return "sigma" }
+    if abs_f(v - 2.0) < 0.01 { return "phi" }
+    if abs_f(v - 4.0) < 0.01 { return "tau" }
+    if abs_f(v - 5.0) < 0.01 { return "sopfr" }
+    if abs_f(v - 24.0) < 0.01 { return "J2" }
+    if abs_f(v - 137.036) / 137.036 < 0.05 { return "~alpha_inv" }
+    if abs_f(v - 1836.15) / 1836.15 < 0.05 { return "~mp/me" }
+    if abs_f(v - 0.3153) / 0.3153 < 0.1 { return "~Omega_m" }
+    return ""
+}
+
+// ─── SOURCE 1: discovery_log ───
+fn load_discovery_values() {
+    let path = "shared/discovery_log.jsonl"
+    if !file_exists(path) {
+        println("  discovery_log: not found")
+        return []
+    }
+    let content = read_file(path)
+    let lines = content.split("\n")
+    let mut vals = []
+    let mut i = 0
+    let max_lines = if lines.len() < 50000 { lines.len() } else { 50000 }
+    while i < max_lines {
+        let line = lines[i]
+        if line.len() > 10 {
+            // "value":"..." 추출
+            let parts = line.split("\"value\":\"")
+            if parts.len() >= 2 {
+                let vstr = parts[1].split("\"")[0]
+                let v = safe_float(vstr)
+                if v > 0.001 && v < 1000000.0 {
+                    vals = vals.push(v)
+                }
+            }
+        }
+        i = i + 1
+    }
+    println("  discovery_log: " + to_string(vals.len()) + " values loaded (from " + to_string(lines.len()) + " lines)")
+    return vals
+}
+
+// ─── SOURCE 2: math_atlas ───
+fn load_atlas_values() {
+    let path = "shared/math_atlas.json"
+    if !file_exists(path) {
+        println("  math_atlas: not found")
+        return []
+    }
+    let content = read_file(path)
+    let parts = content.split("\"title\":\"")
+    let mut vals = []
+    let mut i = 1
+    while i < parts.len() && i < 1000 {
+        let title = parts[i].split("\"")[0]
+        let tokens = title.split(" ")
+        let mut ti = 0
+        while ti < tokens.len() {
+            try {
+                let v = to_float(tokens[ti])
+                if v > 1.0 && v < 100000.0 {
+                    vals = vals.push(v)
+                }
+            } catch e {}
+            ti = ti + 1
+        }
+        i = i + 1
+    }
+    println("  math_atlas: " + to_string(vals.len()) + " values from " + to_string(parts.len() - 1) + " hypotheses")
+    return vals
+}
+
+// ─── SOURCE 3: 실시간 시스템 메트릭 ───
+fn load_live_metrics() {
+    let path = "/tmp/n6_live.txt"
+    if !file_exists(path) {
+        println("  live metrics: not found (run: bash scripts/collect-live.sh first)")
+        return []
+    }
+    let content = read_file(path)
+    let lines = content.split("\n")
+    let mut vals = []
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i]
+        try {
+            let v = to_float(line)
+            if v > 0.0 {
+                vals = vals.push(v)
+            }
+        } catch e {}
+        i = i + 1
+    }
+    println("  live metrics: " + to_string(vals.len()) + " values")
+    return vals
+}
+
+// ─── HISTOGRAM ───
+fn build_histogram(vals: list, bin_size: f64) {
+    // bin_keys (정수 인덱스) + bin_counts
+    let mut bin_keys = []
+    let mut bin_counts = []
+    let mut i = 0
+    while i < vals.len() {
+        let v = vals[i]
+        let bin_idx = to_int(v / bin_size)
+        // 기존 bin 찾기
+        let mut found = false
+        let mut bi = 0
+        while bi < bin_keys.len() {
+            if bin_keys[bi] == bin_idx {
+                bin_counts[bi] = bin_counts[bi] + 1
+                found = true
+                bi = bin_keys.len() // break
+            }
+            bi = bi + 1
+        }
+        if !found {
+            bin_keys = bin_keys.push(bin_idx)
+            bin_counts = bin_counts.push(1)
+        }
+        i = i + 1
+    }
+    return [bin_keys, bin_counts]
+}
+
+fn print_histogram(hist: list, bin_size: f64, top_n: i64) {
+    let bin_keys = hist[0]
+    let bin_counts = hist[1]
+    // top N by count (bubble sort)
+    let mut indices = []
+    let mut ii = 0
+    while ii < bin_keys.len() {
+        indices = indices.push(ii)
+        ii = ii + 1
+    }
+    let mut si = 0
+    while si < indices.len() {
+        let mut sj = si + 1
+        while sj < indices.len() {
+            if bin_counts[indices[sj]] > bin_counts[indices[si]] {
+                let tmp = indices[si]
+                indices[si] = indices[sj]
+                indices[sj] = tmp
+            }
+            sj = sj + 1
+        }
+        si = si + 1
+    }
+    let show = if top_n < indices.len() { top_n } else { indices.len() }
+    let mut pi = 0
+    while pi < show {
+        let idx = indices[pi]
+        let lo = to_float(bin_keys[idx]) * bin_size
+        let hi = lo + bin_size
+        let cnt = bin_counts[idx]
+        let bar_len = if cnt > 50 { 50 } else { cnt }
+        let mut bar = ""
+        let mut bi = 0
+        while bi < bar_len {
+            bar = bar + "█"
+            bi = bi + 1
+        }
+        println("  [" + to_string(lo) + "-" + to_string(hi) + ") " + to_string(cnt) + " " + bar)
+        pi = pi + 1
+    }
+}
+
+// ─── CLUSTER DETECTION ───
+fn find_clusters(vals: list, tolerance: f64) {
+    // 정렬 (bubble sort, 최대 2000개)
+    let max_n = if vals.len() < 2000 { vals.len() } else { 2000 }
+    let mut sorted = []
+    let mut si = 0
+    while si < max_n {
+        sorted = sorted.push(vals[si])
+        si = si + 1
+    }
+    // bubble sort
+    let mut i = 0
+    while i < sorted.len() {
+        let mut j = i + 1
+        while j < sorted.len() {
+            if sorted[j] < sorted[i] {
+                let tmp = sorted[i]
+                sorted[i] = sorted[j]
+                sorted[j] = tmp
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    // 인접 값 클러스터링
+    let mut clusters = []  // 각 클러스터: "centroid|count|members"
+    let mut ci = 0
+    while ci < sorted.len() {
+        let mut cluster_sum = sorted[ci]
+        let mut cluster_count = 1
+        let mut cj = ci + 1
+        while cj < sorted.len() {
+            let rel = abs_f(sorted[cj] - sorted[ci]) / max_f(abs_f(sorted[ci]), 1.0)
+            if rel < tolerance {
+                cluster_sum = cluster_sum + sorted[cj]
+                cluster_count = cluster_count + 1
+                cj = cj + 1
+            } else {
+                cj = sorted.len() // break
+            }
+        }
+        if cluster_count >= 3 {
+            let centroid = cluster_sum / to_float(cluster_count)
+            let entry = to_string(centroid) + "|" + to_string(cluster_count)
+            clusters = clusters.push(entry)
+        }
+        ci = ci + cluster_count
+    }
+    return clusters
+}
+
+// ─── SURPRISE METRIC ───
+// 진짜 새 발견 = n6에 가깝지만 기존 테이블에 없는 것
+fn compute_surprise(vals: list) {
+    let mut surprises = []
+    let mut seen = []
+    let mut i = 0
+    while i < vals.len() {
+        let v = vals[i]
+        let prox = n6_proximity(v)
+        // n6에 가깝고(prox > 0.8) + 이미 아는 값이 아닌 것
+        if prox > 0.8 && !is_known_n6(v) {
+            // 중복 제거
+            let sv = to_string(to_int(v * 100.0))
+            let mut dup = false
+            let mut di = 0
+            while di < seen.len() {
+                if seen[di] == sv {
+                    dup = true
+                    di = seen.len()
+                }
+                di = di + 1
+            }
+            if !dup {
+                seen = seen.push(sv)
+                let name = n6_nearest_name(v)
+                let entry = to_string(v) + "|" + to_string(prox) + "|" + name
+                surprises = surprises.push(entry)
+            }
+        }
+        i = i + 1
+    }
+    return surprises
+}
+
+// ─── CROSS-SOURCE RESONANCE ───
+fn cross_resonance(disc_vals: list, atlas_vals: list, live_vals: list) {
+    let mut resonances = []
+    // discovery × atlas 교차
+    let mut di = 0
+    let d_max = if disc_vals.len() < 500 { disc_vals.len() } else { 500 }
+    while di < d_max {
+        let dv = disc_vals[di]
+        let mut ai = 0
+        let a_max = if atlas_vals.len() < 200 { atlas_vals.len() } else { 200 }
+        while ai < a_max {
+            let av = atlas_vals[ai]
+            let rel = abs_f(dv - av) / max_f(abs_f(dv), 1.0)
+            if rel < 0.01 && dv > 1.5 {
+                let entry = to_string(dv) + " ≈ " + to_string(av) + " (disc×atlas)"
+                resonances = resonances.push(entry)
+            }
+            ai = ai + 1
+        }
+        // discovery × live 교차
+        let mut li = 0
+        while li < live_vals.len() {
+            let lv = live_vals[li]
+            let rel = abs_f(dv - lv) / max_f(abs_f(dv), 1.0)
+            if rel < 0.05 && dv > 1.5 {
+                let entry = to_string(dv) + " ≈ " + to_string(lv) + " (disc×live)"
+                resonances = resonances.push(entry)
+            }
+            li = li + 1
+        }
+        di = di + 1
+    }
+    return resonances
+}
+
+// ─── MAIN ───
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "scan" }
+
+// 시스템 메트릭 수집 (live 모드 또는 scan 모드)
+if mode == "live" || mode == "scan" {
+    // /tmp/n6_live.txt에 시스템 메트릭 저장
+    // hexa에 exec() 없으므로 write_file로 안내
+    println("  (live metrics: /tmp/n6_live.txt — run collect script if stale)")
+}
+
+println("")
+println("╔═══════════════════════════════════════════════════════════╗")
+println("║  REAL BREAKTHROUGH — 실데이터 기반 돌파 엔진             ║")
+println("║  mode: " + mode)
+println("╚═══════════════════════════════════════════════════════════╝")
+println("")
+
+// 데이터 로드
+println("--- Loading Sources ---")
+let disc_vals = load_discovery_values()
+let atlas_vals = load_atlas_values()
+let live_vals = load_live_metrics()
+
+let total_vals = disc_vals.len() + atlas_vals.len() + live_vals.len()
+println("  total: " + to_string(total_vals) + " values from 3 sources")
+println("")
+
+if mode == "histogram" || mode == "scan" {
+    println("--- Histogram (bin=1.0, top 20) ---")
+    // disc_vals만 히스토그램 (가장 큰 소스)
+    let hist = build_histogram(disc_vals, 1.0)
+    print_histogram(hist, 1.0, 20)
+    println("")
+}
+
+if mode == "clusters" || mode == "scan" {
+    println("--- Clusters (tolerance=1%, min=3) ---")
+    // 전체 값 합치기
+    let mut all_vals = []
+    let mut ci = 0
+    while ci < disc_vals.len() && ci < 1000 {
+        all_vals = all_vals.push(disc_vals[ci])
+        ci = ci + 1
+    }
+    ci = 0
+    while ci < atlas_vals.len() {
+        all_vals = all_vals.push(atlas_vals[ci])
+        ci = ci + 1
+    }
+    ci = 0
+    while ci < live_vals.len() {
+        all_vals = all_vals.push(live_vals[ci])
+        ci = ci + 1
+    }
+
+    let clusters = find_clusters(all_vals, 0.01)
+    let mut ki = 0
+    while ki < clusters.len() {
+        let parts = clusters[ki].split("|")
+        let centroid = safe_float(parts[0])
+        let count = parts[1]
+        let known = if is_known_n6(centroid) { " [KNOWN]" } else { " ★NEW★" }
+        let name = n6_nearest_name(centroid)
+        let prox = n6_proximity(centroid)
+        println("  centroid=" + to_string(centroid) + " count=" + count + " prox=" + to_string(prox) + " " + name + known)
+        ki = ki + 1
+    }
+    println("")
+}
+
+if mode == "surprise" || mode == "scan" {
+    println("--- Surprise (n6 근접 but NOT known) ---")
+    let mut all_vals = []
+    let mut ci = 0
+    while ci < disc_vals.len() && ci < 2000 {
+        all_vals = all_vals.push(disc_vals[ci])
+        ci = ci + 1
+    }
+    ci = 0
+    while ci < atlas_vals.len() {
+        all_vals = all_vals.push(atlas_vals[ci])
+        ci = ci + 1
+    }
+    ci = 0
+    while ci < live_vals.len() {
+        all_vals = all_vals.push(live_vals[ci])
+        ci = ci + 1
+    }
+
+    let surprises = compute_surprise(all_vals)
+    if surprises.len() == 0 {
+        println("  (no surprises found — all values are known n6 constants)")
+    } else {
+        let mut si = 0
+        while si < surprises.len() {
+            let parts = surprises[si].split("|")
+            println("  ★ value=" + parts[0] + " proximity=" + parts[1] + " near=" + parts[2])
+            si = si + 1
+        }
+    }
+    println("")
+}
+
+if mode == "resonance" || mode == "scan" {
+    println("--- Cross-Source Resonance ---")
+    let resonances = cross_resonance(disc_vals, atlas_vals, live_vals)
+    if resonances.len() == 0 {
+        println("  (no cross-source resonances found)")
+    } else {
+        let show = if resonances.len() < 30 { resonances.len() } else { 30 }
+        let mut ri = 0
+        while ri < show {
+            println("  ⚡ " + resonances[ri])
+            ri = ri + 1
+        }
+        if resonances.len() > 30 {
+            println("  ... and " + to_string(resonances.len() - 30) + " more")
+        }
+    }
+    println("")
+}
+
+if mode == "live" {
+    println("--- Live System Metrics n6 Scan ---")
+    let mut li = 0
+    while li < live_vals.len() {
+        let v = live_vals[li]
+        let prox = n6_proximity(v)
+        let name = n6_nearest_name(v)
+        let known = if is_known_n6(v) { "KNOWN" } else { "NEW" }
+        if prox > 0.5 {
+            println("  " + to_string(v) + " prox=" + to_string(prox) + " " + name + " [" + known + "]")
+        }
+        li = li + 1
+    }
+    println("")
+}
+
+println("done.")

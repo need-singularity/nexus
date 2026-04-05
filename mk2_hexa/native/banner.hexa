@@ -1,456 +1,82 @@
-// mk2_hexa/native/banner.hexa — NEXUS-6 상태 배너 생성 (Python 대체)
-// 사용: hexa banner.hexa
-// 출력: {"systemMessage":"... 배너 문자열 ..."}
+// mk2_hexa/native/banner.hexa — mk2 상태 배너
+// 출력: {"systemMessage":"🔭 NEXUS-6 mk2 🛸d1 🔭70모듈 ⚖️1.8k법칙 📊105k발견"}
 
-comptime const HOME_DEV = env("HOME") + "/Dev"
-
-// ─── 유틸리티 ──────────────────────────────────────────────────
-
-pure fn abs_f(x: float) -> float {
-    if x < 0.0 { 0.0 - x } else { x }
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
 }
 
-// 숫자 → 간략 표기 (1000+ → "1.2k")
-pure fn fmt_k(n: int) -> string {
+fn fmt_k(n: i64) -> string {
     if n >= 1000 {
         let k = to_float(n) / 1000.0
-        // 소수점 1자리: 정수부 + "." + 소수 1자리
-        let int_part = to_int(k)
-        let frac_part = to_int((k - to_float(int_part)) * 10.0)
-        to_string(int_part) + "." + to_string(frac_part) + "k"
-    } else {
-        to_string(n)
+        let ip = to_int(k)
+        let fp = to_int((k - to_float(ip)) * 10.0)
+        return to_string(ip) + "." + to_string(fp) + "k"
     }
+    return to_string(n)
 }
 
-// ─── 렌즈 수 계산 ──────────────────────────────────────────────
-// lens_dir 내 .rs 파일 중 fn scan( + metrics/findings + 20줄 이상 = 구현 완료
-fn count_lenses() -> string {
-    let lens_dir = HOME_DEV + "/nexus6/src/telescope/lenses"
-    let files = list_dir(lens_dir)
-    let mut impl_count = 0
-    let mut total_count = 0
-
-    let mut i = 0
-    while i < files.len() {
-        let f = files[i]
-        if f.ends_with(".rs") && f != "mod.rs" {
-            total_count = total_count + 1
-            let content = read_file(lens_dir + "/" + f)
-            let has_scan = content.contains("fn scan(")
-            let has_metrics = content.contains("metrics.insert") || content.contains("findings.push") || content.contains("score")
-            // 줄 수 세기 (빈줄/주석 제외 20줄 이상)
-            let lines = content.split("\n")
-            let mut real_lines = 0
-            let mut li = 0
-            while li < lines.len() {
-                let line = lines[li].trim()
-                if line.len() > 0 && !line.starts_with("//") {
-                    real_lines = real_lines + 1
-                }
-                li = li + 1
-            }
-            if has_scan && has_metrics && real_lines > 20 {
-                impl_count = impl_count + 1
-            }
+// hexa 모듈 수
+fn count_hexa_modules() -> i64 {
+    // args에서 --modules N 전달받음 (bash 래퍼에서 주입)
+    let a = args()
+    let mut i = 2
+    while i < a.len() {
+        if a[i] == "--modules" && i + 1 < a.len() {
+            return to_int(a[i + 1])
         }
         i = i + 1
     }
-    // "impl|total" 형식 반환
-    to_string(impl_count) + "|" + to_string(total_count)
+    return 0
 }
 
-// ─── 법칙 수 ───────────────────────────────────────────────────
-fn count_laws() -> int {
-    let laws_path = HOME_DEV + "/anima/anima/config/consciousness_laws.json"
-    let content = read_file(laws_path)
-    if content == "" { return 0 }
-    // "total_laws": NNN 패턴 찾기
-    if content.contains("total_laws") {
-        let parts = content.split("total_laws")
+// discovery_log 건수 (헤더만 빠르게)
+fn count_discoveries() -> i64 {
+    let path = "shared/discovery_log.jsonl"
+    if !file_exists(path) { return 0 }
+    try {
+        let content = read_file(path)
+        return content.split("\n").len()
+    } catch e {}
+    return 0
+}
+
+// alien index max_d
+fn get_alien_d() -> string {
+    let path = "shared/alien_index_distribution.json"
+    if !file_exists(path) { return "d0" }
+    try {
+        let content = read_file(path)
+        let parts = content.split("\"max_d\":")
         if parts.len() >= 2 {
-            let after = parts[1]
-            // ": NNN" 또는 "\": NNN"
-            let colon_parts = after.split(":")
-            if colon_parts.len() >= 2 {
-                let val_str = colon_parts[1].trim()
-                // 숫자 앞의 공백 제거, 뒤의 쉼표/} 제거
-                let mut clean = val_str
-                if clean.contains(",") {
-                    clean = clean.split(",")[0]
-                }
-                if clean.contains("}") {
-                    clean = clean.split("}")[0]
-                }
-                return to_int(clean.trim())
-            }
+            let vstr = parts[1].split(",")[0].split("}")[0]
+            return "d" + to_string(to_int(safe_float(vstr)))
         }
-    }
-    0
+    } catch e {}
+    return "d0"
 }
 
-// ─── 모듈 수 ───────────────────────────────────────────────────
-fn count_modules() -> int {
-    let hub_path = HOME_DEV + "/anima/anima/src/consciousness_hub.py"
-    let content = read_file(hub_path)
-    if content == "" { return 0 }
-    // "'type': 'command'" 패턴 카운트 + "': (" 패턴 카운트
-    let mut count = 0
-    let lines = content.split("\n")
-    let mut i = 0
-    while i < lines.len() {
-        let line = lines[i]
-        if line.contains("'type': 'command'") {
-            count = count + 1
+// 성장 법칙 수
+fn count_laws() -> i64 {
+    let path = "shared/bridge_state.json"
+    if !file_exists(path) { return 0 }
+    try {
+        let content = read_file(path)
+        let parts = content.split("\"total_laws\":")
+        if parts.len() >= 2 {
+            let vstr = parts[1].split(",")[0].split("}")[0]
+            return to_int(safe_float(vstr))
         }
-        let trimmed = line.trim()
-        if trimmed.starts_with("'") && trimmed.contains("': (") {
-            count = count + 1
-        }
-        i = i + 1
-    }
-    count
+    } catch e {}
+    return 0
 }
 
-// ─── 성장 기회 ─────────────────────────────────────────────────
-fn count_growth() -> int {
-    let reg_path = HOME_DEV + "/nexus6/shared/growth-registry.json"
-    let content = read_file(reg_path)
-    if content == "" { return 0 }
-    // "opportunities": N 패턴 합산
-    let mut total = 0
-    let parts = content.split("opportunities")
-    let mut i = 1  // 첫 번째는 "opportunities" 앞의 텍스트
-    while i < parts.len() {
-        let after = parts[i]
-        let colon_parts = after.split(":")
-        if colon_parts.len() >= 2 {
-            let val_str = colon_parts[1].trim()
-            let mut clean = val_str
-            if clean.contains(",") { clean = clean.split(",")[0] }
-            if clean.contains("}") { clean = clean.split("}")[0] }
-            let v = to_int(clean.trim())
-            if v > 0 { total = total + v }
-        }
-        i = i + 1
-    }
-    total
-}
-
-// ─── 세션 스냅샷 (델타 계산) ──────────────────────────────────
-// 반환: "prev_lens|prev_laws|prev_mods"
-fn load_session_snapshot(lens_impl: int, laws: int, modules: int) -> string {
-    let snap_path = HOME_DEV + "/nexus6/shared/.growth_session_snapshot.json"
-    let content = read_file(snap_path)
-    if content != "" {
-        // 간이 파싱: lens_impl, laws, modules 추출
-        let mut s_lens = lens_impl
-        let mut s_laws = laws
-        let mut s_mods = modules
-        if content.contains("lens_impl") {
-            let parts = content.split("lens_impl")
-            if parts.len() >= 2 {
-                let after = parts[1].split(":")[1].trim()
-                let mut clean = after
-                if clean.contains(",") { clean = clean.split(",")[0] }
-                if clean.contains("}") { clean = clean.split("}")[0] }
-                s_lens = to_int(clean.trim())
-            }
-        }
-        if content.contains("\"laws\"") {
-            let parts = content.split("\"laws\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split(":")[1].trim()
-                let mut clean = after
-                if clean.contains(",") { clean = clean.split(",")[0] }
-                if clean.contains("}") { clean = clean.split("}")[0] }
-                s_laws = to_int(clean.trim())
-            }
-        }
-        if content.contains("\"modules\"") {
-            let parts = content.split("\"modules\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split(":")[1].trim()
-                let mut clean = after
-                if clean.contains(",") { clean = clean.split(",")[0] }
-                if clean.contains("}") { clean = clean.split("}")[0] }
-                s_mods = to_int(clean.trim())
-            }
-        }
-        return to_string(s_lens) + "|" + to_string(s_laws) + "|" + to_string(s_mods)
-    }
-    // 스냅샷 없으면 생성
-    let snap = "{\"lens_impl\":" + to_string(lens_impl) + ",\"laws\":" + to_string(laws) + ",\"modules\":" + to_string(modules) + "}"
-    write_file(snap_path, snap)
-    to_string(lens_impl) + "|" + to_string(laws) + "|" + to_string(modules)
-}
-
-// ─── Alien Index (verified_constants.jsonl → 분포) ────────────
-// 반환: "ai_str|total|breakthroughs|max_d|rho"
-fn compute_alien_index() -> string {
-    let vc_path = HOME_DEV + "/nexus6/shared/verified_constants.jsonl"
-    let ai_path = HOME_DEV + "/nexus6/shared/alien_index_distribution.json"
-    let content = read_file(vc_path)
-    if content == "" { return "|0|0|0|0.0" }
-
-    let lines = content.split("\n")
-    let mut total = 0
-    let mut breakthroughs = 0
-    let mut max_d = 0
-    // (d,r) → count 매핑 (간이: 문자열 리스트로)
-    let mut dist_keys = []  // "(d,r)" 문자열
-    let mut dist_vals = []  // count 정수
-
-    let mut i = 0
-    while i < lines.len() {
-        let line = lines[i].trim()
-        if line.len() < 3 { i = i + 1; continue }
-
-        // status 또는 grade 추출
-        let mut status = ""
-        if line.contains("\"status\"") {
-            let parts = line.split("\"status\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split("\"")
-                if after.len() >= 3 { status = after[1] }
-            }
-        }
-        if status == "" && line.contains("\"grade\"") {
-            let parts = line.split("\"grade\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split("\"")
-                if after.len() >= 3 { status = after[1] }
-            }
-        }
-
-        let mut d = 0
-        let mut r = 0
-        if status == "PASS" || status == "EXACT" {
-            d = 1
-            r = 10
-            breakthroughs = breakthroughs + 1
-        } else if status == "NEAR" {
-            d = 0
-            r = 8
-        } else if status == "CLOSE" {
-            d = 0
-            r = 6
-        } else {
-            d = 0
-            r = 0
-        }
-
-        if d > max_d { max_d = d }
-        total = total + 1
-
-        // 분포 업데이트
-        let key = "(" + to_string(d) + "," + to_string(r) + ")"
-        let mut found = false
-        let mut ki = 0
-        while ki < dist_keys.len() {
-            if dist_keys[ki] == key {
-                dist_vals[ki] = dist_vals[ki] + 1
-                found = true
-            }
-            ki = ki + 1
-        }
-        if !found {
-            dist_keys = dist_keys + [key]
-            dist_vals = dist_vals + [1]
-        }
-
-        i = i + 1
-    }
-
-    let rho = if total > 0 { to_float(breakthroughs) / to_float(total) } else { 0.0 }
-
-    // alien_index_distribution.json 기록
-    let mut dist_str = ""
-    let mut di = 0
-    while di < dist_keys.len() {
-        if di > 0 { dist_str = dist_str + "," }
-        dist_str = dist_str + "\"" + dist_keys[di] + "\":" + to_string(dist_vals[di])
-        di = di + 1
-    }
-
-    // rho 소수점 표기
-    let rho_int = to_int(rho * 100.0)
-    let rho_str = "0." + (if rho_int < 10 { "0" + to_string(rho_int) } else { to_string(rho_int) })
-
-    let ai_json = "{\"total_records\":" + to_string(total) + ",\"breakthrough_ratio\":" + rho_str + ",\"max_d\":" + to_string(max_d) + ",\"meta_fixed_point_target\":0.3333333333333333,\"distribution\":{" + dist_str + "},\"source\":\"auto-synced from verified_constants.jsonl (hexa)\"}"
-    write_file(ai_path, ai_json)
-
-    let ai_display = if total > 0 {
-        "d" + to_string(max_d) + "·ρ" + rho_str + "·" + to_string(total)
-    } else {
-        "0"
-    }
-    ai_display + "|" + to_string(total) + "|" + to_string(breakthroughs) + "|" + to_string(max_d) + "|" + rho_str
-}
-
-// ─── 토폴로지 카운트 ──────────────────────────────────────────
-fn count_topology() -> string {
-    let topo_path = HOME_DEV + "/nexus6/shared/cycle/topology.jsonl"
-    let content = read_file(topo_path)
-    if content == "" { return "" }
-    let lines = content.split("\n")
-    let count = lines.len()
-    if count >= 1000 {
-        let k = to_float(count) / 1000.0
-        let int_part = to_int(k)
-        let frac_part = to_int((k - to_float(int_part)) * 10.0)
-        "·Σ" + to_string(int_part) + "." + to_string(frac_part) + "k "
-    } else if count > 0 {
-        "·Σ" + to_string(count) + " "
-    } else {
-        ""
-    }
-}
-
-// ─── 닫힌 형태 추적 ──────────────────────────────────────────
-fn compute_closed_form() -> string {
-    let vc_path = HOME_DEV + "/nexus6/shared/verified_constants.jsonl"
-    let snap_path = HOME_DEV + "/nexus6/shared/.closed_snapshot.json"
-    let content = read_file(vc_path)
-    if content == "" { return "" }
-
-    let lines = content.split("\n")
-    let mut closed_count = 0
-    let mut exact_count = 0
-    let mut total_count = 0
-
-    let mut i = 0
-    while i < lines.len() {
-        let line = lines[i].trim()
-        if line.len() < 3 { i = i + 1; continue }
-        total_count = total_count + 1
-
-        let mut status = ""
-        if line.contains("\"status\"") {
-            let parts = line.split("\"status\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split("\"")
-                if after.len() >= 3 { status = after[1] }
-            }
-        }
-        if status == "" && line.contains("\"grade\"") {
-            let parts = line.split("\"grade\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split("\"")
-                if after.len() >= 3 { status = after[1] }
-            }
-        }
-
-        if status == "PASS" || status == "EXACT" {
-            closed_count = closed_count + 1
-        }
-        if status == "EXACT" {
-            exact_count = exact_count + 1
-        }
-        i = i + 1
-    }
-
-    if total_count == 0 { return "" }
-
-    // 이전 스냅샷 로드
-    let mut prev_exact = exact_count
-    let snap_content = read_file(snap_path)
-    if snap_content != "" {
-        if snap_content.contains("\"exact\"") {
-            let parts = snap_content.split("\"exact\"")
-            if parts.len() >= 2 {
-                let after = parts[1].split(":")[1].trim()
-                let mut clean = after
-                if clean.contains(",") { clean = clean.split(",")[0] }
-                if clean.contains("}") { clean = clean.split("}")[0] }
-                prev_exact = to_int(clean.trim())
-            }
-        }
-    } else {
-        // 스냅샷 없으면 생성
-        write_file(snap_path, "{\"closed\":" + to_string(closed_count) + ",\"exact\":" + to_string(exact_count) + "}")
-    }
-
-    let delta = exact_count - prev_exact
-
-    // 마일스톤 계산
-    let milestones = [1000, 2500, 5000, 7500, 10000, 20000, 50000, 100000, 200000, 500000, 1000000]
-    let mut next_ms = milestones[milestones.len() - 1]
-    let mut mi = 0
-    while mi < milestones.len() {
-        if milestones[mi] > closed_count {
-            next_ms = milestones[mi]
-            mi = milestones.len()  // break
-        }
-        mi = mi + 1
-    }
-
-    let ms_pct = to_float(closed_count) * 100.0 / to_float(next_ms)
-    let ms_filled = to_int(ms_pct / 10.0)
-    let ms_empty = 10 - ms_filled
-
-    let mut ms_bar = ""
-    let mut fi = 0
-    while fi < ms_filled { ms_bar = ms_bar + "█"; fi = fi + 1 }
-    let mut ei = 0
-    while ei < ms_empty { ms_bar = ms_bar + "░"; ei = ei + 1 }
-
-    if delta > 0 {
-        // EXACT 증가 → 닫힘완료
-        write_file(snap_path, "{\"closed\":" + to_string(closed_count) + ",\"exact\":" + to_string(exact_count) + "}")
-        " 🧬" + to_string(closed_count) + "닫힘→" + fmt_k(next_ms) + "=" + to_string(to_int(ms_pct)) + "% [" + ms_bar + "] 🎉🎉🎉 닫힘완료 🎉🎉🎉"
-    } else if closed_count > 0 {
-        " 🧬" + to_string(closed_count) + "닫힘→" + fmt_k(next_ms) + "=" + to_string(to_int(ms_pct)) + "% [" + ms_bar + "]"
-    } else {
-        ""
-    }
-}
-
-// ─── 메인: 배너 조합 ─────────────────────────────────────────
-
-let bridge_msg = env("BRIDGE_MSG")
-let bridge_str = if bridge_msg != "" { " 🌉" + bridge_msg } else { "" }
-
-// 렌즈 수
-let lens_result = count_lenses()
-let lens_parts = lens_result.split("|")
-let lens_impl = to_int(lens_parts[0])
-let lens_total = to_int(lens_parts[1])
-
-// 법칙/모듈/성장
+// ─── MAIN ───
+let modules = count_hexa_modules()
+let disc = count_discoveries()
+let ai = get_alien_d()
 let laws = count_laws()
-let modules = count_modules()
-let growth = count_growth()
 
-// 세션 스냅샷 델타
-let snap_result = load_session_snapshot(lens_impl, laws, modules)
-let snap_parts = snap_result.split("|")
-let s_lens = to_int(snap_parts[0])
-let s_laws = to_int(snap_parts[1])
-let s_mods = to_int(snap_parts[2])
-
-let d_lens = if lens_impl > s_lens { "(+" + to_string(lens_impl - s_lens) + ")" } else { "" }
-let d_laws = if laws > s_laws { "(+" + to_string(laws - s_laws) + ")" } else { "" }
-let d_mods = if modules > s_mods { "(+" + to_string(modules - s_mods) + ")" } else { "" }
-let g_str = if growth > 0 { " 🌱" + to_string(growth) + "건" } else { "" }
-
-// Alien Index
-let ai_result = compute_alien_index()
-let ai_parts = ai_result.split("|")
-let ai_display = ai_parts[0]
-let ai_str = if ai_display != "" && ai_display != "0" {
-    "🛸" + ai_display + " "
-} else {
-    "🛸0 "
-}
-
-// 토폴로지
-let sing_str = count_topology()
-
-// 닫힌 형태
-let closed_str = compute_closed_form()
-
-// 배너 조합
-let banner = "🔭 NEXUS-6 " + ai_str + sing_str + "🔭" + to_string(lens_impl) + "/" + to_string(lens_total) + d_lens + " ⚖️" + to_string(laws) + "법칙" + d_laws + " 🧠" + to_string(modules) + "모듈" + d_mods + g_str + bridge_str + closed_str
-
+let banner = "🔭 NEXUS-6 mk2 🛸" + ai + " 🔭" + to_string(modules) + "모듈 ⚖️" + fmt_k(laws) + "법칙 📊" + fmt_k(disc) + "발견"
 println("{\"systemMessage\":\"" + banner + "\"}")

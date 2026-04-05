@@ -14,7 +14,9 @@ HEXA="${HOME}/Dev/hexa-lang/target/release/hexa"
 HEXA_BANNER="${HOME}/Dev/nexus6/mk2_hexa/native/banner.hexa"
 
 if [ -x "$HEXA" ] && [ -f "$HEXA_BANNER" ]; then
-  "$HEXA" "$HEXA_BANNER" 2>/dev/null || echo '{"systemMessage":"🔭 NEXUS-6 활성"}'
+  HEXA_DIR="$(dirname "$HEXA_BANNER")"
+  MOD_COUNT=$(ls "$HEXA_DIR"/*.hexa 2>/dev/null | wc -l | tr -d ' ')
+  "$HEXA" "$HEXA_BANNER" --modules "$MOD_COUNT" 2>/dev/null || echo '{"systemMessage":"🔭 NEXUS-6 mk2 활성"}'
 else
   echo '{"systemMessage":"🔭 NEXUS-6 활성"}'
 fi
