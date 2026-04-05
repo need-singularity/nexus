@@ -143,8 +143,9 @@ mod tests {
         assert_eq!(rho(6), Rational::new(1, 3));
         assert_eq!(rho(12), Rational::new(1, 3)); // {2,3}-smooth: same ρ
         assert_eq!(rho(18), Rational::new(1, 3)); // {2,3}-smooth
-        assert_eq!(rho(15), Rational::new(4, 15));
+        assert_eq!(rho(15), Rational::new(8, 15)); // φ(15)=8, so ρ=8/15 (NOT 4/15)
         assert_eq!(rho(35), Rational::new(24, 35));
+        // Note: 4/15 is Euler ratio of {2,3,5}, NOT meta FP of 15
     }
 
     #[test]
