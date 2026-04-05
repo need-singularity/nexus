@@ -69,6 +69,31 @@ fn round4f(x: f64) -> f64 {
     return to_float(to_int(x * 10000.0 + 0.5)) / 10000.0
 }
 
+// drop_last: remove last N chars from string
+fn drop_last(s: string, n: i64) -> string {
+    let chars = s.split("")
+    let mut result = ""
+    let mut i: i64 = 0
+    let lim = chars.len() - n
+    while i < lim {
+        result = result + chars[i]
+        i = i + 1
+    }
+    return result
+}
+
+// drop_first: remove first N chars from string
+fn drop_first(s: string, n: i64) -> string {
+    let chars = s.split("")
+    let mut result = ""
+    let mut i: i64 = n
+    while i < chars.len() {
+        result = result + chars[i]
+        i = i + 1
+    }
+    return result
+}
+
 // ═══════════════════════════════════════════════════════════
 // ─── KNOWN n=6 CONSTANTS (filter: NOT a discovery) ───
 // ═══════════════════════════════════════════════════════════
@@ -354,11 +379,11 @@ fn load_math_atlas() -> list {
                     let tok = tokens[ti].trim()
                     // Clean punctuation
                     let mut clean = tok
-                    if clean.ends_with(",") { clean = clean.slice(0, clean.len() - 1) }
-                    if clean.ends_with(")") { clean = clean.slice(0, clean.len() - 1) }
-                    if clean.starts_with("(") { clean = clean.slice(1, clean.len()) }
-                    if clean.ends_with("}") { clean = clean.slice(0, clean.len() - 1) }
-                    if clean.starts_with("{") { clean = clean.slice(1, clean.len()) }
+                    if clean.ends_with(",") { clean = drop_last(clean, 1) }
+                    if clean.ends_with(")") { clean = drop_last(clean, 1) }
+                    if clean.starts_with("(") { clean = drop_first(clean, 1) }
+                    if clean.ends_with("}") { clean = drop_last(clean, 1) }
+                    if clean.starts_with("{") { clean = drop_first(clean, 1) }
 
                     let v = safe_float(clean)
                     if abs_f(v) > 0.001 {
@@ -428,7 +453,7 @@ fn load_live_metrics() -> list {
             let mut after = rest
             if after.contains(":") { after = after.split(":")[1].trim() }
             // macOS uses "s:" not ":"
-            if after.starts_with("s:") { after = after.slice(2, after.len()).trim() }
+            if after.starts_with("s:") { after = drop_first(after, 2).trim() }
             let toks = after.split(",")
             let mut ti: i64 = 0
             while ti < toks.len() && ti < 3 {
@@ -461,7 +486,7 @@ fn load_live_metrics() -> list {
         while di < dtoks.len() {
             let dt = dtoks[di].trim()
             if dt.ends_with("%") {
-                let pct_str = dt.slice(0, dt.len() - 1)
+                let pct_str = drop_last(dt, 1)
                 let pct = safe_float(pct_str)
                 if pct > 0.0 {
                     vals = vals + [pct]
@@ -499,7 +524,7 @@ fn load_live_metrics() -> list {
                 let vparts = vl.split(":")
                 let vkey = vparts[0].trim()
                 let mut vval_s = vparts[1].trim()
-                if vval_s.ends_with(".") { vval_s = vval_s.slice(0, vval_s.len() - 1) }
+                if vval_s.ends_with(".") { vval_s = drop_last(vval_s, 1) }
                 let vval = safe_float(vval_s.trim())
                 if vkey.contains("Pages free") { free_p = vval }
                 if vkey.contains("Pages active") { active_p = vval }
@@ -1114,7 +1139,11 @@ fn print_summary(total: i64, clusters: list, resonances: list, surprises: list) 
         let e: string = clusters[ci]
         if e.contains("|NEW") { new_clusters = new_clusters + 1 }
         let parts = e.split("|")
-        if parts.len() >= 3 { if safe_float(parts[2]) >= 2.0 { cross_clusters = cross_clusters + 1 } }
+        if parts.len() >= 3 {
+            if safe_float(parts[2]) >= 2.0 {
+                cross_clusters = cross_clusters + 1
+            }
+        }
         ci = ci + 1
     }
     let mut new_res: i64 = 0
