@@ -3135,15 +3135,15 @@ fn run_singularity_daemon(base_dir: Option<String>, interval_sec: u64) -> Result
         // Active breakthrough probe — rotate through all domains each tick.
         // Finds domain's lowest-density (frontier) point and emits a probe meta-point.
         if let Some(t) = topo_for_probe.as_ref() {
-            use crate::singularity_recursion::analysis::frontier_points;
+            use crate::singularity_recursion::analysis::frontier_sampled;
             use crate::singularity_recursion::topology::{append_point, Singularity};
             use std::collections::BTreeSet;
             let domains: BTreeSet<String> = t.points.iter().map(|p| p.domain.clone()).collect();
             let doms: Vec<String> = domains.into_iter().collect();
             if !doms.is_empty() {
                 let target_dom = &doms[(tick_no as usize) % doms.len()];
-                // find frontier point within this domain
-                let frontier = frontier_points(t, 0.15, 50);
+                // sampled frontier: ~500 candidates instead of full O(N²)
+                let frontier = frontier_sampled(t, 0.15, 200, 500);
                 let pick = frontier.iter().find(|(_, p)| p.domain == *target_dom);
                 if let Some((density, fp)) = pick {
                     // emit meta-probe point describing the frontier probe

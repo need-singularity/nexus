@@ -148,6 +148,30 @@ pub fn bridges_between<'a>(t: &'a Topology, dom_a: &str, dom_b: &str, eps: f32, 
         .collect()
 }
 
+/// Approximate frontier: sample M random points, count their neighbors within eps.
+/// Returns lowest-density (frontier) candidates. O(N*M) instead of O(N²).
+pub fn frontier_sampled<'a>(t: &'a Topology, eps: f32, k: usize, sample_m: usize) -> Vec<(usize, &'a Point)> {
+    let n = t.points.len();
+    if n == 0 { return vec![]; }
+    let hashes: Vec<u128> = t.points.iter()
+        .map(|p| u128::from_str_radix(&p.simhash, 16).unwrap_or(0))
+        .collect();
+    // Deterministic "random" sample via stride
+    let stride = (n / sample_m.max(1)).max(1);
+    let sample_idx: Vec<usize> = (0..n).step_by(stride).take(sample_m).collect();
+    let mut densities: Vec<(usize, usize)> = sample_idx.iter().map(|&i| {
+        let mut count = 0;
+        for j in 0..n {
+            if i == j { continue; }
+            if distance(hashes[i], hashes[j]) <= eps { count += 1; }
+        }
+        (count, i)
+    }).collect();
+    densities.sort_by_key(|(c, _)| *c);
+    densities.truncate(k);
+    densities.into_iter().map(|(c, i)| (c, &t.points[i])).collect()
+}
+
 /// Top-K highest-density points (interior/core) — candidates for re-blowup seeds.
 /// Opposite of frontier: points with many neighbors = validated core concepts.
 pub fn core_points<'a>(t: &'a Topology, eps: f32, k: usize) -> Vec<(usize, &'a Point)> {
