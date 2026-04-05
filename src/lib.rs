@@ -17,6 +17,8 @@ pub mod resource_limit;
 pub mod alien_index;
 pub mod meta_gate;
 pub mod implant;
+pub mod pack;
+pub mod sentry;
 
 // --- Agent-generated modules ---
 pub mod alert;

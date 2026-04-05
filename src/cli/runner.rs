@@ -183,6 +183,10 @@ fn run_with_config(cmd: CliCommand, cfg: &NexusConfig) -> Result<(), String> {
         CliCommand::Bench => run_bench(),
         CliCommand::Dashboard { html, output } => run_dashboard(html, output),
         CliCommand::AlienIndex { sub } => crate::cli::alien_index_cmd::run(sub),
+        CliCommand::SingularityTick { base_dir } => run_singularity_tick(base_dir),
+        CliCommand::Pack { sub } => run_pack(sub),
+        CliCommand::Sentry { sub } => run_sentry(sub),
+        CliCommand::Hook { sub } => run_hook(sub),
         CliCommand::Help => {
             print_help();
             Ok(())
@@ -1804,6 +1808,38 @@ fn run_status() -> Result<(), String> {
     Ok(())
 }
 
+fn run_pack(sub: crate::cli::parser::PackSub) -> Result<(), String> {
+    use crate::cli::parser::PackSub;
+    use crate::pack;
+    match sub {
+        PackSub::Install { force } => pack::install(force),
+        PackSub::Uninstall => pack::uninstall(),
+        PackSub::Status => pack::status(),
+        PackSub::Doctor => pack::doctor(),
+    }
+}
+
+fn run_sentry(sub: crate::cli::parser::SentrySub) -> Result<(), String> {
+    use crate::cli::parser::SentrySub;
+    use crate::sentry;
+    match sub {
+        SentrySub::Start { interval_sec, foreground } => sentry::start(interval_sec, foreground),
+        SentrySub::Stop => sentry::stop(),
+        SentrySub::Status => sentry::status(),
+        SentrySub::Tail { lines } => sentry::tail(lines),
+    }
+}
+
+fn run_hook(sub: crate::cli::parser::HookSub) -> Result<(), String> {
+    use crate::cli::parser::HookSub;
+    use crate::pack::hook_cmd;
+    match sub {
+        HookSub::List => hook_cmd::list(),
+        HookSub::Enable { name } => hook_cmd::enable(&name),
+        HookSub::Disable { name } => hook_cmd::disable(&name),
+    }
+}
+
 fn run_dispatch(target: &str, prompt: &str, parallel: bool) -> Result<(), String> {
     use std::process::Command;
 
@@ -2987,4 +3023,34 @@ fn hit_rate_bar(rate: f64, width: usize) -> String {
         bar.push('\u{2591}');
     }
     bar
+}
+
+fn run_singularity_tick(base_dir: Option<String>) -> Result<(), String> {
+    use crate::singularity_recursion::tick::{run_tick, CycleRunner, TickPaths};
+    use crate::singularity_recursion::topology::{Point, Singularity};
+    use crate::config::SingularityRecursionConfig;
+
+    // Placeholder runner: deterministic fake until CycleEngine wiring lands.
+    struct ShimRunner;
+    impl CycleRunner for ShimRunner {
+        fn run(&mut self, domain: &str, seed: Option<&Point>) -> Singularity {
+            let prior = seed.map(|p| p.singularity.invariant.clone()).unwrap_or_default();
+            Singularity {
+                invariant: format!("{} :: probe from [{}]", domain,
+                                   prior.chars().take(60).collect::<String>()),
+                confidence: 0.5,
+                novelty: 0.8,
+                depth_reached: 3,
+            }
+        }
+    }
+
+    let base = base_dir.unwrap_or_else(|| "shared/cycle".to_string());
+    let paths = TickPaths::from_base(&base);
+    let cfg = SingularityRecursionConfig::default();
+    let mut runner = ShimRunner;
+    let out = run_tick(&paths, &cfg, &mut runner);
+    println!("tick exit={} point={:?} elapsed={}s",
+             out.exit_code, out.point_id, out.elapsed_sec);
+    if out.exit_code == 0 { Ok(()) } else { std::process::exit(out.exit_code); }
 }
