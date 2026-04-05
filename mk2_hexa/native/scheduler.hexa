@@ -1,0 +1,389 @@
+// mk2_hexa/native/scheduler.hexa — 태스크 스케줄러 (Rust src/scheduler/ 포팅)
+// 작업 스케줄링 및 관리
+// 실행: hexa scheduler.hexa add <name> <command> <interval_secs>
+//       hexa scheduler.hexa list
+//       hexa scheduler.hexa run [now_secs]
+//       hexa scheduler.hexa remove <name>
+//       hexa scheduler.hexa toggle <name>
+//       hexa scheduler.hexa defaults
+
+// ─── 설정 ───
+comptime const TASK_FILE = "shared/scheduler_tasks.jsonl"
+
+// ─── 태스크 구조체 ───
+struct ScheduledTask {
+    name: string,
+    command: string,
+    interval_secs: int,
+    last_run: string,
+    enabled: bool
+}
+
+// ─── 태스크 생성 ───
+fn task_new(name: string, command: string, interval_secs: int) -> ScheduledTask {
+    ScheduledTask {
+        name: name,
+        command: command,
+        interval_secs: interval_secs,
+        last_run: "",
+        enabled: true
+    }
+}
+
+// ─── 직렬화 ───
+fn task_to_json(t: ScheduledTask) -> string {
+    let enabled_str = if t.enabled { "true" } else { "false" }
+    "{\"name\":\"" + t.name + "\",\"command\":\"" + t.command + "\",\"interval\":" + to_string(t.interval_secs) + ",\"last_run\":\"" + t.last_run + "\",\"enabled\":" + enabled_str + "}"
+}
+
+// ─── JSON 헬퍼 ───
+fn jstr(json: string, key: string) -> string {
+    let needle = "\"" + key + "\":\""
+    let idx = json.index_of(needle)
+    if idx < 0 { return "" }
+    let start = idx + needle.length()
+    let rest = json.slice(start, json.length())
+    let end = rest.index_of("\"")
+    if end < 0 { return "" }
+    rest.slice(0, end)
+}
+
+fn jnum(json: string, key: string) -> string {
+    let needle = "\"" + key + "\":"
+    let idx = json.index_of(needle)
+    if idx < 0 { return "0" }
+    let start = idx + needle.length()
+    let rest = json.slice(start, json.length())
+    let end_c = rest.index_of(",")
+    let end_b = rest.index_of("}")
+    let mut end = rest.length()
+    if end_c >= 0 { end = end_c }
+    if end_b >= 0 {
+        if end_b < end { end = end_b }
+    }
+    rest.slice(0, end).trim()
+}
+
+fn jbool(json: string, key: string) -> bool {
+    let val = jnum(json, key)
+    val == "true"
+}
+
+// ─── 파싱 ───
+fn parse_task(line: string) -> ScheduledTask {
+    let name = jstr(line, "name")
+    let command = jstr(line, "command")
+    let last_run = jstr(line, "last_run")
+    let enabled = jbool(line, "enabled")
+    let mut interval = 3600
+    try {
+        interval = to_int(jnum(line, "interval"))
+    } catch {
+        interval = 3600
+    }
+    ScheduledTask {
+        name: name,
+        command: command,
+        interval_secs: interval,
+        last_run: last_run,
+        enabled: enabled
+    }
+}
+
+// ─── 전체 태스크 로드 ───
+fn load_tasks() -> string {
+    read_file(TASK_FILE)
+}
+
+fn save_tasks_raw(content: string) {
+    write_file(TASK_FILE, content)
+}
+
+// ─── 태스크 추가 (동일 이름 시 교체) ───
+fn add_task(name: string, command: string, interval_secs: int) {
+    let raw = load_tasks()
+    let task = task_new(name, command, interval_secs)
+    let mut lines = []
+    if raw != "" {
+        let parts = raw.split("\n")
+        let mut i = 0
+        while i < parts.length() {
+            let line = parts[i].trim()
+            if line != "" {
+                let existing = parse_task(line)
+                if existing.name != name {
+                    lines = lines.push(line)
+                }
+            }
+            i = i + 1
+        }
+    }
+    lines = lines.push(task_to_json(task))
+    let mut out = ""
+    let mut j = 0
+    while j < lines.length() {
+        out = out + lines[j] + "\n"
+        j = j + 1
+    }
+    save_tasks_raw(out)
+    print("added: " + name + " (every " + to_string(interval_secs) + "s) -> " + command)
+}
+
+// ─── 태스크 제거 ───
+fn remove_task(name: string) -> bool {
+    let raw = load_tasks()
+    if raw == "" {
+        print("no tasks")
+        return false
+    }
+    let parts = raw.split("\n")
+    let mut lines = []
+    let mut found = false
+    let mut i = 0
+    while i < parts.length() {
+        let line = parts[i].trim()
+        if line != "" {
+            let t = parse_task(line)
+            if t.name == name {
+                found = true
+            } else {
+                lines = lines.push(line)
+            }
+        }
+        i = i + 1
+    }
+    if !found {
+        print("task not found: " + name)
+        return false
+    }
+    let mut out = ""
+    let mut j = 0
+    while j < lines.length() {
+        out = out + lines[j] + "\n"
+        j = j + 1
+    }
+    save_tasks_raw(out)
+    print("removed: " + name)
+    true
+}
+
+// ─── 태스크 목록 ───
+fn list_tasks() -> int {
+    let raw = load_tasks()
+    if raw == "" {
+        print("(no tasks)")
+        return 0
+    }
+    let parts = raw.split("\n")
+    let mut count = 0
+    let mut i = 0
+    while i < parts.length() {
+        let line = parts[i].trim()
+        if line != "" {
+            let t = parse_task(line)
+            let status = if t.enabled { "ON " } else { "OFF" }
+            let last = if t.last_run == "" { "never" } else { t.last_run }
+            print("[" + status + "] " + t.name + " | every " + to_string(t.interval_secs) + "s | last: " + last + " | cmd: " + t.command)
+            count = count + 1
+        }
+        i = i + 1
+    }
+    count
+}
+
+// ─── 토글 ───
+fn toggle_task(name: string) {
+    let raw = load_tasks()
+    if raw == "" {
+        print("no tasks")
+        return
+    }
+    let parts = raw.split("\n")
+    let mut lines = []
+    let mut found = false
+    let mut i = 0
+    while i < parts.length() {
+        let line = parts[i].trim()
+        if line != "" {
+            let t = parse_task(line)
+            if t.name == name {
+                found = true
+                let toggled = ScheduledTask {
+                    name: t.name,
+                    command: t.command,
+                    interval_secs: t.interval_secs,
+                    last_run: t.last_run,
+                    enabled: !t.enabled
+                }
+                lines = lines.push(task_to_json(toggled))
+                let new_status = if toggled.enabled { "enabled" } else { "disabled" }
+                print(name + " -> " + new_status)
+            } else {
+                lines = lines.push(line)
+            }
+        }
+        i = i + 1
+    }
+    if !found {
+        print("task not found: " + name)
+        return
+    }
+    let mut out = ""
+    let mut j = 0
+    while j < lines.length() {
+        out = out + lines[j] + "\n"
+        j = j + 1
+    }
+    save_tasks_raw(out)
+}
+
+// ─── 실행 대상 판별 + 마크 ───
+fn run_due(now_secs: int) -> int {
+    let raw = load_tasks()
+    if raw == "" {
+        print("(no tasks)")
+        return 0
+    }
+    let parts = raw.split("\n")
+    let mut lines = []
+    let mut due_count = 0
+    let mut i = 0
+    while i < parts.length() {
+        let line = parts[i].trim()
+        if line != "" {
+            let t = parse_task(line)
+            let mut is_due = false
+            if t.enabled {
+                if t.last_run == "" {
+                    is_due = true
+                } else {
+                    let mut last_secs = 0
+                    try {
+                        last_secs = to_int(t.last_run)
+                    } catch {
+                        is_due = true
+                    }
+                    if !is_due {
+                        let elapsed = now_secs - last_secs
+                        if elapsed >= t.interval_secs {
+                            is_due = true
+                        }
+                    }
+                }
+            }
+            if is_due {
+                print("[RUN] " + t.name + " -> " + t.command)
+                let updated = ScheduledTask {
+                    name: t.name,
+                    command: t.command,
+                    interval_secs: t.interval_secs,
+                    last_run: to_string(now_secs),
+                    enabled: t.enabled
+                }
+                lines = lines.push(task_to_json(updated))
+                due_count = due_count + 1
+            } else {
+                lines = lines.push(line)
+            }
+        }
+        i = i + 1
+    }
+    // 저장
+    let mut out = ""
+    let mut j = 0
+    while j < lines.length() {
+        out = out + lines[j] + "\n"
+        j = j + 1
+    }
+    save_tasks_raw(out)
+    if due_count == 0 {
+        print("(no tasks due at t=" + to_string(now_secs) + ")")
+    } else {
+        print("--- " + to_string(due_count) + " task(s) executed")
+    }
+    due_count
+}
+
+// ─── 기본 태스크 설치 ───
+fn install_defaults() {
+    add_task("daily-full-scan", "scan all --full", 86400)
+    add_task("hourly-quick-scan", "scan physics --lenses consciousness,topology,causal", 3600)
+    // weekly-ouroboros 는 비활성으로 추가 후 토글 OFF
+    add_task("weekly-ouroboros", "evolve all --max-cycles 6", 604800)
+    toggle_task("weekly-ouroboros")
+    print("--- default tasks installed")
+}
+
+// ─── CLI ───
+fn main() {
+    let a = args()
+    if a.length() < 2 {
+        print("scheduler.hexa — task scheduling & job management")
+        print("usage:")
+        print("  hexa scheduler.hexa add <name> <command> <interval_secs>")
+        print("  hexa scheduler.hexa list")
+        print("  hexa scheduler.hexa run [now_secs]          — run due tasks")
+        print("  hexa scheduler.hexa remove <name>")
+        print("  hexa scheduler.hexa toggle <name>")
+        print("  hexa scheduler.hexa defaults                — install default n=6 tasks")
+        return
+    }
+    let cmd = a[1]
+    match cmd {
+        "add" -> {
+            if a.length() < 5 {
+                print("usage: hexa scheduler.hexa add <name> <command> <interval_secs>")
+                return
+            }
+            let name = a[2]
+            let command = a[3]
+            let mut interval = 3600
+            try {
+                interval = to_int(a[4])
+            } catch {
+                print("invalid interval: " + a[4])
+                return
+            }
+            add_task(name, command, interval)
+        },
+        "list" -> {
+            let n = list_tasks()
+            print("--- " + to_string(n) + " task(s)")
+        },
+        "run" -> {
+            let mut now = to_int(to_string(time()))
+            if a.length() >= 3 {
+                try {
+                    now = to_int(a[2])
+                } catch {
+                    print("invalid timestamp: " + a[2])
+                    return
+                }
+            }
+            run_due(now)
+        },
+        "remove" -> {
+            if a.length() < 3 {
+                print("usage: hexa scheduler.hexa remove <name>")
+                return
+            }
+            remove_task(a[2])
+        },
+        "toggle" -> {
+            if a.length() < 3 {
+                print("usage: hexa scheduler.hexa toggle <name>")
+                return
+            }
+            toggle_task(a[2])
+        },
+        "defaults" -> {
+            install_defaults()
+        },
+        _ -> {
+            print("unknown command: " + cmd)
+            print("commands: add, list, run, remove, toggle, defaults")
+        }
+    }
+}
+
+main()

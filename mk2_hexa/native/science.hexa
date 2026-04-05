@@ -1,0 +1,732 @@
+// mk2_hexa/native/science.hexa — Scientific method engine
+// Rust 원본: src/science/ (predict.rs, simulate.rs, compare.rs, reproduce.rs, publish.rs)
+// 실행: hexa science.hexa predict|simulate|validate|compare|publish <hypothesis>
+//
+// CLI:
+//   hexa science.hexa predict <exp_type> <target>              — 예측 (history 기반)
+//   hexa science.hexa simulate <exp_type> <target> [n_sims]    — Monte Carlo 시뮬레이션
+//   hexa science.hexa validate <exp_type> <target>             — predict + simulate + 비교
+//   hexa science.hexa compare <a_name> <a_score> <b_name> <b_score>  — A vs B 비교
+//   hexa science.hexa publish <exp_type> <target>              — 결과 마크다운 생성
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const SIGMA = 12
+comptime const J2 = 24
+comptime const META_FP = 0.333333333
+
+// ─── math helpers ───
+
+fn abs(x: float) -> float {
+    if x < 0.0 { return 0.0 - x }
+    x
+}
+
+fn sqrt(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut guess = x / 2.0
+    if guess < 0.001 { guess = 0.001 }
+    let mut i = 0
+    while i < 20 {
+        guess = (guess + x / guess) / 2.0
+        i = i + 1
+    }
+    guess
+}
+
+fn clamp(x: float, lo: float, hi: float) -> float {
+    if x < lo { return lo }
+    if x > hi { return hi }
+    x
+}
+
+fn min_f(a: float, b: float) -> float {
+    if a < b { a } else { b }
+}
+
+fn max_f(a: float, b: float) -> float {
+    if a > b { a } else { b }
+}
+
+fn max_i(a: int, b: int) -> int {
+    if a > b { a } else { b }
+}
+
+fn min_i(a: int, b: int) -> int {
+    if a < b { a } else { b }
+}
+
+fn floor(x: float) -> float {
+    to_float(to_int(x))
+}
+
+// ─── Statistics helpers ───
+
+fn mean(data) -> float {
+    let n = length(data)
+    if n == 0 { return 0.0 }
+    let mut sum = 0.0
+    let mut i = 0
+    while i < n { sum = sum + data[i]; i = i + 1 }
+    sum / to_float(n)
+}
+
+fn variance(data, mean_val: float) -> float {
+    let n = length(data)
+    if n < 2 { return 0.0 }
+    let mut ss = 0.0
+    let mut i = 0
+    while i < n {
+        let d = data[i] - mean_val
+        ss = ss + d * d
+        i = i + 1
+    }
+    ss / (to_float(n) - 1.0)
+}
+
+fn std_dev(data) -> float {
+    let m = mean(data)
+    sqrt(variance(data, m))
+}
+
+// ─── Baseline for experiment type ───
+
+fn baseline_phi(exp_type: string) -> float {
+    if exp_type == "tension" { return 6.0 }
+    if exp_type == "Tension" { return 6.0 }
+    if exp_type == "fusion" { return 24.0 }
+    if exp_type == "Fusion" { return 24.0 }
+    if exp_type == "substitution" { return 2.0 }
+    if exp_type == "doping" { return 8.0 }
+    if exp_type == "phase" { return 12.0 }
+    6.0
+}
+
+fn baseline_entropy(exp_type: string) -> float {
+    if exp_type == "tension" { return 12.0 }
+    if exp_type == "Tension" { return 12.0 }
+    if exp_type == "fusion" { return 48.0 }
+    if exp_type == "Fusion" { return 48.0 }
+    if exp_type == "substitution" { return 4.0 }
+    if exp_type == "doping" { return 10.0 }
+    if exp_type == "phase" { return 24.0 }
+    6.0
+}
+
+// ─── n=6 affinity score ───
+
+fn compute_n6_affinity(phi_delta: float, entropy_delta: float) -> float {
+    let n6_consts = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 11.0, 12.0, 24.0, 48.0, 144.0]
+    let phi_abs = abs(phi_delta)
+    let mut best_phi = 1.0
+    if phi_abs > 0.000000000001 {
+        best_phi = 999999.0
+        let mut i = 0
+        while i < length(n6_consts) {
+            let d = abs((phi_abs - n6_consts[i]) / n6_consts[i])
+            if d < best_phi { best_phi = d }
+            i = i + 1
+        }
+    }
+    let ent_abs = abs(entropy_delta)
+    let mut best_ent = 1.0
+    if ent_abs > 0.000000000001 {
+        best_ent = 999999.0
+        let mut j = 0
+        while j < length(n6_consts) {
+            let d = abs((ent_abs - n6_consts[j]) / n6_consts[j])
+            if d < best_ent { best_ent = d }
+            j = j + 1
+        }
+    }
+    let avg_dist = (best_phi + best_ent) / 2.0
+    min_f(1.0 / (1.0 + avg_dist), 1.0)
+}
+
+// ─── Prediction ───
+
+struct Prediction {
+    experiment_type: string,
+    target: string,
+    predicted_phi_delta: float,
+    predicted_entropy_delta: float,
+    predicted_n6_score: float,
+    confidence: float,
+    reasoning: string
+}
+
+struct PredictionResult {
+    pred: Prediction,
+    actual_phi: float,
+    actual_entropy: float,
+    actual_n6: float,
+    accuracy: float,
+    surprise: float
+}
+
+fn predict_experiment(exp_type: string, target: string, history) -> Prediction {
+    // history = [[type_str, phi_delta, entropy_delta], ...]
+    let mut similar_phi = []
+    let mut similar_ent = []
+    let mut i = 0
+    while i < length(history) {
+        let entry = history[i]
+        if entry[0] == exp_type {
+            let similar_phi = similar_phi.push(entry[1])
+            let similar_ent = similar_ent.push(entry[2])
+        }
+        i = i + 1
+    }
+
+    if length(similar_phi) == 0 {
+        return Prediction {
+            experiment_type: exp_type,
+            target: target,
+            predicted_phi_delta: 0.0,
+            predicted_entropy_delta: 0.0,
+            predicted_n6_score: 0.5,
+            confidence: 0.1,
+            reasoning: "No matching history -- baseline prediction"
+        }
+    }
+
+    let n = to_float(length(similar_phi))
+    let mean_phi = mean(similar_phi)
+    let mean_ent = mean(similar_ent)
+    let var_phi = variance(similar_phi, mean_phi)
+    let std_phi = sqrt(var_phi)
+
+    // confidence scales with sample size, inversely with variance
+    let conf_raw = (1.0 - 1.0 / (n + 1.0)) * min_f(1.0 / (1.0 + std_phi), 1.0)
+    let confidence = min_f(conf_raw, 0.95)
+
+    let n6_score = compute_n6_affinity(mean_phi, mean_ent)
+
+    let reasoning = "Based on " + to_string(to_int(n)) + " similar '" + exp_type + "' experiments"
+
+    Prediction {
+        experiment_type: exp_type,
+        target: target,
+        predicted_phi_delta: mean_phi,
+        predicted_entropy_delta: mean_ent,
+        predicted_n6_score: n6_score,
+        confidence: confidence,
+        reasoning: reasoning
+    }
+}
+
+fn evaluate_prediction(pred: Prediction, actual_phi: float, actual_ent: float, actual_n6: float) -> PredictionResult {
+    let phi_err = if abs(actual_phi) > 0.000000000001 {
+        abs((pred.predicted_phi_delta - actual_phi) / abs(actual_phi))
+    } else {
+        abs(pred.predicted_phi_delta)
+    }
+    let ent_err = if abs(actual_ent) > 0.000000000001 {
+        abs((pred.predicted_entropy_delta - actual_ent) / abs(actual_ent))
+    } else {
+        abs(pred.predicted_entropy_delta)
+    }
+    let n6_err = abs((pred.predicted_n6_score - actual_n6) / max_f(1.0, abs(actual_n6)))
+    let mean_err = (phi_err + ent_err + n6_err) / 3.0
+    let accuracy = clamp(1.0 - mean_err, 0.0, 1.0)
+    let surprise = min_f(mean_err, 1.0)
+
+    PredictionResult {
+        pred: pred,
+        actual_phi: actual_phi,
+        actual_entropy: actual_ent,
+        actual_n6: actual_n6,
+        accuracy: accuracy,
+        surprise: surprise
+    }
+}
+
+// ─── Monte Carlo Simulation ───
+
+struct SimConfig {
+    experiment_type: string,
+    target: string,
+    n_simulations: int,
+    noise_level: float,
+    time_steps: int
+}
+
+struct SimResult {
+    mean_phi_delta: float,
+    std_phi_delta: float,
+    mean_entropy_delta: float,
+    percentile_95: float,
+    worst_case: float,
+    best_case: float,
+    convergence_step: int
+}
+
+fn lcg_next(state: float) -> float {
+    // simplified LCG: state * large_prime + offset, mod large_number
+    let raw = state * 6364136223.0 + 1442695040.0
+    raw - floor(raw / 4294967296.0) * 4294967296.0
+}
+
+fn lcg_uniform(state: float) -> float {
+    // returns value in [-0.5, 0.5]
+    let frac = state / 4294967296.0
+    frac - 0.5
+}
+
+fn simulate(config: SimConfig) -> SimResult {
+    let n = max_i(1, config.n_simulations)
+    let steps = max_i(1, config.time_steps)
+    let noise = config.noise_level
+    let base_phi = baseline_phi(config.experiment_type)
+    let base_ent = baseline_entropy(config.experiment_type)
+
+    let mut phi_results = []
+    let mut ent_results = []
+    let mut rng = 42.0 + to_float(length(config.target))
+
+    let mut i = 0
+    while i < n {
+        let mut phi = base_phi
+        let mut entropy = base_ent
+
+        let mut step = 0
+        while step < steps {
+            rng = lcg_next(rng)
+            let r = lcg_uniform(rng)
+            phi = phi + r * noise * max_f(abs(base_phi), 1.0) / (to_float(step) + 1.0)
+            entropy = entropy + r * noise * 0.5 * max_f(abs(base_ent), 1.0) / (to_float(step) + 1.0)
+            step = step + 1
+        }
+
+        let phi_results = phi_results.push(phi)
+        let ent_results = ent_results.push(entropy)
+        rng = rng + to_float(i) * 7.0 + 13.0
+        i = i + 1
+    }
+
+    let mean_phi = mean(phi_results)
+    let mean_ent = mean(ent_results)
+    let var_phi = variance(phi_results, mean_phi)
+    let std_phi = sqrt(var_phi)
+
+    // sort for percentiles
+    let mut sorted = []
+    let mut si = 0
+    while si < n {
+        let sorted = sorted.push(phi_results[si])
+        si = si + 1
+    }
+    // bubble sort
+    let mut pass = 0
+    while pass < n {
+        let mut q = 0
+        while q < n - 1 {
+            if sorted[q] > sorted[q + 1] {
+                let tmp = sorted[q]
+                let sorted = sorted.set(q, sorted[q + 1])
+                let sorted = sorted.set(q + 1, tmp)
+            }
+            q = q + 1
+        }
+        pass = pass + 1
+    }
+
+    let p95_idx = min_i(to_int(to_float(n) * 0.95), n - 1)
+    let percentile_95 = sorted[p95_idx]
+    let worst = sorted[0]
+    let best = sorted[n - 1]
+
+    // convergence detection
+    let mut conv_step = -1
+    let mut running_sum = 0.0
+    let mut prev_mean = 0.0
+    let mut ci = 0
+    while ci < n {
+        running_sum = running_sum + phi_results[ci]
+        let curr_mean = running_sum / to_float(ci + 1)
+        if ci >= 5 {
+            let rel_change = if abs(prev_mean) > 0.000000000001 {
+                abs((curr_mean - prev_mean) / prev_mean)
+            } else {
+                abs(curr_mean)
+            }
+            if rel_change < 0.01 {
+                if conv_step < 0 { conv_step = ci }
+            }
+        }
+        prev_mean = curr_mean
+        ci = ci + 1
+    }
+
+    SimResult {
+        mean_phi_delta: mean_phi,
+        std_phi_delta: std_phi,
+        mean_entropy_delta: mean_ent,
+        percentile_95: percentile_95,
+        worst_case: worst,
+        best_case: best,
+        convergence_step: conv_step
+    }
+}
+
+// ─── Reproduction ───
+
+struct ReproResult {
+    n_repeats: int,
+    results: [float],
+    mean: float,
+    std: float,
+    cv: float,
+    reproducible: bool,
+    outlier_count: int
+}
+
+fn reproduce(exp_type: string, target: string, n_repeats: int, variation: float) -> ReproResult {
+    let n = max_i(1, n_repeats)
+    let base = baseline_phi(exp_type)
+
+    let mut results = []
+    let mut rng = 123.0 + to_float(length(target))
+
+    let mut i = 0
+    while i < n {
+        rng = lcg_next(rng)
+        let r = lcg_uniform(rng)
+        let value = base + r * variation * max_f(abs(base), 1.0)
+        let results = results.push(value)
+        rng = rng + to_float(i) * 11.0 + 7.0
+        i = i + 1
+    }
+
+    let m = mean(results)
+    let var = variance(results, m)
+    let s = sqrt(var)
+    let cv = if abs(m) > 0.000000000001 { s / abs(m) } else { s }
+
+    // outlier detection: |value - mean| > 2 * std
+    let mut outlier_count = 0
+    let mut oi = 0
+    while oi < n {
+        if abs(results[oi] - m) > 2.0 * s {
+            if s > 0.000000000001 {
+                outlier_count = outlier_count + 1
+            }
+        }
+        oi = oi + 1
+    }
+
+    let reproducible = cv < 0.1
+
+    ReproResult {
+        n_repeats: n,
+        results: results,
+        mean: m,
+        std: s,
+        cv: cv,
+        reproducible: reproducible,
+        outlier_count: outlier_count
+    }
+}
+
+// ─── Comparison (A vs B) ───
+
+struct CompareResult {
+    a_name: string,
+    b_name: string,
+    a_score: float,
+    b_score: float,
+    winner: string,
+    effect_size: float
+}
+
+fn compare(a_name: string, a_score: float, b_name: string, b_score: float) -> CompareResult {
+    let diff = a_score - b_score
+    let avg = (abs(a_score) + abs(b_score)) / 2.0
+    let effect = if avg > 0.000000000001 { diff / avg } else { 0.0 }
+
+    let winner = if abs(effect) > 0.5 {
+        if diff > 0.0 { a_name } else { b_name }
+    } else {
+        "Tie"
+    }
+
+    CompareResult {
+        a_name: a_name,
+        b_name: b_name,
+        a_score: a_score,
+        b_score: b_score,
+        winner: winner,
+        effect_size: effect
+    }
+}
+
+// ─── Publish (markdown generation) ───
+
+fn capitalize(s: string) -> string {
+    // simple: return as-is (hexa lacks char manipulation)
+    s
+}
+
+fn publish_markdown(exp_type: string, target: string, pred: Prediction, sim: SimResult, repro: ReproResult) -> string {
+    let mut md = ""
+    md = md + "# NEXUS-6 Discovery: " + exp_type + " on " + target + " -- n=6 Analysis\n\n"
+
+    md = md + "## Abstract\n\n"
+    md = md + "We performed a '" + exp_type + "' experiment on '" + target + "' and analyzed through the n=6 lens.\n\n"
+
+    md = md + "## Prediction\n\n"
+    md = md + "- Predicted phi_delta: " + to_string(pred.predicted_phi_delta) + "\n"
+    md = md + "- Predicted entropy_delta: " + to_string(pred.predicted_entropy_delta) + "\n"
+    md = md + "- Predicted n6_score: " + to_string(pred.predicted_n6_score) + "\n"
+    md = md + "- Confidence: " + to_string(pred.confidence) + "\n"
+    md = md + "- Reasoning: " + pred.reasoning + "\n\n"
+
+    md = md + "## Simulation Results\n\n"
+    md = md + "- Mean phi_delta: " + to_string(sim.mean_phi_delta) + "\n"
+    md = md + "- Std phi_delta: " + to_string(sim.std_phi_delta) + "\n"
+    md = md + "- 95th percentile: " + to_string(sim.percentile_95) + "\n"
+    md = md + "- Range: [" + to_string(sim.worst_case) + ", " + to_string(sim.best_case) + "]\n"
+    if sim.convergence_step >= 0 {
+        md = md + "- Converged at step: " + to_string(sim.convergence_step) + "\n"
+    }
+    md = md + "\n"
+
+    md = md + "## Reproducibility\n\n"
+    md = md + "- Repeats: " + to_string(repro.n_repeats) + "\n"
+    md = md + "- Mean: " + to_string(repro.mean) + "\n"
+    md = md + "- Std: " + to_string(repro.std) + "\n"
+    md = md + "- CV: " + to_string(repro.cv) + "\n"
+    md = md + "- Status: " + (if repro.reproducible { "REPRODUCIBLE" } else { "NOT REPRODUCIBLE" }) + "\n"
+    if repro.outlier_count > 0 {
+        md = md + "- Outliers: " + to_string(repro.outlier_count) + "\n"
+    }
+    md = md + "\n"
+
+    md = md + "## Testable Predictions\n\n"
+    md = md + "1. Repeating '" + exp_type + "' on '" + target + "' should yield similar n=6 alignment\n"
+    md = md + "2. Adjacent experiment types should show comparable n=6 connections\n\n"
+
+    md = md + "---\n*Generated by NEXUS-6 Science Cycle (hexa-native)*\n"
+    md
+}
+
+// ─── CLI ───
+
+fn main() {
+    let a = args()
+    let argc = length(a)
+
+    if argc < 2 {
+        println("Usage:")
+        println("  hexa science.hexa predict <exp_type> <target>")
+        println("  hexa science.hexa simulate <exp_type> <target> [n_sims]")
+        println("  hexa science.hexa validate <exp_type> <target>")
+        println("  hexa science.hexa compare <a_name> <a_score> <b_name> <b_score>")
+        println("  hexa science.hexa publish <exp_type> <target>")
+        return 0
+    }
+
+    let cmd = a[1]
+
+    if cmd == "predict" {
+        if argc < 4 {
+            println("Usage: hexa science.hexa predict <exp_type> <target>")
+            return 1
+        }
+        let exp_type = a[2]
+        let target = a[3]
+
+        // empty history -> baseline prediction
+        let history = []
+        let pred = predict_experiment(exp_type, target, history)
+
+        println("=== Prediction: " + exp_type + " on " + target + " ===")
+        println("  phi_delta: " + to_string(pred.predicted_phi_delta))
+        println("  entropy_delta: " + to_string(pred.predicted_entropy_delta))
+        println("  n6_score: " + to_string(pred.predicted_n6_score))
+        println("  confidence: " + to_string(pred.confidence))
+        println("  reasoning: " + pred.reasoning)
+
+        // also try with synthetic history from baseline
+        let bp = baseline_phi(exp_type)
+        let be = baseline_entropy(exp_type)
+        let synth_history = [
+            [exp_type, bp, be],
+            [exp_type, bp * 1.01, be * 0.99],
+            [exp_type, bp * 0.99, be * 1.01]
+        ]
+        let pred2 = predict_experiment(exp_type, target, synth_history)
+        println("")
+        println("  (with synthetic history)")
+        println("  phi_delta: " + to_string(pred2.predicted_phi_delta))
+        println("  entropy_delta: " + to_string(pred2.predicted_entropy_delta))
+        println("  confidence: " + to_string(pred2.confidence))
+        return 0
+    }
+
+    if cmd == "simulate" {
+        if argc < 4 {
+            println("Usage: hexa science.hexa simulate <exp_type> <target> [n_sims]")
+            return 1
+        }
+        let exp_type = a[2]
+        let target = a[3]
+        let mut n_sims = 100
+        if argc >= 5 {
+            try {
+                n_sims = to_int(to_float(a[4]))
+            } catch e {
+                n_sims = 100
+            }
+        }
+
+        let config = SimConfig {
+            experiment_type: exp_type,
+            target: target,
+            n_simulations: n_sims,
+            noise_level: 0.1,
+            time_steps: 10
+        }
+        let result = simulate(config)
+
+        println("=== Simulation: " + exp_type + " on " + target + " (" + to_string(n_sims) + " runs) ===")
+        println("  Mean phi_delta: " + to_string(result.mean_phi_delta))
+        println("  Std phi_delta: " + to_string(result.std_phi_delta))
+        println("  Mean entropy_delta: " + to_string(result.mean_entropy_delta))
+        println("  95th percentile: " + to_string(result.percentile_95))
+        println("  Range: [" + to_string(result.worst_case) + ", " + to_string(result.best_case) + "]")
+        if result.convergence_step >= 0 {
+            println("  Converged at step: " + to_string(result.convergence_step))
+        } else {
+            println("  Convergence: not detected")
+        }
+        return 0
+    }
+
+    if cmd == "validate" {
+        if argc < 4 {
+            println("Usage: hexa science.hexa validate <exp_type> <target>")
+            return 1
+        }
+        let exp_type = a[2]
+        let target = a[3]
+
+        println("=== Scientific Validation: " + exp_type + " on " + target + " ===")
+        println("")
+
+        // Step 1: Predict
+        let bp = baseline_phi(exp_type)
+        let be = baseline_entropy(exp_type)
+        let history = [
+            [exp_type, bp, be],
+            [exp_type, bp * 1.02, be * 0.98]
+        ]
+        let pred = predict_experiment(exp_type, target, history)
+        println("[1/4] PREDICT")
+        println("  phi_delta: " + to_string(pred.predicted_phi_delta))
+        println("  entropy_delta: " + to_string(pred.predicted_entropy_delta))
+        println("  confidence: " + to_string(pred.confidence))
+        println("")
+
+        // Step 2: Simulate
+        let sim_config = SimConfig {
+            experiment_type: exp_type,
+            target: target,
+            n_simulations: 50,
+            noise_level: 0.1,
+            time_steps: 10
+        }
+        let sim = simulate(sim_config)
+        println("[2/4] SIMULATE (50 Monte Carlo runs)")
+        println("  Mean phi_delta: " + to_string(sim.mean_phi_delta))
+        println("  Std: " + to_string(sim.std_phi_delta))
+        println("  Range: [" + to_string(sim.worst_case) + ", " + to_string(sim.best_case) + "]")
+        println("")
+
+        // Step 3: Evaluate prediction vs simulation
+        let n6_affinity = compute_n6_affinity(sim.mean_phi_delta, sim.mean_entropy_delta)
+        let eval = evaluate_prediction(pred, sim.mean_phi_delta, sim.mean_entropy_delta, n6_affinity)
+        println("[3/4] EVALUATE (prediction vs simulation)")
+        println("  Accuracy: " + to_string(eval.accuracy))
+        println("  Surprise: " + to_string(eval.surprise))
+        println("")
+
+        // Step 4: Reproduce
+        let repro = reproduce(exp_type, target, 20, 0.05)
+        println("[4/4] REPRODUCE (20 repeats, variation=0.05)")
+        println("  Mean: " + to_string(repro.mean))
+        println("  CV: " + to_string(repro.cv))
+        println("  Reproducible: " + to_string(repro.reproducible))
+        println("  Outliers: " + to_string(repro.outlier_count))
+        println("")
+
+        // Verdict
+        let passed = if eval.accuracy > 0.5 {
+            if repro.reproducible { true } else { false }
+        } else {
+            false
+        }
+        if passed {
+            println("VERDICT: VALIDATED (accuracy=" + to_string(eval.accuracy) + ", CV=" + to_string(repro.cv) + ")")
+        } else {
+            println("VERDICT: NOT VALIDATED (accuracy=" + to_string(eval.accuracy) + ", CV=" + to_string(repro.cv) + ")")
+        }
+        return 0
+    }
+
+    if cmd == "compare" {
+        if argc < 6 {
+            println("Usage: hexa science.hexa compare <a_name> <a_score> <b_name> <b_score>")
+            return 1
+        }
+        let a_name = a[2]
+        let mut a_score = 0.0
+        try { a_score = to_float(a[3]) } catch e { println("ERROR: invalid score: " + a[3]); return 1 }
+        let b_name = a[4]
+        let mut b_score = 0.0
+        try { b_score = to_float(a[5]) } catch e { println("ERROR: invalid score: " + a[5]); return 1 }
+
+        let result = compare(a_name, a_score, b_name, b_score)
+        println("=== Comparison: " + a_name + " vs " + b_name + " ===")
+        println("  " + a_name + ": " + to_string(a_score))
+        println("  " + b_name + ": " + to_string(b_score))
+        println("  Effect size: " + to_string(result.effect_size))
+        println("  Winner: " + result.winner)
+        return 0
+    }
+
+    if cmd == "publish" {
+        if argc < 4 {
+            println("Usage: hexa science.hexa publish <exp_type> <target>")
+            return 1
+        }
+        let exp_type = a[2]
+        let target = a[3]
+
+        // generate all sections
+        let bp = baseline_phi(exp_type)
+        let be = baseline_entropy(exp_type)
+        let history = [[exp_type, bp, be], [exp_type, bp * 1.01, be * 0.99]]
+        let pred = predict_experiment(exp_type, target, history)
+
+        let sim_config = SimConfig {
+            experiment_type: exp_type,
+            target: target,
+            n_simulations: 50,
+            noise_level: 0.1,
+            time_steps: 10
+        }
+        let sim = simulate(sim_config)
+        let repro = reproduce(exp_type, target, 20, 0.05)
+        let md = publish_markdown(exp_type, target, pred, sim, repro)
+
+        println(md)
+        return 0
+    }
+
+    println("Unknown command: " + cmd)
+    println("Commands: predict, simulate, validate, compare, publish")
+    1
+}
+
+main()

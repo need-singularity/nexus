@@ -1,0 +1,463 @@
+// mk2_hexa/native/encoder.hexa — 데이터 인코딩 + 벡터화
+// Rust 원본: src/encoder/ (mod.rs, parser.rs, vectorize.rs)
+// 실행: hexa encoder.hexa <command> [args...]
+//
+// CLI:
+//   hexa encoder.hexa encode <file.md>        — 가설 마크다운 → TSV 벡터 행렬
+//   hexa encoder.hexa decode <file.tsv>       — TSV 벡터 → 사람이 읽을 수 있는 형태
+//   hexa encoder.hexa parse <file.md>         — 가설 파싱만 (디버그)
+//   hexa encoder.hexa keys <file.md>          — 추출 가능한 피처 키 목록
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const NAN_MARKER = -999999.0
+
+// ────────────────────────────────────────────────────────────────
+//  단위 제거 (parser.rs strip_units 포팅)
+// ────────────────────────────────────────────────────────────────
+
+// 물리 단위 접미사 리스트
+fn unit_suffixes() -> string {
+    // 긴 것부터 매칭해야 "GPa" 가 "Pa" 보다 먼저 잡힘
+    "GPa|MPa|kPa|Pa|GHz|MHz|kHz|Hz|MeV|keV|eV|mV|kV|V|mA|kA|A|MW|kW|mW|W|nm|mm|cm|km|m|kg|mg|g|ns|ms|us|s|K|T|%"
+}
+
+fn strip_units(value: string) -> string {
+    let v = trim(value)
+    let units = split(unit_suffixes(), "|")
+    let ui = 0
+    while ui < length(units) {
+        let unit = units[ui]
+        if ends_with(v, unit) {
+            let num_part = trim(substring(v, 0, length(v) - length(unit)))
+            // 숫자인지 확인
+            try {
+                let test = to_float(num_part)
+                return num_part
+            } catch e {
+                // 숫자가 아니면 단위 제거하지 않음
+            }
+        }
+        ui = ui + 1
+    }
+    return v
+}
+
+// ────────────────────────────────────────────────────────────────
+//  가설 파서 (parser.rs parse_hypotheses 포팅)
+//  입력: 마크다운 텍스트
+//  형식: ## H-XX-NN: Title
+//        - Key = Value
+//
+//  반환: 파이프+탭 인코딩 문자열
+//    엔트리 구분: "\n\n" (이중 개행)
+//    키=값 구분: "\t" (탭)
+// ────────────────────────────────────────────────────────────────
+
+fn parse_hypotheses(content: string) -> string {
+    let lines = split(content, "\n")
+    let entries = ""
+    let current = ""
+    let in_entry = false
+
+    let li = 0
+    while li < length(lines) {
+        let line = trim(lines[li])
+
+        // 가설 헤더: ## H-XX-NN: Title
+        if starts_with(line, "## H-") {
+            if find(line, ":") >= 0 {
+                // 이전 엔트리 저장
+                if in_entry {
+                    if length(entries) > 0 {
+                        entries = entries + "\n\n"
+                    }
+                    entries = entries + current
+                }
+                // 새 엔트리 시작
+                // "## H-SC-01: Title" → id="H-SC-01", title="Title"
+                let stripped = line
+                // ## 제거
+                while starts_with(stripped, "#") {
+                    stripped = substring(stripped, 1, length(stripped))
+                }
+                stripped = trim(stripped)
+                let colon_pos = find(stripped, ":")
+                let id = trim(substring(stripped, 0, colon_pos))
+                let title = trim(substring(stripped, colon_pos + 1, length(stripped)))
+                current = "id=" + id + "\ttitle=" + title
+                in_entry = true
+            }
+        }
+        // 키-값 줄: - Key = Value
+        else if starts_with(line, "- ") {
+            if in_entry {
+                if find(line, "=") >= 0 {
+                    let kv = trim(substring(line, 2, length(line)))
+                    let eq_pos = find(kv, "=")
+                    let key = trim(substring(kv, 0, eq_pos))
+                    let raw_val = trim(substring(kv, eq_pos + 1, length(kv)))
+                    let clean_val = strip_units(raw_val)
+                    current = current + "\t" + key + "=" + clean_val
+                }
+            }
+        }
+        li = li + 1
+    }
+
+    // 마지막 엔트리
+    if in_entry {
+        if length(entries) > 0 {
+            entries = entries + "\n\n"
+        }
+        entries = entries + current
+    }
+
+    return entries
+}
+
+// 파싱 결과에서 엔트리 수 세기
+fn count_entries(parsed: string) -> int {
+    if length(parsed) == 0 { return 0 }
+    let parts = split(parsed, "\n\n")
+    return length(parts)
+}
+
+// 엔트리에서 특정 키 값 추출
+fn get_field(entry: string, key: string) -> string {
+    let fields = split(entry, "\t")
+    let fi = 0
+    while fi < length(fields) {
+        let field = fields[fi]
+        let eq = find(field, "=")
+        if eq >= 0 {
+            let k = substring(field, 0, eq)
+            if k == key {
+                return substring(field, eq + 1, length(field))
+            }
+        }
+        fi = fi + 1
+    }
+    return ""
+}
+
+// 모든 엔트리에서 고유 키 수집
+fn collect_keys(parsed: string) -> string {
+    if length(parsed) == 0 { return "" }
+    let entry_strs = split(parsed, "\n\n")
+    let keys = []
+    let ei = 0
+    while ei < length(entry_strs) {
+        let fields = split(entry_strs[ei], "\t")
+        let fi = 0
+        while fi < length(fields) {
+            let field = fields[fi]
+            let eq = find(field, "=")
+            if eq >= 0 {
+                let k = substring(field, 0, eq)
+                // 중복 체크
+                let dup = false
+                let ki = 0
+                while ki < length(keys) {
+                    if keys[ki] == k { dup = true }
+                    ki = ki + 1
+                }
+                if !dup { keys = keys.push(k) }
+            }
+            fi = fi + 1
+        }
+        ei = ei + 1
+    }
+    // 파이프 구분 문자열로 반환
+    let out = ""
+    let oi = 0
+    while oi < length(keys) {
+        if oi > 0 { out = out + "|" }
+        out = out + keys[oi]
+        oi = oi + 1
+    }
+    return out
+}
+
+// ────────────────────────────────────────────────────────────────
+//  벡터화 (vectorize.rs 포팅)
+//  피처 키 리스트 + 파싱 결과 → TSV 행렬
+//  비숫자/누락 → NAN_MARKER (-999999.0)
+// ────────────────────────────────────────────────────────────────
+
+fn vectorize(parsed: string, feature_keys: string) -> string {
+    if length(parsed) == 0 { return "" }
+
+    let entry_strs = split(parsed, "\n\n")
+    let keys = split(feature_keys, "|")
+
+    // 헤더 행
+    let out = ""
+    let ki = 0
+    while ki < length(keys) {
+        if ki > 0 { out = out + "\t" }
+        out = out + keys[ki]
+        ki = ki + 1
+    }
+    out = out + "\n"
+
+    // 데이터 행
+    let ei = 0
+    while ei < length(entry_strs) {
+        let entry = entry_strs[ei]
+        let row = ""
+        let ri = 0
+        while ri < length(keys) {
+            if ri > 0 { row = row + "\t" }
+            let val_str = get_field(entry, keys[ri])
+            if length(val_str) == 0 {
+                row = row + to_string(NAN_MARKER)
+            } else {
+                try {
+                    let fval = to_float(val_str)
+                    row = row + to_string(fval)
+                } catch e {
+                    // 비숫자 → NAN 마커
+                    row = row + to_string(NAN_MARKER)
+                }
+            }
+            ri = ri + 1
+        }
+        out = out + row + "\n"
+        ei = ei + 1
+    }
+
+    return out
+}
+
+// ────────────────────────────────────────────────────────────────
+//  디코드: TSV 벡터 → 사람이 읽을 수 있는 형태
+// ────────────────────────────────────────────────────────────────
+
+fn decode_tsv(content: string) -> string {
+    let lines = split(content, "\n")
+    if length(lines) < 2 { return "[WARN] 헤더+데이터 최소 2줄 필요" }
+
+    let headers = split(trim(lines[0]), "\t")
+    let out = "=== Decoded Vectors ===\n"
+
+    let li = 1
+    let entry_num = 0
+    while li < length(lines) {
+        let line = trim(lines[li])
+        if length(line) == 0 {
+            li = li + 1
+            continue
+        }
+        entry_num = entry_num + 1
+        let vals = split(line, "\t")
+        out = out + "\n--- Entry #" + to_string(entry_num) + " ---\n"
+        let vi = 0
+        while vi < length(headers) {
+            let val = ""
+            if vi < length(vals) { val = vals[vi] } else { val = "(missing)" }
+            // NAN 마커 표시
+            try {
+                let fv = to_float(val)
+                if fv == NAN_MARKER {
+                    val = "NaN (missing)"
+                }
+            } catch e {}
+            out = out + "  " + headers[vi] + " = " + val + "\n"
+            vi = vi + 1
+        }
+        li = li + 1
+    }
+
+    out = out + "\nTotal entries: " + to_string(entry_num) + "\n"
+    return out
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 메인
+// ────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv = args()
+
+    if length(argv) < 2 {
+        println("encoder.hexa — 가설 데이터 인코딩 + 벡터화 (n=6)")
+        println("")
+        println("Usage:")
+        println("  hexa encoder.hexa encode <file.md>   — 가설 마크다운 → TSV 벡터 행렬")
+        println("  hexa encoder.hexa decode <file.tsv>   — TSV 벡터 → 읽기 편한 형태")
+        println("  hexa encoder.hexa parse <file.md>    — 가설 파싱만 (디버그)")
+        println("  hexa encoder.hexa keys <file.md>     — 추출 가능한 피처 키 목록")
+        println("")
+        println("입력 형식 (마크다운):")
+        println("  ## H-SC-01: Hypothesis Title")
+        println("  - Tc = 39 K")
+        println("  - Pressure = 0 GPa")
+        println("")
+        println("출력 (encode): TSV 행렬, 비숫자/누락 → " + to_string(NAN_MARKER))
+        return 0
+    }
+
+    let cmd = argv[1]
+
+    if cmd == "encode" {
+        if length(argv) < 3 {
+            println("[ERROR] 파일 경로 필요: hexa encoder.hexa encode <file.md>")
+            return 1
+        }
+        let path = argv[2]
+        let content = ""
+        try {
+            content = read_file(path)
+        } catch e {
+            println("[ERROR] 파일 읽기 실패: " + path)
+            return 1
+        }
+
+        let parsed = parse_hypotheses(content)
+        let n_entries = count_entries(parsed)
+        if n_entries == 0 {
+            println("[WARN] 가설 엔트리 없음 (## H-XX-NN: 형식 확인)")
+            return 1
+        }
+
+        // 수치 키만 추출 (id, title 제외)
+        let all_keys = collect_keys(parsed)
+        let key_list = split(all_keys, "|")
+        let numeric_keys = ""
+        let ki = 0
+        while ki < length(key_list) {
+            let k = key_list[ki]
+            if k != "id" {
+                if k != "title" {
+                    if length(numeric_keys) > 0 { numeric_keys = numeric_keys + "|" }
+                    numeric_keys = numeric_keys + k
+                }
+            }
+            ki = ki + 1
+        }
+
+        if length(numeric_keys) == 0 {
+            println("[WARN] 수치 피처 없음")
+            return 1
+        }
+
+        println("// Encoded from: " + path)
+        println("// Entries: " + to_string(n_entries))
+        println("// Features: " + numeric_keys)
+        println("")
+        let matrix = vectorize(parsed, numeric_keys)
+        print(matrix)
+
+        // 파일 출력 옵션
+        if length(argv) >= 4 {
+            let out_path = argv[3]
+            try {
+                write_file(out_path, matrix)
+                println("\n// Saved to: " + out_path)
+            } catch e {
+                println("\n[WARN] 파일 저장 실패: " + out_path)
+            }
+        }
+
+    } else if cmd == "decode" {
+        if length(argv) < 3 {
+            println("[ERROR] 파일 경로 필요: hexa encoder.hexa decode <file.tsv>")
+            return 1
+        }
+        let path = argv[2]
+        let content = ""
+        try {
+            content = read_file(path)
+        } catch e {
+            println("[ERROR] 파일 읽기 실패: " + path)
+            return 1
+        }
+        println(decode_tsv(content))
+
+    } else if cmd == "parse" {
+        if length(argv) < 3 {
+            println("[ERROR] 파일 경로 필요")
+            return 1
+        }
+        let path = argv[2]
+        let content = ""
+        try {
+            content = read_file(path)
+        } catch e {
+            println("[ERROR] 파일 읽기 실패: " + path)
+            return 1
+        }
+
+        let parsed = parse_hypotheses(content)
+        let n_entries = count_entries(parsed)
+        println("=== Parsed Hypotheses (" + to_string(n_entries) + " entries) ===")
+        println("")
+
+        if n_entries == 0 {
+            println("(없음)")
+            return 0
+        }
+
+        let entry_strs = split(parsed, "\n\n")
+        let ei = 0
+        while ei < length(entry_strs) {
+            let entry = entry_strs[ei]
+            let id = get_field(entry, "id")
+            let title = get_field(entry, "title")
+            println("#" + to_string(ei + 1) + " [" + id + "] " + title)
+            let fields = split(entry, "\t")
+            let fi = 0
+            while fi < length(fields) {
+                let field = fields[fi]
+                let eq = find(field, "=")
+                if eq >= 0 {
+                    let k = substring(field, 0, eq)
+                    if k != "id" {
+                        if k != "title" {
+                            let v = substring(field, eq + 1, length(field))
+                            println("  " + k + " = " + v)
+                        }
+                    }
+                }
+                fi = fi + 1
+            }
+            println("")
+            ei = ei + 1
+        }
+
+    } else if cmd == "keys" {
+        if length(argv) < 3 {
+            println("[ERROR] 파일 경로 필요")
+            return 1
+        }
+        let path = argv[2]
+        let content = ""
+        try {
+            content = read_file(path)
+        } catch e {
+            println("[ERROR] 파일 읽기 실패: " + path)
+            return 1
+        }
+
+        let parsed = parse_hypotheses(content)
+        let all_keys = collect_keys(parsed)
+        println("=== Feature Keys ===")
+        let key_list = split(all_keys, "|")
+        let ki = 0
+        while ki < length(key_list) {
+            println("  " + key_list[ki])
+            ki = ki + 1
+        }
+        println("\nTotal: " + to_string(length(key_list)))
+
+    } else {
+        println("[ERROR] 알 수 없는 명령: " + cmd)
+        println("  encode | decode | parse | keys")
+        return 1
+    }
+
+    return 0
+}
+
+main()

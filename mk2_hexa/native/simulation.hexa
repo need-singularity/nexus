@@ -1,0 +1,557 @@
+// mk2_hexa/native/simulation.hexa — 시뮬레이션 엔진 (가설 테스트)
+// Rust 원본: src/simulation/mod.rs
+// 실행: hexa simulation.hexa run <hypothesis> [steps]
+//
+// CLI:
+//   hexa simulation.hexa run <hypothesis> [steps]    — 가설 수렴 테스트
+//   hexa simulation.hexa sweep <param_spec>          — 파라미터 그리드 탐색
+//   hexa simulation.hexa sensitivity <baseline>      — 민감도 분석
+//   hexa simulation.hexa adversarial <baseline> [budget] — 적대적 시뮬레이션
+//   hexa simulation.hexa landscape [dims] [grid]     — n=6 어트랙터 지형
+
+// ─── comptime 상수 ───
+comptime const N = 6.0
+comptime const SIGMA = 12.0
+comptime const PHI = 2.0
+comptime const TAU = 4.0
+comptime const J2 = 24.0
+comptime const SIGMA_TAU = 48.0
+comptime const SIGMA_SQ = 144.0
+comptime const META_FP = 0.333333333
+
+// n=6 어트랙터: n, sigma, J2, sigma*tau, sigma^2
+fn n6_attractors() -> [float] {
+    [N, SIGMA, J2, SIGMA_TAU, SIGMA_SQ]
+}
+
+// ────────────────────────────────────────────────────────────────
+//  결정론적 LCG PRNG
+// ────────────────────────────────────────────────────────────────
+
+struct Lcg {
+    state: int
+}
+
+fn lcg_new(seed: int) -> Lcg {
+    Lcg { state: seed }
+}
+
+fn lcg_next_centered(rng: Lcg) -> float {
+    // LCG: state = state * 6364136223846793005 + 1442695040888963407
+    // hexa에서는 단순 해시로 대체
+    let s = rng.state
+    rng.state = (s * 1103515245 + 12345) % 2147483647
+    to_float(rng.state % 10000) / 10000.0 - 0.5
+}
+
+fn lcg_next_unit(rng: Lcg) -> float {
+    lcg_next_centered(rng) + 0.5
+}
+
+// ────────────────────────────────────────────────────────────────
+//  파라미터 범위
+// ────────────────────────────────────────────────────────────────
+
+struct ParamRange {
+    name: string,
+    min: float,
+    max: float,
+    steps: int
+}
+
+fn grid_values(r: ParamRange) -> [float] {
+    let n = if r.steps < 1 { 1 } else { r.steps }
+    if n == 1 {
+        return [(r.min + r.max) / PHI]
+    }
+    let mut vals = []
+    let mut i = 0
+    while i < n {
+        let v = r.min + (r.max - r.min) * to_float(i) / to_float(n - 1)
+        vals = vals.push(v)
+        i = i + 1
+    }
+    vals
+}
+
+// ────────────────────────────────────────────────────────────────
+//  결과 구조체
+// ────────────────────────────────────────────────────────────────
+
+struct SweepResult {
+    best_params: [float],
+    best_value: float,
+    total_evaluated: int
+}
+
+struct SensitivityEntry {
+    name: string,
+    derivative: float,
+    relative_importance: float
+}
+
+struct ConvergenceResult {
+    converged: bool,
+    attractor: float,
+    final_distance: float,
+    convergence_step: int,
+    trajectory_len: int
+}
+
+struct AdversarialResult {
+    worst_case_value: float,
+    best_case_value: float,
+    robustness: float,
+    n_perturbations: int
+}
+
+// ────────────────────────────────────────────────────────────────
+//  수렴 테스트: 어트랙터에 수렴하는지 검사
+// ────────────────────────────────────────────────────────────────
+
+fn convergence_test(initial: float, max_steps: int, target: float, rate: float) -> ConvergenceResult {
+    let attractors = n6_attractors()
+    let threshold = 0.01
+    let patience = 6  // n=6
+
+    let mut value = initial
+    let mut consecutive_close = 0
+    let mut nearest = 0.0
+    let mut conv_step = -1
+    let mut traj_len = 1
+
+    let mut step = 0
+    while step < max_steps {
+        // step_fn: x + rate * (target - x)
+        value = value + rate * (target - value)
+        traj_len = traj_len + 1
+
+        // 가장 가까운 어트랙터 찾기
+        let mut min_dist = 999999.0
+        let mut closest = 0.0
+        let mut ai = 0
+        while ai < len(attractors) {
+            let a = attractors[ai]
+            let denom = if a < 0.0 { 0.0 - a } else { a }
+            let actual_denom = if denom < 0.000000000001 { 0.000000000001 } else { denom }
+            let raw_diff = value - a
+            let abs_diff = if raw_diff < 0.0 { 0.0 - raw_diff } else { raw_diff }
+            let d = abs_diff / actual_denom
+            if d < min_dist {
+                min_dist = d
+                closest = a
+            }
+            ai = ai + 1
+        }
+
+        if min_dist < threshold {
+            consecutive_close = consecutive_close + 1
+            nearest = closest
+            if consecutive_close >= patience && conv_step < 0 {
+                conv_step = step + 1 - patience
+            }
+        } else {
+            consecutive_close = 0
+        }
+
+        step = step + 1
+    }
+
+    // 최종 거리
+    let mut final_dist = 999999.0
+    let mut fi = 0
+    while fi < len(attractors) {
+        let a = attractors[fi]
+        let denom2 = if a < 0.0 { 0.0 - a } else { a }
+        let actual_d2 = if denom2 < 0.000000000001 { 0.000000000001 } else { denom2 }
+        let raw2 = value - a
+        let abs2 = if raw2 < 0.0 { 0.0 - raw2 } else { raw2 }
+        let dd = abs2 / actual_d2
+        if dd < final_dist { final_dist = dd }
+        fi = fi + 1
+    }
+
+    ConvergenceResult {
+        converged: conv_step >= 0,
+        attractor: nearest,
+        final_distance: final_dist,
+        convergence_step: conv_step,
+        trajectory_len: traj_len
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  파라미터 스윕 (2D 그리드)
+// ────────────────────────────────────────────────────────────────
+
+fn parameter_sweep_2d(r1: ParamRange, r2: ParamRange, target_x: float, target_y: float) -> SweepResult {
+    let g1 = grid_values(r1)
+    let g2 = grid_values(r2)
+    let total = len(g1) * len(g2)
+
+    let mut best_value = -999999999.0
+    let mut best_p = [0.0, 0.0]
+
+    let mut i = 0
+    while i < len(g1) {
+        let mut j = 0
+        while j < len(g2) {
+            // 목적 함수: -((x - target_x)^2 + (y - target_y)^2)
+            let dx = g1[i] - target_x
+            let dy = g2[j] - target_y
+            let val = 0.0 - (dx * dx + dy * dy)
+            if val > best_value {
+                best_value = val
+                best_p = [g1[i], g2[j]]
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    SweepResult {
+        best_params: best_p,
+        best_value: best_value,
+        total_evaluated: total
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  민감도 분석 (중심 유한차분)
+// ────────────────────────────────────────────────────────────────
+
+fn sensitivity_analysis(baseline: [float], names: [string], delta: float) -> [SensitivityEntry] {
+    let actual_delta = if delta <= 0.0 { 0.01 } else { delta }
+    let n_params = len(baseline)
+
+    // 기준값: sum of squares (테스트용 목적함수)
+    let mut baseline_val = 0.0
+    let mut bi = 0
+    while bi < n_params {
+        baseline_val = baseline_val + baseline[bi] * baseline[bi]
+        bi = bi + 1
+    }
+
+    let mut results = []
+    let mut abs_sum = 0.0
+
+    let mut i = 0
+    while i < n_params {
+        let name = if i < len(names) { names[i] } else { "param_" + to_string(i) }
+        let base_abs = if baseline[i] < 0.0 { 0.0 - baseline[i] } else { baseline[i] }
+        let h = actual_delta * (if base_abs > 1.0 { base_abs } else { 1.0 })
+
+        // f(p+h)
+        let mut f_plus = 0.0
+        let mut pi = 0
+        while pi < n_params {
+            let v = if pi == i { baseline[pi] + h } else { baseline[pi] }
+            f_plus = f_plus + v * v
+            pi = pi + 1
+        }
+        // f(p-h)
+        let mut f_minus = 0.0
+        let mut mi = 0
+        while mi < n_params {
+            let v2 = if mi == i { baseline[mi] - h } else { baseline[mi] }
+            f_minus = f_minus + v2 * v2
+            mi = mi + 1
+        }
+
+        let deriv = (f_plus - f_minus) / (PHI * h)
+        let abs_deriv = if deriv < 0.0 { 0.0 - deriv } else { deriv }
+        abs_sum = abs_sum + abs_deriv
+        results = results.push(SensitivityEntry { name: name, derivative: deriv, relative_importance: abs_deriv })
+        i = i + 1
+    }
+
+    // relative_importance 정규화
+    let mut normalized = []
+    let mut ni = 0
+    while ni < len(results) {
+        let rel = if abs_sum > 0.0000000000001 { results[ni].relative_importance / abs_sum } else { 1.0 / to_float(n_params) }
+        normalized = normalized.push(SensitivityEntry {
+            name: results[ni].name,
+            derivative: results[ni].derivative,
+            relative_importance: rel
+        })
+        ni = ni + 1
+    }
+    normalized
+}
+
+// ────────────────────────────────────────────────────────────────
+//  적대적 시뮬레이션
+// ────────────────────────────────────────────────────────────────
+
+fn adversarial_sim(baseline: [float], budget: float, n_samples: int, seed: int) -> AdversarialResult {
+    let n_dims = len(baseline)
+    let mut rng = lcg_new(seed)
+
+    // 기준값
+    let mut baseline_val = 1.0
+    let mut bi2 = 0
+    while bi2 < n_dims {
+        baseline_val = baseline_val * baseline[bi2]
+        bi2 = bi2 + 1
+    }
+
+    let mut worst = baseline_val
+    let mut best = baseline_val
+
+    let mut s = 0
+    while s < n_samples {
+        let mut perturbed_val = 1.0
+        let mut di = 0
+        while di < n_dims {
+            let p = lcg_next_centered(rng) * PHI * budget
+            perturbed_val = perturbed_val * (baseline[di] + p)
+            di = di + 1
+        }
+        if perturbed_val < worst { worst = perturbed_val }
+        if perturbed_val > best { best = perturbed_val }
+        s = s + 1
+    }
+
+    let range = best - worst
+    let abs_range = if range < 0.0 { 0.0 - range } else { range }
+    let scale = if best < 0.0 { 0.0 - best } else { best }
+    let actual_scale = if scale < 0.000000000001 { 0.000000000001 } else { scale }
+    let mut rob = 1.0 - abs_range / actual_scale
+    if rob < 0.0 { rob = 0.0 }
+    if rob > 1.0 { rob = 1.0 }
+
+    AdversarialResult {
+        worst_case_value: worst,
+        best_case_value: best,
+        robustness: rob,
+        n_perturbations: n_samples
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  n=6 어트랙터 지형 매핑
+// ────────────────────────────────────────────────────────────────
+
+struct LandscapePoint {
+    coords: [float],
+    basin_depth: float
+}
+
+fn n6_landscape(dims: int, grid_per_dim: int) -> [LandscapePoint] {
+    let actual_dims = if dims < 1 { 1 } else if dims > 4 { 4 } else { dims }
+    let actual_grid = if grid_per_dim < 2 { 2 } else { grid_per_dim }
+    let attractors = n6_attractors()
+    let range_max = SIGMA_SQ  // 144
+
+    // 1D/2D만 지원 (고차원은 조합 폭발)
+    let mut results = []
+
+    if actual_dims == 1 {
+        let mut i = 0
+        while i < actual_grid {
+            let x = range_max * to_float(i) / to_float(actual_grid - 1)
+            let mut min_dist = 999999.0
+            let mut ai = 0
+            while ai < len(attractors) {
+                let d = x - attractors[ai]
+                let abs_d = if d < 0.0 { 0.0 - d } else { d }
+                if abs_d < min_dist { min_dist = abs_d }
+                ai = ai + 1
+            }
+            let depth = 1.0 / (1.0 + min_dist)
+            results = results.push(LandscapePoint { coords: [x], basin_depth: depth })
+            i = i + 1
+        }
+    } else {
+        // 2D
+        let mut i = 0
+        while i < actual_grid {
+            let x = range_max * to_float(i) / to_float(actual_grid - 1)
+            let mut j = 0
+            while j < actual_grid {
+                let y = range_max * to_float(j) / to_float(actual_grid - 1)
+                let mut min_dist = 999999.0
+                let mut ai = 0
+                while ai < len(attractors) {
+                    let a = attractors[ai]
+                    let dx = x - a
+                    let dy = y - a
+                    let dist2 = dx * dx + dy * dy
+                    // sqrt 근사
+                    let mut guess = dist2 / 2.0
+                    if guess < 1.0 { guess = 1.0 }
+                    let mut iter = 0
+                    while iter < 10 {
+                        guess = (guess + dist2 / guess) / 2.0
+                        iter = iter + 1
+                    }
+                    if guess < min_dist { min_dist = guess }
+                    ai = ai + 1
+                }
+                let depth = 1.0 / (1.0 + min_dist)
+                results = results.push(LandscapePoint { coords: [x, y], basin_depth: depth })
+                j = j + 1
+            }
+            i = i + 1
+        }
+    }
+    results
+}
+
+// ────────────────────────────────────────────────────────────────
+//  검증
+// ────────────────────────────────────────────────────────────────
+
+// 수렴 테스트: 0 -> sigma=12, rate=0.1
+let conv = convergence_test(0.0, 200, SIGMA, 0.1)
+assert conv.converged
+assert conv.attractor == SIGMA
+assert conv.final_distance < 0.02
+println("=== simulation verified ===")
+println("convergence to sigma=12:", conv.converged, "at step:", conv.convergence_step)
+println("final_distance:", conv.final_distance)
+
+// 파라미터 스윕
+let sweep = parameter_sweep_2d(
+    ParamRange { name: "x", min: 0.0, max: SIGMA, steps: 13 },
+    ParamRange { name: "y", min: 0.0, max: J2, steps: 25 },
+    N, SIGMA
+)
+assert sweep.total_evaluated == 325
+let dx_best = sweep.best_params[0] - N
+let abs_dx = if dx_best < 0.0 { 0.0 - dx_best } else { dx_best }
+assert abs_dx < 1.5
+println("sweep best:", sweep.best_params[0], sweep.best_params[1], "value:", sweep.best_value)
+
+// 민감도
+let sens = sensitivity_analysis([N, SIGMA], ["x", "y"], 0.01)
+assert len(sens) == 2
+let rel_sum = sens[0].relative_importance + sens[1].relative_importance
+let sum_err = rel_sum - 1.0
+let abs_sum_err = if sum_err < 0.0 { 0.0 - sum_err } else { sum_err }
+assert abs_sum_err < 0.0001
+println("sensitivity x:", sens[0].derivative, "y:", sens[1].derivative)
+
+// 적대적
+let adv = adversarial_sim([N, SIGMA], 1.0, 100, 42)
+assert adv.worst_case_value < N * SIGMA
+assert adv.robustness >= 0.0
+assert adv.robustness <= 1.0
+println("adversarial worst:", adv.worst_case_value, "best:", adv.best_case_value, "robustness:", adv.robustness)
+
+// 지형
+let land = n6_landscape(1, 25)
+assert len(land) == 25
+println("landscape 1D points:", len(land))
+
+theorem simulation_convergence {
+    forall rate: float, rate > 0.0 => convergence_bounded(rate)
+}
+
+proof simulation_invariants {
+    invariant attractors_non_empty()
+    invariant robustness_in_01()
+    invariant basin_depth_positive()
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 메인
+// ────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv = args()
+    if len(argv) < 2 {
+        println("Usage: hexa simulation.hexa <run|sweep|sensitivity|adversarial|landscape> [args...]")
+        return
+    }
+    let cmd = argv[1]
+
+    match cmd {
+        "run" -> {
+            let hypothesis = if len(argv) >= 3 { argv[2] } else { "sigma" }
+            let mut steps = 200
+            if len(argv) >= 4 { try { steps = to_int(argv[3]) } catch {} }
+
+            // 가설에 따른 수렴 목표 결정
+            let target = match hypothesis {
+                "n"        -> N,
+                "sigma"    -> SIGMA,
+                "j2"       -> J2,
+                "sigma_tau" -> SIGMA_TAU,
+                "sigma_sq" -> SIGMA_SQ,
+                _          -> SIGMA
+            }
+
+            println("Hypothesis:", hypothesis, "-> target:", target)
+            println("Steps:", steps)
+
+            let result = convergence_test(0.0, steps, target, 0.1)
+            println("Converged:", result.converged)
+            if result.converged {
+                println("Attractor:", result.attractor)
+                println("Convergence step:", result.convergence_step)
+            }
+            println("Final distance:", result.final_distance)
+            println("Trajectory length:", result.trajectory_len)
+        },
+        "sweep" -> {
+            println("Parameter sweep: (x, y) -> n=6 attractors")
+            let r1 = ParamRange { name: "x", min: 0.0, max: SIGMA, steps: 13 }
+            let r2 = ParamRange { name: "y", min: 0.0, max: J2, steps: 25 }
+            let result = parameter_sweep_2d(r1, r2, N, SIGMA)
+            println("Total evaluated:", result.total_evaluated)
+            println("Best params: x=", result.best_params[0], "y=", result.best_params[1])
+            println("Best value:", result.best_value)
+        },
+        "sensitivity" -> {
+            let mut base = [N, SIGMA]
+            let names = ["x", "y"]
+            let result = sensitivity_analysis(base, names, 0.01)
+            println("Sensitivity analysis (baseline: [" + to_string(N) + ", " + to_string(SIGMA) + "]):")
+            let mut i = 0
+            while i < len(result) {
+                println("  " + result[i].name + ": derivative=" + to_string(result[i].derivative) + " importance=" + to_string(result[i].relative_importance))
+                i = i + 1
+            }
+        },
+        "adversarial" -> {
+            let mut base = [N, SIGMA]
+            let mut budget = 1.0
+            if len(argv) >= 3 { try { budget = to_float(argv[2]) } catch {} }
+            let result = adversarial_sim(base, budget, 100, 42)
+            println("Adversarial simulation (budget=" + to_string(budget) + "):")
+            println("  Worst case:", result.worst_case_value)
+            println("  Best case:", result.best_case_value)
+            println("  Robustness:", result.robustness)
+            println("  Perturbations tested:", result.n_perturbations)
+        },
+        "landscape" -> {
+            let mut dims = 1
+            let mut grid = 25
+            if len(argv) >= 3 { try { dims = to_int(argv[2]) } catch {} }
+            if len(argv) >= 4 { try { grid = to_int(argv[3]) } catch {} }
+            let result = n6_landscape(dims, grid)
+            println("n=6 attractor landscape: dims=" + to_string(dims) + " grid=" + to_string(grid))
+            println("Points:", len(result))
+            // 상위 basin_depth 출력
+            let mut best_depth = 0.0
+            let mut best_coord = []
+            let mut i = 0
+            while i < len(result) {
+                if result[i].basin_depth > best_depth {
+                    best_depth = result[i].basin_depth
+                    best_coord = result[i].coords
+                }
+                i = i + 1
+            }
+            println("Peak basin depth:", best_depth, "at:", best_coord)
+        },
+        _ -> {
+            println("Unknown command:", cmd)
+            println("Usage: hexa simulation.hexa <run|sweep|sensitivity|adversarial|landscape> [args...]")
+        }
+    }
+}
+
+main()

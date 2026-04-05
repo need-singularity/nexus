@@ -1,0 +1,495 @@
+// mk2_hexa/native/materials.hexa — 재료 과학 n=6 분석
+// Rust 원본: src/materials/ (mod.rs, db.rs, dft_pipeline.rs, mp_client.rs)
+// 실행: hexa materials.hexa analyze <material_data_json>
+//
+// CLI:
+//   hexa materials.hexa analyze <material_json>     — DFT 후보 분석 + POSCAR/QE 생성
+//   hexa materials.hexa rank <material_json>        — 후보 랭킹 (score = Ef - 0.5*Eg)
+//   hexa materials.hexa poscar <material_json>      — VASP POSCAR 출력
+//   hexa materials.hexa qe <material_json>          — Quantum ESPRESSO pw.x 입력 출력
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const SIGMA = 12
+comptime const PHI = 2
+comptime const TAU = 4
+comptime const ANG_TO_BOHR = 1.8897259886
+comptime const DEFAULT_ECUTWFC = 60.0
+comptime const DEFAULT_LATTICE = 4.0
+
+// ────────────────────────────────────────────────────────────────
+//  격자 상수 테이블 (Angstrom)
+// ────────────────────────────────────────────────────────────────
+
+fn lattice_constant(el: string) -> float {
+    match el {
+        "Li" -> 3.51, "Na" -> 4.29, "O" -> 2.46, "S" -> 3.13,
+        "Fe" -> 2.87, "Co" -> 2.51, "Ni" -> 3.52, "Mn" -> 8.91,
+        "Ti" -> 2.95, "Zr" -> 3.23, "Al" -> 4.05, "Si" -> 5.43,
+        "Cu" -> 3.61, "Zn" -> 2.66, "Mg" -> 3.21, "Ca" -> 5.58,
+        "Ba" -> 5.02, "Sr" -> 6.08, "La" -> 5.30, "Ce" -> 5.16,
+        "P" -> 3.31, "Se" -> 4.36, "Te" -> 4.45,
+        _ -> 0.0
+    }
+}
+
+fn approx_mass(el: string) -> float {
+    match el {
+        "H" -> 1.008, "Li" -> 6.941, "Be" -> 9.012, "B" -> 10.81,
+        "C" -> 12.011, "N" -> 14.007, "O" -> 15.999, "F" -> 18.998,
+        "Na" -> 22.990, "Mg" -> 24.305, "Al" -> 26.982, "Si" -> 28.086,
+        "P" -> 30.974, "S" -> 32.065, "Cl" -> 35.453, "K" -> 39.098,
+        "Ca" -> 40.078, "Ti" -> 47.867, "V" -> 50.942, "Cr" -> 51.996,
+        "Mn" -> 54.938, "Fe" -> 55.845, "Co" -> 58.933, "Ni" -> 58.693,
+        "Cu" -> 63.546, "Zn" -> 65.38, "Ga" -> 69.723, "Ge" -> 72.63,
+        "Se" -> 78.971, "Sr" -> 87.62, "Zr" -> 91.224, "Nb" -> 92.906,
+        "Mo" -> 95.95, "Ba" -> 137.327, "La" -> 138.905, "Ce" -> 140.116,
+        "Te" -> 127.60,
+        _ -> 50.0
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  DFT 후보 구조체
+// ────────────────────────────────────────────────────────────────
+
+struct DftCandidate {
+    formula: string,
+    elements: [string],
+    spacegroup: string,
+    predicted_bandgap: float,
+    predicted_formation_energy: float
+}
+
+// ────────────────────────────────────────────────────────────────
+//  격자 상수 추정
+// ────────────────────────────────────────────────────────────────
+
+fn estimate_lattice(elements: [string]) -> float {
+    let mut sum = 0.0
+    let mut count = 0
+    let mut i = 0
+    while i < len(elements) {
+        let a = lattice_constant(elements[i])
+        if a > 0.0 {
+            sum = sum + a
+            count = count + 1
+        }
+        i = i + 1
+    }
+    if count > 0 { sum / count } else { DEFAULT_LATTICE }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  구조 타입 추론
+// ────────────────────────────────────────────────────────────────
+
+fn infer_structure(sg: string) -> string {
+    match sg {
+        "Pm-3m" -> "perovskite",
+        "221"   -> "perovskite",
+        "Fd-3m" -> "spinel",
+        "227"   -> "spinel",
+        "Fm-3m" -> "rocksalt",
+        "225"   -> "rocksalt",
+        _       -> "generic"
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  필터링: formation_energy < 0, bandgap >= 0, elements 비어있지 않음
+// ────────────────────────────────────────────────────────────────
+
+fn filter_candidates(candidates: [DftCandidate]) -> [DftCandidate] {
+    let mut result = []
+    let mut i = 0
+    while i < len(candidates) {
+        let c = candidates[i]
+        if c.predicted_formation_energy < 0.0 && c.predicted_bandgap >= 0.0 && len(c.elements) > 0 {
+            result = result.push(c)
+        }
+        i = i + 1
+    }
+    result
+}
+
+// ────────────────────────────────────────────────────────────────
+//  랭킹: score = formation_energy - 0.5 * bandgap (낮을수록 좋음)
+// ────────────────────────────────────────────────────────────────
+
+struct RankEntry {
+    index: int,
+    score: float
+}
+
+fn rank_candidates(candidates: [DftCandidate]) -> [RankEntry] {
+    let mut ranked = []
+    let mut i = 0
+    while i < len(candidates) {
+        let c = candidates[i]
+        let score = c.predicted_formation_energy - 0.5 * c.predicted_bandgap
+        ranked = ranked.push(RankEntry { index: i, score: score })
+        i = i + 1
+    }
+    // 단순 선택 정렬 (오름차순)
+    let mut j = 0
+    while j < len(ranked) {
+        let mut min_idx = j
+        let mut k = j + 1
+        while k < len(ranked) {
+            if ranked[k].score < ranked[min_idx].score {
+                min_idx = k
+            }
+            k = k + 1
+        }
+        if min_idx != j {
+            let tmp = ranked[j]
+            ranked[j] = ranked[min_idx]
+            ranked[min_idx] = tmp
+        }
+        j = j + 1
+    }
+    ranked
+}
+
+// ────────────────────────────────────────────────────────────────
+//  VASP POSCAR 생성
+// ────────────────────────────────────────────────────────────────
+
+fn generate_poscar(c: DftCandidate) -> string {
+    let a = estimate_lattice(c.elements)
+    let stype = infer_structure(c.spacegroup)
+    let el_line = join(c.elements, " ")
+
+    match stype {
+        "perovskite" -> poscar_perovskite(c, a, el_line),
+        "spinel"     -> poscar_spinel(c, a, el_line),
+        "rocksalt"   -> poscar_rocksalt(c, a, el_line),
+        _            -> poscar_generic(c, a, el_line)
+    }
+}
+
+fn poscar_perovskite(c: DftCandidate, a: float, el_line: string) -> string {
+    let counts = if len(c.elements) >= 3 { "1  1  3" } else { repeat_str("1", len(c.elements)) }
+    c.formula + " -- perovskite (DFT candidate)\n" +
+    to_string(a) + "\n" +
+    "1.000000  0.000000  0.000000\n" +
+    "0.000000  1.000000  0.000000\n" +
+    "0.000000  0.000000  1.000000\n" +
+    el_line + "\n" +
+    counts + "\n" +
+    "Direct\n" +
+    "0.000000  0.000000  0.000000\n" +
+    "0.500000  0.500000  0.500000\n" +
+    "0.500000  0.500000  0.000000\n" +
+    "0.500000  0.000000  0.500000\n" +
+    "0.000000  0.500000  0.500000\n"
+}
+
+fn poscar_spinel(c: DftCandidate, a: float, el_line: string) -> string {
+    let counts = if len(c.elements) >= 3 { "2  4  8" } else { repeat_str("2", len(c.elements)) }
+    c.formula + " -- spinel (DFT candidate)\n" +
+    to_string(a) + "\n" +
+    "0.500000  0.500000  0.000000\n" +
+    "0.500000  0.000000  0.500000\n" +
+    "0.000000  0.500000  0.500000\n" +
+    el_line + "\n" +
+    counts + "\n" +
+    "Direct\n" +
+    "0.000000  0.000000  0.000000\n" +
+    "0.250000  0.250000  0.250000\n" +
+    "0.625000  0.625000  0.625000\n" +
+    "0.375000  0.375000  0.375000\n"
+}
+
+fn poscar_rocksalt(c: DftCandidate, a: float, el_line: string) -> string {
+    let counts = if len(c.elements) >= 2 { "1  1" } else { "2" }
+    c.formula + " -- rocksalt (DFT candidate)\n" +
+    to_string(a) + "\n" +
+    "0.500000  0.500000  0.000000\n" +
+    "0.500000  0.000000  0.500000\n" +
+    "0.000000  0.500000  0.500000\n" +
+    el_line + "\n" +
+    counts + "\n" +
+    "Direct\n" +
+    "0.000000  0.000000  0.000000\n" +
+    "0.500000  0.500000  0.500000\n"
+}
+
+fn poscar_generic(c: DftCandidate, a: float, el_line: string) -> string {
+    let counts = repeat_str("1", len(c.elements))
+    c.formula + " -- generic (DFT candidate)\n" +
+    to_string(a) + "\n" +
+    "1.000000  0.000000  0.000000\n" +
+    "0.000000  1.000000  0.000000\n" +
+    "0.000000  0.000000  1.000000\n" +
+    el_line + "\n" +
+    counts + "\n" +
+    "Direct\n" +
+    "0.000000  0.000000  0.000000\n"
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Quantum ESPRESSO pw.x 입력 생성
+// ────────────────────────────────────────────────────────────────
+
+fn generate_qe_input(c: DftCandidate) -> string {
+    let a_bohr = estimate_lattice(c.elements) * ANG_TO_BOHR
+    let nat = len(c.elements)
+    let ecutwfc = DEFAULT_ECUTWFC
+    let ecutrho = ecutwfc * 8.0
+
+    let mut species_lines = ""
+    let mut position_lines = ""
+    let mut i = 0
+    while i < nat {
+        let el = c.elements[i]
+        let mass = approx_mass(el)
+        species_lines = species_lines + "  " + el + "  " + to_string(mass) + "  " + el + ".UPF\n"
+        let frac = if nat > 0 { i / nat } else { 0.0 }
+        position_lines = position_lines + "  " + el + "  " + to_string(frac) + "  " + to_string(frac) + "  " + to_string(frac) + "\n"
+        i = i + 1
+    }
+
+    let prefix = lowercase(c.formula)
+    "&CONTROL\n" +
+    "  calculation = 'scf'\n" +
+    "  prefix      = '" + prefix + "'\n" +
+    "  outdir      = './tmp'\n" +
+    "  pseudo_dir  = './pseudo'\n" +
+    "/\n" +
+    "&SYSTEM\n" +
+    "  ibrav  = 0\n" +
+    "  celldm(1) = " + to_string(a_bohr) + "\n" +
+    "  nat    = " + to_string(nat) + "\n" +
+    "  ntyp   = " + to_string(nat) + "\n" +
+    "  ecutwfc = " + to_string(ecutwfc) + "\n" +
+    "  ecutrho = " + to_string(ecutrho) + "\n" +
+    "/\n" +
+    "&ELECTRONS\n" +
+    "  mixing_beta = 0.3\n" +
+    "  conv_thr    = 1.0e-8\n" +
+    "/\n" +
+    "ATOMIC_SPECIES\n" +
+    species_lines +
+    "ATOMIC_POSITIONS {crystal}\n" +
+    position_lines +
+    "K_POINTS {automatic}\n" +
+    "  6 6 6  0 0 0\n" +
+    "CELL_PARAMETERS {bohr}\n" +
+    "  " + to_string(a_bohr) + "  0.000000  0.000000\n" +
+    "  0.000000  " + to_string(a_bohr) + "  0.000000\n" +
+    "  0.000000  0.000000  " + to_string(a_bohr) + "\n"
+}
+
+// ────────────────────────────────────────────────────────────────
+//  유틸리티
+// ────────────────────────────────────────────────────────────────
+
+fn repeat_str(s: string, n: int) -> string {
+    let mut result = ""
+    let mut i = 0
+    while i < n {
+        if i > 0 { result = result + "  " }
+        result = result + s
+        i = i + 1
+    }
+    result
+}
+
+fn join(arr: [string], sep: string) -> string {
+    let mut result = ""
+    let mut i = 0
+    while i < len(arr) {
+        if i > 0 { result = result + sep }
+        result = result + arr[i]
+        i = i + 1
+    }
+    result
+}
+
+fn lowercase(s: string) -> string {
+    // hexa 내장 to_lower 사용 가정; 없으면 그대로 반환
+    try {
+        to_lower(s)
+    } catch {
+        s
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  JSON 파싱 헬퍼 (단순 형식)
+// ────────────────────────────────────────────────────────────────
+
+fn parse_candidate_json(json_str: string) -> DftCandidate {
+    // 최소 JSON 파서: {"formula":"X","elements":["A","B"],"spacegroup":"Y","bandgap":1.0,"formation_energy":-0.5}
+    let formula = json_extract_string(json_str, "formula")
+    let spacegroup = json_extract_string(json_str, "spacegroup")
+    let elements = json_extract_string_array(json_str, "elements")
+    let mut bandgap = 0.0
+    try { bandgap = to_float(json_extract_string(json_str, "bandgap")) } catch {}
+    let mut fe = 0.0
+    try { fe = to_float(json_extract_string(json_str, "formation_energy")) } catch {}
+    DftCandidate {
+        formula: formula,
+        elements: elements,
+        spacegroup: spacegroup,
+        predicted_bandgap: bandgap,
+        predicted_formation_energy: fe
+    }
+}
+
+fn json_extract_string(json: string, key: string) -> string {
+    // naive: find "key":"value" pattern
+    let needle = "\"" + key + "\":"
+    let idx = index_of(json, needle)
+    if idx < 0 { return "" }
+    let after = substring(json, idx + len(needle), len(json))
+    let trimmed = trim(after)
+    if starts_with(trimmed, "\"") {
+        let end = index_of(substring(trimmed, 1, len(trimmed)), "\"")
+        if end >= 0 { return substring(trimmed, 1, 1 + end) }
+    }
+    // numeric value
+    let mut end = 0
+    while end < len(trimmed) {
+        let ch = char_at(trimmed, end)
+        if ch == "," || ch == "}" || ch == "]" { break }
+        end = end + 1
+    }
+    trim(substring(trimmed, 0, end))
+}
+
+fn json_extract_string_array(json: string, key: string) -> [string] {
+    let needle = "\"" + key + "\":"
+    let idx = index_of(json, needle)
+    if idx < 0 { return [] }
+    let after = substring(json, idx + len(needle), len(json))
+    let start = index_of(after, "[")
+    let end = index_of(after, "]")
+    if start < 0 || end < 0 { return [] }
+    let inner = substring(after, start + 1, end)
+    // split by comma, strip quotes
+    let parts = split(inner, ",")
+    let mut result = []
+    let mut i = 0
+    while i < len(parts) {
+        let s = trim(replace(replace(parts[i], "\"", ""), "'", ""))
+        if len(s) > 0 {
+            result = result.push(s)
+        }
+        i = i + 1
+    }
+    result
+}
+
+// ────────────────────────────────────────────────────────────────
+//  검증
+// ────────────────────────────────────────────────────────────────
+
+let test_c = DftCandidate {
+    formula: "LiCoO2",
+    elements: ["Li", "Co", "O"],
+    spacegroup: "Fm-3m",
+    predicted_bandgap: 2.5,
+    predicted_formation_energy: -1.2
+}
+
+assert infer_structure("Fm-3m") == "rocksalt"
+assert infer_structure("Pm-3m") == "perovskite"
+assert infer_structure("Fd-3m") == "spinel"
+assert infer_structure("Pa-3") == "generic"
+
+let lat = estimate_lattice(["Li", "Co", "O"])
+assert lat > 0.0
+
+let poscar = generate_poscar(test_c)
+assert index_of(poscar, "LiCoO2") >= 0
+assert index_of(poscar, "rocksalt") >= 0
+
+println("=== materials verified ===")
+println("structure(Fm-3m):", infer_structure("Fm-3m"))
+println("lattice(Li,Co,O):", lat)
+
+// 필터 테스트
+let unstable = DftCandidate {
+    formula: "FeS2",
+    elements: ["Fe", "S"],
+    spacegroup: "Pa-3",
+    predicted_bandgap: 0.9,
+    predicted_formation_energy: 0.3
+}
+let filtered = filter_candidates([test_c, unstable])
+assert len(filtered) == 1
+println("filter: 2 candidates -> ", len(filtered), " passed")
+
+// 랭킹 테스트
+let ranked = rank_candidates([test_c])
+assert len(ranked) == 1
+println("rank score:", ranked[0].score)
+
+theorem materials_stability_filter {
+    forall c: DftCandidate, c.predicted_formation_energy < 0.0 => stable_candidate(c)
+}
+
+proof materials_invariants {
+    invariant lattice_positive()
+    invariant score_bounded()
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 메인
+// ────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv = args()
+    if len(argv) < 2 {
+        println("Usage: hexa materials.hexa <analyze|rank|poscar|qe> <material_json>")
+        return
+    }
+    let cmd = argv[1]
+    let data = if len(argv) >= 3 { argv[2] } else { "" }
+
+    match cmd {
+        "analyze" -> {
+            if len(data) == 0 {
+                println("Error: provide material JSON")
+                return
+            }
+            let c = parse_candidate_json(data)
+            println("Formula:", c.formula)
+            println("Elements:", join(c.elements, ", "))
+            println("Structure:", infer_structure(c.spacegroup))
+            println("Lattice (A):", estimate_lattice(c.elements))
+            println("Bandgap (eV):", c.predicted_bandgap)
+            println("Formation E (eV/atom):", c.predicted_formation_energy)
+            let stable = c.predicted_formation_energy < 0.0 && c.predicted_bandgap >= 0.0
+            println("Stable:", stable)
+            println("")
+            println("--- POSCAR ---")
+            println(generate_poscar(c))
+            println("--- QE Input ---")
+            println(generate_qe_input(c))
+        },
+        "rank" -> {
+            let c = parse_candidate_json(data)
+            let score = c.predicted_formation_energy - 0.5 * c.predicted_bandgap
+            println("Formula:", c.formula)
+            println("Score:", score)
+        },
+        "poscar" -> {
+            let c = parse_candidate_json(data)
+            println(generate_poscar(c))
+        },
+        "qe" -> {
+            let c = parse_candidate_json(data)
+            println(generate_qe_input(c))
+        },
+        _ -> {
+            println("Unknown command:", cmd)
+            println("Usage: hexa materials.hexa <analyze|rank|poscar|qe> <material_json>")
+        }
+    }
+}
+
+main()

@@ -1,0 +1,289 @@
+// mk2_hexa/native/distributed.hexa — 분산 탐색 스케줄러 (Rust distributed/ 포팅)
+// 도메인-병렬 스캔을 워커 노드에 라운드-로빈 분배
+// 실행: hexa distributed.hexa add <id> <address> [idle|busy|offline]
+//       hexa distributed.hexa distribute <domain1> <domain2> ...
+//       hexa distributed.hexa status
+//       hexa distributed.hexa merge
+
+// ─── 설정 ───
+comptime const WORKERS_FILE = "shared/distributed_workers.json"
+comptime const RESULTS_FILE = "shared/distributed_results.json"
+
+// ─── 구조체 ───
+
+struct WorkerNode {
+    id: string,
+    address: string,
+    status: string,
+    assigned_domains: string
+}
+
+// ─── 워커 관리 ───
+
+fn worker_new(id: string, address: string, status: string) -> WorkerNode {
+    WorkerNode {
+        id: id,
+        address: address,
+        status: status,
+        assigned_domains: ""
+    }
+}
+
+fn is_available(w: WorkerNode) -> bool {
+    w.status != "offline"
+}
+
+// ─── 워커 목록 로드/저장 ───
+
+fn load_workers() -> string {
+    let raw = read_file(WORKERS_FILE)
+    if raw == "" { return "[]" }
+    raw
+}
+
+fn save_workers(json: string) {
+    write_file(WORKERS_FILE, json)
+}
+
+fn parse_workers(raw: string) -> int {
+    // 줄 단위로 id 파싱하여 개수 반환 (간이)
+    let lines = raw.split("\n")
+    let mut count = 0
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i].trim()
+        if line.contains("\"id\"") {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    count
+}
+
+fn extract_worker_field(raw: string, idx: int, field: string) -> string {
+    // raw JSON 배열에서 idx번째 객체의 field 값 추출
+    let needle = "\"" + field + "\":"
+    let parts = raw.split(needle)
+    if parts.length() <= idx + 1 { return "" }
+    let after = parts[idx + 1].trim()
+    if after.starts_with("\"") {
+        let inner = after.slice(1, after.length())
+        let end_q = inner.index_of("\"")
+        if end_q < 0 { return "" }
+        return inner.slice(0, end_q)
+    }
+    let end = after.index_of(",")
+    if end < 0 {
+        let end2 = after.index_of("}")
+        if end2 < 0 { return "" }
+        return after.slice(0, end2).trim()
+    }
+    after.slice(0, end).trim()
+}
+
+// ─── 라운드-로빈 분배 ───
+
+fn distribute_domains(worker_ids: string, domain_list: string) -> string {
+    // worker_ids: comma-sep, domain_list: comma-sep
+    let wids = worker_ids.split(",")
+    let doms = domain_list.split(",")
+    let n = wids.length()
+    if n == 0 { return "{}" }
+
+    // 버킷 할당 (라운드 로빈)
+    let mut result = "["
+    let mut buckets = []
+    let mut bi = 0
+    while bi < n {
+        buckets = buckets.push("")
+        bi = bi + 1
+    }
+
+    let mut di = 0
+    while di < doms.length() {
+        let slot = di % n
+        let cur = buckets[slot]
+        if cur == "" {
+            buckets[slot] = doms[di].trim()
+        } else {
+            buckets[slot] = cur + ";" + doms[di].trim()
+        }
+        di = di + 1
+    }
+
+    // JSON 출력
+    let mut first = true
+    let mut wi = 0
+    while wi < n {
+        let b = buckets[wi]
+        if b != "" {
+            if !first { result = result + "," }
+            result = result + "{\"worker\":\"" + wids[wi].trim() + "\",\"domains\":\"" + b + "\"}"
+            first = false
+        }
+        wi = wi + 1
+    }
+    result = result + "]"
+    result
+}
+
+// ─── 결과 병합 ───
+
+fn merge_results(results_json: string) -> string {
+    // results_json: [{"worker":"w1","results":"r1;r2"},...]
+    // → flat list "r1;r2;r3"
+    let parts = results_json.split("\"results\":\"")
+    let mut merged = ""
+    let mut i = 1
+    while i < parts.length() {
+        let after = parts[i]
+        let end_q = after.index_of("\"")
+        if end_q > 0 {
+            let val = after.slice(0, end_q)
+            if merged == "" {
+                merged = val
+            } else {
+                merged = merged + ";" + val
+            }
+        }
+        i = i + 1
+    }
+    merged
+}
+
+// ─── 워커 JSON 생성 ───
+
+fn worker_to_json(id: string, address: string, status: string) -> string {
+    "{\"id\":\"" + id + "\",\"address\":\"" + address + "\",\"status\":\"" + status + "\"}"
+}
+
+fn add_worker_to_file(id: string, address: string, status: string) {
+    let raw = read_file(WORKERS_FILE)
+    let entry = worker_to_json(id, address, status)
+    if raw == "" {
+        write_file(WORKERS_FILE, "[" + entry + "]")
+    } else {
+        // 기존 ] 앞에 삽입
+        let trimmed = raw.trim()
+        if trimmed == "[]" {
+            write_file(WORKERS_FILE, "[" + entry + "]")
+        } else {
+            let without_bracket = trimmed.slice(0, trimmed.length() - 1)
+            write_file(WORKERS_FILE, without_bracket + "," + entry + "]")
+        }
+    }
+}
+
+// ─── 워커 ID 추출 (available만) ───
+
+fn get_available_ids(raw: string) -> string {
+    let lines = raw.split("\n")
+    let mut ids = ""
+    let mut cur_id = ""
+    let mut cur_status = ""
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i].trim()
+        if line.contains("\"id\"") {
+            let p = line.split("\"id\":")
+            if p.length() > 1 {
+                let v = p[1].trim().replace("\"", "").replace(",", "")
+                cur_id = v
+            }
+        }
+        if line.contains("\"status\"") {
+            let p = line.split("\"status\":")
+            if p.length() > 1 {
+                let v = p[1].trim().replace("\"", "").replace(",", "").replace("}", "")
+                cur_status = v
+                if cur_status != "offline" {
+                    if ids == "" {
+                        ids = cur_id
+                    } else {
+                        ids = ids + "," + cur_id
+                    }
+                }
+                cur_id = ""
+                cur_status = ""
+            }
+        }
+        i = i + 1
+    }
+    ids
+}
+
+// ─── CLI ───
+
+fn main() {
+    let a = args()
+    if a.length() < 2 {
+        print("distributed.hexa — 분산 탐색 스케줄러")
+        print("Usage:")
+        print("  add <id> <address> [idle|busy|offline]")
+        print("  distribute <domain1> <domain2> ...")
+        print("  status")
+        print("  merge")
+        return
+    }
+    let cmd = a[1]
+
+    if cmd == "add" {
+        if a.length() < 4 {
+            print("Usage: add <id> <address> [status=idle]")
+            return
+        }
+        let id = a[2]
+        let address = a[3]
+        let mut status = "idle"
+        if a.length() > 4 { status = a[4] }
+        add_worker_to_file(id, address, status)
+        print("[distributed] added worker " + id + " (" + address + ") status=" + status)
+    }
+
+    if cmd == "status" {
+        let raw = load_workers()
+        let count = parse_workers(raw)
+        let avail_ids = get_available_ids(raw)
+        let avail_count = if avail_ids == "" { 0 } else { avail_ids.split(",").length() }
+        print("=== distributed scheduler status ===")
+        print("  total workers : " + to_string(count))
+        print("  available     : " + to_string(avail_count))
+        if avail_ids != "" {
+            print("  available ids : " + avail_ids)
+        }
+    }
+
+    if cmd == "distribute" {
+        if a.length() < 3 {
+            print("Usage: distribute <domain1> <domain2> ...")
+            return
+        }
+        let mut domains = ""
+        let mut di = 2
+        while di < a.length() {
+            if domains == "" { domains = a[di] }
+            else { domains = domains + "," + a[di] }
+            di = di + 1
+        }
+        let raw = load_workers()
+        let avail_ids = get_available_ids(raw)
+        if avail_ids == "" {
+            print("[distributed] no available workers")
+            return
+        }
+        let plan = distribute_domains(avail_ids, domains)
+        write_file(RESULTS_FILE, plan)
+        print("[distributed] plan:")
+        print(plan)
+    }
+
+    if cmd == "merge" {
+        let raw = read_file(RESULTS_FILE)
+        if raw == "" {
+            print("[distributed] no results to merge")
+            return
+        }
+        let merged = merge_results(raw)
+        print("[distributed] merged results: " + merged)
+    }
+}

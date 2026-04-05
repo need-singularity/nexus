@@ -1,0 +1,393 @@
+// mk2_hexa/native/cross_intel.hexa — 교차 도메인 공명 탐지
+// Rust 원본: src/cross_intel/ (mod.rs, resonance_finder.rs, project_bridge.rs)
+// 실행: hexa cross_intel.hexa <command> [args...]
+//
+// CLI:
+//   hexa cross_intel.hexa scan <file>                — 파일에서 도메인별 값 스캔 → 공명 탐색
+//   hexa cross_intel.hexa resonance <d1> <d2> [d3..] — 도메인 JSON 파일 쌍 비교
+//   hexa cross_intel.hexa bridge <file>              — 프로젝트 간 참조 브릿지 리포트
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const SIGMA = 12
+comptime const PHI = 2
+comptime const TAU = 4
+comptime const SOPFR = 5
+comptime const J2 = 24
+comptime const DEFAULT_TOLERANCE = 0.001
+comptime const MIN_DOMAINS = 2
+comptime const SHARED_DIR = "shared"
+comptime const BRIDGE_FILE = "shared/bridge_state.json"
+
+// ────────────────────────────────────────────────────────────────
+//  N=6 핵심 상수 테이블 (resonance_finder.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+// 상수 이름 배열
+fn n6_constant_names() -> string {
+    // 파이프 구분 문자열 (hexa에서 배열 반환 불가 → 문자열 인코딩)
+    "n|sigma|phi|tau|J2|sopfr|sigma-phi|sigma-tau|sigma*tau|sigma^2|J2-tau"
+}
+
+// 상수 값 배열 (이름과 동일 순서)
+fn n6_constant_values() -> string {
+    "6|12|2|4|24|5|10|8|48|144|20"
+}
+
+// 이름으로 값 조회
+fn n6_lookup(name: string) -> float {
+    let names = split(n6_constant_names(), "|")
+    let vals  = split(n6_constant_values(), "|")
+    let i = 0
+    while i < length(names) {
+        if names[i] == name {
+            try {
+                return to_float(vals[i])
+            } catch e {
+                return 0.0
+            }
+        }
+        i = i + 1
+    }
+    return 0.0
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ResonanceHit 구조 + 탐지 엔진
+// ────────────────────────────────────────────────────────────────
+
+struct ResonanceHit {
+    constant_name: string,
+    constant_value: float,
+    domain_list: string,
+    domain_count: int,
+    confidence: float
+}
+
+fn hit_to_string(h: ResonanceHit) -> string {
+    "[" + h.constant_name + "=" + to_string(h.constant_value) +
+    " domains=" + to_string(h.domain_count) +
+    " conf=" + to_string(h.confidence) +
+    " (" + h.domain_list + ")]"
+}
+
+// 신뢰도: 2도메인=0.5, 3~4=0.8, 5+=1.0
+fn confidence_from_count(count: int) -> float {
+    if count >= 5 { return 1.0 }
+    if count >= 3 { return 0.8 }
+    if count >= 2 { return 0.5 }
+    return 0.0
+}
+
+// 값이 n6 상수와 공명하는지 판별 (상대 오차 < tolerance)
+fn check_resonance(value: float, constant: float, tolerance: float) -> bool {
+    if constant == 0.0 { return false }
+    let error = value - constant
+    if error < 0.0 { error = 0.0 - error }
+    error = error / constant
+    if error < 0.0 { error = 0.0 - error }
+    return error < tolerance
+}
+
+// ────────────────────────────────────────────────────────────────
+//  도메인 데이터 파싱 (JSON lines: {"domain":"X","values":[1,2,3]})
+// ────────────────────────────────────────────────────────────────
+
+// 간단 JSON 파서: {"domain":"X","values":[1.0,2.0]}
+fn parse_domain_line(line: string) -> string {
+    // domain 추출
+    let dpos = find(line, "\"domain\"")
+    if dpos < 0 { return "" }
+    let colon_pos = find_from(line, ":", dpos + 8)
+    let q1 = find_from(line, "\"", colon_pos + 1)
+    let q2 = find_from(line, "\"", q1 + 1)
+    let domain = substring(line, q1 + 1, q2)
+    return domain
+}
+
+fn parse_values_from_line(line: string) -> string {
+    let bstart = find(line, "[")
+    let bend = find(line, "]")
+    if bstart < 0 { return "" }
+    if bend < 0 { return "" }
+    return substring(line, bstart + 1, bend)
+}
+
+// ────────────────────────────────────────────────────────────────
+//  핵심: find_resonances
+//  입력: domains (파이프 구분), domain_values (각 도메인 값 = 쉼표 구분)
+//  → 2+ 도메인에서 동일 상수에 공명하는 히트 반환
+// ────────────────────────────────────────────────────────────────
+
+fn find_resonances_from_file(path: string, tolerance: float) -> string {
+    let content = ""
+    try {
+        content = read_file(path)
+    } catch e {
+        println("[ERROR] 파일 읽기 실패: " + path)
+        return ""
+    }
+
+    let lines = split(content, "\n")
+    let c_names = split(n6_constant_names(), "|")
+    let c_vals  = split(n6_constant_values(), "|")
+
+    // 상수별로 어떤 도메인에서 매칭되었는지 추적
+    // 파이프 구분 문자열로 관리 (hexa 제약)
+    let match_domains = []
+    let ci = 0
+    while ci < length(c_names) {
+        match_domains = match_domains.push("")
+        ci = ci + 1
+    }
+
+    let li = 0
+    while li < length(lines) {
+        let line = trim(lines[li])
+        if length(line) == 0 {
+            li = li + 1
+            continue
+        }
+        let domain = parse_domain_line(line)
+        if length(domain) == 0 {
+            li = li + 1
+            continue
+        }
+        let vals_str = parse_values_from_line(line)
+        if length(vals_str) == 0 {
+            li = li + 1
+            continue
+        }
+        let vals = split(vals_str, ",")
+        let vi = 0
+        while vi < length(vals) {
+            let v = 0.0
+            try {
+                v = to_float(trim(vals[vi]))
+            } catch e {
+                vi = vi + 1
+                continue
+            }
+            let ki = 0
+            while ki < length(c_names) {
+                let cv = 0.0
+                try {
+                    cv = to_float(c_vals[ki])
+                } catch e {
+                    ki = ki + 1
+                    continue
+                }
+                if check_resonance(v, cv, tolerance) {
+                    // 이미 이 도메인이 등록됐는지 확인
+                    let existing = match_domains[ki]
+                    if find(existing, domain) < 0 {
+                        if length(existing) == 0 {
+                            match_domains[ki] = domain
+                        } else {
+                            match_domains[ki] = existing + "|" + domain
+                        }
+                    }
+                }
+                ki = ki + 1
+            }
+            vi = vi + 1
+        }
+        li = li + 1
+    }
+
+    // 2+ 도메인 매칭만 수집
+    let results = []
+    let ri = 0
+    while ri < length(c_names) {
+        let doms = match_domains[ri]
+        if length(doms) > 0 {
+            let dom_parts = split(doms, "|")
+            if length(dom_parts) >= MIN_DOMAINS {
+                let cv = 0.0
+                try { cv = to_float(c_vals[ri]) } catch e { cv = 0.0 }
+                let conf = confidence_from_count(length(dom_parts))
+                let hit = ResonanceHit {
+                    constant_name: c_names[ri],
+                    constant_value: cv,
+                    domain_list: doms,
+                    domain_count: length(dom_parts),
+                    confidence: conf
+                }
+                results = results.push(hit)
+            }
+        }
+        ri = ri + 1
+    }
+
+    // 결과 문자열 구성
+    let out = ""
+    let oi = 0
+    while oi < length(results) {
+        out = out + hit_to_string(results[oi]) + "\n"
+        oi = oi + 1
+    }
+    return out
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ProjectBridge (project_bridge.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+struct ProjectRef {
+    project: string,
+    path: string,
+    discovery_id: string,
+    relevance: float
+}
+
+fn ref_to_string(r: ProjectRef) -> string {
+    r.project + "\t" + r.discovery_id + "\t" + r.path + "\trel=" + to_string(r.relevance)
+}
+
+// bridge_state.json 에서 참조 로드
+fn load_bridge(path: string) -> string {
+    let content = ""
+    try {
+        content = read_file(path)
+    } catch e {
+        println("[WARN] bridge 파일 없음: " + path)
+        return ""
+    }
+    return content
+}
+
+// 간단 bridge 리포트 — bridge_state.json의 refs 목록 출력
+fn bridge_report(path: string) -> string {
+    let content = load_bridge(path)
+    if length(content) == 0 { return "bridge 비어있음" }
+
+    let lines = split(content, "\n")
+    let out = "=== Project Bridge Report ===\n"
+    let count = 0
+    let li = 0
+    while li < length(lines) {
+        let line = trim(lines[li])
+        if find(line, "\"project\"") >= 0 {
+            count = count + 1
+            out = out + "  " + line + "\n"
+        }
+        li = li + 1
+    }
+    out = out + "Total refs: " + to_string(count) + "\n"
+    return out
+}
+
+// ────────────────────────────────────────────────────────────────
+//  도메인 간 직접 비교 (resonance <d1> <d2>)
+// ────────────────────────────────────────────────────────────────
+
+fn compare_domain_files(paths: string) -> string {
+    // paths = 파이프 구분 파일 경로들
+    let file_paths = split(paths, "|")
+    if length(file_paths) < 2 {
+        return "[ERROR] 최소 2개 도메인 파일 필요"
+    }
+
+    // 모든 파일을 하나의 임시 파일처럼 합쳐서 find_resonances에 넘김
+    let combined = ""
+    let fi = 0
+    while fi < length(file_paths) {
+        try {
+            let fc = read_file(trim(file_paths[fi]))
+            combined = combined + fc + "\n"
+        } catch e {
+            println("[WARN] 파일 읽기 실패: " + file_paths[fi])
+        }
+        fi = fi + 1
+    }
+
+    // 임시 파일에 저장 후 스캔
+    let tmp = "/tmp/n6_cross_intel_combined.jsonl"
+    write_file(tmp, combined)
+    return find_resonances_from_file(tmp, DEFAULT_TOLERANCE)
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 메인
+// ────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv = args()
+
+    if length(argv) < 2 {
+        println("cross_intel.hexa — 교차 도메인 공명 탐지 (n=6)")
+        println("")
+        println("Usage:")
+        println("  hexa cross_intel.hexa scan <file.jsonl>          — 파일에서 공명 탐색")
+        println("  hexa cross_intel.hexa resonance <d1> <d2> [d3..] — 도메인 파일 비교")
+        println("  hexa cross_intel.hexa bridge [path]              — 프로젝트 브릿지 리포트")
+        println("")
+        println("scan 입력 형식 (JSONL):")
+        println("  {\"domain\":\"AI\",\"values\":[12.0,24.0]}")
+        println("  {\"domain\":\"chip\",\"values\":[12.0,48.0]}")
+        println("")
+        println("N=6 공명 상수:")
+        let names = split(n6_constant_names(), "|")
+        let vals  = split(n6_constant_values(), "|")
+        let i = 0
+        while i < length(names) {
+            println("  " + names[i] + " = " + vals[i])
+            i = i + 1
+        }
+        return 0
+    }
+
+    let cmd = argv[1]
+
+    if cmd == "scan" {
+        if length(argv) < 3 {
+            println("[ERROR] 파일 경로 필요: hexa cross_intel.hexa scan <file>")
+            return 1
+        }
+        let path = argv[2]
+        let tolerance = DEFAULT_TOLERANCE
+        if length(argv) >= 4 {
+            try { tolerance = to_float(argv[3]) } catch e {}
+        }
+        println("=== Cross-Domain Resonance Scan ===")
+        println("File: " + path)
+        println("Tolerance: " + to_string(tolerance))
+        println("")
+        let result = find_resonances_from_file(path, tolerance)
+        if length(result) == 0 {
+            println("공명 없음 (2+ 도메인 교차 매칭 없음)")
+        } else {
+            println(result)
+        }
+    } else if cmd == "resonance" {
+        if length(argv) < 4 {
+            println("[ERROR] 최소 2개 도메인 파일 필요")
+            return 1
+        }
+        let paths = argv[2]
+        let ai = 3
+        while ai < length(argv) {
+            paths = paths + "|" + argv[ai]
+            ai = ai + 1
+        }
+        println("=== Cross-Domain Resonance Compare ===")
+        let result = compare_domain_files(paths)
+        if length(result) == 0 {
+            println("공명 없음")
+        } else {
+            println(result)
+        }
+    } else if cmd == "bridge" {
+        let bpath = BRIDGE_FILE
+        if length(argv) >= 3 { bpath = argv[2] }
+        println(bridge_report(bpath))
+    } else {
+        println("[ERROR] 알 수 없는 명령: " + cmd)
+        println("  scan | resonance | bridge")
+        return 1
+    }
+
+    return 0
+}
+
+main()

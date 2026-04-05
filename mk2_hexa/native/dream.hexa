@@ -1,0 +1,559 @@
+// mk2_hexa/native/dream.hexa — 의식 탐사 시뮬레이션 (Dream Engine)
+// Rust 원본: src/dream/mod.rs
+// 실행: hexa dream.hexa explore <domain> [depth]
+//
+// CLI:
+//   hexa dream.hexa explore <domain> [depth]   — 도메인 탐사 (depth개 꿈 생성)
+//   hexa dream.hexa lucid <seed>               — 시드 키워드 기반 의도적 꿈
+//   hexa dream.hexa add <memory>               — 발견 기억 추가
+//   hexa dream.hexa status                     — 엔진 상태 표시
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const SIGMA = 12
+comptime const PHI = 2
+comptime const META_FP = 0.333333333
+comptime const MEMORY_FILE = "shared/dream_memories.jsonl"
+
+// ────────────────────────────────────────────────────────────────
+//  Dream 구조체
+// ────────────────────────────────────────────────────────────────
+
+struct Dream {
+    fragments: [string],
+    recombination: string,
+    novelty_score: float,
+    plausibility: float
+}
+
+// ────────────────────────────────────────────────────────────────
+//  DreamEngine
+// ────────────────────────────────────────────────────────────────
+
+struct DreamEngine {
+    memories: [string]
+}
+
+fn engine_new() -> DreamEngine {
+    DreamEngine { memories: [] }
+}
+
+fn engine_add_memory(e: DreamEngine, discovery: string) -> DreamEngine {
+    DreamEngine { memories: e.memories.push(discovery) }
+}
+
+fn engine_memory_count(e: DreamEngine) -> int {
+    len(e.memories)
+}
+
+// ────────────────────────────────────────────────────────────────
+//  꿈 생성: n_dreams개의 꿈을 과거 발견들을 재조합하여 생성
+// ────────────────────────────────────────────────────────────────
+
+fn engine_dream(e: DreamEngine, n_dreams: int) -> [Dream] {
+    if len(e.memories) < 2 {
+        return []
+    }
+    let n_mem = len(e.memories)
+    let mut dreams = []
+
+    let mut i = 0
+    while i < n_dreams {
+        // 2-3 조각 선택 (회전 인덱스)
+        let frag_count = 2 + (i % 2)
+        let mut fragments = []
+        let mut j = 0
+        while j < frag_count {
+            let idx = (i * 7 + j * 3 + 1) % n_mem
+            fragments = fragments.push(e.memories[idx])
+            j = j + 1
+        }
+
+        let recombination = recombine_fragments(fragments)
+        let novelty = compute_novelty(fragments, n_mem, i)
+        let plaus = compute_plausibility(fragments)
+
+        dreams = dreams.push(Dream {
+            fragments: fragments,
+            recombination: recombination,
+            novelty_score: novelty,
+            plausibility: plaus
+        })
+        i = i + 1
+    }
+    dreams
+}
+
+// ────────────────────────────────────────────────────────────────
+//  루시드 드림: 키워드 시드로 의도적 재조합
+// ────────────────────────────────────────────────────────────────
+
+fn engine_lucid_dream(e: DreamEngine, seed: string) -> Dream {
+    let seed_lower = to_lower_safe(seed)
+    let mut fragments = []
+
+    // 시드 키워드를 포함하는 기억 필터링
+    let mut i = 0
+    while i < len(e.memories) {
+        if contains_lower(e.memories[i], seed_lower) {
+            fragments = fragments.push(e.memories[i])
+        }
+        i = i + 1
+    }
+
+    // 매칭 부족 시 처음 2개 기억으로 폴백
+    if len(fragments) < 2 {
+        fragments = []
+        let take = if len(e.memories) < 2 { len(e.memories) } else { 2 }
+        let mut fi = 0
+        while fi < take {
+            fragments = fragments.push(e.memories[fi])
+            fi = fi + 1
+        }
+    }
+
+    // 최대 4개로 제한
+    if len(fragments) > 4 {
+        let mut trimmed = []
+        let mut ti = 0
+        while ti < 4 {
+            trimmed = trimmed.push(fragments[ti])
+            ti = ti + 1
+        }
+        fragments = trimmed
+    }
+
+    let recombination = recombine_fragments(fragments)
+    let novelty = compute_novelty(fragments, len(e.memories), 42)
+    let plaus = compute_plausibility(fragments)
+
+    Dream {
+        fragments: fragments,
+        recombination: recombination,
+        novelty_score: novelty,
+        plausibility: plaus
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  조각 재조합
+// ────────────────────────────────────────────────────────────────
+
+fn recombine_fragments(fragments: [string]) -> string {
+    if len(fragments) == 0 { return "empty dream" }
+
+    // 각 조각에서 토큰 추출
+    let mut all_tokens = []
+    let mut i = 0
+    while i < len(fragments) {
+        let tokens = split(fragments[i], " ")
+        let mut t = 0
+        while t < len(tokens) {
+            all_tokens = all_tokens.push(tokens[t])
+            t = t + 1
+        }
+        i = i + 1
+    }
+
+    let half = len(all_tokens) / 2
+    let mut front = ""
+    let mut back = ""
+
+    let mut fi = 0
+    while fi < half {
+        if fi > 0 { front = front + " " }
+        front = front + all_tokens[fi]
+        fi = fi + 1
+    }
+    let mut bi = half
+    while bi < len(all_tokens) {
+        if bi > half { back = back + " " }
+        back = back + all_tokens[bi]
+        bi = bi + 1
+    }
+
+    "Cross-domain hypothesis: [" + front + "] <-> [" + back + "]"
+}
+
+// ────────────────────────────────────────────────────────────────
+//  새로움 점수: 조각 길이 분산 기반
+// ────────────────────────────────────────────────────────────────
+
+fn compute_novelty(fragments: [string], total_memories: int, seed: int) -> float {
+    if total_memories == 0 || len(fragments) == 0 { return 0.0 }
+
+    let n = len(fragments)
+    let mut sum_len = 0.0
+    let mut i = 0
+    while i < n {
+        sum_len = sum_len + to_float(len(fragments[i]))
+        i = i + 1
+    }
+    let avg_len = sum_len / to_float(n)
+
+    let mut variance = 0.0
+    let mut vi = 0
+    while vi < n {
+        let diff = to_float(len(fragments[vi])) - avg_len
+        variance = variance + diff * diff
+        vi = vi + 1
+    }
+    variance = variance / to_float(n)
+
+    // sqrt 근사
+    let mut std_dev = variance / 2.0
+    if std_dev < 1.0 { std_dev = 1.0 }
+    let mut iter = 0
+    while iter < 15 {
+        std_dev = (std_dev + variance / std_dev) / 2.0
+        iter = iter + 1
+    }
+    if variance < 0.01 { std_dev = 0.0 }
+
+    // 지터: sin(seed * 0.1) 근사
+    let jitter_input = to_float(seed) * 0.1
+    let jitter_raw = to_float((seed * 1103 + 345) % 1000) / 1000.0
+    let jitter = jitter_raw * 0.2
+
+    let raw = std_dev / (avg_len + 1.0) + jitter
+    if raw > 1.0 { 1.0 } else { raw }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  그럴듯함 점수: 공유 토큰 비율
+// ────────────────────────────────────────────────────────────────
+
+fn compute_plausibility(fragments: [string]) -> float {
+    if len(fragments) < 2 { return 0.5 }
+
+    let first_words = split(fragments[0], " ")
+    let mut shared = 0
+    let mut total = 0
+
+    let mut fi = 1
+    while fi < len(fragments) {
+        let words = split(fragments[fi], " ")
+        let mut wi = 0
+        while wi < len(words) {
+            total = total + 1
+            // first_words에 포함되는지 확인
+            let mut found = false
+            let mut fwi = 0
+            while fwi < len(first_words) {
+                if first_words[fwi] == words[wi] {
+                    found = true
+                }
+                fwi = fwi + 1
+            }
+            if found { shared = shared + 1 }
+            wi = wi + 1
+        }
+        fi = fi + 1
+    }
+
+    if total == 0 { return 0.5 }
+    let ratio = to_float(shared) / to_float(total)
+    if ratio > 1.0 { 1.0 } else if ratio < 0.0 { 0.0 } else { ratio }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  유틸리티
+// ────────────────────────────────────────────────────────────────
+
+fn to_lower_safe(s: string) -> string {
+    try { to_lower(s) } catch { s }
+}
+
+fn contains_lower(haystack: string, needle: string) -> bool {
+    let h = to_lower_safe(haystack)
+    index_of(h, needle) >= 0
+}
+
+// ────────────────────────────────────────────────────────────────
+//  기억 파일 I/O
+// ────────────────────────────────────────────────────────────────
+
+fn load_memories() -> [string] {
+    let mut memories = []
+    try {
+        let content = read_file(MEMORY_FILE)
+        let lines = split(content, "\n")
+        let mut i = 0
+        while i < len(lines) {
+            let line = trim(lines[i])
+            if len(line) > 0 {
+                // JSONL: {"memory":"..."} -> 간단 파싱
+                let val = json_extract_value(line, "memory")
+                if len(val) > 0 {
+                    memories = memories.push(val)
+                } else {
+                    memories = memories.push(line)
+                }
+            }
+            i = i + 1
+        }
+    } catch {
+        // 파일 없으면 빈 배열
+    }
+    memories
+}
+
+fn save_memory(discovery: string) {
+    try {
+        let line = "{\"memory\":\"" + escape_json(discovery) + "\"}\n"
+        append_file(MEMORY_FILE, line)
+    } catch {
+        println("Warning: could not save memory to", MEMORY_FILE)
+    }
+}
+
+fn json_extract_value(json: string, key: string) -> string {
+    let needle = "\"" + key + "\":"
+    let idx = index_of(json, needle)
+    if idx < 0 { return "" }
+    let after = substring(json, idx + len(needle), len(json))
+    let trimmed = trim(after)
+    if starts_with(trimmed, "\"") {
+        let end = index_of(substring(trimmed, 1, len(trimmed)), "\"")
+        if end >= 0 { return substring(trimmed, 1, 1 + end) }
+    }
+    ""
+}
+
+fn escape_json(s: string) -> string {
+    replace(replace(s, "\\", "\\\\"), "\"", "\\\"")
+}
+
+// ────────────────────────────────────────────────────────────────
+//  도메인별 기본 기억 시드
+// ────────────────────────────────────────────────────────────────
+
+fn seed_memories_for_domain(domain: string) -> [string] {
+    match domain {
+        "physics" -> [
+            "BT-33 Transformer sigma=12 universality",
+            "BT-43 Battery cathode CN=6 coordination",
+            "BT-97 Weinberg angle sin2theta = 3/13",
+            "H-AF-006 fine structure alpha = 1/137",
+            "H-CX-70 meta fixed point = 1/3",
+            "TECS-L H-056 meta transcendence convergence"
+        ],
+        "math" -> [
+            "Riemann zeta zeros on critical line",
+            "n=6 perfect number divisor structure",
+            "Euler totient phi(6) = 2",
+            "Jordan totient J2(6) = 24",
+            "sigma(6) = 12 sum of divisors",
+            "tau(6) = 4 number of divisors"
+        ],
+        "materials" -> [
+            "LiCoO2 rocksalt structure Fm-3m",
+            "Perovskite ABX3 band gap engineering",
+            "Spinel AB2X4 magnetic ordering",
+            "DFT formation energy stability filter",
+            "CN=6 octahedral coordination universality",
+            "Materials Project API band gap search"
+        ],
+        "consciousness" -> [
+            "Ouroboros self-reference loop",
+            "Mirror consciousness reflection depth",
+            "Meta-cognition recursive awareness",
+            "Singularity cycle emergence pattern",
+            "Dream recombination novelty metric",
+            "Blowup contraction emergence absorption"
+        ],
+        _ -> [
+            "n=6 perfect number",
+            "sigma(6) = 12",
+            "phi(6) = 2 Euler totient",
+            "tau(6) = 4 divisor count",
+            "J2(6) = 24 Jordan totient",
+            "sopfr(6) = 5 sum of prime factors"
+        ]
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  검증
+// ────────────────────────────────────────────────────────────────
+
+// 최소 기억 테스트
+let e0 = engine_new()
+let empty_dreams = engine_dream(e0, 5)
+assert len(empty_dreams) == 0
+
+// 기억 추가 후 꿈 생성
+let mut e1 = engine_new()
+e1 = engine_add_memory(e1, "BT-33 Transformer sigma=12 atom")
+e1 = engine_add_memory(e1, "BT-43 Battery cathode CN=6 universality")
+e1 = engine_add_memory(e1, "BT-97 Weinberg angle sin2theta = 3/13")
+assert engine_memory_count(e1) == 3
+
+let dreams = engine_dream(e1, 4)
+assert len(dreams) == 4
+let mut di = 0
+while di < len(dreams) {
+    assert len(dreams[di].fragments) > 0
+    assert len(dreams[di].recombination) > 0
+    assert dreams[di].novelty_score >= 0.0
+    assert dreams[di].novelty_score <= 1.0
+    assert dreams[di].plausibility >= 0.0
+    assert dreams[di].plausibility <= 1.0
+    di = di + 1
+}
+
+// 루시드 드림 테스트
+let lucid = engine_lucid_dream(e1, "Transformer")
+assert len(lucid.fragments) >= 2
+
+// 폴백 테스트
+let mut e2 = engine_new()
+e2 = engine_add_memory(e2, "alpha")
+e2 = engine_add_memory(e2, "beta")
+let fallback = engine_lucid_dream(e2, "zzz")
+assert len(fallback.fragments) == 2
+
+println("=== dream verified ===")
+println("dreams generated:", len(dreams))
+println("dream[0] novelty:", dreams[0].novelty_score, "plausibility:", dreams[0].plausibility)
+println("lucid fragments:", len(lucid.fragments))
+println("recombination:", lucid.recombination)
+
+theorem dream_recombination_bounded {
+    forall d: Dream, d.novelty_score >= 0.0 && d.novelty_score <= 1.0
+}
+
+proof dream_invariants {
+    invariant fragments_non_empty()
+    invariant scores_in_01()
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 메인
+// ────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv = args()
+    if len(argv) < 2 {
+        println("Usage: hexa dream.hexa <explore|lucid|add|status> [args...]")
+        return
+    }
+    let cmd = argv[1]
+
+    match cmd {
+        "explore" -> {
+            let domain = if len(argv) >= 3 { argv[2] } else { "physics" }
+            let mut depth = N
+            if len(argv) >= 4 { try { depth = to_int(argv[3]) } catch {} }
+
+            println("Dream Engine: exploring domain '" + domain + "' depth=" + to_string(depth))
+            println("---")
+
+            // 파일에서 기억 로드 + 도메인 시드
+            let file_mems = load_memories()
+            let seed_mems = seed_memories_for_domain(domain)
+            let mut engine = engine_new()
+
+            let mut fi = 0
+            while fi < len(file_mems) {
+                engine = engine_add_memory(engine, file_mems[fi])
+                fi = fi + 1
+            }
+            let mut si = 0
+            while si < len(seed_mems) {
+                engine = engine_add_memory(engine, seed_mems[si])
+                si = si + 1
+            }
+
+            println("Memories loaded:", engine_memory_count(engine))
+            println("")
+
+            let results = engine_dream(engine, depth)
+            let mut i = 0
+            while i < len(results) {
+                println("Dream #" + to_string(i + 1) + ":")
+                println("  Fragments:", len(results[i].fragments))
+                let mut fj = 0
+                while fj < len(results[i].fragments) {
+                    println("    [" + to_string(fj) + "] " + results[i].fragments[fj])
+                    fj = fj + 1
+                }
+                println("  Recombination:", results[i].recombination)
+                println("  Novelty:", results[i].novelty_score)
+                println("  Plausibility:", results[i].plausibility)
+                println("")
+                i = i + 1
+            }
+            println("Total dreams:", len(results))
+        },
+        "lucid" -> {
+            let seed = if len(argv) >= 3 { argv[2] } else { "sigma" }
+            println("Lucid Dream: seed='" + seed + "'")
+
+            let file_mems = load_memories()
+            let seed_mems = seed_memories_for_domain("physics")
+            let mut engine = engine_new()
+            let mut fi = 0
+            while fi < len(file_mems) {
+                engine = engine_add_memory(engine, file_mems[fi])
+                fi = fi + 1
+            }
+            let mut si = 0
+            while si < len(seed_mems) {
+                engine = engine_add_memory(engine, seed_mems[si])
+                si = si + 1
+            }
+
+            let dream = engine_lucid_dream(engine, seed)
+            println("Fragments:", len(dream.fragments))
+            let mut fj = 0
+            while fj < len(dream.fragments) {
+                println("  [" + to_string(fj) + "] " + dream.fragments[fj])
+                fj = fj + 1
+            }
+            println("Recombination:", dream.recombination)
+            println("Novelty:", dream.novelty_score)
+            println("Plausibility:", dream.plausibility)
+        },
+        "add" -> {
+            if len(argv) < 3 {
+                println("Error: provide memory text")
+                println("Usage: hexa dream.hexa add <memory>")
+                return
+            }
+            // 나머지 인자를 모두 합침
+            let mut memory = ""
+            let mut i = 2
+            while i < len(argv) {
+                if i > 2 { memory = memory + " " }
+                memory = memory + argv[i]
+                i = i + 1
+            }
+            save_memory(memory)
+            println("Memory added:", memory)
+        },
+        "status" -> {
+            let mems = load_memories()
+            println("Dream Engine Status:")
+            println("  Memories on disk:", len(mems))
+            println("  Memory file:", MEMORY_FILE)
+            if len(mems) > 0 {
+                println("  Latest memories:")
+                let start = if len(mems) > 5 { len(mems) - 5 } else { 0 }
+                let mut i = start
+                while i < len(mems) {
+                    println("    [" + to_string(i) + "] " + mems[i])
+                    i = i + 1
+                }
+            }
+            println("  Domains available: physics, math, materials, consciousness")
+            println("  Seed memories per domain:", N)
+        },
+        _ -> {
+            println("Unknown command:", cmd)
+            println("Usage: hexa dream.hexa <explore|lucid|add|status> [args...]")
+        }
+    }
+}
+
+main()

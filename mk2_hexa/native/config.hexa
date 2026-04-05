@@ -1,0 +1,419 @@
+// mk2_hexa/native/config.hexa — 설정 파일 관리 (Rust src/config.rs 포팅)
+// ~/.nexus6/config.toml 읽기/쓰기 (간이 TOML 파서)
+// 실행: hexa config.hexa get <key>
+//       hexa config.hexa set <key> <value>
+//       hexa config.hexa list
+//       hexa config.hexa init
+//       hexa config.hexa section <name>
+
+// ─── 설정 ───
+comptime const HOME_ENV = "HOME"
+comptime const CONFIG_SUBPATH = "/.nexus6/config.toml"
+
+// ─── 기본값 ───
+comptime const DEFAULT_LOOP_DOMAIN = "number_theory"
+comptime const DEFAULT_LOOP_CYCLES = 1
+comptime const DEFAULT_LOOP_MAX_OUROBOROS = 6
+comptime const DEFAULT_LOOP_MAX_META = 6
+comptime const DEFAULT_LOOP_FORGE_AFTER = 3
+
+comptime const DEFAULT_DAEMON_INTERVAL = 30
+comptime const DEFAULT_BLOWUP_DOMAIN = "number_theory"
+comptime const DEFAULT_BLOWUP_DEPTH = 6
+comptime const DEFAULT_BLOWUP_MAX_COROLLARIES = 216
+comptime const DEFAULT_BLOWUP_MIN_CONFIDENCE = 0.15
+
+comptime const DEFAULT_EVOLUTION_SERENDIPITY = 0.3
+comptime const DEFAULT_EVOLUTION_MIN_VERIFY = 0.5
+comptime const DEFAULT_EVOLUTION_MAX_MUTATIONS = 20
+
+comptime const DEFAULT_FORGE_MAX_CANDIDATES = 20
+comptime const DEFAULT_FORGE_MIN_CONFIDENCE = 0.2
+comptime const DEFAULT_FORGE_SIMILARITY = 0.8
+
+comptime const DEFAULT_LOG_MAX_BYTES = 1048576
+comptime const DEFAULT_LOG_MAX_FILES = 5
+
+// ─── config 파일 경로 결정 ───
+fn config_path() -> string {
+    // env HOME 읽기 시도 — hexa에서는 간이 방법
+    // 후보: read_file로 알려진 경로 탐색
+    let home_candidates = "/Users/ghost"
+    home_candidates + CONFIG_SUBPATH
+}
+
+// ─── 간이 TOML 파서 ───
+// 지원: [section], key = value, key = "string", # 주석
+// 중첩 미지원 (flat key 방식: section.key)
+
+struct ConfigEntry {
+    section: string,
+    key: string,
+    value: string
+}
+
+fn parse_toml(content: string) -> string {
+    // 전체 파싱 결과를 "section.key=value\n" 형태로 반환
+    let lines = content.split("\n")
+    let mut current_section = ""
+    let mut result = ""
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i].trim()
+        // 주석/빈줄 스킵
+        if line == "" {
+            i = i + 1
+            continue
+        }
+        if line.slice(0, 1) == "#" {
+            i = i + 1
+            continue
+        }
+        // 섹션 헤더
+        if line.slice(0, 1) == "[" {
+            let end = line.index_of("]")
+            if end > 0 {
+                current_section = line.slice(1, end).trim()
+            }
+            i = i + 1
+            continue
+        }
+        // key = value
+        let eq = line.index_of("=")
+        if eq > 0 {
+            let key = line.slice(0, eq).trim()
+            let mut val = line.slice(eq + 1, line.length()).trim()
+            // 인라인 주석 제거
+            let hash = val.index_of("#")
+            if hash > 0 {
+                val = val.slice(0, hash).trim()
+            }
+            // 따옴표 제거
+            if val.length() >= 2 {
+                if val.slice(0, 1) == "\"" {
+                    let last = val.slice(val.length() - 1, val.length())
+                    if last == "\"" {
+                        val = val.slice(1, val.length() - 1)
+                    }
+                }
+            }
+            let full_key = if current_section != "" { current_section + "." + key } else { key }
+            result = result + full_key + "=" + val + "\n"
+        }
+        i = i + 1
+    }
+    result
+}
+
+// ─── 키-값 조회 ───
+fn get_value(parsed: string, key: string) -> string {
+    let needle = key + "="
+    let lines = parsed.split("\n")
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i]
+        if line.index_of(needle) == 0 {
+            return line.slice(needle.length(), line.length())
+        }
+        i = i + 1
+    }
+    ""
+}
+
+// ─── config 전체 읽기 ───
+fn load_config() -> string {
+    let path = config_path()
+    let content = read_file(path)
+    if content == "" {
+        return ""
+    }
+    parse_toml(content)
+}
+
+// ─── config에서 값 가져오기 (기본값 포함) ───
+fn config_get(key: string) -> string {
+    let parsed = load_config()
+    let val = get_value(parsed, key)
+    if val != "" { return val }
+
+    // 기본값 반환
+    match key {
+        "loop.domain" -> DEFAULT_LOOP_DOMAIN,
+        "loop.cycles" -> to_string(DEFAULT_LOOP_CYCLES),
+        "loop.max_ouroboros_cycles" -> to_string(DEFAULT_LOOP_MAX_OUROBOROS),
+        "loop.max_meta_cycles" -> to_string(DEFAULT_LOOP_MAX_META),
+        "loop.forge_after_n_cycles" -> to_string(DEFAULT_LOOP_FORGE_AFTER),
+        "daemon.interval_min" -> to_string(DEFAULT_DAEMON_INTERVAL),
+        "blowup.domain" -> DEFAULT_BLOWUP_DOMAIN,
+        "blowup.max_depth" -> to_string(DEFAULT_BLOWUP_DEPTH),
+        "blowup.max_corollaries" -> to_string(DEFAULT_BLOWUP_MAX_COROLLARIES),
+        "blowup.min_confidence" -> to_string(DEFAULT_BLOWUP_MIN_CONFIDENCE),
+        "evolution.serendipity_ratio" -> to_string(DEFAULT_EVOLUTION_SERENDIPITY),
+        "evolution.min_verification_score" -> to_string(DEFAULT_EVOLUTION_MIN_VERIFY),
+        "evolution.max_mutations_per_cycle" -> to_string(DEFAULT_EVOLUTION_MAX_MUTATIONS),
+        "forge.max_candidates" -> to_string(DEFAULT_FORGE_MAX_CANDIDATES),
+        "forge.min_confidence" -> to_string(DEFAULT_FORGE_MIN_CONFIDENCE),
+        "forge.similarity_threshold" -> to_string(DEFAULT_FORGE_SIMILARITY),
+        "log_rotation.max_bytes" -> to_string(DEFAULT_LOG_MAX_BYTES),
+        "log_rotation.max_files" -> to_string(DEFAULT_LOG_MAX_FILES),
+        _ -> ""
+    }
+}
+
+// ─── config에 값 쓰기 ───
+fn config_set(key: string, value: string) {
+    let path = config_path()
+    let content = read_file(path)
+
+    // key를 section.name 으로 분리
+    let dot = key.index_of(".")
+    let mut section = ""
+    let mut name = key
+    if dot > 0 {
+        section = key.slice(0, dot)
+        name = key.slice(dot + 1, key.length())
+    }
+
+    let section_header = "[" + section + "]"
+    let entry = name + " = " + value
+
+    if content == "" {
+        // 새 파일
+        let new_content = if section != "" { section_header + "\n" + entry + "\n" } else { entry + "\n" }
+        write_file(path, new_content)
+        print("set " + key + " = " + value + " (new file)")
+        return
+    }
+
+    let lines = content.split("\n")
+    let mut result = []
+    let mut in_section = false
+    let mut replaced = false
+    let mut section_exists = false
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i]
+        let trimmed = line.trim()
+
+        // 섹션 헤더 체크
+        if trimmed.length() > 0 {
+            if trimmed.slice(0, 1) == "[" {
+                if in_section {
+                    if !replaced {
+                        // 섹션 끝에 도달, 키 없었으므로 추가
+                        result = result.push(entry)
+                        replaced = true
+                    }
+                }
+                if trimmed == section_header {
+                    in_section = true
+                    section_exists = true
+                } else {
+                    in_section = false
+                }
+            }
+        }
+
+        // 현재 섹션 내에서 키 찾기
+        if in_section {
+            if trimmed.slice(0, 1) != "#" {
+                if trimmed.slice(0, 1) != "[" {
+                    let eq = trimmed.index_of("=")
+                    if eq > 0 {
+                        let k = trimmed.slice(0, eq).trim()
+                        if k == name {
+                            result = result.push(entry)
+                            replaced = true
+                            i = i + 1
+                            continue
+                        }
+                    }
+                }
+            }
+        }
+
+        result = result.push(line)
+        i = i + 1
+    }
+
+    // 섹션 끝까지 키를 못 찾은 경우
+    if in_section {
+        if !replaced {
+            result = result.push(entry)
+            replaced = true
+        }
+    }
+
+    // 섹션 자체가 없는 경우
+    if !section_exists {
+        if section != "" {
+            result = result.push("")
+            result = result.push(section_header)
+        }
+        result = result.push(entry)
+    }
+
+    let mut out = ""
+    let mut j = 0
+    while j < result.length() {
+        out = out + result[j] + "\n"
+        j = j + 1
+    }
+    write_file(path, out)
+    print("set " + key + " = " + value)
+}
+
+// ─── 전체 설정 목록 ───
+fn config_list() {
+    let parsed = load_config()
+    if parsed == "" {
+        print("(no config file found at " + config_path() + ")")
+        print("run 'hexa config.hexa init' to create default config")
+        return
+    }
+    let lines = parsed.split("\n")
+    let mut count = 0
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i].trim()
+        if line != "" {
+            print(line)
+            count = count + 1
+        }
+        i = i + 1
+    }
+    print("--- " + to_string(count) + " setting(s)")
+}
+
+// ─── 섹션별 목록 ───
+fn config_section(section_name: string) {
+    let parsed = load_config()
+    let prefix = section_name + "."
+    let lines = parsed.split("\n")
+    let mut count = 0
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i].trim()
+        if line != "" {
+            if line.index_of(prefix) == 0 {
+                print(line)
+                count = count + 1
+            }
+        }
+        i = i + 1
+    }
+    if count == 0 {
+        // 기본값 표시
+        print("(no configured values for [" + section_name + "], showing defaults)")
+        match section_name {
+            "loop" -> {
+                print("loop.domain=" + DEFAULT_LOOP_DOMAIN)
+                print("loop.cycles=" + to_string(DEFAULT_LOOP_CYCLES))
+                print("loop.max_ouroboros_cycles=" + to_string(DEFAULT_LOOP_MAX_OUROBOROS))
+                print("loop.max_meta_cycles=" + to_string(DEFAULT_LOOP_MAX_META))
+                print("loop.forge_after_n_cycles=" + to_string(DEFAULT_LOOP_FORGE_AFTER))
+            },
+            "daemon" -> {
+                print("daemon.interval_min=" + to_string(DEFAULT_DAEMON_INTERVAL))
+            },
+            "blowup" -> {
+                print("blowup.domain=" + DEFAULT_BLOWUP_DOMAIN)
+                print("blowup.max_depth=" + to_string(DEFAULT_BLOWUP_DEPTH))
+                print("blowup.max_corollaries=" + to_string(DEFAULT_BLOWUP_MAX_COROLLARIES))
+                print("blowup.min_confidence=" + to_string(DEFAULT_BLOWUP_MIN_CONFIDENCE))
+            },
+            "evolution" -> {
+                print("evolution.serendipity_ratio=" + to_string(DEFAULT_EVOLUTION_SERENDIPITY))
+                print("evolution.min_verification_score=" + to_string(DEFAULT_EVOLUTION_MIN_VERIFY))
+                print("evolution.max_mutations_per_cycle=" + to_string(DEFAULT_EVOLUTION_MAX_MUTATIONS))
+            },
+            "forge" -> {
+                print("forge.max_candidates=" + to_string(DEFAULT_FORGE_MAX_CANDIDATES))
+                print("forge.min_confidence=" + to_string(DEFAULT_FORGE_MIN_CONFIDENCE))
+                print("forge.similarity_threshold=" + to_string(DEFAULT_FORGE_SIMILARITY))
+            },
+            "log_rotation" -> {
+                print("log_rotation.max_bytes=" + to_string(DEFAULT_LOG_MAX_BYTES))
+                print("log_rotation.max_files=" + to_string(DEFAULT_LOG_MAX_FILES))
+            },
+            _ -> {
+                print("unknown section: " + section_name)
+            }
+        }
+    } else {
+        print("--- " + to_string(count) + " setting(s) in [" + section_name + "]")
+    }
+}
+
+// ─── 기본 config.toml 생성 ───
+fn config_init() {
+    let path = config_path()
+    let existing = read_file(path)
+    if existing != "" {
+        print("config already exists at " + path)
+        print("use 'set' to modify individual values")
+        return
+    }
+    let template = "# NEXUS-6 Configuration\n# Place this file at ~/.nexus6/config.toml\n# All values are optional — hardcoded defaults are shown.\n\n[loop]\n# domain = \"number_theory\"\n# cycles = 1\n# max_ouroboros_cycles = 6\n# max_meta_cycles = 6\n# forge_after_n_cycles = 3\n\n[daemon]\n# domain = \"number_theory\"\n# interval_min = 30\n# max_loops = 0          # 0 = infinite\n\n[blowup]\n# domain = \"number_theory\"\n# max_depth = 6\n# max_corollaries = 216\n# min_confidence = 0.15\n# transfer_domains = [\"physics\", \"mathematics\", \"information\", \"biology\", \"consciousness\", \"architecture\"]\n\n[evolution]\n# domain = \"general\"\n# serendipity_ratio = 0.3\n# min_verification_score = 0.5\n# max_mutations_per_cycle = 20\n\n[forge]\n# max_candidates = 20\n# min_confidence = 0.2\n# similarity_threshold = 0.8\n\n[materials]\n# api_key = \"your-materials-project-api-key\"\n\n[log_rotation]\n# max_bytes = 1048576   # 1 MB\n# max_files = 5\n"
+    write_file(path, template)
+    print("created default config at " + path)
+}
+
+// ─── CLI ───
+fn main() {
+    let a = args()
+    if a.length() < 2 {
+        print("config.hexa — configuration file management")
+        print("usage:")
+        print("  hexa config.hexa get <key>           — get value (section.key format)")
+        print("  hexa config.hexa set <key> <value>   — set value")
+        print("  hexa config.hexa list                — show all settings")
+        print("  hexa config.hexa section <name>      — show section (loop/daemon/blowup/...)")
+        print("  hexa config.hexa init                — create default config.toml")
+        print("")
+        print("sections: loop, daemon, blowup, evolution, forge, materials, log_rotation")
+        return
+    }
+    let cmd = a[1]
+    match cmd {
+        "get" -> {
+            if a.length() < 3 {
+                print("usage: hexa config.hexa get <key>")
+                return
+            }
+            let key = a[2]
+            let val = config_get(key)
+            if val == "" {
+                print(key + " = (not set)")
+            } else {
+                print(key + " = " + val)
+            }
+        },
+        "set" -> {
+            if a.length() < 4 {
+                print("usage: hexa config.hexa set <key> <value>")
+                return
+            }
+            config_set(a[2], a[3])
+        },
+        "list" -> {
+            config_list()
+        },
+        "section" -> {
+            if a.length() < 3 {
+                print("usage: hexa config.hexa section <name>")
+                return
+            }
+            config_section(a[2])
+        },
+        "init" -> {
+            config_init()
+        },
+        _ -> {
+            print("unknown command: " + cmd)
+            print("commands: get, set, list, section, init")
+        }
+    }
+}
+
+main()

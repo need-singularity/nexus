@@ -1,0 +1,264 @@
+// mk2_hexa/native/nlp.hexa — NLP 의도 파싱 (Rust nlp/ 포팅)
+// 자연어 → CLI 명령 변환 (한국어 + 영어)
+// 실행: hexa nlp.hexa parse "물리에서 이상한 패턴 찾아줘"
+//       hexa nlp.hexa classify "verify 12.0 확인"
+//       hexa nlp.hexa to-cli "physics 전체 스캔"
+
+// ─── 도메인 매핑 ───
+
+fn korean_to_english_domain(text: string) -> string {
+    if text.contains("물리") { return "physics" }
+    if text.contains("생물") { return "biology" }
+    if text.contains("화학") { return "chemistry" }
+    if text.contains("에너지") { return "energy" }
+    if text.contains("칩") { return "chip" }
+    if text.contains("반도체") { return "semiconductor" }
+    if text.contains("핵융합") { return "fusion" }
+    if text.contains("우주") { return "cosmology" }
+    if text.contains("양자") { return "quantum" }
+    if text.contains("배터리") { return "battery" }
+    if text.contains("태양") { return "solar" }
+    if text.contains("플라즈마") { return "plasma" }
+    if text.contains("로봇") { return "robotics" }
+    if text.contains("암호") { return "crypto" }
+    if text.contains("네트워크") { return "network" }
+    if text.contains("소재") { return "material" }
+    if text.contains("디스플레이") { return "display" }
+    if text.contains("오디오") { return "audio" }
+    if text.contains("수학") { return "math" }
+    if text.contains("소프트웨어") { return "software" }
+    if text.contains("환경") { return "environment" }
+    ""
+}
+
+fn extract_domain(text: string) -> string {
+    let kr = korean_to_english_domain(text)
+    if kr != "" { return kr }
+
+    let domains = ["physics", "biology", "chemistry", "energy", "chip", "semiconductor", "fusion", "cosmology", "quantum", "ai", "battery", "solar", "plasma", "robotics", "crypto", "network", "material", "display", "audio", "math", "software", "environment"]
+    let mut i = 0
+    while i < domains.length() {
+        if text.contains(domains[i]) { return domains[i] }
+        i = i + 1
+    }
+    "general"
+}
+
+// ─── 숫자 추출 ───
+
+fn extract_first_number(text: string) -> string {
+    let tokens = text.split(" ")
+    let mut i = 0
+    while i < tokens.length() {
+        let tok = tokens[i].trim()
+        if tok != "" {
+            try {
+                let v = to_float(tok)
+                return tok
+            } catch e {
+                // not a number, try stripping trailing punctuation
+                let cleaned = tok.replace(",", "").replace(")", "").replace("(", "")
+                try {
+                    let v2 = to_float(cleaned)
+                    return cleaned
+                } catch e2 {
+                    // skip
+                }
+            }
+        }
+        i = i + 1
+    }
+    ""
+}
+
+// ─── 키워드 포함 확인 ───
+
+fn contains_any(text: string, keywords: string) -> bool {
+    let kws = keywords.split(",")
+    let mut i = 0
+    while i < kws.length() {
+        if text.contains(kws[i].trim()) { return true }
+        i = i + 1
+    }
+    false
+}
+
+// ─── 실험 타입 추출 ───
+
+fn extract_experiment_type(text: string) -> string {
+    if text.contains("장력") { return "tension" }
+    if text.contains("핵융합") { return "fusion" }
+    if text.contains("위상") { return "phase" }
+    if text.contains("공명") { return "resonance" }
+    if text.contains("대칭") { return "symmetry" }
+    if text.contains("tension") { return "tension" }
+    if text.contains("fusion") { return "fusion" }
+    if text.contains("phase") { return "phase" }
+    if text.contains("resonance") { return "resonance" }
+    if text.contains("symmetry") { return "symmetry" }
+    "tension"
+}
+
+// ─── 렌즈 추출 ───
+
+fn extract_lens(text: string) -> string {
+    if text.contains("의식") { return "consciousness" }
+    if text.contains("consciousness") { return "consciousness" }
+    if text.contains("위상") { return "topology" }
+    if text.contains("topology") { return "topology" }
+    if text.contains("인과") { return "causal" }
+    if text.contains("causal") { return "causal" }
+    if text.contains("양자") { return "quantum" }
+    if text.contains("quantum") { return "quantum" }
+    if text.contains("파동") { return "wave" }
+    if text.contains("wave") { return "wave" }
+    if text.contains("진화") { return "evolution" }
+    if text.contains("evolution") { return "evolution" }
+    if text.contains("열역학") { return "thermo" }
+    if text.contains("thermo") { return "thermo" }
+    if text.contains("중력") { return "gravity" }
+    if text.contains("gravity") { return "gravity" }
+    ""
+}
+
+// ─── 의도 분류 ───
+
+fn classify_intent(text: string) -> string {
+    let lower = text.lower()
+
+    // Help
+    if contains_any(lower, "help,도움,도와줘,사용법") {
+        return "help"
+    }
+
+    // Verify
+    if contains_any(lower, "verify,검증,확인,관련있나") {
+        let num = extract_first_number(text)
+        if num != "" {
+            return "verify:" + num
+        }
+    }
+
+    // Experiment
+    if contains_any(lower, "experiment,실험") {
+        let exp_type = extract_experiment_type(lower)
+        let target = extract_domain(lower)
+        let lens = extract_lens(lower)
+        return "experiment:" + exp_type + ":" + target + ":" + lens
+    }
+
+    // Scan
+    if contains_any(lower, "scan,찾아,스캔,탐색,이상,패턴") {
+        let domain = extract_domain(lower)
+        let full = contains_any(lower, "전체,full,전수,풀")
+        let full_str = if full { "true" } else { "false" }
+        return "scan:" + domain + ":" + full_str
+    }
+
+    // Search
+    if contains_any(lower, "search,보여줘,검색,최근,발견") {
+        let query = text.replace("search", "").replace("보여줘", "").replace("검색", "").replace("최근", "").replace("발견", "").trim()
+        let q = if query == "" { "recent" } else { query }
+        return "search:" + q
+    }
+
+    "unknown:" + text
+}
+
+// ─── 의도 → CLI 인자 변환 ───
+
+fn intent_to_cli(intent: string) -> string {
+    let parts = intent.split(":")
+    let action = parts[0]
+
+    if action == "help" {
+        return "nexus6 help"
+    }
+    if action == "verify" {
+        if parts.length() > 1 {
+            return "nexus6 verify " + parts[1]
+        }
+        return "nexus6 verify"
+    }
+    if action == "scan" {
+        let mut cmd = "nexus6 scan"
+        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
+        if parts.length() > 2 {
+            if parts[2] == "true" { cmd = cmd + " --full" }
+        }
+        return cmd
+    }
+    if action == "experiment" {
+        let mut cmd = "nexus6 experiment"
+        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
+        if parts.length() > 2 { cmd = cmd + " " + parts[2] }
+        return cmd
+    }
+    if action == "search" {
+        let mut cmd = "nexus6 search"
+        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
+        return cmd
+    }
+    "nexus6 " + intent
+}
+
+// ─── CLI ───
+
+fn main() {
+    let a = args()
+    if a.length() < 2 {
+        print("nlp.hexa — NLP 의도 파서 (한국어 + 영어)")
+        print("Usage:")
+        print("  classify <text>   의도 분류")
+        print("  parse <text>      의도 분류 + 상세")
+        print("  to-cli <text>     자연어 → CLI 인자 변환")
+        return
+    }
+
+    let cmd = a[1]
+    let mut text = ""
+    let mut ti = 2
+    while ti < a.length() {
+        if text == "" { text = a[ti] }
+        else { text = text + " " + a[ti] }
+        ti = ti + 1
+    }
+
+    if cmd == "classify" {
+        let intent = classify_intent(text)
+        print("[nlp] intent: " + intent)
+    }
+
+    if cmd == "parse" {
+        let intent = classify_intent(text)
+        let parts = intent.split(":")
+        let action = parts[0]
+        print("[nlp] action : " + action)
+        if action == "scan" {
+            if parts.length() > 1 { print("  domain : " + parts[1]) }
+            if parts.length() > 2 { print("  full   : " + parts[2]) }
+        }
+        if action == "verify" {
+            if parts.length() > 1 { print("  value  : " + parts[1]) }
+        }
+        if action == "experiment" {
+            if parts.length() > 1 { print("  type   : " + parts[1]) }
+            if parts.length() > 2 { print("  target : " + parts[2]) }
+            if parts.length() > 3 {
+                if parts[3] != "" { print("  lens   : " + parts[3]) }
+            }
+        }
+        if action == "search" {
+            if parts.length() > 1 { print("  query  : " + parts[1]) }
+        }
+        if action == "unknown" {
+            if parts.length() > 1 { print("  text   : " + parts[1]) }
+        }
+    }
+
+    if cmd == "to-cli" {
+        let intent = classify_intent(text)
+        let cli = intent_to_cli(intent)
+        print("[nlp] " + cli)
+    }
+}

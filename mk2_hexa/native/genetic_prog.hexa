@@ -1,0 +1,453 @@
+// mk2_hexa/native/genetic_prog.hexa — 유전 프로그래밍 진화 엔진
+// 렌즈 파이프라인 진화: 돌연변이 / 교차 / 선택
+// n=6 상수: pop_size=sigma^2=144, mutation_rate=1/sigma=1/12, crossover=1/2+1/3+1/6=1
+// CLI: hexa genetic_prog.hexa evolve <domain> [generations]
+
+// ──────────────────────────────────────
+// n=6 상수
+// ──────────────────────────────────────
+
+comptime const DEFAULT_POP_SIZE = 144     // sigma^2 = 12^2
+comptime const MUTATION_RATE = 0.0833333  // 1/sigma = 1/12
+comptime const TOURNAMENT_K = 3           // n/phi ~= 3
+
+// ──────────────────────────────────────
+// Gene: 단일 렌즈 설정
+// ──────────────────────────────────────
+
+struct Gene {
+    lens_id: string,
+    weight: float,      // 0.0~1.0
+    threshold: float    // 0.0~1.0
+}
+
+fn make_gene(lid: string, w: float, t: float) -> Gene {
+    let w2 = if w < 0.0 { 0.0 } else if w > 1.0 { 1.0 } else { w }
+    let t2 = if t < 0.0 { 0.0 } else if t > 1.0 { 1.0 } else { t }
+    Gene { lens_id: lid, weight: w2, threshold: t2 }
+}
+
+// ──────────────────────────────────────
+// Chromosome: 유전자 파이프라인
+// ──────────────────────────────────────
+
+struct Chromosome {
+    genes: [Gene]
+}
+
+fn make_chromosome(genes: [Gene]) -> Chromosome {
+    Chromosome { genes: genes }
+}
+
+fn total_weight(c: Chromosome) -> float {
+    let mut sum = 0.0
+    let mut i = 0
+    while i < length(c.genes) {
+        sum = sum + c.genes[i].weight
+        i = i + 1
+    }
+    sum
+}
+
+// ──────────────────────────────────────
+// LCG 의사난수 생성기 (결정론적)
+// Knuth LCG: state = state * 6364136223846793005 + 1 (mod 2^64)
+// hexa에 u64 wrapping이 없으므로 간이 LCG 사용
+// ──────────────────────────────────────
+
+struct Rng {
+    state: int
+}
+
+fn rng_new(seed: int) -> Rng {
+    Rng { state: if seed == 0 { 42 } else { seed } }
+}
+
+fn rng_next(rng: Rng) -> Rng {
+    // 간이 LCG: (a * state + c) mod m
+    // a=1103515245, c=12345, m=2^31
+    let a = 1103515245
+    let c = 12345
+    let m = 2147483648  // 2^31
+    let next = (a * rng.state + c) % m
+    let next = if next < 0 { 0 - next } else { next }
+    Rng { state: next }
+}
+
+fn rng_float(rng: Rng) -> float {
+    // [0.0, 1.0)
+    let s = if rng.state < 0 { 0 - rng.state } else { rng.state }
+    to_float(s % 10000) / 10000.0
+}
+
+fn rng_int(rng: Rng, n: int) -> int {
+    // [0, n)
+    let s = if rng.state < 0 { 0 - rng.state } else { rng.state }
+    s % n
+}
+
+// ──────────────────────────────────────
+// Population: 진화 집단
+// ──────────────────────────────────────
+
+struct Population {
+    chromosomes: [Chromosome],
+    rng: Rng,
+    mutation_rate: float
+}
+
+fn random_population(lens_ids: [string], gene_count: int, pop_size: int, seed: int) -> Population {
+    let mut rng = rng_new(seed)
+    let mut chromosomes = []
+    let n_lenses = length(lens_ids)
+
+    let mut p = 0
+    while p < pop_size {
+        let mut genes = []
+        let mut g = 0
+        while g < gene_count {
+            let lid = lens_ids[g % n_lenses]
+            rng = rng_next(rng)
+            let w = rng_float(rng)
+            rng = rng_next(rng)
+            let t = rng_float(rng)
+            let genes = genes.push(make_gene(lid, w, t))
+            g = g + 1
+        }
+        let chromosomes = chromosomes.push(make_chromosome(genes))
+        p = p + 1
+    }
+
+    Population {
+        chromosomes: chromosomes,
+        rng: rng,
+        mutation_rate: MUTATION_RATE
+    }
+}
+
+// ──────────────────────────────────────
+// 토너먼트 선택
+// ──────────────────────────────────────
+
+fn tournament_select(pop: Population, fitnesses: [float], k: int) -> int {
+    let n = length(pop.chromosomes)
+    let mut rng = pop.rng
+    rng = rng_next(rng)
+    let mut best_idx = rng_int(rng, n)
+    let mut best_fit = fitnesses[best_idx]
+
+    let mut t = 1
+    while t < k {
+        rng = rng_next(rng)
+        let idx = rng_int(rng, n)
+        if fitnesses[idx] > best_fit {
+            best_idx = idx
+            best_fit = fitnesses[idx]
+        }
+        t = t + 1
+    }
+    best_idx
+}
+
+// ──────────────────────────────────────
+// Egyptian fraction 교차: 1/2 + 1/3 + 1/6 = 1
+// ──────────────────────────────────────
+
+fn crossover(a: Chromosome, b: Chromosome) -> Chromosome {
+    let len_a = length(a.genes)
+    let len_b = length(b.genes)
+    let len = if len_a < len_b { len_a } else { len_b }
+    if len == 0 { return a }
+
+    let split1 = len / 2           // 1/2
+    let split2 = split1 + len / 3  // + 1/3
+    // 나머지 ~= 1/6
+
+    let mut genes = []
+    let mut i = 0
+    while i < len {
+        if i < split1 {
+            let genes = genes.push(a.genes[i])      // 1/2 from A
+        } else if i < split2 {
+            let genes = genes.push(b.genes[i])      // 1/3 from B
+        } else {
+            let genes = genes.push(a.genes[i])      // 1/6 from A
+        }
+        i = i + 1
+    }
+    make_chromosome(genes)
+}
+
+// ──────────────────────────────────────
+// 돌연변이
+// ──────────────────────────────────────
+
+fn clamp01(v: float) -> float {
+    if v < 0.0 { 0.0 } else if v > 1.0 { 1.0 } else { v }
+}
+
+fn mutate(c: Chromosome, rng: Rng, rate: float) -> Chromosome {
+    let mut genes = []
+    let mut r = rng
+    let mut i = 0
+    while i < length(c.genes) {
+        let g = c.genes[i]
+        r = rng_next(r)
+        if rng_float(r) < rate {
+            r = rng_next(r)
+            let delta_w = (rng_float(r) - 0.5) * 0.2
+            r = rng_next(r)
+            let delta_t = (rng_float(r) - 0.5) * 0.2
+            let genes = genes.push(make_gene(g.lens_id, clamp01(g.weight + delta_w), clamp01(g.threshold + delta_t)))
+        } else {
+            let genes = genes.push(g)
+        }
+        i = i + 1
+    }
+    make_chromosome(genes)
+}
+
+// ──────────────────────────────────────
+// 적합도 함수
+// ──────────────────────────────────────
+
+fn fitness(c: Chromosome, data: [float], known_patterns: [bool]) -> float {
+    let n = length(data)
+    if n == 0 { return 0.0 }
+    if n != length(known_patterns) { return 0.0 }
+
+    let tw = total_weight(c)
+    if tw < 0.000000000001 { return 0.0 }
+
+    let mut score = 0.0
+    let mut di = 0
+    while di < n {
+        let val = data[di]
+        let is_real = known_patterns[di]
+
+        // 각 유전자가 투표
+        let mut detection = 0.0
+        let mut gi = 0
+        while gi < length(c.genes) {
+            if val > c.genes[gi].threshold {
+                detection = detection + c.genes[gi].weight
+            }
+            gi = gi + 1
+        }
+        detection = detection / tw
+
+        if is_real {
+            score = score + detection
+        } else {
+            score = score - detection * 0.5  // 거짓 양성 감점 (가벼움)
+        }
+        di = di + 1
+    }
+
+    // [0, 1] 정규화
+    let normalized = score / to_float(n) + 0.5
+    clamp01(normalized)
+}
+
+// ──────────────────────────────────────
+// 1세대 진화
+// ──────────────────────────────────────
+
+fn evolve_one(pop: Population, data: [float], known_patterns: [bool]) -> Population {
+    let pop_size = length(pop.chromosomes)
+    if pop_size == 0 { return pop }
+
+    // 적합도 계산
+    let mut fitnesses = []
+    let mut fi = 0
+    while fi < pop_size {
+        let f = fitness(pop.chromosomes[fi], data, known_patterns)
+        let fitnesses = fitnesses.push(f)
+        fi = fi + 1
+    }
+
+    // 엘리트 선택 (최고 개체 보존)
+    let mut best_idx = 0
+    let mut best_fit = fitnesses[0]
+    let mut bi = 1
+    while bi < pop_size {
+        if fitnesses[bi] > best_fit {
+            best_idx = bi
+            best_fit = fitnesses[bi]
+        }
+        bi = bi + 1
+    }
+    let elite = pop.chromosomes[best_idx]
+
+    let mut next_gen = []
+    let next_gen = next_gen.push(elite)
+    let mut rng = pop.rng
+
+    while length(next_gen) < pop_size {
+        // 토너먼트 선택
+        rng = rng_next(rng)
+        let pa_idx = rng_int(rng, pop_size)
+        rng = rng_next(rng)
+        let pb_idx = rng_int(rng, pop_size)
+
+        let child = crossover(pop.chromosomes[pa_idx], pop.chromosomes[pb_idx])
+        rng = rng_next(rng)
+        let child = mutate(child, rng, pop.mutation_rate)
+        let next_gen = next_gen.push(child)
+    }
+
+    Population {
+        chromosomes: next_gen,
+        rng: rng,
+        mutation_rate: pop.mutation_rate
+    }
+}
+
+// ──────────────────────────────────────
+// N세대 진화 + 최적 개체 반환
+// ──────────────────────────────────────
+
+fn evolve(pop: Population, generations: int, data: [float], known_patterns: [bool]) -> Chromosome {
+    let mut current = pop
+    let mut gen = 0
+    while gen < generations {
+        current = evolve_one(current, data, known_patterns)
+        gen = gen + 1
+    }
+
+    // 최적 개체 반환
+    let pop_size = length(current.chromosomes)
+    let mut best_idx = 0
+    let mut best_fit = fitness(current.chromosomes[0], data, known_patterns)
+    let mut i = 1
+    while i < pop_size {
+        let f = fitness(current.chromosomes[i], data, known_patterns)
+        if f > best_fit {
+            best_idx = i
+            best_fit = f
+        }
+        i = i + 1
+    }
+    current.chromosomes[best_idx]
+}
+
+// ──────────────────────────────────────
+// CLI 엔트리포인트
+// ──────────────────────────────────────
+
+fn print_chromosome(c: Chromosome) {
+    println("  Chromosome (" + to_string(length(c.genes)) + " genes, total_weight=" + to_string(total_weight(c)) + ")")
+    let mut i = 0
+    while i < length(c.genes) {
+        let g = c.genes[i]
+        println("    [" + to_string(i) + "] " + g.lens_id + " w=" + to_string(g.weight) + " t=" + to_string(g.threshold))
+        i = i + 1
+    }
+}
+
+fn main() {
+    let argv = args()
+    let cmd = if length(argv) > 1 { argv[1] } else { "evolve" }
+
+    match cmd {
+        "evolve" -> {
+            let domain = if length(argv) > 2 { argv[2] } else { "general" }
+            let mut gens = 12  // sigma = 12
+            if length(argv) > 3 {
+                try {
+                    gens = to_int(argv[3])
+                } catch e {
+                    println("Invalid generations, using default 12")
+                }
+            }
+
+            // n=6 기본 렌즈
+            let lens_ids = ["consciousness", "gravity", "topology", "thermo", "wave", "evolution"]
+            let gene_count = 6  // n=6
+            let pop_size = 24   // 빠른 실행 (풀 사이즈: 144)
+            let seed = 42
+
+            println("=== Genetic Programming: " + domain + " ===")
+            println("  Population: " + to_string(pop_size) + ", Generations: " + to_string(gens))
+            println("  Mutation rate: " + to_string(MUTATION_RATE) + " (1/sigma)")
+            println("  Crossover: Egyptian fraction 1/2 + 1/3 + 1/6 = 1")
+
+            let pop = random_population(lens_ids, gene_count, pop_size, seed)
+
+            // 테스트 데이터: 처음 6개 진짜, 나머지 6개 잡음
+            let data = [0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.1, 0.15, 0.2, 0.05, 0.12, 0.08]
+            let known = [true, true, true, true, true, true, false, false, false, false, false, false]
+
+            let best = evolve(pop, gens, data, known)
+            let best_fit = fitness(best, data, known)
+
+            println("\n  Best fitness after " + to_string(gens) + " generations: " + to_string(best_fit))
+            print_chromosome(best)
+        },
+        _ -> {
+            println("Usage: hexa genetic_prog.hexa evolve <domain> [generations]")
+        }
+    }
+}
+
+// ──────────────────────────────────────
+// 검증
+// ──────────────────────────────────────
+
+// n=6 상수
+assert DEFAULT_POP_SIZE == 144
+assert MUTATION_RATE > 0.083
+assert MUTATION_RATE < 0.084
+
+// Gene clamp
+let g1 = make_gene("test", -0.5, 1.5)
+assert g1.weight == 0.0
+assert g1.threshold == 1.0
+
+let g2 = make_gene("test", 0.5, 0.5)
+assert g2.weight == 0.5
+
+// Chromosome total weight
+let c1 = make_chromosome([make_gene("a", 0.3, 0.5), make_gene("b", 0.7, 0.5)])
+assert total_weight(c1) == 1.0
+
+// Egyptian crossover (6 genes = n=6)
+let parent_a = make_chromosome([make_gene("a0",0.1,0.1), make_gene("a1",0.2,0.2), make_gene("a2",0.3,0.3), make_gene("a3",0.4,0.4), make_gene("a4",0.5,0.5), make_gene("a5",0.6,0.6)])
+let parent_b = make_chromosome([make_gene("b0",0.9,0.9), make_gene("b1",0.8,0.8), make_gene("b2",0.7,0.7), make_gene("b3",0.6,0.6), make_gene("b4",0.5,0.5), make_gene("b5",0.4,0.4)])
+let child = crossover(parent_a, parent_b)
+assert length(child.genes) == 6
+// 처음 3개 (1/2) = parent_a
+assert child.genes[0].lens_id == "a0"
+assert child.genes[1].lens_id == "a1"
+assert child.genes[2].lens_id == "a2"
+// 다음 2개 (1/3) = parent_b
+assert child.genes[3].lens_id == "b3"
+assert child.genes[4].lens_id == "b4"
+// 마지막 1개 (1/6) = parent_a
+assert child.genes[5].lens_id == "a5"
+
+// clamp01
+assert clamp01(-0.1) == 0.0
+assert clamp01(1.5) == 1.0
+assert clamp01(0.5) == 0.5
+
+// fitness: empty data
+let empty_c = make_chromosome([make_gene("x", 0.5, 0.5)])
+assert fitness(empty_c, [], []) == 0.0
+
+// RNG 결정론
+let r1 = rng_new(42)
+let r2 = rng_new(42)
+let r1b = rng_next(r1)
+let r2b = rng_next(r2)
+assert r1b.state == r2b.state
+
+// random_population 결정론
+let lids = ["a", "b"]
+let p1 = random_population(lids, 2, 4, 42)
+let p2 = random_population(lids, 2, 4, 42)
+assert length(p1.chromosomes) == 4
+assert length(p2.chromosomes) == 4
+assert p1.chromosomes[0].genes[0].weight == p2.chromosomes[0].genes[0].weight
+
+println("=== genetic_prog verified ===")
