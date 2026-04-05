@@ -187,7 +187,7 @@ if vc_path.exists():
         ms_filled = int(ms_pct / 10)
         ms_bar = '█' * ms_filled + '░' * (10 - ms_filled)
         if delta > 0:
-            closed_str = f' 🎉🎉🎉 +{delta}닫힘! 🧬{closed_count}→{fmt_k(next_ms)}={ms_pct:.0f}% [{ms_bar}] 🎉🎉🎉'
+            closed_str = f' 🧬{closed_count}닫힘→{fmt_k(next_ms)}={ms_pct:.0f}% [{ms_bar}] 🎉🎉🎉 +{delta}닫힘완료 🎉🎉🎉'
             closed_snap_path.write_text(json.dumps({'closed': closed_count}))
         elif closed_count > 0:
             closed_str = f' 🧬{closed_count}닫힘→{fmt_k(next_ms)}={ms_pct:.0f}% [{ms_bar}]'
