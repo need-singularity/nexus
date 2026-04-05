@@ -33,5 +33,25 @@ class TestParseSession(unittest.TestCase):
         self.assertIn("mean_tool_result_bytes", result)
         self.assertIn("p95_tool_result_bytes", result)
 
+    def test_render_metrics_md(self):
+        from cc_session_miner import render_metrics_md, render_hypotheses_md
+        agg = {
+            "session_count": 2, "total_tool_calls": 4,
+            "total_tool_result_bytes": 109, "mean_tool_result_bytes": 27.25,
+            "p50_tool_result_bytes": 32, "p95_tool_result_bytes": 32,
+            "mean_repeat_rate": 0.167, "corrupt_lines_total": 1,
+        }
+        md = render_metrics_md(agg, date_str="2026-04-05")
+        self.assertIn("# Claude Code 효율 지표", md)
+        self.assertIn("2026-04-05", md)
+        self.assertIn("p95", md)
+        self.assertIn("세션당", md)
+        self.assertIn("##", md)
+        self.assertIn("=", md)
+
+        hyp = render_hypotheses_md(agg, date_str="2026-04-05")
+        self.assertIn("# 돌파 가설", hyp)
+        self.assertIn("H1", hyp)
+
 if __name__ == "__main__":
     unittest.main()
