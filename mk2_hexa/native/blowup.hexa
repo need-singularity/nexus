@@ -15,6 +15,12 @@
 // ─── UTILITIES ───
 // ═══════════════════════════════════════════════════════════
 
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
 fn abs_f(x: f64) -> f64 {
     if x < 0.0 { return 0.0 - x }
     return x
@@ -856,6 +862,19 @@ fn telescope_verify(vals: string, threshold: f64) -> string {
 let a = args()
 let domain = if len(a) >= 3 { a[2] } else { "math" }
 let max_depth: i64 = if len(a) >= 4 { to_int(a[3]) } else { 6 }
+// --no-graph: graph read/write 스킵 (cascade 모드용)
+// --seeds "6|12|2|4|...": 외부 seed 주입 (seed_engine 연동)
+let mut skip_graph = false
+let mut ext_seeds = ""
+let mut ai: i64 = 2
+while ai < len(a) {
+    if a[ai] == "--no-graph" { skip_graph = true }
+    if a[ai] == "--seeds" && ai + 1 < len(a) {
+        ext_seeds = a[ai + 1]
+        ai = ai + 1
+    }
+    ai = ai + 1
+}
 let log_path = "shared/discovery_log.jsonl"
 let graph_path = "shared/discovery_graph.json"
 let mc: i64 = m_count(domain)
@@ -872,15 +891,23 @@ println("")
 // PHASE 1: Graph Load
 // ═══════════════════════════════════════════════════════════
 
-println("--- Phase 1: Graph Load ---")
-let graph_content = graph_load()
-let graph_nodes_before: i64 = graph_count_type(graph_content, "node")
-let graph_edges_before: i64 = graph_count_type(graph_content, "edge")
-let graph_hubs_before: i64 = graph_hub_count(graph_content, 3)
-println("  file             : shared/discovery_graph.json")
-println("  nodes (before)   :", graph_nodes_before)
-println("  edges (before)   :", graph_edges_before)
-println("  hubs (deg>=3)    :", graph_hubs_before)
+let mut graph_content = ""
+let mut graph_nodes_before: i64 = 0
+let mut graph_edges_before: i64 = 0
+let mut graph_hubs_before: i64 = 0
+if !skip_graph {
+    println("--- Phase 1: Graph Load ---")
+    graph_content = graph_load()
+    graph_nodes_before = graph_count_type(graph_content, "node")
+    graph_edges_before = graph_count_type(graph_content, "edge")
+    graph_hubs_before = graph_hub_count(graph_content, 3)
+    println("  file             : shared/discovery_graph.json")
+    println("  nodes (before)   :", graph_nodes_before)
+    println("  edges (before)   :", graph_edges_before)
+    println("  hubs (deg>=3)    :", graph_hubs_before)
+} else {
+    println("--- Phase 1: Graph Load (skipped --no-graph) ---")
+}
 println("")
 
 // ═══════════════════════════════════════════════════════════
@@ -995,18 +1022,37 @@ let mut logged: i64 = 0
 // Collect all corollary values for telescope (phase 5)
 let mut val_csv = ""
 
-// Build initial axiom pool from domain metrics
+// Build initial axiom pool — 외부 seed 있으면 동적, 없으면 도메인 메트릭
 let mut ax_names = ""
 let mut ax_vals = ""
 let mut ax_n: i64 = 0
-let mut init_i: i64 = 0
-while init_i < mc {
-    if len(ax_names) > 0 { ax_names = ax_names + "|" }
-    ax_names = ax_names + m_name(init_i, domain)
-    if len(ax_vals) > 0 { ax_vals = ax_vals + "|" }
-    ax_vals = ax_vals + to_string(m_val(init_i, domain))
-    ax_n = ax_n + 1
-    init_i = init_i + 1
+
+if ext_seeds.len() > 0 {
+    // --seeds 모드: seed_engine 출력 사용
+    ax_vals = ext_seeds
+    let seed_parts = ext_seeds.split("|")
+    let mut si: i64 = 0
+    while si < seed_parts.len() {
+        if si > 0 { ax_names = ax_names + "|" }
+        let sv = safe_float(seed_parts[si])
+        let nm = match_name(sv)
+        if nm != "" { ax_names = ax_names + nm } else { ax_names = ax_names + "s" + to_string(si) }
+        si = si + 1
+    }
+    ax_n = seed_parts.len()
+    println("  seed source: DYNAMIC (" + to_string(ax_n) + " seeds from --seeds)")
+} else {
+    // 기본: 도메인 메트릭
+    let mut init_i: i64 = 0
+    while init_i < mc {
+        if len(ax_names) > 0 { ax_names = ax_names + "|" }
+        ax_names = ax_names + m_name(init_i, domain)
+        if len(ax_vals) > 0 { ax_vals = ax_vals + "|" }
+        ax_vals = ax_vals + to_string(m_val(init_i, domain))
+        ax_n = ax_n + 1
+        init_i = init_i + 1
+    }
+    println("  seed source: STATIC (" + to_string(ax_n) + " domain metrics)")
 }
 
 // Per-depth stats tracking (pipe-separated)
@@ -1458,10 +1504,13 @@ if tele_boost > 0.0 {
 // PHASE 6: Graph Update
 // ═══════════════════════════════════════════════════════════
 
-println("--- Phase 6: Graph Update ---")
 let mut graph_new_entries = ""
 let mut graph_added_nodes: i64 = 0
 let mut graph_added_edges: i64 = 0
+if skip_graph {
+    println("--- Phase 6: Graph Update (skipped --no-graph) ---")
+} else {
+println("--- Phase 6: Graph Update ---")
 
 // Hub bonus: nodes with degree >= 3 get +0.1 confidence
 let hub_bonus: f64 = if graph_hubs_before > 0 { 0.1 } else { 0.0 }
@@ -1513,10 +1562,13 @@ if graph_added_nodes > 0 {
 let graph_nodes_after = graph_nodes_before + graph_added_nodes
 let graph_edges_after = graph_edges_before + graph_added_edges
 
-println("  nodes added      :", graph_added_nodes)
-println("  edges added      :", graph_added_edges)
-println("  nodes (after)    :", graph_nodes_after)
-println("  edges (after)    :", graph_edges_after)
+if !skip_graph {
+    println("  nodes added      :", graph_added_nodes)
+    println("  edges added      :", graph_added_edges)
+    println("  nodes (after)    :", graph_nodes_after)
+    println("  edges (after)    :", graph_edges_after)
+}
+} // end if !skip_graph (Phase 6)
 println("")
 
 // ═══════════════════════════════════════════════════════════
