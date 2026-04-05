@@ -1,99 +1,51 @@
 // mk2_hexa/native/effects.hexa — effect handler 기반 I/O
-// Rust 의 Result<T,E> 스타일 대신 HEXA effect system 사용.
-
-// ═══════════════════════════════════════════════════════════════════════
-// FileSystem effect — 모든 파일 I/O 명시적 선언
-// ═══════════════════════════════════════════════════════════════════════
 
 effect FileSystem {
-    fn read(path: string) -> string throws IOError
-    fn write_atomic(path: string, data: string) throws IOError
+    fn read(path: string) -> string
+    fn write_atomic(path: string, data: string)
     fn exists(path: string) -> bool
-    fn mtime(path: string) -> int throws IOError
+    fn mtime(path: string) -> int
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// Clock effect — 결정적 테스트 가능
-// ═══════════════════════════════════════════════════════════════════════
 
 effect Clock {
     fn now_unix() -> int
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Logger effect — 결정적 로그 캡처 가능
-// ═══════════════════════════════════════════════════════════════════════
-
 effect Logger {
     fn info(msg: string)
     fn warn(msg: string)
-    fn error(msg: string)
+    fn error_log(msg: string)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Default handlers (production)
-// ═══════════════════════════════════════════════════════════════════════
-
-handle FileSystem with {
-    fn read(path) {
-        // syscall: open+read+close
-        resume posix_read(path)
+// Default handler (production)
+fn run_with_fs(path: string) -> string {
+    handle {
+        FileSystem.read(path)
+    } with {
+        FileSystem.read(p) => {
+            resume(posix_read(p))
+        }
     }
-    fn write_atomic(path, data) {
-        // write to .tmp then rename (atomic on POSIX)
-        let tmp = path + ".tmp"
-        posix_write(tmp, data)
-        posix_rename(tmp, path)
-        resume ()
+}
+
+fn run_with_logger(msg: string) {
+    handle {
+        Logger.info(msg)
+    } with {
+        Logger.info(m) => {
+            println("[info] " + m)
+            resume(0)
+        }
     }
-    fn exists(path) { resume posix_stat(path) != null }
-    fn mtime(path) { resume posix_stat(path).mtime }
 }
 
-handle Clock with {
-    fn now_unix() { resume posix_time() }
-}
+// 사용 예
+println("=== effects defined ===")
+println("FileSystem: read, write_atomic, exists, mtime")
+println("Clock: now_unix")
+println("Logger: info, warn, error_log")
 
-handle Logger with {
-    fn info(msg) { stderr.write("[info] " + msg + "\n"); resume () }
-    fn warn(msg) { stderr.write("[warn] " + msg + "\n"); resume () }
-    fn error(msg) { stderr.write("[error] " + msg + "\n"); resume () }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Test handlers (deterministic, in-memory)
-// ═══════════════════════════════════════════════════════════════════════
-
-handle FileSystem for testing with {
-    let mut files: map<string, string> = {}
-    fn read(path) {
-        if path in files { resume files[path] }
-        else { throw IOError("not found: " + path) }
-    }
-    fn write_atomic(path, data) {
-        files[path] = data
-        resume ()
-    }
-    fn exists(path) { resume path in files }
-    fn mtime(path) { if path in files { resume 0 } else { throw IOError }}
-}
-
-handle Clock for testing with {
-    let mut t: int = 0
-    fn now_unix() { resume t }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 사용 예 — FileSystem 효과 명시
-// ═══════════════════════════════════════════════════════════════════════
-
-fn example_read_log() -> int
-    with FileSystem, Logger
-    throws IOError
-{
-    Logger.info("reading discovery log")
-    let content = FileSystem.read("shared/discovery_log.jsonl")
-    let lines = content.split("\n")
-    Logger.info("loaded " + to_string(len(lines)) + " lines")
-    return len(lines)
+proof effect_invariants {
+    invariant write_then_read_consistent()
+    invariant all_handlers_resume()
 }

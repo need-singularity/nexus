@@ -1,0 +1,104 @@
+// mk2_hexa/native/growth_tick.hexa — 성장 틱 처리 (Python 대체)
+// 사용: hexa growth_tick.hexa <source> <growth_json_path>
+// growth_state.json의 interaction_count 증가 + stage 승격
+
+fn main() {
+    let a = args()
+    let source = if a.len() >= 3 { a[2] } else { "unknown" }
+    let growth_json = if a.len() >= 4 { a[3] } else { env("HOME") + "/Dev/anima/anima/config/growth_state.json" }
+
+    let content = read_file(growth_json)
+    if content == "" { return }
+
+    // interaction_count 추출
+    let mut count = 0
+    if content.contains("interaction_count") {
+        let parts = content.split("interaction_count")
+        if parts.len() >= 2 {
+            let after = parts[1].split(":")[1].trim()
+            let mut clean = after
+            if clean.contains(",") { clean = clean.split(",")[0] }
+            if clean.contains("}") { clean = clean.split("}")[0] }
+            count = to_int(clean.trim())
+        }
+    }
+
+    count = count + 1
+
+    // stage_index 추출 + 승격 판정
+    let mut stage_index = 0
+    if content.contains("stage_index") {
+        let parts = content.split("stage_index")
+        if parts.len() >= 2 {
+            let after = parts[1].split(":")[1].trim()
+            let mut clean = after
+            if clean.contains(",") { clean = clean.split(",")[0] }
+            if clean.contains("}") { clean = clean.split("}")[0] }
+            stage_index = to_int(clean.trim())
+        }
+    }
+
+    // 임계값 기반 승격: adult(4,10000) child(3,2000) toddler(2,500) infant(1,100)
+    if count >= 10000 && stage_index < 4 {
+        stage_index = 4
+    } else if count >= 2000 && stage_index < 3 {
+        stage_index = 3
+    } else if count >= 500 && stage_index < 2 {
+        stage_index = 2
+    } else if count >= 100 && stage_index < 1 {
+        stage_index = 1
+    }
+
+    // interaction_count 갱신 (문자열 치환)
+    let mut updated = content
+    // interaction_count 치환
+    if updated.contains("interaction_count") {
+        let before = updated.split("\"interaction_count\"")[0]
+        let after_full = updated.split("\"interaction_count\"")[1]
+        // ": NNN," 또는 ": NNN}" 패턴
+        let colon_and_rest = after_full.split(":")[0]  // 빈 문자열 (콜론 바로 앞)
+        let value_and_rest = after_full.split(":")
+        if value_and_rest.len() >= 2 {
+            let rest_str = value_and_rest[1]
+            // 숫자 끝 찾기: 쉼표 또는 } 또는 줄바꿈
+            let mut end_char = ","
+            let mut after_value = ""
+            if rest_str.contains(",") {
+                after_value = rest_str.split(",")[1]
+                // 나머지 쉼표들 복원
+                let rest_parts = rest_str.split(",")
+                let mut ri = 2
+                while ri < rest_parts.len() {
+                    after_value = after_value + "," + rest_parts[ri]
+                    ri = ri + 1
+                }
+            }
+            updated = before + "\"interaction_count\": " + to_string(count) + "," + after_value
+        }
+    }
+
+    // stage_index 갱신
+    if updated.contains("stage_index") {
+        let before = updated.split("\"stage_index\"")[0]
+        let after_full = updated.split("\"stage_index\"")[1]
+        let value_and_rest = after_full.split(":")
+        if value_and_rest.len() >= 2 {
+            let rest_str = value_and_rest[1]
+            let mut after_value = ""
+            if rest_str.contains(",") {
+                let rest_parts = rest_str.split(",")
+                let mut ri = 1
+                while ri < rest_parts.len() {
+                    if ri > 1 { after_value = after_value + "," }
+                    after_value = after_value + rest_parts[ri]
+                    ri = ri + 1
+                }
+            }
+            updated = before + "\"stage_index\": " + to_string(stage_index) + "," + after_value
+        }
+    }
+
+    write_file(growth_json, updated)
+}
+
+main()

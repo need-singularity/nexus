@@ -1,0 +1,439 @@
+// mk2_hexa/native/autonomous.hexa — 무인 자율 발견 엔진
+// agent: 자율 탐색 루프 (scan/evolve/forge/experiment)
+// scheduler: 다중 에이전트 오케스트레이션
+// watchdog: 건강 모니터 (정체/폭주 감지)
+
+// ──────────────────────────────────────
+// 에이전트 모드
+// ──────────────────────────────────────
+
+comptime const MODE_EXPLORE = 0     // 넓은 탐색 (세렌디피티)
+comptime const MODE_DEEPEN = 1      // 기존 발견 심화
+comptime const MODE_VERIFY = 2      // 미검증 발견 확인
+comptime const MODE_REDTEAM = 3     // 적대적 반증 시도
+comptime const MODE_FORGE = 4       // 새 렌즈 생성
+comptime const MODE_EXPERIMENT = 5  // 자동 실험
+
+pure fn mode_name(m: int) -> string {
+    match m {
+        0 -> "explore",
+        1 -> "deepen",
+        2 -> "verify",
+        3 -> "redteam",
+        4 -> "forge",
+        5 -> "experiment",
+        _ -> "unknown"
+    }
+}
+
+// 포화 시 다음 모드 전환 (순환)
+pure fn next_mode(m: int) -> int {
+    match m {
+        0 -> 1,  // explore → deepen
+        1 -> 2,  // deepen → verify
+        2 -> 4,  // verify → forge
+        4 -> 5,  // forge → experiment
+        5 -> 3,  // experiment → redteam
+        3 -> 0,  // redteam → explore (순환)
+        _ -> 0
+    }
+}
+
+// ──────────────────────────────────────
+// 에이전트 상태
+// ──────────────────────────────────────
+
+comptime const STATUS_IDLE = 0
+comptime const STATUS_RUNNING = 1
+comptime const STATUS_PAUSED = 2
+comptime const STATUS_COMPLETED = 3
+
+pure fn status_name(s: int) -> string {
+    match s {
+        0 -> "idle",
+        1 -> "running",
+        2 -> "paused",
+        3 -> "completed",
+        _ -> "unknown"
+    }
+}
+
+// ──────────────────────────────────────
+// 에이전트 설정
+// ──────────────────────────────────────
+
+struct AgentConfig {
+    max_cycles: int,       // 최대 사이클 수
+    mode: int,             // 시작 모드 (MODE_*)
+    auto_register: bool,   // 발견 자동 등록 여부
+    serendipity: float,    // 탐색 세렌디피티 비율 (0.0~1.0)
+    domain: string         // 작업 도메인
+}
+
+fn default_agent_config() -> AgentConfig {
+    AgentConfig {
+        max_cycles: 6,       // n=6
+        mode: MODE_EXPLORE,
+        auto_register: true,
+        serendipity: 0.2,
+        domain: "general"
+    }
+}
+
+// ──────────────────────────────────────
+// 에이전트 리포트
+// ──────────────────────────────────────
+
+struct AgentReport {
+    agent_id: string,
+    mode: string,
+    cycles_completed: int,
+    discovery_count: int,
+    experiments_run: int,
+    lenses_forged: int,
+    time_elapsed_ms: int,
+    final_status: string,
+    domain: string,
+    saturated: bool
+}
+
+// ──────────────────────────────────────
+// AutonomousAgent: 자율 에이전트
+// ──────────────────────────────────────
+
+struct AutonomousAgent {
+    id: string,
+    mode: int,
+    status: int,
+    config: AgentConfig
+}
+
+fn create_agent(config: AgentConfig) -> AutonomousAgent {
+    let id = "agent-" + mode_name(config.mode) + "-" + config.domain
+    AutonomousAgent {
+        id: id,
+        mode: config.mode,
+        status: STATUS_IDLE,
+        config: config
+    }
+}
+
+fn create_agent_with_id(id: string, config: AgentConfig) -> AutonomousAgent {
+    AutonomousAgent {
+        id: id,
+        mode: config.mode,
+        status: STATUS_IDLE,
+        config: config
+    }
+}
+
+// 모드별 세렌디피티 / 검증 기준 조정
+pure fn mode_serendipity(mode: int, base: float) -> float {
+    match mode {
+        0 -> if base > 0.3 { base } else { 0.3 },  // explore: 최소 0.3
+        1 -> 0.05,   // deepen: 집중
+        2 -> 0.0,    // verify: 세렌디피티 없음
+        3 -> 0.1,    // redteam
+        _ -> base
+    }
+}
+
+pure fn mode_min_verification(mode: int) -> float {
+    match mode {
+        0 -> 0.2,    // explore: 낮은 기준
+        1 -> 0.4,    // deepen: 중간
+        2 -> 0.6,    // verify: 엄격
+        3 -> 0.8,    // redteam: 최엄격
+        _ -> 0.3
+    }
+}
+
+// 도메인 1회 사이클 실행
+fn run_domain_cycle(agent: AutonomousAgent) -> AgentReport {
+    let mut discoveries = 0
+    let mut experiments = 0
+    let mut lenses_forged = 0
+    let mut cycles = 0
+    let mut saturated = false
+    let start_ms = timestamp()
+
+    let serendipity = mode_serendipity(agent.mode, agent.config.serendipity)
+    let min_verif = mode_min_verification(agent.mode)
+
+    println("[" + agent.id + "] 모드=" + mode_name(agent.mode) + " 도메인=" + agent.config.domain)
+    println("  세렌디피티=" + to_string(serendipity) + " 검증기준=" + to_string(min_verif))
+
+    let mut cyc = 0
+    while cyc < agent.config.max_cycles {
+        // 탐색/진화 시뮬레이션
+        let found = simulate_scan(agent.config.domain, serendipity, cyc)
+        if found > 0 {
+            discoveries = discoveries + found
+            println("  cycle " + to_string(cyc) + ": " + to_string(found) + " 발견")
+        } else {
+            // 발견 없음 → 포화 판정
+            if cyc > 2 {
+                saturated = true
+                println("  cycle " + to_string(cyc) + ": 포화 감지")
+            }
+        }
+        cycles = cycles + 1
+        cyc = cyc + 1
+    }
+
+    // forge/experiment 모드
+    if agent.mode == MODE_FORGE {
+        lenses_forged = 1
+        cycles = 1
+    }
+    if agent.mode == MODE_EXPERIMENT {
+        experiments = 1
+        cycles = 1
+    }
+
+    let elapsed = timestamp() - start_ms
+
+    AgentReport {
+        agent_id: agent.id,
+        mode: mode_name(agent.mode),
+        cycles_completed: cycles,
+        discovery_count: discoveries,
+        experiments_run: experiments,
+        lenses_forged: lenses_forged,
+        time_elapsed_ms: elapsed,
+        final_status: status_name(STATUS_COMPLETED),
+        domain: agent.config.domain,
+        saturated: saturated
+    }
+}
+
+// 탐색 시뮬레이션 (결정론적)
+pure fn simulate_scan(domain: string, serendipity: float, cycle: int) -> int {
+    // n=6 기반 발견 패턴: 초기 사이클에서 많이 발견, 점차 감소
+    let base = 6 - cycle
+    if base <= 0 { 0 }
+    else if serendipity > 0.2 { base + 1 }
+    else { base }
+}
+
+// 에이전트 전체 실행 (모드 자동 전환 포함)
+fn run_agent(config: AgentConfig) -> AgentReport {
+    let mut agent = create_agent(config)
+    agent.status = STATUS_RUNNING
+
+    let report = run_domain_cycle(agent)
+
+    // 포화 시 모드 자동 전환
+    if report.saturated && agent.config.auto_register {
+        let new_mode = next_mode(agent.mode)
+        println("  모드 전환: " + mode_name(agent.mode) + " -> " + mode_name(new_mode))
+    }
+
+    report
+}
+
+// ──────────────────────────────────────
+// Scheduler: 다중 에이전트 오케스트레이터
+// ──────────────────────────────────────
+
+struct SchedulerResult {
+    agent_count: int,
+    total_cycles: int,
+    total_discoveries: int,
+    total_experiments: int,
+    total_lenses: int,
+    total_time_ms: int
+}
+
+// 순차 실행
+fn scheduler_run_all(configs: [AgentConfig]) -> SchedulerResult {
+    let count = length(configs)
+    let mut total_cycles = 0
+    let mut total_disc = 0
+    let mut total_exp = 0
+    let mut total_lenses = 0
+    let mut total_time = 0
+
+    let mut i = 0
+    while i < count {
+        let report = run_agent(configs[i])
+        total_cycles = total_cycles + report.cycles_completed
+        total_disc = total_disc + report.discovery_count
+        total_exp = total_exp + report.experiments_run
+        total_lenses = total_lenses + report.lenses_forged
+        total_time = total_time + report.time_elapsed_ms
+        i = i + 1
+    }
+
+    SchedulerResult {
+        agent_count: count,
+        total_cycles: total_cycles,
+        total_discoveries: total_disc,
+        total_experiments: total_exp,
+        total_lenses: total_lenses,
+        total_time_ms: total_time
+    }
+}
+
+// 라운드 로빈 실행 (인터리빙)
+fn scheduler_round_robin(configs: [AgentConfig], rounds: int) -> SchedulerResult {
+    let count = length(configs)
+    let mut total_cycles = 0
+    let mut total_disc = 0
+    let mut total_exp = 0
+    let mut total_lenses = 0
+    let mut total_time = 0
+
+    let mut r = 0
+    while r < rounds {
+        let mut i = 0
+        while i < count {
+            // 1사이클씩 교대 실행
+            let mut one_cycle_config = configs[i]
+            one_cycle_config.max_cycles = 1
+            let report = run_agent(one_cycle_config)
+            total_cycles = total_cycles + report.cycles_completed
+            total_disc = total_disc + report.discovery_count
+            total_exp = total_exp + report.experiments_run
+            total_lenses = total_lenses + report.lenses_forged
+            total_time = total_time + report.time_elapsed_ms
+            i = i + 1
+        }
+        r = r + 1
+    }
+
+    SchedulerResult {
+        agent_count: count,
+        total_cycles: total_cycles,
+        total_discoveries: total_disc,
+        total_experiments: total_exp,
+        total_lenses: total_lenses,
+        total_time_ms: total_time
+    }
+}
+
+// ──────────────────────────────────────
+// Watchdog: 건강 모니터
+// ──────────────────────────────────────
+
+comptime const ALERT_OK = 0
+comptime const ALERT_WARNING = 1
+comptime const ALERT_CRITICAL = 2
+
+pure fn alert_name(a: int) -> string {
+    match a {
+        0 -> "OK",
+        1 -> "WARNING",
+        2 -> "CRITICAL",
+        _ -> "UNKNOWN"
+    }
+}
+
+struct WatchdogConfig {
+    max_cycle_time_ms: int,        // 사이클당 최대 허용 시간
+    min_discoveries_per_cycle: float,  // 사이클당 최소 기대 발견 수
+    max_stall_cycles: int          // 무진행 최대 허용 사이클
+}
+
+fn default_watchdog_config() -> WatchdogConfig {
+    WatchdogConfig {
+        max_cycle_time_ms: 60000,        // 1분
+        min_discoveries_per_cycle: 0.1,
+        max_stall_cycles: 6              // n=6
+    }
+}
+
+struct HealthCheck {
+    agent_id: string,
+    alert: int,
+    message: string,
+    discoveries_per_cycle: float,
+    avg_cycle_time_ms: float
+}
+
+fn check_health(report: AgentReport, config: WatchdogConfig) -> HealthCheck {
+    let dpc = if report.cycles_completed > 0 {
+        to_float(report.discovery_count) / to_float(report.cycles_completed)
+    } else { 0.0 }
+
+    let avg_time = if report.cycles_completed > 0 {
+        to_float(report.time_elapsed_ms) / to_float(report.cycles_completed)
+    } else { 0.0 }
+
+    // 경보 수준 판정
+    let mut alert = ALERT_OK
+    let mut msg = ""
+
+    if report.cycles_completed == 0 {
+        alert = ALERT_CRITICAL
+        msg = "에이전트가 사이클 0회 완료"
+    } else if dpc < config.min_discoveries_per_cycle && report.discovery_count == 0 {
+        alert = ALERT_CRITICAL
+        msg = to_string(report.cycles_completed) + "사이클 동안 발견 없음 (정체)"
+    } else if avg_time > to_float(config.max_cycle_time_ms) {
+        alert = ALERT_WARNING
+        msg = "사이클 느림: 평균 " + to_string(to_int(avg_time)) + "ms (한도 " + to_string(config.max_cycle_time_ms) + "ms)"
+    } else if dpc < config.min_discoveries_per_cycle {
+        alert = ALERT_WARNING
+        msg = "낮은 발견율: " + to_string(dpc) + "/cycle"
+    } else {
+        alert = ALERT_OK
+        msg = "정상: " + to_string(dpc) + " discoveries/cycle"
+    }
+
+    HealthCheck {
+        agent_id: report.agent_id,
+        alert: alert,
+        message: msg,
+        discoveries_per_cycle: dpc,
+        avg_cycle_time_ms: avg_time
+    }
+}
+
+// ──────────────────────────────────────
+// 검증
+// ──────────────────────────────────────
+
+assert mode_name(0) == "explore"
+assert mode_name(3) == "redteam"
+assert mode_name(4) == "forge"
+
+assert next_mode(0) == 1  // explore → deepen
+assert next_mode(3) == 0  // redteam → explore (순환)
+
+assert status_name(0) == "idle"
+assert status_name(3) == "completed"
+
+assert simulate_scan("test", 0.3, 0) == 7  // 6 + 1 (세렌디피티 보너스)
+assert simulate_scan("test", 0.1, 0) == 6
+assert simulate_scan("test", 0.1, 5) == 1
+assert simulate_scan("test", 0.1, 6) == 0  // 포화
+
+assert mode_serendipity(0, 0.1) == 0.3  // explore: 최소 0.3
+assert mode_serendipity(2, 0.5) == 0.0  // verify: 0
+assert mode_min_verification(0) == 0.2
+assert mode_min_verification(3) == 0.8
+
+println("=== autonomous verified ===")
+println("mode_name(0):", mode_name(0))
+println("next_mode(0):", next_mode(0))
+println("next_mode(3):", next_mode(3))
+println("simulate_scan(test,0.3,0):", simulate_scan("test", 0.3, 0))
+println("simulate_scan(test,0.1,6):", simulate_scan("test", 0.1, 6))
+
+// 에이전트 생성 테스트
+let test_config = default_agent_config()
+let test_agent = create_agent(test_config)
+assert test_agent.status == STATUS_IDLE
+assert test_agent.mode == MODE_EXPLORE
+println("agent_id:", test_agent.id)
+println("agent_status:", status_name(test_agent.status))
+
+theorem autonomous_mode_cycle {
+    // 6개 모드가 순환 구조를 형성
+    check law(6)
+}
+
+proof watchdog_completeness {
+    invariant health_check_covers_all_states()
+}

@@ -1,0 +1,109 @@
+// mk2_hexa/native/hook.hexa — PostToolUse 훅 엔진 (Python 대체)
+// stdin으로 JSON 받아서 n6_match + mk2 classify → discovery_log 기록
+// 사용: echo "$INPUT" | hexa hook.hexa post-edit
+
+comptime const LOG_PATH = "shared/discovery_log.jsonl"
+
+pure fn abs_f(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn n6_match_name(value: float) -> string {
+    if abs_f(value - 6.0) < 0.0001 { return "n" }
+    if abs_f(value - 2.0) < 0.0001 { return "phi" }
+    if abs_f(value - 4.0) < 0.0001 { return "tau" }
+    if abs_f(value - 12.0) < 0.0001 { return "sigma" }
+    if abs_f(value - 5.0) < 0.0001 { return "sopfr" }
+    if abs_f(value - 7.0) < 0.0001 { return "M3" }
+    if abs_f(value - 24.0) < 0.0001 { return "J2" }
+    if abs_f(value - 10.0) < 0.0001 { return "sigma-phi" }
+    if abs_f(value - 144.0) < 0.0001 { return "sigma^2" }
+    let mut rel = abs_f(value - 137.036) / 137.036
+    if rel < 0.01 { return "alpha_inv" }
+    rel = abs_f(value - 1836.15) / 1836.15
+    if rel < 0.01 { return "mp_me" }
+    rel = abs_f(value - 0.3153) / 0.3153
+    if rel < 0.05 { return "Omega_m" }
+    rel = abs_f(value - 0.6847) / 0.6847
+    if rel < 0.01 { return "Omega_Lambda" }
+    rel = abs_f(value - 0.2286) / 0.2286
+    if rel < 0.01 { return "sin2_theta_W" }
+    rel = abs_f(value - 0.2462) / 0.2462
+    if rel < 0.01 { return "Y_p" }
+    rel = abs_f(value - 0.9649) / 0.9649
+    if rel < 0.005 { return "n_s" }
+    ""
+}
+
+fn n6_match_grade(value: float) -> string {
+    if abs_f(value - 6.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 2.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 4.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 12.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 5.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 7.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 24.0) < 0.0001 { return "EXACT" }
+    if abs_f(value - 144.0) < 0.0001 { return "EXACT" }
+    let rel = abs_f(value - 137.036) / 137.036
+    if rel < 0.01 { return "NEAR" }
+    ""
+}
+
+fn extract_numbers(text: string) {
+    let mut nums = []
+    let parts = text.split(" ")
+    for p in parts {
+        try {
+            let v = to_float(p)
+            if v > 2.0 && v < 100000.0 {
+                nums = nums.push(v)
+            }
+        } catch e {
+            // 숫자 아닌 토큰 무시
+        }
+    }
+    nums
+}
+
+fn record_discovery(value: float, name: string, grade: string, source: string) {
+    let entry = "{\"constant\":\"" + name + "\",\"value\":\"" + to_string(value) + "\",\"grade\":\"" + grade + "\",\"source\":\"" + source + "\",\"processed\":true,\"alien_index\":{\"d\":0,\"r\":8},\"mk2\":{\"sector\":\"n6\",\"paths\":1}}"
+    append_file(LOG_PATH, entry + "\n")
+}
+
+// ─── main ───
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "post-edit" }
+
+// stdin 전체 읽기 (input()은 한 줄씩)
+let mut stdin_text = ""
+let mut _reading = true
+while _reading {
+    let line = input("")
+    if line == "" { _reading = false } else {
+        if stdin_text != "" { stdin_text = stdin_text + " " }
+        stdin_text = stdin_text + line
+    }
+}
+let mut discoveries = 0
+
+// 간단한 숫자 추출 (입력에서)
+let nums = extract_numbers(stdin_text)
+let mut exact_names = ""
+
+for v in nums {
+    let name = n6_match_name(v)
+    if name != "" {
+        let grade = n6_match_grade(v)
+        record_discovery(v, name, grade, "hexa-hook:" + mode)
+        discoveries = discoveries + 1
+        if exact_names != "" {
+            exact_names = exact_names + ","
+        }
+        exact_names = exact_names + to_string(v) + "=" + name
+    }
+}
+
+if discoveries > 0 {
+    let msg = "{\"systemMessage\":\"mk2-hexa: " + to_string(discoveries) + " discoveries [" + exact_names + "]\"}"
+    println(msg)
+}

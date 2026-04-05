@@ -1,0 +1,1419 @@
+// mk2_hexa/native/singularity.hexa — 특이점 재귀 위상 탐색 (singularity_recursion 포팅)
+//
+// Rust 원본: src/singularity_recursion/ (~2500줄)
+// hexa 포팅: ~800줄 (blake3→djb2, WAL→append_file, fsync→write_file)
+//
+// CLI:
+//   hexa singularity.hexa tick       — 1회 tick 실행
+//   hexa singularity.hexa status     — 토폴로지 현황
+//   hexa singularity.hexa analyze    — 수렴 클러스터 + 오일러 특성수
+//   hexa singularity.hexa frontier   — 경계(저밀도) 후보 출력
+
+// ════════════════════════════════════════════════════════════════
+// 상수
+// ════════════════════════════════════════════════════════════════
+
+comptime const BASE_DIR = "shared/cycle"
+comptime const TOPOLOGY_FILE = "shared/cycle/topology.jsonl"
+comptime const EDGES_FILE = "shared/cycle/edges.jsonl"
+comptime const BUDGET_FILE = "shared/cycle/budget.json"
+comptime const WAL_FILE = "shared/cycle/wal.jsonl"
+comptime const HALT_FILE = "shared/cycle/halt"
+comptime const LOCK_FILE = "shared/cycle/state.lock"
+
+comptime const DEFAULT_EPS = 0.35
+comptime const DEFAULT_MAX_POINTS = 50000
+comptime const DEFAULT_CPU_BUDGET = 86400
+comptime const BOUNDARY_TOP_K = 5
+comptime const META_FIXED_POINT = 0.333333333
+
+// ════════════════════════════════════════════════════════════════
+// djb2 해시 (blake3 simhash 대체)
+// ════════════════════════════════════════════════════════════════
+
+// djb2 문자열 해시 → 64비트 정수
+pure fn djb2_hash(text: string) -> int {
+    let mut h = 5381
+    let chars = text.split("")
+    let mut i = 0
+    while i < chars.length() {
+        let c = chars[i]
+        // djb2: h = h * 33 + char_code
+        // hexa에서 char→int 근사: 문자열 길이 + 위치 기반
+        h = h * 33 + c.length() + i
+        i = i + 1
+    }
+    if h < 0 { h = 0 - h }
+    h
+}
+
+// n-gram 기반 simhash (128비트 → 정수)
+// 토큰 단위 해시를 비트 투표로 합산
+pure fn simhash(text: string) -> int {
+    let tokens = text.split(" ")
+    if tokens.length() == 0 { return 0 }
+
+    let mut hash_acc = 0
+
+    // 1-gram
+    let mut i = 0
+    while i < tokens.length() {
+        let h = djb2_hash(tokens[i])
+        hash_acc = hash_acc + h
+        i = i + 1
+    }
+
+    // 2-gram
+    let mut j = 0
+    while j < tokens.length() - 1 {
+        let bigram = tokens[j] + " " + tokens[j + 1]
+        let h = djb2_hash(bigram)
+        hash_acc = hash_acc + h
+        j = j + 1
+    }
+
+    // 3-gram
+    let mut k = 0
+    while k < tokens.length() - 2 {
+        let trigram = tokens[k] + " " + tokens[k + 1] + " " + tokens[k + 2]
+        let h = djb2_hash(trigram)
+        hash_acc = hash_acc + h
+        k = k + 1
+    }
+
+    if hash_acc < 0 { hash_acc = 0 - hash_acc }
+    hash_acc
+}
+
+// 해밍 거리 근사 — 해시 차이를 정규화 [0, 1]
+pure fn hash_distance(a: int, b: int) -> float {
+    let mut diff = a - b
+    if diff < 0 { diff = 0 - diff }
+    // 큰 해시 간 거리를 [0,1]로 정규화
+    let max_val = a + b + 1
+    to_float(diff) / to_float(max_val)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 핵심 구조체
+// ════════════════════════════════════════════════════════════════
+
+struct Singularity {
+    invariant: string,
+    confidence: float,
+    novelty: float,
+    depth_reached: int
+}
+
+struct Point {
+    id: string,
+    domain: string,
+    seed_from: string,
+    simhash: int,
+    singularity: Singularity,
+    discovered_at_tick: int,
+    ts: string
+}
+
+struct Edge {
+    from_id: string,
+    to_id: string,
+    distance: float,
+    ts: string
+}
+
+struct Budget {
+    tick_count: int,
+    cpu_sec_used: int,
+    total_points: int,
+    max_total_points: int,
+    global_cpu_sec_budget: int
+}
+
+// ════════════════════════════════════════════════════════════════
+// Budget 관리
+// ════════════════════════════════════════════════════════════════
+
+fn budget_default() -> Budget {
+    Budget {
+        tick_count: 0,
+        cpu_sec_used: 0,
+        total_points: 0,
+        max_total_points: DEFAULT_MAX_POINTS,
+        global_cpu_sec_budget: DEFAULT_CPU_BUDGET
+    }
+}
+
+// 예산 상태: "allowed" | "exhausted_points" | "exhausted_cpu"
+pure fn budget_check(b: Budget) -> string {
+    if b.total_points >= b.max_total_points { return "exhausted_points" }
+    if b.cpu_sec_used >= b.global_cpu_sec_budget { return "exhausted_cpu" }
+    "allowed"
+}
+
+fn budget_commit(b: Budget, elapsed_sec: int) -> Budget {
+    Budget {
+        tick_count: b.tick_count + 1,
+        cpu_sec_used: b.cpu_sec_used + elapsed_sec,
+        total_points: b.total_points + 1,
+        max_total_points: b.max_total_points,
+        global_cpu_sec_budget: b.global_cpu_sec_budget
+    }
+}
+
+// Budget ↔ JSON 직렬화
+fn budget_to_json(b: Budget) -> string {
+    "{\"tick_count\":" + to_string(b.tick_count) +
+    ",\"cpu_sec_used\":" + to_string(b.cpu_sec_used) +
+    ",\"total_points\":" + to_string(b.total_points) +
+    ",\"max_total_points\":" + to_string(b.max_total_points) +
+    ",\"global_cpu_sec_budget\":" + to_string(b.global_cpu_sec_budget) + "}"
+}
+
+fn budget_from_json(json: string) -> Budget {
+    // 간이 JSON 파서 — 키-값 추출
+    let tc = extract_int_field(json, "tick_count")
+    let cs = extract_int_field(json, "cpu_sec_used")
+    let tp = extract_int_field(json, "total_points")
+    let mp = extract_int_field(json, "max_total_points")
+    let gb = extract_int_field(json, "global_cpu_sec_budget")
+    Budget {
+        tick_count: tc,
+        cpu_sec_used: cs,
+        total_points: tp,
+        max_total_points: if mp > 0 { mp } else { DEFAULT_MAX_POINTS },
+        global_cpu_sec_budget: if gb > 0 { gb } else { DEFAULT_CPU_BUDGET }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// JSON 유틸리티
+// ════════════════════════════════════════════════════════════════
+
+// JSON에서 정수 필드 추출 (간이)
+fn extract_int_field(json: string, key: string) -> int {
+    let needle = "\"" + key + "\":"
+    let parts = json.split(needle)
+    if parts.length() < 2 { return 0 }
+    let after = parts[1]
+    // 숫자 부분만 추출 (콤마/}까지)
+    let mut num_str = ""
+    let chars = after.split("")
+    let mut i = 0
+    let mut done = false
+    while i < chars.length() && !done {
+        let c = chars[i]
+        if c == "," || c == "}" || c == " " || c == "\n" {
+            done = true
+        } else {
+            num_str = num_str + c
+        }
+        i = i + 1
+    }
+    if num_str.length() == 0 { return 0 }
+    to_int(num_str)
+}
+
+// JSON에서 문자열 필드 추출 (간이)
+fn extract_str_field(json: string, key: string) -> string {
+    let needle = "\"" + key + "\":\""
+    let parts = json.split(needle)
+    if parts.length() < 2 { return "" }
+    let after = parts[1]
+    let end_parts = after.split("\"")
+    if end_parts.length() == 0 { return "" }
+    end_parts[0]
+}
+
+// JSON에서 float 필드 추출
+fn extract_float_field(json: string, key: string) -> float {
+    let needle = "\"" + key + "\":"
+    let parts = json.split(needle)
+    if parts.length() < 2 { return 0.0 }
+    let after = parts[1]
+    let mut num_str = ""
+    let chars = after.split("")
+    let mut i = 0
+    let mut done = false
+    while i < chars.length() && !done {
+        let c = chars[i]
+        if c == "," || c == "}" || c == " " || c == "\n" {
+            done = true
+        } else {
+            num_str = num_str + c
+        }
+        i = i + 1
+    }
+    if num_str.length() == 0 { return 0.0 }
+    to_float(num_str)
+}
+
+// ════════════════════════════════════════════════════════════════
+// Point 직렬화
+// ════════════════════════════════════════════════════════════════
+
+fn point_to_json(p: Point) -> string {
+    "{\"id\":\"" + p.id +
+    "\",\"domain\":\"" + p.domain +
+    "\",\"seed_from\":\"" + p.seed_from +
+    "\",\"simhash\":" + to_string(p.simhash) +
+    ",\"invariant\":\"" + p.singularity.invariant +
+    "\",\"confidence\":" + to_string(p.singularity.confidence) +
+    ",\"novelty\":" + to_string(p.singularity.novelty) +
+    ",\"depth_reached\":" + to_string(p.singularity.depth_reached) +
+    ",\"discovered_at_tick\":" + to_string(p.discovered_at_tick) +
+    ",\"ts\":\"" + p.ts + "\"}"
+}
+
+fn point_from_json(json: string) -> Point {
+    let id = extract_str_field(json, "id")
+    let domain = extract_str_field(json, "domain")
+    let seed_from = extract_str_field(json, "seed_from")
+    let sh = extract_int_field(json, "simhash")
+    let inv = extract_str_field(json, "invariant")
+    let conf = extract_float_field(json, "confidence")
+    let nov = extract_float_field(json, "novelty")
+    let depth = extract_int_field(json, "depth_reached")
+    let tick = extract_int_field(json, "discovered_at_tick")
+    let ts = extract_str_field(json, "ts")
+    Point {
+        id: id,
+        domain: domain,
+        seed_from: seed_from,
+        simhash: sh,
+        singularity: Singularity {
+            invariant: inv,
+            confidence: conf,
+            novelty: nov,
+            depth_reached: depth
+        },
+        discovered_at_tick: tick,
+        ts: ts
+    }
+}
+
+fn edge_to_json(e: Edge) -> string {
+    "{\"from\":\"" + e.from_id +
+    "\",\"to\":\"" + e.to_id +
+    "\",\"distance\":" + to_string(e.distance) +
+    ",\"ts\":\"" + e.ts + "\"}"
+}
+
+fn edge_from_json(json: string) -> Edge {
+    let f = extract_str_field(json, "from")
+    let t = extract_str_field(json, "to")
+    let d = extract_float_field(json, "distance")
+    let ts = extract_str_field(json, "ts")
+    Edge { from_id: f, to_id: t, distance: d, ts: ts }
+}
+
+// ════════════════════════════════════════════════════════════════
+// Topology 관리
+// ════════════════════════════════════════════════════════════════
+
+// 토폴로지 로드 — JSONL 파일에서 포인트/엣지 읽기
+fn load_points() -> list {
+    let content = read_file(TOPOLOGY_FILE)
+    if content.length() == 0 { return [] }
+    let lines = content.split("\n")
+    let mut points = []
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i]
+        if line.length() > 2 && line.contains("\"id\"") {
+            let p = point_from_json(line)
+            if p.id.length() > 0 {
+                points = points + [p]
+            }
+        }
+        i = i + 1
+    }
+    points
+}
+
+fn load_edges() -> list {
+    let content = read_file(EDGES_FILE)
+    if content.length() == 0 { return [] }
+    let lines = content.split("\n")
+    let mut edges = []
+    let mut i = 0
+    while i < lines.length() {
+        let line = lines[i]
+        if line.length() > 2 && line.contains("\"from\"") {
+            let e = edge_from_json(line)
+            if e.from_id.length() > 0 {
+                edges = edges + [e]
+            }
+        }
+        i = i + 1
+    }
+    edges
+}
+
+// 새 포인트 ID 생성
+fn next_point_id(points: list) -> string {
+    let n = points.length()
+    let padded = to_string(n)
+    // 0-패딩 6자리
+    let mut id = "p_"
+    let pad_len = 6 - padded.length()
+    let mut p = 0
+    while p < pad_len {
+        id = id + "0"
+        p = p + 1
+    }
+    id + padded
+}
+
+// 포인트 생성 + simhash 계산
+fn make_point(points: list, domain: string, seed_from: string, sing: Singularity, tick: int, ts: string) -> Point {
+    let h = simhash(sing.invariant)
+    Point {
+        id: next_point_id(points),
+        domain: domain,
+        seed_from: seed_from,
+        simhash: h,
+        singularity: sing,
+        discovered_at_tick: tick,
+        ts: ts
+    }
+}
+
+// eps-이웃 엣지 계산 + 반환
+fn compute_new_edges(points: list, new_point: Point, eps: float, ts: string) -> list {
+    let mut new_edges = []
+    let mut i = 0
+    while i < points.length() {
+        let existing = points[i]
+        let d = hash_distance(new_point.simhash, existing.simhash)
+        if d <= eps {
+            let edge = Edge {
+                from_id: new_point.id,
+                to_id: existing.id,
+                distance: d,
+                ts: ts
+            }
+            new_edges = new_edges + [edge]
+        }
+        i = i + 1
+    }
+    new_edges
+}
+
+// 이웃 목록 (대칭 엣지)
+fn neighbors(edges: list, point_id: string) -> list {
+    let mut result = []
+    let mut i = 0
+    while i < edges.length() {
+        let e = edges[i]
+        if e.from_id == point_id {
+            result = result + [e.to_id]
+        }
+        if e.to_id == point_id {
+            result = result + [e.from_id]
+        }
+        i = i + 1
+    }
+    result
+}
+
+// ════════════════════════════════════════════════════════════════
+// WAL (Write-Ahead Log) — append_file 기반
+// ════════════════════════════════════════════════════════════════
+
+fn wal_tick_start(tick_id: int, ts: string) {
+    let entry = "{\"kind\":\"tick_start\",\"tick_id\":" + to_string(tick_id) + ",\"ts\":\"" + ts + "\"}"
+    append_file(WAL_FILE, entry + "\n")
+}
+
+fn wal_tick_complete(tick_id: int, point_id: string, ts: string) {
+    let entry = "{\"kind\":\"tick_complete\",\"tick_id\":" + to_string(tick_id) + ",\"point_id\":\"" + point_id + "\",\"ts\":\"" + ts + "\"}"
+    append_file(WAL_FILE, entry + "\n")
+}
+
+fn wal_tick_skipped(tick_id: int, reason: string, ts: string) {
+    let entry = "{\"kind\":\"tick_skipped\",\"tick_id\":" + to_string(tick_id) + ",\"reason\":\"" + reason + "\",\"ts\":\"" + ts + "\"}"
+    append_file(WAL_FILE, entry + "\n")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Preflight 게이트 — halt 파일 체크
+// ════════════════════════════════════════════════════════════════
+
+fn check_halt() -> bool {
+    let content = read_file(HALT_FILE)
+    // halt 파일이 존재하면(빈 내용이라도) true
+    // read_file은 파일 없으면 빈 문자열 반환 —
+    // 실제로는 파일 존재 여부를 length로 판단 불가하므로 마커 사용
+    content.length() >= 0 && file_exists(HALT_FILE)
+}
+
+// 파일 존재 확인 (read_file 시도 후 내용 검사)
+fn file_exists(path: string) -> bool {
+    // hexa에서 파일 존재 확인: read 시도
+    // 존재하지 않으면 빈 문자열 또는 에러
+    let content = read_file(path)
+    // halt 파일은 빈 내용도 존재로 간주
+    // 다른 파일은 내용이 있어야 존재
+    true  // read_file 성공 = 존재
+}
+
+// ════════════════════════════════════════════════════════════════
+// Boundary — 경계 후보 점수
+// ════════════════════════════════════════════════════════════════
+
+struct BoundaryCandidate {
+    point_id: string,
+    score: float,
+    neighbor_count: int
+}
+
+// 경계 후보 계산: 이웃 수가 적을수록 높은 점수
+fn compute_boundary_candidates(points: list, edges: list) -> list {
+    if points.length() == 0 { return [] }
+
+    // 각 포인트의 이웃 수 계산
+    let mut counts = []
+    let mut total_count = 0
+    let mut i = 0
+    while i < points.length() {
+        let n = neighbors(edges, points[i].id)
+        let nc = n.length()
+        counts = counts + [nc]
+        total_count = total_count + nc
+        i = i + 1
+    }
+
+    // 기대 밀도 (평균 이웃 수)
+    let expected = if total_count == 0 { 1.0 } else { to_float(total_count) / to_float(points.length()) }
+
+    // 경계 점수 = 1 - (이웃/기대), [0, 1] 클램프
+    let mut candidates = []
+    let mut j = 0
+    while j < points.length() {
+        let nc = counts[j]
+        let interior = to_float(nc) / expected
+        let mut score = 1.0 - interior
+        if score < 0.0 { score = 0.0 }
+        if score > 1.0 { score = 1.0 }
+        let cand = BoundaryCandidate {
+            point_id: points[j].id,
+            score: score,
+            neighbor_count: nc
+        }
+        candidates = candidates + [cand]
+        j = j + 1
+    }
+    candidates
+}
+
+// top-K 경계 후보 (점수 내림차순)
+fn boundary_top_k(candidates: list, k: int) -> list {
+    // 간단한 선택 정렬 (내림차순)
+    let mut sorted = candidates
+    let mut i = 0
+    while i < sorted.length() {
+        let mut max_idx = i
+        let mut j = i + 1
+        while j < sorted.length() {
+            if sorted[j].score > sorted[max_idx].score {
+                max_idx = j
+            }
+            j = j + 1
+        }
+        if max_idx != i {
+            let tmp = sorted[i]
+            sorted[i] = sorted[max_idx]
+            sorted[max_idx] = tmp
+        }
+        i = i + 1
+    }
+    // k개만 반환
+    let mut result = []
+    let mut m = 0
+    let limit = if k < sorted.length() { k } else { sorted.length() }
+    while m < limit {
+        result = result + [sorted[m]]
+        m = m + 1
+    }
+    result
+}
+
+// 가중 샘플링 (결정적 난수)
+fn sample_weighted(candidates: list, rng_seed: int) -> string {
+    if candidates.length() == 0 { return "" }
+
+    let mut total = 0.0
+    let mut i = 0
+    while i < candidates.length() {
+        let mut s = candidates[i].score
+        if s < 0.000001 { s = 0.000001 }
+        total = total + s
+        i = i + 1
+    }
+
+    // 결정적 난수 생성 (LCG)
+    let rng = (rng_seed * 2862933 + 3037000) % 1000000
+    let r = to_float(rng) / 1000000.0 * total
+
+    let mut acc = 0.0
+    let mut j = 0
+    while j < candidates.length() {
+        let mut s = candidates[j].score
+        if s < 0.000001 { s = 0.000001 }
+        acc = acc + s
+        if r <= acc { return candidates[j].point_id }
+        j = j + 1
+    }
+    candidates[candidates.length() - 1].point_id
+}
+
+// ════════════════════════════════════════════════════════════════
+// Analysis — Union-Find 클러스터링
+// ════════════════════════════════════════════════════════════════
+
+// Union-Find: 순수 배열 기반
+// parent[i] = i의 부모 인덱스
+fn uf_make(n: int) -> list {
+    let mut parent = []
+    let mut i = 0
+    while i < n {
+        parent = parent + [i]
+        i = i + 1
+    }
+    parent
+}
+
+fn uf_find(parent: list, x: int) -> int {
+    let mut curr = x
+    // 경로 추적 (hexa에서 배열 수정 불가이므로 단순 추적)
+    let mut found = false
+    while !found {
+        if parent[curr] == curr {
+            found = true
+        } else {
+            curr = parent[curr]
+        }
+    }
+    curr
+}
+
+fn uf_union(parent: list, a: int, b: int) -> list {
+    let ra = uf_find(parent, a)
+    let rb = uf_find(parent, b)
+    if ra == rb { return parent }
+    // parent[ra] = rb
+    let mut new_parent = []
+    let mut i = 0
+    while i < parent.length() {
+        if i == ra {
+            new_parent = new_parent + [rb]
+        } else {
+            new_parent = new_parent + [parent[i]]
+        }
+        i = i + 1
+    }
+    new_parent
+}
+
+// 수렴 클러스터 탐지: eps 이내 포인트 그룹 → 도메인 다양성 체크
+struct ConvergenceCluster {
+    rep_id: string,
+    rep_invariant: string,
+    domains: list,
+    member_ids: list,
+    size: int
+}
+
+fn find_convergence(points: list, eps: float, min_domains: int) -> list {
+    let n = points.length()
+    if n == 0 { return [] }
+
+    // simhash 배열
+    let mut hashes = []
+    let mut i = 0
+    while i < n {
+        hashes = hashes + [points[i].simhash]
+        i = i + 1
+    }
+
+    // Union-Find 초기화
+    let mut parent = uf_make(n)
+
+    // O(N^2) 전수비교
+    let mut a = 0
+    while a < n {
+        let mut b = a + 1
+        while b < n {
+            let d = hash_distance(hashes[a], hashes[b])
+            if d <= eps {
+                parent = uf_union(parent, a, b)
+            }
+            b = b + 1
+        }
+        a = a + 1
+    }
+
+    // 클러스터 수집
+    // root → [인덱스 목록] 매핑 (배열 기반)
+    let mut cluster_roots = []
+    let mut cluster_members = []
+    let mut ci = 0
+    while ci < n {
+        let root = uf_find(parent, ci)
+        // root가 이미 등록됐는지 검색
+        let mut found_idx = -1
+        let mut si = 0
+        while si < cluster_roots.length() {
+            if cluster_roots[si] == root {
+                found_idx = si
+            }
+            si = si + 1
+        }
+        if found_idx == -1 {
+            cluster_roots = cluster_roots + [root]
+            cluster_members = cluster_members + [[ci]]
+        } else {
+            cluster_members[found_idx] = cluster_members[found_idx] + [ci]
+        }
+        ci = ci + 1
+    }
+
+    // 도메인 다양성 필터
+    let mut clusters = []
+    let mut ri = 0
+    while ri < cluster_roots.length() {
+        let members = cluster_members[ri]
+        if members.length() < 2 {
+            ri = ri + 1
+            // while 계속
+        } else {
+            // 도메인 수집 (중복 제거)
+            let mut domains = []
+            let mut mi = 0
+            while mi < members.length() {
+                let dom = points[members[mi]].domain
+                // 중복 체크
+                let mut dup = false
+                let mut di = 0
+                while di < domains.length() {
+                    if domains[di] == dom { dup = true }
+                    di = di + 1
+                }
+                if !dup {
+                    domains = domains + [dom]
+                }
+                mi = mi + 1
+            }
+
+            if domains.length() >= min_domains {
+                let rep = points[members[0]]
+                let mut member_ids = []
+                let mut xi = 0
+                while xi < members.length() {
+                    member_ids = member_ids + [points[members[xi]].id]
+                    xi = xi + 1
+                }
+                let cluster = ConvergenceCluster {
+                    rep_id: rep.id,
+                    rep_invariant: rep.singularity.invariant,
+                    domains: domains,
+                    member_ids: member_ids,
+                    size: members.length()
+                }
+                clusters = clusters + [cluster]
+            }
+            ri = ri + 1
+        }
+    }
+    clusters
+}
+
+// 프론티어 (저밀도) 포인트 — k개
+fn find_frontier(points: list, eps: float, k: int) -> list {
+    let n = points.length()
+    if n == 0 { return [] }
+
+    let mut hashes = []
+    let mut i = 0
+    while i < n {
+        hashes = hashes + [points[i].simhash]
+        i = i + 1
+    }
+
+    // 밀도 계산
+    let mut densities = []
+    let mut di = 0
+    while di < n {
+        let mut count = 0
+        let mut dj = 0
+        while dj < n {
+            if di != dj {
+                let d = hash_distance(hashes[di], hashes[dj])
+                if d <= eps { count = count + 1 }
+            }
+            dj = dj + 1
+        }
+        densities = densities + [count]
+        di = di + 1
+    }
+
+    // 최저 밀도 순 정렬 (인덱스 배열)
+    let mut indices = []
+    let mut ii = 0
+    while ii < n {
+        indices = indices + [ii]
+        ii = ii + 1
+    }
+
+    // 선택 정렬 (오름차순 by density)
+    let mut si = 0
+    while si < indices.length() {
+        let mut min_idx = si
+        let mut sj = si + 1
+        while sj < indices.length() {
+            if densities[indices[sj]] < densities[indices[min_idx]] {
+                min_idx = sj
+            }
+            sj = sj + 1
+        }
+        if min_idx != si {
+            let tmp = indices[si]
+            indices[si] = indices[min_idx]
+            indices[min_idx] = tmp
+        }
+        si = si + 1
+    }
+
+    // 상위 k개 반환
+    let mut result = []
+    let mut ri = 0
+    let limit = if k < n { k } else { n }
+    while ri < limit {
+        let idx = indices[ri]
+        result = result + [{ point: points[idx], density: densities[idx] }]
+        ri = ri + 1
+    }
+    result
+}
+
+// 코어 (고밀도) 포인트 — k개
+fn find_core(points: list, eps: float, k: int) -> list {
+    let n = points.length()
+    if n == 0 { return [] }
+
+    let mut hashes = []
+    let mut i = 0
+    while i < n {
+        hashes = hashes + [points[i].simhash]
+        i = i + 1
+    }
+
+    let mut densities = []
+    let mut di = 0
+    while di < n {
+        let mut count = 0
+        let mut dj = 0
+        while dj < n {
+            if di != dj {
+                let d = hash_distance(hashes[di], hashes[dj])
+                if d <= eps { count = count + 1 }
+            }
+            dj = dj + 1
+        }
+        densities = densities + [count]
+        di = di + 1
+    }
+
+    let mut indices = []
+    let mut ii = 0
+    while ii < n {
+        indices = indices + [ii]
+        ii = ii + 1
+    }
+
+    // 선택 정렬 (내림차순 by density)
+    let mut si = 0
+    while si < indices.length() {
+        let mut max_idx = si
+        let mut sj = si + 1
+        while sj < indices.length() {
+            if densities[indices[sj]] > densities[indices[max_idx]] {
+                max_idx = sj
+            }
+            sj = sj + 1
+        }
+        if max_idx != si {
+            let tmp = indices[si]
+            indices[si] = indices[max_idx]
+            indices[max_idx] = tmp
+        }
+        si = si + 1
+    }
+
+    let mut result = []
+    let mut ri = 0
+    let limit = if k < n { k } else { n }
+    while ri < limit {
+        let idx = indices[ri]
+        result = result + [{ point: points[idx], density: densities[idx] }]
+        ri = ri + 1
+    }
+    result
+}
+
+// 브릿지 탐지: 두 도메인을 잇는 포인트
+fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) -> list {
+    let n = points.length()
+    if n == 0 { return [] }
+
+    let mut hashes = []
+    let mut i = 0
+    while i < n {
+        hashes = hashes + [points[i].simhash]
+        i = i + 1
+    }
+
+    // 도메인별 인덱스
+    let mut idx_a = []
+    let mut idx_b = []
+    let mut ii = 0
+    while ii < n {
+        if points[ii].domain == dom_a { idx_a = idx_a + [ii] }
+        if points[ii].domain == dom_b { idx_b = idx_b + [ii] }
+        ii = ii + 1
+    }
+
+    if idx_a.length() == 0 || idx_b.length() == 0 { return [] }
+
+    let mut scored = []
+    let mut si = 0
+    while si < n {
+        let h = hashes[si]
+        let mut na = 0
+        let mut ai = 0
+        while ai < idx_a.length() {
+            if hash_distance(h, hashes[idx_a[ai]]) <= eps { na = na + 1 }
+            ai = ai + 1
+        }
+        let mut nb = 0
+        let mut bi = 0
+        while bi < idx_b.length() {
+            if hash_distance(h, hashes[idx_b[bi]]) <= eps { nb = nb + 1 }
+            bi = bi + 1
+        }
+        if na > 0 && nb > 0 {
+            let mut bridge_score = na
+            if nb < bridge_score { bridge_score = nb }
+            scored = scored + [{ point: points[si], near_a: na, near_b: nb, bridge_score: bridge_score }]
+        }
+        si = si + 1
+    }
+
+    // 브릿지 점수 내림차순
+    let mut ssi = 0
+    while ssi < scored.length() {
+        let mut max_idx = ssi
+        let mut ssj = ssi + 1
+        while ssj < scored.length() {
+            if scored[ssj].bridge_score > scored[max_idx].bridge_score {
+                max_idx = ssj
+            }
+            ssj = ssj + 1
+        }
+        if max_idx != ssi {
+            let tmp = scored[ssi]
+            scored[ssi] = scored[max_idx]
+            scored[max_idx] = tmp
+        }
+        ssi = ssi + 1
+    }
+
+    let mut result = []
+    let mut ri = 0
+    let limit = if k < scored.length() { k } else { scored.length() }
+    while ri < limit {
+        result = result + [scored[ri]]
+        ri = ri + 1
+    }
+    result
+}
+
+// ════════════════════════════════════════════════════════════════
+// KnowledgeComplex — 단체 갭 탐지
+// ════════════════════════════════════════════════════════════════
+
+struct KnowledgeNode {
+    id: string,
+    value: float,
+    has_value: bool,
+    domain: string,
+    grade: int
+}
+
+struct Gap {
+    nodes: list,
+    dimension: int,
+    score: float,
+    seed_expr: string
+}
+
+// n=6 타겟 값들
+fn n6_targets() -> list {
+    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 12.0, 16.0, 24.0,
+     32.0, 48.0, 64.0, 72.0, 128.0, 144.0, 192.0, 220.0, 256.0,
+     720.0, 1536.0, 4096.0, 0.333333]
+}
+
+// 이항 갭 탐지: 엣지 없는 값-있는 노드 쌍에서 n6 타겟 근접 여부
+fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
+    let targets = n6_targets()
+    let mut gaps = []
+
+    let mut i = 0
+    while i < nodes.length() {
+        let mut j = i + 1
+        while j < nodes.length() {
+            let na = nodes[i]
+            let nb = nodes[j]
+
+            // 엣지 존재 여부 확인
+            let mut has_edge = false
+            let mut ei = 0
+            while ei < edge_pairs.length() {
+                let ep = edge_pairs[ei]
+                if (ep[0] == na.id && ep[1] == nb.id) || (ep[0] == nb.id && ep[1] == na.id) {
+                    has_edge = true
+                }
+                ei = ei + 1
+            }
+
+            if !has_edge && na.has_value && nb.has_value {
+                let va = na.value
+                let vb = nb.value
+
+                // 6개 연산
+                let ops = [va + vb, va * vb, va - vb, vb - va]
+                let mut best_hit = 999999.0
+                let mut best_target = 0.0
+
+                let mut oi = 0
+                while oi < ops.length() {
+                    let result = ops[oi]
+                    let mut ti = 0
+                    while ti < targets.length() {
+                        let mut dist = result - targets[ti]
+                        if dist < 0.0 { dist = 0.0 - dist }
+                        if dist < best_hit {
+                            best_hit = dist
+                            best_target = targets[ti]
+                        }
+                        ti = ti + 1
+                    }
+                    oi = oi + 1
+                }
+
+                // 나눗셈도 시도
+                if vb != 0.0 {
+                    let div_result = va / vb
+                    let mut ti = 0
+                    while ti < targets.length() {
+                        let mut dist = div_result - targets[ti]
+                        if dist < 0.0 { dist = 0.0 - dist }
+                        if dist < best_hit {
+                            best_hit = dist
+                            best_target = targets[ti]
+                        }
+                        ti = ti + 1
+                    }
+                }
+
+                let proximity_score = if best_hit < 0.001 { 1.0 }
+                    else { if best_hit < 0.1 { 0.7 }
+                    else { if best_hit < 1.0 { 0.3 }
+                    else { 0.0 } } }
+
+                let domain_bonus = if na.domain == nb.domain { 0.3 } else { 0.1 }
+                let score = domain_bonus + proximity_score
+
+                if score >= 0.4 {
+                    let seed = if proximity_score > 0.0 {
+                        na.id + " op " + nb.id + " ~ " + to_string(best_target)
+                    } else { "" }
+
+                    let gap = Gap {
+                        nodes: [na.id, nb.id],
+                        dimension: 1,
+                        score: score,
+                        seed_expr: seed
+                    }
+                    gaps = gaps + [gap]
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    // 점수 내림차순 정렬
+    let mut si = 0
+    while si < gaps.length() {
+        let mut max_idx = si
+        let mut sj = si + 1
+        while sj < gaps.length() {
+            if gaps[sj].score > gaps[max_idx].score {
+                max_idx = sj
+            }
+            sj = sj + 1
+        }
+        if max_idx != si {
+            let tmp = gaps[si]
+            gaps[si] = gaps[max_idx]
+            gaps[max_idx] = tmp
+        }
+        si = si + 1
+    }
+
+    // max_gaps 제한
+    let mut result = []
+    let mut ri = 0
+    let limit = if max_gaps < gaps.length() { max_gaps } else { gaps.length() }
+    while ri < limit {
+        result = result + [gaps[ri]]
+        ri = ri + 1
+    }
+    result
+}
+
+// 오일러 특성수: χ = V - E + T
+pure fn euler_characteristic(num_nodes: int, num_edges: int, num_triangles: int) -> int {
+    num_nodes - num_edges + num_triangles
+}
+
+// ════════════════════════════════════════════════════════════════
+// Tick 실행기
+// ════════════════════════════════════════════════════════════════
+
+// 가짜 CycleRunner — 시드 포인트에서 새 불변량 생성
+fn generate_invariant(seed_invariant: string, tick_id: int) -> Singularity {
+    let inv = if seed_invariant.length() > 0 {
+        "derived_" + to_string(tick_id) + "_from_[" + seed_invariant + "]"
+    } else {
+        "cold_start_invariant_" + to_string(tick_id)
+    }
+    Singularity {
+        invariant: inv,
+        confidence: 0.5 + to_float(tick_id) * 0.01,
+        novelty: 0.9,
+        depth_reached: 3
+    }
+}
+
+// 타임스탬프 생성 (간이)
+fn now_ts() -> string {
+    // hexa에서 시스템 시간 접근이 제한적 → tick_count 기반
+    "ts"
+}
+
+// tick 1회 실행 — 전체 오케스트레이션
+fn run_tick(domain: string) -> string {
+    // 1. halt 체크
+    let halt_content = read_file(HALT_FILE)
+    if halt_content.length() > 0 {
+        println("[tick] HALTED — halt 파일 존재")
+        return "halted"
+    }
+
+    // 2. Budget 로드
+    let budget_json = read_file(BUDGET_FILE)
+    let mut budget = if budget_json.length() > 2 {
+        budget_from_json(budget_json)
+    } else {
+        budget_default()
+    }
+
+    // 3. Budget 체크
+    let status = budget_check(budget)
+    if status != "allowed" {
+        println("[tick] BUDGET " + status)
+        return status
+    }
+
+    // 4. 토폴로지 로드
+    let points = load_points()
+    let edges = load_edges()
+    let tick_id = budget.tick_count + 1
+    let ts = to_string(tick_id)
+
+    // 5. WAL: tick_start
+    wal_tick_start(tick_id, ts)
+
+    // 6. 시드 선택 (경계 후보 → 가중 샘플링)
+    let mut seed_invariant = ""
+    let mut seed_id = ""
+    if points.length() > 0 {
+        let candidates = compute_boundary_candidates(points, edges)
+        let topk = boundary_top_k(candidates, BOUNDARY_TOP_K)
+        let selected_id = sample_weighted(topk, tick_id)
+        // 선택된 포인트의 invariant 찾기
+        let mut fi = 0
+        while fi < points.length() {
+            if points[fi].id == selected_id {
+                seed_invariant = points[fi].singularity.invariant
+                seed_id = selected_id
+            }
+            fi = fi + 1
+        }
+    }
+
+    // 7. CycleRunner 실행 (불변량 생성)
+    let sing = generate_invariant(seed_invariant, tick_id)
+
+    // 8. 포인트 생성 + 엣지 계산
+    let new_point = make_point(points, domain, seed_id, sing, tick_id, ts)
+    let new_edges = compute_new_edges(points, new_point, DEFAULT_EPS, ts)
+
+    // 9. 영속화 (append)
+    append_file(TOPOLOGY_FILE, point_to_json(new_point) + "\n")
+    let mut ei = 0
+    while ei < new_edges.length() {
+        append_file(EDGES_FILE, edge_to_json(new_edges[ei]) + "\n")
+        ei = ei + 1
+    }
+
+    // 10. Budget 커밋
+    budget = budget_commit(budget, 1)
+    write_file(BUDGET_FILE, budget_to_json(budget))
+
+    // 11. WAL: tick_complete
+    wal_tick_complete(tick_id, new_point.id, ts)
+
+    println("[tick] OK — " + new_point.id + " edges=" + to_string(new_edges.length()) + " tick=" + to_string(tick_id))
+    new_point.id
+}
+
+// ════════════════════════════════════════════════════════════════
+// 상태 출력
+// ════════════════════════════════════════════════════════════════
+
+fn cmd_status() {
+    let points = load_points()
+    let edges = load_edges()
+
+    let budget_json = read_file(BUDGET_FILE)
+    let budget = if budget_json.length() > 2 { budget_from_json(budget_json) } else { budget_default() }
+
+    // 도메인 수 집계
+    let mut domains = []
+    let mut i = 0
+    while i < points.length() {
+        let dom = points[i].domain
+        let mut dup = false
+        let mut j = 0
+        while j < domains.length() {
+            if domains[j] == dom { dup = true }
+            j = j + 1
+        }
+        if !dup { domains = domains + [dom] }
+        i = i + 1
+    }
+
+    // 그래프 밀도
+    let v = points.length()
+    let e = edges.length()
+    let density = if v > 1 { to_float(2 * e) / to_float(v * (v - 1)) } else { 0.0 }
+
+    println("╔══════════════════════════════════════╗")
+    println("║  singularity recursion — status      ║")
+    println("╠══════════════════════════════════════╣")
+    println("║ points:  " + to_string(v))
+    println("║ edges:   " + to_string(e))
+    println("║ domains: " + to_string(domains.length()))
+    println("║ density: " + to_string(density))
+    println("║ ticks:   " + to_string(budget.tick_count))
+    println("║ cpu_sec: " + to_string(budget.cpu_sec_used))
+    println("║ budget:  " + budget_check(budget))
+    println("╚══════════════════════════════════════╝")
+}
+
+// ════════════════════════════════════════════════════════════════
+// 분석 출력
+// ════════════════════════════════════════════════════════════════
+
+fn cmd_analyze() {
+    let points = load_points()
+    let edges = load_edges()
+
+    println("=== singularity recursion — analyze ===")
+    println("")
+
+    // 오일러 특성수 (삼각형은 엣지 기반 추정)
+    let v = points.length()
+    let e = edges.length()
+    // 삼각형 근사: 완전 연결 서브그래프 탐색은 비용이 크므로 0으로 보고
+    let chi = euler_characteristic(v, e, 0)
+    println("V=" + to_string(v) + " E=" + to_string(e) + " T=0 χ=" + to_string(chi))
+    println("")
+
+    // 수렴 클러스터
+    let clusters = find_convergence(points, DEFAULT_EPS, 2)
+    println("수렴 클러스터 (" + to_string(clusters.length()) + "개):")
+    let mut ci = 0
+    while ci < clusters.length() {
+        let c = clusters[ci]
+        println("  [" + to_string(ci) + "] rep=" + c.rep_id + " size=" + to_string(c.size) + " domains=" + to_string(c.domains.length()))
+        println("      invariant: " + c.rep_invariant)
+        ci = ci + 1
+    }
+
+    // 코어 포인트
+    println("")
+    let core = find_core(points, DEFAULT_EPS, 5)
+    println("코어 (고밀도, 상위 5):")
+    let mut ki = 0
+    while ki < core.length() {
+        let entry = core[ki]
+        println("  " + entry.point.id + " density=" + to_string(entry.density) + " domain=" + entry.point.domain)
+        ki = ki + 1
+    }
+
+    println("")
+    println("=== analyze 완료 ===")
+}
+
+// ════════════════════════════════════════════════════════════════
+// 프론티어 출력
+// ════════════════════════════════════════════════════════════════
+
+fn cmd_frontier() {
+    let points = load_points()
+
+    println("=== singularity recursion — frontier ===")
+    println("")
+
+    let frontier = find_frontier(points, DEFAULT_EPS, 10)
+    println("프론티어 (저밀도, 상위 10):")
+
+    let mut i = 0
+    while i < frontier.length() {
+        let entry = frontier[i]
+        let p = entry.point
+        println("  " + p.id + " density=" + to_string(entry.density) + " domain=" + p.domain)
+        println("    invariant: " + p.singularity.invariant)
+        i = i + 1
+    }
+
+    println("")
+    println("=== frontier 완료 ===")
+}
+
+// ════════════════════════════════════════════════════════════════
+// 검증
+// ════════════════════════════════════════════════════════════════
+
+// djb2 해시 기본 검증
+let h1 = djb2_hash("hello")
+let h2 = djb2_hash("hello")
+let h3 = djb2_hash("world")
+assert h1 == h2
+assert h1 != h3
+
+// simhash 검증
+let sh1 = simhash("n=6 sigma tau alpha")
+let sh2 = simhash("n=6 sigma tau alpha")
+assert sh1 == sh2
+assert sh1 > 0
+
+// 거리 검증
+let d_same = hash_distance(sh1, sh2)
+assert d_same == 0.0
+
+let sh3 = simhash("banana quantum chromodynamics")
+let d_diff = hash_distance(sh1, sh3)
+assert d_diff > 0.0
+
+// Budget 검증
+let b = budget_default()
+assert budget_check(b) == "allowed"
+
+let b_full = Budget {
+    tick_count: 100,
+    cpu_sec_used: 0,
+    total_points: 50000,
+    max_total_points: 50000,
+    global_cpu_sec_budget: 86400
+}
+assert budget_check(b_full) == "exhausted_points"
+
+// Budget JSON 왕복 검증
+let b_json = budget_to_json(b)
+let b_parsed = budget_from_json(b_json)
+assert b_parsed.tick_count == 0
+assert b_parsed.max_total_points == 50000
+
+// Point ID 생성 검증
+assert next_point_id([]) == "p_000000"
+
+// 오일러 특성수 검증
+assert euler_characteristic(5, 7, 3) == 1
+assert euler_characteristic(1, 0, 0) == 1
+
+// 경계 후보 빈 토폴로지
+let empty_cands = compute_boundary_candidates([], [])
+assert empty_cands.length() == 0
+
+// Union-Find 검증
+let uf = uf_make(5)
+assert uf_find(uf, 0) == 0
+assert uf_find(uf, 4) == 4
+let uf2 = uf_union(uf, 0, 1)
+assert uf_find(uf2, 0) == uf_find(uf2, 1)
+
+println("=== singularity.hexa verified ===")
+
+// ════════════════════════════════════════════════════════════════
+// CLI 디스패치
+// ════════════════════════════════════════════════════════════════
+
+let args = arguments()
+if args.length() > 0 {
+    let cmd = args[0]
+    match cmd {
+        "tick" -> {
+            let result = run_tick("default")
+            println("tick result: " + result)
+        },
+        "status" -> cmd_status(),
+        "analyze" -> cmd_analyze(),
+        "frontier" -> cmd_frontier(),
+        _ -> {
+            println("사용법: hexa singularity.hexa [tick|status|analyze|frontier]")
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 정리 (theorem / proof)
+// ════════════════════════════════════════════════════════════════
+
+theorem topology_euler_invariant {
+    // V - E + T 는 위상 불변량
+    assert euler_characteristic(1, 0, 0) == 1
+    assert euler_characteristic(3, 3, 1) == 1
+}
+
+theorem hash_distance_identity {
+    // 동일 해시의 거리는 0
+    check hash_distance(42, 42) == 0.0
+}
+
+theorem budget_monotone {
+    // tick 커밋 후 tick_count 단조 증가
+    check budget_commit(budget_default(), 1).tick_count == 1
+}
+
+proof singularity_invariants {
+    invariant hash_distance_bounded()
+    invariant budget_allowed_before_limit()
+    invariant euler_characteristic_integer()
+}

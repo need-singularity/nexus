@@ -1,0 +1,524 @@
+// mk2_hexa/native/lens_forge.hexa — 렌즈 자동 생성 (Rust lens_forge 포팅)
+// gap 분석 → 후보 생성(4전략) → Jaccard 검증 → 새 렌즈 출력
+// Rust/Python 의존 0 — 순수 hexa 파일 I/O
+
+comptime const REGISTRY_PATH = "shared/lens_registry.json"
+comptime const FORGE_OUT_PATH = "shared/forge_result.json"
+comptime const SIMILARITY_THRESHOLD = 0.8
+comptime const MAX_CANDIDATES = 20
+comptime const LENS_WEAK_THRESHOLD = 8
+
+// ─── 알려진 도메인 (24 = J_2) ───
+
+pure fn known_domain(idx: int) -> string {
+    match idx {
+        0 -> "ai", 1 -> "chip", 2 -> "energy", 3 -> "battery",
+        4 -> "solar", 5 -> "fusion", 6 -> "superconductor", 7 -> "quantum",
+        8 -> "biology", 9 -> "cosmology", 10 -> "robotics", 11 -> "materials",
+        12 -> "blockchain", 13 -> "network", 14 -> "cryptography", 15 -> "display",
+        16 -> "audio", 17 -> "environment", 18 -> "mathematics", 19 -> "software",
+        20 -> "plasma", 21 -> "compiler", 22 -> "consciousness", 23 -> "thermodynamics",
+        _ -> ""
+    }
+}
+
+comptime const DOMAIN_COUNT = 24
+
+// ─── 도메인 시프트 쌍 (mutation 전략용) ───
+
+pure fn shift_from(idx: int) -> string {
+    match idx {
+        0 -> "ai", 1 -> "chip", 2 -> "energy",
+        3 -> "biology", 4 -> "network", 5 -> "software",
+        _ -> ""
+    }
+}
+
+pure fn shift_to(idx: int) -> string {
+    match idx {
+        0 -> "robotics", 1 -> "quantum", 2 -> "fusion",
+        3 -> "materials", 4 -> "blockchain", 5 -> "compiler",
+        _ -> ""
+    }
+}
+
+comptime const SHIFT_COUNT = 6
+
+// ─── JSON 간이 파서 ───
+
+pure fn extract_field(line: string, field: string) -> string {
+    let needle = "\"" + field + "\":"
+    if !line.contains(needle) { return "" }
+    let after = line.split(needle)
+    if after.len() < 2 { return "" }
+    let rest = after[1]
+    if rest.starts_with("\"") {
+        let parts = rest.split("\"")
+        if parts.len() >= 2 { return parts[1] }
+    }
+    let mut result = ""
+    let mut i = 0
+    while i < rest.len() {
+        let ch = rest[i]
+        if ch == "," || ch == "}" || ch == " " || ch == "]" { return result }
+        result = result + ch
+        i = i + 1
+    }
+    result
+}
+
+pure fn extract_int(line: string, field: string) -> int {
+    let s = extract_field(line, field)
+    if s == "" { return 0 }
+    let mut num_str = ""
+    let mut i = 0
+    let mut cont = true
+    while i < s.len() && cont {
+        let ch = s[i]
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+            num_str = num_str + ch
+        } else {
+            cont = false
+        }
+        i = i + 1
+    }
+    if num_str == "" { return 0 }
+    to_int(num_str)
+}
+
+// ─── 유틸 ───
+
+pure fn abs_f(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+pure fn min_i(a: int, b: int) -> int {
+    if a < b { a } else { b }
+}
+
+pure fn max_f(a: float, b: float) -> float {
+    if a > b { a } else { b }
+}
+
+pure fn min_f(a: float, b: float) -> float {
+    if a < b { a } else { b }
+}
+
+// ─── Jaccard 유사도 ───
+// 두 콤마-분리 도메인 문자열 간 집합 유사도
+pure fn jaccard_similarity(a_csv: string, b_csv: string) -> float {
+    if a_csv == "" && b_csv == "" { return 0.0 }
+    if a_csv == "" || b_csv == "" { return 0.0 }
+    let a_parts = a_csv.split(",")
+    let b_parts = b_csv.split(",")
+    // 교집합 크기 (O(n*m) — 렌즈 affinity 최대 ~6개이므로 충분)
+    let mut inter = 0
+    for ai in a_parts {
+        for bi in b_parts {
+            if ai == bi { inter = inter + 1 }
+        }
+    }
+    // 합집합 = |A| + |B| - |A∩B|
+    let union_size = a_parts.len() + b_parts.len() - inter
+    if union_size == 0 { return 0.0 }
+    inter / union_size
+}
+
+// ─── GapReport 구조체 ───
+
+struct GapReport {
+    uncovered_csv: string,
+    uncovered_count: int,
+    weak_csv: string,
+    weak_count: int,
+    suggested_csv: string
+}
+
+// ─── 갭 분석 ───
+// 레지스트리(JSON lines: {"name":"...","affinity":"a,b,c"})와 도메인 매칭
+fn analyze_gaps(registry_lines: string) -> GapReport {
+    let lines = registry_lines.split("\n")
+
+    // 각 도메인에 대해 렌즈 수 카운트
+    let mut uncovered_csv = ""
+    let mut uncovered_count = 0
+    let mut weak_csv = ""
+    let mut weak_count = 0
+    let mut suggested_csv = ""
+
+    let mut di = 0
+    while di < DOMAIN_COUNT {
+        let domain = known_domain(di)
+        let mut lens_count = 0
+
+        for line in lines {
+            if line != "" {
+                let affinity = extract_field(line, "affinity")
+                if affinity.contains(domain) {
+                    lens_count = lens_count + 1
+                }
+            }
+        }
+
+        if lens_count == 0 {
+            // 미커버 도메인
+            if uncovered_csv == "" {
+                uncovered_csv = domain
+            } else {
+                uncovered_csv = uncovered_csv + "," + domain
+            }
+            uncovered_count = uncovered_count + 1
+            let cat = domain + "_specialist"
+            if suggested_csv == "" {
+                suggested_csv = cat
+            } else {
+                suggested_csv = suggested_csv + "," + cat
+            }
+        } else if lens_count < LENS_WEAK_THRESHOLD {
+            // 약한 커버리지 도메인
+            if weak_csv == "" {
+                weak_csv = domain
+            } else {
+                weak_csv = weak_csv + "," + domain
+            }
+            weak_count = weak_count + 1
+        }
+
+        di = di + 1
+    }
+
+    GapReport {
+        uncovered_csv: uncovered_csv,
+        uncovered_count: uncovered_count,
+        weak_csv: weak_csv,
+        weak_count: weak_count,
+        suggested_csv: suggested_csv
+    }
+}
+
+// ─── 후보 렌즈 구조체 ───
+
+struct LensCandidate {
+    name: string,
+    description: string,
+    source: string,
+    affinity: string,
+    confidence: float
+}
+
+// ─── 전략 1: 조합 (Combination) ───
+// 두 렌즈의 affinity 합집합이 미커버 도메인을 포함하면 후보 생성
+fn generate_combination(registry_lines: string, gap: GapReport) -> string {
+    if gap.uncovered_count == 0 { return "" }
+    let lines = registry_lines.split("\n")
+    let uncovered = gap.uncovered_csv.split(",")
+
+    let mut result = ""
+    let mut count = 0
+    let limit = min_i(lines.len(), 100)
+
+    let mut i = 0
+    while i < limit && count < MAX_CANDIDATES {
+        let line_i = lines[i]
+        if line_i != "" {
+            let name_i = extract_field(line_i, "name")
+            let aff_i = extract_field(line_i, "affinity")
+
+            let mut j = i + 1
+            while j < limit && count < MAX_CANDIDATES {
+                let line_j = lines[j]
+                if line_j != "" {
+                    let name_j = extract_field(line_j, "name")
+                    let aff_j = extract_field(line_j, "affinity")
+                    let merged = aff_i + "," + aff_j
+
+                    // 미커버 도메인 하나라도 포함?
+                    for uc in uncovered {
+                        if merged.contains(uc) && count < MAX_CANDIDATES {
+                            let cname = name_i + "_" + name_j + "_combo"
+                            let entry = "{\"name\":\"" + cname + "\",\"source\":\"combination\",\"affinity\":\"" + merged + "\",\"confidence\":0.6,\"desc\":\"Combination of " + name_i + " and " + name_j + " to cover " + uc + "\"}"
+                            if result == "" {
+                                result = entry
+                            } else {
+                                result = result + "\n" + entry
+                            }
+                            count = count + 1
+                        }
+                    }
+                }
+                j = j + 1
+            }
+        }
+        i = i + 1
+    }
+    result
+}
+
+// ─── 전략 2: 유추 (Analogy) ───
+// 강한 렌즈를 약한 도메인에 전이
+fn generate_analogy(registry_lines: string, gap: GapReport) -> string {
+    if gap.weak_count == 0 { return "" }
+    let lines = registry_lines.split("\n")
+    let weak_domains = gap.weak_csv.split(",")
+
+    let mut result = ""
+    let mut count = 0
+
+    for wd in weak_domains {
+        for line in lines {
+            if line != "" && count < MAX_CANDIDATES {
+                let name = extract_field(line, "name")
+                let aff = extract_field(line, "affinity")
+                // affinity 2개 이상인 렌즈만 (강한 렌즈)
+                let parts = aff.split(",")
+                if parts.len() >= 2 {
+                    let cname = name + "_to_" + wd
+                    let new_aff = wd + "," + aff
+                    let entry = "{\"name\":\"" + cname + "\",\"source\":\"analogy\",\"affinity\":\"" + new_aff + "\",\"confidence\":0.4,\"desc\":\"Analogical transfer of " + name + " to " + wd + "\"}"
+                    if result == "" {
+                        result = entry
+                    } else {
+                        result = result + "\n" + entry
+                    }
+                    count = count + 1
+                }
+            }
+        }
+    }
+    result
+}
+
+// ─── 전략 3: 변이 (Mutation) ───
+// 도메인 시프트 쌍으로 기존 렌즈를 변이
+fn generate_mutation(registry_lines: string) -> string {
+    let lines = registry_lines.split("\n")
+    let mut result = ""
+    let mut count = 0
+
+    for line in lines {
+        if line != "" && count < MAX_CANDIDATES {
+            let name = extract_field(line, "name")
+            let aff = extract_field(line, "affinity")
+
+            let mut si = 0
+            while si < SHIFT_COUNT && count < MAX_CANDIDATES {
+                let sfrom = shift_from(si)
+                let sto = shift_to(si)
+                if aff.contains(sfrom) && !aff.contains(sto) {
+                    let cname = name + "_mut_" + sto
+                    let new_aff = aff + "," + sto
+                    let entry = "{\"name\":\"" + cname + "\",\"source\":\"mutation\",\"affinity\":\"" + new_aff + "\",\"confidence\":0.3,\"desc\":\"Mutation of " + name + " shifting " + sfrom + " -> " + sto + "\"}"
+                    if result == "" {
+                        result = entry
+                    } else {
+                        result = result + "\n" + entry
+                    }
+                    count = count + 1
+                }
+                si = si + 1
+            }
+        }
+    }
+    result
+}
+
+// ─── 전략 4: 발견 기반 (Discovery) ───
+// 스캔 이력에서 발견 많은 도메인을 깊이 탐색하는 렌즈 생성
+fn generate_discovery(scan_log: string) -> string {
+    if scan_log == "" { return "" }
+    let lines = scan_log.split("\n")
+
+    // 도메인별 발견 수 집계
+    let mut result = ""
+    let mut count = 0
+
+    // 간이 구현: 각 도메인에 대해 발견 횟수 세기
+    let mut di = 0
+    while di < DOMAIN_COUNT && count < MAX_CANDIDATES {
+        let domain = known_domain(di)
+        let mut disc_count = 0
+        for line in lines {
+            if line != "" {
+                let d = extract_field(line, "domain")
+                let disc = extract_field(line, "discoveries")
+                if d == domain && disc != "" && disc != "0" {
+                    disc_count = disc_count + 1
+                }
+            }
+        }
+        if disc_count > 0 {
+            let cname = domain + "_discovery_deep"
+            let entry = "{\"name\":\"" + cname + "\",\"source\":\"discovery\",\"affinity\":\"" + domain + "\",\"confidence\":0.5,\"desc\":\"Bottom-up deepening " + domain + " based on " + to_string(disc_count) + " discoveries\"}"
+            if result == "" {
+                result = entry
+            } else {
+                result = result + "\n" + entry
+            }
+            count = count + 1
+        }
+        di = di + 1
+    }
+    result
+}
+
+// ─── 검증 (Validator) ───
+// Jaccard 유사도 < threshold + gap 커버 → Accept/Modify/Reject
+
+pure fn validate_candidate(cand_affinity: string, registry_lines: string, gap: GapReport) -> string {
+    let lines = registry_lines.split("\n")
+
+    // 최대 Jaccard 유사도 계산
+    let mut max_sim = 0.0
+    for line in lines {
+        if line != "" {
+            let aff = extract_field(line, "affinity")
+            let sim = jaccard_similarity(cand_affinity, aff)
+            max_sim = max_f(max_sim, sim)
+        }
+    }
+
+    let is_unique = max_sim < SIMILARITY_THRESHOLD
+
+    // gap 커버 확인
+    let mut covers_gap = false
+    if gap.uncovered_count > 0 {
+        let uc_parts = gap.uncovered_csv.split(",")
+        for uc in uc_parts {
+            if cand_affinity.contains(uc) { covers_gap = true }
+        }
+    }
+    if !covers_gap && gap.weak_count > 0 {
+        let wk_parts = gap.weak_csv.split(",")
+        for wk in wk_parts {
+            if cand_affinity.contains(wk) { covers_gap = true }
+        }
+    }
+
+    if !is_unique { return "REJECT" }
+    if !covers_gap { return "MODIFY" }
+    "ACCEPT"
+}
+
+// ─── Forge Cycle (메인 엔진) ───
+// gap → 4전략 생성 → 검증 → 결과 출력
+
+fn forge_cycle(registry_content: string, scan_log: string) -> string {
+    let gap = analyze_gaps(registry_content)
+
+    // 4전략으로 후보 수집
+    let combo = generate_combination(registry_content, gap)
+    let analogy = generate_analogy(registry_content, gap)
+    let mutation = generate_mutation(registry_content)
+    let discovery = generate_discovery(scan_log)
+
+    // 후보 합산
+    let mut all = ""
+    if combo != "" { all = combo }
+    if analogy != "" {
+        if all == "" { all = analogy } else { all = all + "\n" + analogy }
+    }
+    if mutation != "" {
+        if all == "" { all = mutation } else { all = all + "\n" + mutation }
+    }
+    if discovery != "" {
+        if all == "" { all = discovery } else { all = all + "\n" + discovery }
+    }
+
+    if all == "" {
+        println("  no candidates generated")
+        return "{\"generated\":0,\"accepted\":0,\"lenses\":[]}"
+    }
+
+    let cand_lines = all.split("\n")
+    let mut generated = 0
+    let mut accepted = 0
+    let mut accepted_json = ""
+
+    for cl in cand_lines {
+        if cl != "" {
+            generated = generated + 1
+            let aff = extract_field(cl, "affinity")
+            let conf_str = extract_field(cl, "confidence")
+            let verdict = validate_candidate(aff, registry_content, gap)
+
+            if verdict == "ACCEPT" {
+                accepted = accepted + 1
+                if accepted_json == "" {
+                    accepted_json = cl
+                } else {
+                    accepted_json = accepted_json + "," + cl
+                }
+            }
+        }
+    }
+
+    let result = "{\"generated\":" + to_string(generated) + ",\"accepted\":" + to_string(accepted) + ",\"gap_uncovered\":" + to_string(gap.uncovered_count) + ",\"gap_weak\":" + to_string(gap.weak_count) + "}"
+    result
+}
+
+// ─── CLI 진입점 ───
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "analyze" }
+
+if mode == "analyze" {
+    // gap 분석만 수행
+    println("=== lens_forge: gap analyze ===")
+    if !file_exists(REGISTRY_PATH) {
+        println("  registry not found: " + REGISTRY_PATH)
+        println("  creating empty registry")
+        write_file(REGISTRY_PATH, "")
+    }
+    let reg = read_file(REGISTRY_PATH)
+    let gap = analyze_gaps(reg)
+    println("  uncovered (" + to_string(gap.uncovered_count) + "): " + gap.uncovered_csv)
+    println("  weak      (" + to_string(gap.weak_count) + "): " + gap.weak_csv)
+    println("  suggested : " + gap.suggested_csv)
+}
+
+if mode == "forge" {
+    // 전체 forge cycle 실행
+    println("=== lens_forge: forge cycle ===")
+    if !file_exists(REGISTRY_PATH) {
+        println("  registry not found: " + REGISTRY_PATH)
+        write_file(REGISTRY_PATH, "")
+    }
+    let reg = read_file(REGISTRY_PATH)
+    let scan_log = if file_exists("shared/discovery_log.jsonl") {
+        read_file("shared/discovery_log.jsonl")
+    } else {
+        ""
+    }
+    let result = forge_cycle(reg, scan_log)
+    println("  result: " + result)
+    write_file(FORGE_OUT_PATH, result)
+    println("  written: " + FORGE_OUT_PATH)
+}
+
+if mode == "jaccard" {
+    // 두 affinity 간 Jaccard 유사도 테스트
+    let set_a = if a.len() >= 4 { a[3] } else { "ai,chip" }
+    let set_b = if a.len() >= 5 { a[4] } else { "ai,quantum" }
+    let sim = jaccard_similarity(set_a, set_b)
+    println("jaccard(\"" + set_a + "\", \"" + set_b + "\") = " + to_string(sim))
+}
+
+// ─── 검증 ───
+
+assert jaccard_similarity("ai,chip", "ai,chip") == 1.0
+assert jaccard_similarity("ai,chip", "energy,fusion") == 0.0
+
+let gap_test = analyze_gaps("")
+assert gap_test.uncovered_count == DOMAIN_COUNT
+
+println("=== lens_forge verified ===")
+
+theorem forge_gap_completeness {
+    // 빈 레지스트리 → 24개 도메인 전부 미커버
+    assert DOMAIN_COUNT == 24
+}
+
+proof forge_invariants {
+    invariant jaccard_bounded_0_1()
+    invariant candidates_capped_at_max()
+}

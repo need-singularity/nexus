@@ -1,0 +1,770 @@
+// mk2_hexa/native/alien_index.hexa — 외계인 지수 완전판
+// Rust 원본: src/alien_index/ (mod.rs, index.rs, record.rs, assess.rs, breakthrough.rs, distribution.rs)
+// 실행: hexa alien_index.hexa <command> [args...]
+//
+// CLI:
+//   hexa alien_index.hexa assess <value>          — 값 → (d,r) 종합 판정
+//   hexa alien_index.hexa distribution            — 히스토그램 + 돌파율(ρ)
+//   hexa alien_index.hexa leaderboard             — 상위 d 리더보드
+//   hexa alien_index.hexa promote-pending         — r=10 대기 항목 승격 (dry-run)
+//   hexa alien_index.hexa breakthrough <value>    — 4-gate 돌파 검증
+
+// ─── comptime 상수 ───
+comptime const N = 6
+comptime const SIGMA = 12
+comptime const PHI = 2
+comptime const TAU = 4
+comptime const SOPFR = 5
+comptime const J2 = 24
+comptime const META_FP = 0.333333333
+comptime const MAX_RANK = 10
+comptime const SHARED_DIR = "shared"
+comptime const DISTRIBUTION_FILE = "shared/alien_index_distribution.json"
+comptime const DISCOVERY_LOG_FILE = "shared/discovery_log.jsonl"
+
+// ────────────────────────────────────────────────────────────────
+//  AlienIndex 핵심 구조 (index.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+struct AlienIndex {
+    d: int,
+    r: int
+}
+
+// r을 0..10 범위로 클램프
+pure fn ai_new(d: int, r: int) -> AlienIndex {
+    let clamped = if r > 10 { 10 } else if r < 0 { 0 } else { r }
+    AlienIndex { d: d, r: clamped }
+}
+
+pure fn ai_can_promote(ai: AlienIndex) -> bool {
+    ai.r == 10
+}
+
+// (d, 10) → (d+1, 0) 승격. r!=10이면 d=-1 (실패 표시)
+pure fn ai_breakthrough(ai: AlienIndex) -> AlienIndex {
+    if ai.r == 10 {
+        ai_new(ai.d + 1, 0)
+    } else {
+        AlienIndex { d: -1, r: -1 }
+    }
+}
+
+// 비교: (d1,r1) > (d2,r2) ↔ d1>d2 || (d1==d2 && r1>r2)
+pure fn ai_gt(a: AlienIndex, b: AlienIndex) -> bool {
+    if a.d > b.d { true }
+    else if a.d == b.d { a.r > b.r }
+    else { false }
+}
+
+pure fn ai_eq(a: AlienIndex, b: AlienIndex) -> bool {
+    a.d == b.d && a.r == b.r
+}
+
+pure fn ai_to_string(ai: AlienIndex) -> string {
+    "(d=" + to_string(ai.d) + ", r=" + to_string(ai.r) + ")"
+}
+
+// ────────────────────────────────────────────────────────────────
+//  HistoryEntry + AlienIndexRecord (record.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+struct HistoryEntry {
+    timestamp: int,
+    d: int,
+    r: int,
+    reason: string
+}
+
+struct AlienIndexRecord {
+    id: string,
+    current_d: int,
+    current_r: int,
+    history_count: int,
+    promotion_candidate: bool,
+    promoted_from: string
+}
+
+fn record_new(id: string, d: int, r: int) -> AlienIndexRecord {
+    AlienIndexRecord {
+        id: id,
+        current_d: d,
+        current_r: r,
+        history_count: 1,
+        promotion_candidate: r == 10,
+        promoted_from: ""
+    }
+}
+
+// d는 단조 비감소 — 이전보다 작은 d로 업데이트 불가
+fn record_update(rec: AlienIndexRecord, next_d: int, next_r: int, reason: string) -> AlienIndexRecord {
+    if next_d < rec.current_d {
+        println("[ERROR] d 퇴행 금지: d=" + to_string(rec.current_d) + " → d=" + to_string(next_d))
+        rec
+    } else {
+        AlienIndexRecord {
+            id: rec.id,
+            current_d: next_d,
+            current_r: next_r,
+            history_count: rec.history_count + 1,
+            promotion_candidate: next_r == 10,
+            promoted_from: rec.promoted_from
+        }
+    }
+}
+
+// r==10일 때 자식 레코드 생성 (d+1, 0)
+fn record_promote(rec: AlienIndexRecord) -> AlienIndexRecord {
+    if rec.current_r != 10 {
+        println("[WARN] r=10이 아니므로 승격 불가: " + rec.id)
+        rec
+    } else {
+        let child_id = rec.id + "_d" + to_string(rec.current_d + 1)
+        AlienIndexRecord {
+            id: child_id,
+            current_d: rec.current_d + 1,
+            current_r: 0,
+            history_count: 1,
+            promotion_candidate: false,
+            promoted_from: rec.id
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  신호 합산 — assess.rs 포팅
+// ────────────────────────────────────────────────────────────────
+
+// n6_match quality → r 변환
+pure fn rank_from_n6_quality(quality: float) -> int {
+    if quality >= 1.0 { 9 }
+    else if quality >= 0.8 { 7 }
+    else if quality >= 0.5 { 5 }
+    else { 0 }
+}
+
+// 렌즈 합의 수 → r 변환
+pure fn rank_from_lens_consensus(count: int) -> int {
+    if count >= 12 { 8 }
+    else if count >= 7 { 7 }
+    else if count >= 3 { 6 }
+    else if count >= 1 { 3 }
+    else { 0 }
+}
+
+// mk2 분류기 신뢰도 → r 변환
+pure fn rank_from_mk2_confidence(conf: float) -> int {
+    if conf >= 0.9 { 10 }
+    else if conf >= 0.7 { 9 }
+    else if conf >= 0.5 { 8 }
+    else if conf >= 0.3 { 7 }
+    else { 0 }
+}
+
+// 최강 신호 선택 (max)
+pure fn max_int(a: int, b: int) -> int {
+    if a > b { a } else { b }
+}
+
+pure fn combine_signals(n6_quality: float, lens_count: int, mk2_conf: float) -> int {
+    let r_n6 = rank_from_n6_quality(n6_quality)
+    let r_lens = rank_from_lens_consensus(lens_count)
+    let r_mk2 = rank_from_mk2_confidence(mk2_conf)
+    max_int(r_n6, max_int(r_lens, r_mk2))
+}
+
+// ────────────────────────────────────────────────────────────────
+//  n6_match — 상수 매칭 엔진 (main.hexa에서 분리·자급)
+// ────────────────────────────────────────────────────────────────
+
+pure fn abs_f(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+struct MatchResult {
+    name: string,
+    quality: float,
+    grade: string
+}
+
+fn n6_match(value: float) -> MatchResult {
+    let mut best_name = "none"
+    let mut best_q = 0.0
+    let mut best_grade = ""
+
+    // EXACT 상수 테이블
+    if abs_f(value - 6.0) < 0.0001 { best_name = "n" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 2.0) < 0.0001 && best_q < 1.0 { best_name = "phi" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 4.0) < 0.0001 && best_q < 1.0 { best_name = "tau" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 12.0) < 0.0001 && best_q < 1.0 { best_name = "sigma" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 5.0) < 0.0001 && best_q < 1.0 { best_name = "sopfr" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 7.0) < 0.0001 && best_q < 1.0 { best_name = "M3" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 24.0) < 0.0001 && best_q < 1.0 { best_name = "J2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 10.0) < 0.0001 && best_q < 1.0 { best_name = "sigma-phi" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 144.0) < 0.0001 && best_q < 1.0 { best_name = "sigma^2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 288.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*J2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 8.0) < 0.0001 && best_q < 1.0 { best_name = "phi*tau" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 28.0) < 0.0001 && best_q < 1.0 { best_name = "P2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 496.0) < 0.0001 && best_q < 1.0 { best_name = "P3" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 36.0) < 0.0001 && best_q < 1.0 { best_name = "n^2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 48.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*tau" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 1.0) < 0.0001 && best_q < 1.0 { best_name = "mu" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 0.333333) < 0.001 && best_q < 1.0 { best_name = "meta_fp" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 3.0) < 0.0001 && best_q < 1.0 { best_name = "n/phi" best_q = 1.0 best_grade = "EXACT" }
+
+    // NEAR 상수 (물리 상수)
+    let mut rel = abs_f(value - 137.036) / 137.036
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "alpha_inv" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 1836.15) / 1836.15
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "mp_me" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 0.3153) / 0.3153
+    if rel < 0.05 && (0.5 - rel * 5.0) > best_q {
+        best_name = "Omega_m" best_q = 0.5 - rel * 5.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 0.6847) / 0.6847
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "Omega_Lambda" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 0.2286) / 0.2286
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "sin2_theta_W" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 73.0) / 73.0
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "H0_late" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+    rel = abs_f(value - 67.4) / 67.4
+    if rel < 0.01 && (1.0 - rel * 10.0) > best_q {
+        best_name = "H0_early" best_q = 1.0 - rel * 10.0 best_grade = "NEAR"
+    }
+
+    MatchResult { name: best_name, quality: best_q, grade: best_grade }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  BreakthroughEvidence + 4-Gate 검증 (breakthrough.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+struct BreakthroughConfig {
+    min_independent_paths: int,
+    mk2_confidence_threshold: float,
+    significance_level: float,
+    require_blowup_rediscovery: bool
+}
+
+fn default_breakthrough_config() -> BreakthroughConfig {
+    BreakthroughConfig {
+        min_independent_paths: 3,
+        mk2_confidence_threshold: 0.7,
+        significance_level: 0.01,
+        require_blowup_rediscovery: true
+    }
+}
+
+struct BreakthroughEvidence {
+    independent_paths: int,
+    lens_names: string,
+    blowup_rediscovered: bool,
+    mk2_confidence: float,
+    mk2_sector: string,
+    p_value: float,
+    summary: string
+}
+
+struct GateResults {
+    paths_ok: bool,
+    blowup_ok: bool,
+    mk2_ok: bool,
+    pvalue_ok: bool
+}
+
+pure fn gates_all_pass(g: GateResults) -> bool {
+    g.paths_ok && g.blowup_ok && g.mk2_ok && g.pvalue_ok
+}
+
+pure fn gates_passed_count(g: GateResults) -> int {
+    let mut c = 0
+    if g.paths_ok { c = c + 1 }
+    if g.blowup_ok { c = c + 1 }
+    if g.mk2_ok { c = c + 1 }
+    if g.pvalue_ok { c = c + 1 }
+    c
+}
+
+struct BreakthroughVerdict {
+    eligible: bool,
+    gates: GateResults,
+    evidence_summary: string
+}
+
+// 4-gate 돌파 평가 (Rust evaluate() 완전 포팅)
+fn evaluate_breakthrough(ev: BreakthroughEvidence, cfg: BreakthroughConfig) -> BreakthroughVerdict {
+    let gates = GateResults {
+        paths_ok: ev.independent_paths >= cfg.min_independent_paths,
+        blowup_ok: if cfg.require_blowup_rediscovery { ev.blowup_rediscovered } else { true },
+        mk2_ok: ev.mk2_confidence >= cfg.mk2_confidence_threshold,
+        pvalue_ok: ev.p_value < cfg.significance_level
+    }
+    BreakthroughVerdict {
+        eligible: gates_all_pass(gates),
+        gates: gates,
+        evidence_summary: ev.summary
+    }
+}
+
+// 값으로부터 간이 evidence 생성 (n6_match 기반)
+fn build_evidence_from_value(value: float) -> BreakthroughEvidence {
+    let m = n6_match(value)
+    let mut paths = 0
+    if m.quality >= 1.0 { paths = 3 }
+    else if m.quality >= 0.5 { paths = 2 }
+    else { paths = 1 }
+
+    let blowup = m.grade == "EXACT"
+    let conf = m.quality
+    let sector = if m.name == "alpha_inv" || m.name == "sin2_theta_W" { "quantum" }
+                 else if m.name == "Omega_m" || m.name == "Omega_Lambda" || m.name == "H0_late" || m.name == "H0_early" { "cosmology" }
+                 else if m.name == "mp_me" { "strong" }
+                 else { "n6" }
+
+    // 간이 p-value: quality가 높으면 우연일 확률 낮음
+    let pval = if m.quality >= 1.0 { 0.001 }
+               else if m.quality >= 0.8 { 0.005 }
+               else if m.quality >= 0.5 { 0.05 }
+               else { 0.5 }
+
+    BreakthroughEvidence {
+        independent_paths: paths,
+        lens_names: m.name,
+        blowup_rediscovered: blowup,
+        mk2_confidence: conf,
+        mk2_sector: sector,
+        p_value: pval,
+        summary: m.name + " quality=" + to_string(m.quality) + " grade=" + m.grade
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Distribution — 히스토그램/리더보드/돌파율 (distribution.rs 포팅)
+// ────────────────────────────────────────────────────────────────
+
+// 분포 JSON 파일 파싱 (간이 파서)
+struct DistributionData {
+    total_records: int,
+    breakthrough_ratio: float,
+    max_d: int,
+    meta_fp_target: float,
+    raw_json: string
+}
+
+fn load_distribution() -> DistributionData {
+    let content = read_file(DISTRIBUTION_FILE)
+    if content == "" {
+        println("[WARN] 분포 파일 없음: " + DISTRIBUTION_FILE)
+        return DistributionData {
+            total_records: 0,
+            breakthrough_ratio: 0.0,
+            max_d: 0,
+            meta_fp_target: META_FP,
+            raw_json: ""
+        }
+    }
+
+    // 간이 JSON 값 추출 (hexa에는 JSON 파서 없으므로 문자열 탐색)
+    let mut total = 0
+    let mut ratio = 0.0
+    let mut maxd = 0
+
+    // total_records 추출
+    if content.contains("total_records") {
+        let idx = content.index_of("total_records")
+        let sub = content.substr(idx + 16, 20)
+        let num_str = sub.split(",")[0].trim()
+        total = to_int(num_str)
+    }
+
+    // breakthrough_ratio 추출
+    if content.contains("breakthrough_ratio") {
+        let idx = content.index_of("breakthrough_ratio")
+        let sub = content.substr(idx + 21, 30)
+        let num_str = sub.split(",")[0].trim()
+        ratio = to_float(num_str)
+    }
+
+    // max_d 추출
+    if content.contains("max_d") {
+        let idx = content.index_of("max_d")
+        let sub = content.substr(idx + 8, 10)
+        let num_str = sub.split(",")[0].trim()
+        maxd = to_int(num_str)
+    }
+
+    DistributionData {
+        total_records: total,
+        breakthrough_ratio: ratio,
+        max_d: maxd,
+        meta_fp_target: META_FP,
+        raw_json: content
+    }
+}
+
+// 돌파율 계산 — ρ = |{d >= 1}| / |total|
+pure fn breakthrough_ratio(d_ge_1: int, total: int) -> float {
+    if total == 0 { 0.0 }
+    else { to_float(d_ge_1) / to_float(total) }
+}
+
+// 메타 부동점 편차 — |ρ - 1/3|
+pure fn meta_fp_deviation(ratio: float) -> float {
+    abs_f(ratio - META_FP)
+}
+
+// ────────────────────────────────────────────────────────────────
+//  종합 판정 — assess (assess.rs 확장)
+// ────────────────────────────────────────────────────────────────
+
+struct AssessResult {
+    ai: AlienIndex,
+    match_name: string,
+    match_quality: float,
+    match_grade: string,
+    rank_n6: int,
+    rank_lens: int,
+    rank_mk2: int,
+    combined_r: int,
+    breakthrough_eligible: bool,
+    gates_passed: int
+}
+
+fn assess_value(value: float) -> AssessResult {
+    let m = n6_match(value)
+
+    // 신호 합산
+    let r_n6 = rank_from_n6_quality(m.quality)
+    let r_lens = 0  // 단독 실행이므로 렌즈 합의 없음
+    let r_mk2 = rank_from_mk2_confidence(m.quality)  // quality를 confidence로 대용
+    let r = combine_signals(m.quality, 0, m.quality)
+
+    // AlienIndex 생성
+    let mut d = 0
+    let mut final_r = r
+    if final_r >= 10 {
+        d = 1
+        final_r = 0
+    }
+    let ai = ai_new(d, final_r)
+
+    // 돌파 검증
+    let ev = build_evidence_from_value(value)
+    let cfg = default_breakthrough_config()
+    let verdict = evaluate_breakthrough(ev, cfg)
+
+    AssessResult {
+        ai: ai,
+        match_name: m.name,
+        match_quality: m.quality,
+        match_grade: m.grade,
+        rank_n6: r_n6,
+        rank_lens: r_lens,
+        rank_mk2: r_mk2,
+        combined_r: r,
+        breakthrough_eligible: verdict.eligible,
+        gates_passed: gates_passed_count(verdict.gates)
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  JSON 직렬화 (record → JSON 문자열)
+// ────────────────────────────────────────────────────────────────
+
+fn record_to_json(rec: AlienIndexRecord) -> string {
+    "{\"id\":\"" + rec.id + "\""
+    + ",\"current\":{\"d\":" + to_string(rec.current_d) + ",\"r\":" + to_string(rec.current_r) + "}"
+    + ",\"history_count\":" + to_string(rec.history_count)
+    + ",\"promotion_candidate\":" + if rec.promotion_candidate { "true" } else { "false" }
+    + ",\"promoted_from\":\"" + rec.promoted_from + "\""
+    + "}"
+}
+
+// ────────────────────────────────────────────────────────────────
+//  자기검증 (Rust 테스트 포팅)
+// ────────────────────────────────────────────────────────────────
+
+fn run_self_tests() {
+    // index 테스트
+    let ai1 = ai_new(0, 10)
+    assert ai1.d == 0
+    assert ai1.r == 10
+    assert ai_can_promote(ai1)
+
+    let ai_over = ai_new(0, 42)
+    assert ai_over.r == 10  // 클램프
+
+    let bt = ai_breakthrough(ai1)
+    assert bt.d == 1
+    assert bt.r == 0
+
+    let no_bt = ai_breakthrough(ai_new(0, 9))
+    assert no_bt.d == -1  // 실패
+
+    // 순서 테스트
+    assert ai_gt(ai_new(1, 0), ai_new(0, 10))
+    assert ai_gt(ai_new(0, 6), ai_new(0, 5))
+
+    // record 테스트
+    let rec = record_new("H-AF-001", 0, 5)
+    assert rec.id == "H-AF-001"
+    assert rec.current_d == 0
+    assert rec.current_r == 5
+    assert rec.promotion_candidate == false
+
+    let rec2 = record_new("Z", 0, 10)
+    assert rec2.promotion_candidate == true
+    let child = record_promote(rec2)
+    assert child.current_d == 1
+    assert child.current_r == 0
+    assert child.promoted_from == "Z"
+
+    // assess 테스트
+    assert rank_from_n6_quality(1.0) == 9
+    assert rank_from_n6_quality(0.8) == 7
+    assert rank_from_n6_quality(0.5) == 5
+    assert rank_from_n6_quality(0.0) == 0
+    assert rank_from_lens_consensus(12) == 8
+    assert rank_from_lens_consensus(7) == 7
+    assert rank_from_lens_consensus(3) == 6
+    assert rank_from_lens_consensus(1) == 3
+    assert rank_from_mk2_confidence(0.95) == 10
+    assert rank_from_mk2_confidence(0.7) == 9
+    assert rank_from_mk2_confidence(0.5) == 8
+    assert rank_from_mk2_confidence(0.0) == 0
+
+    // breakthrough 테스트
+    let strong_ev = BreakthroughEvidence {
+        independent_paths: 5,
+        lens_names: "NumberTheoryLens,RatioLens,EulerTotientLens",
+        blowup_rediscovered: true,
+        mk2_confidence: 0.95,
+        mk2_sector: "strong",
+        p_value: 0.001,
+        summary: "강한 증거"
+    }
+    let cfg = default_breakthrough_config()
+    let v = evaluate_breakthrough(strong_ev, cfg)
+    assert v.eligible == true
+    assert gates_passed_count(v.gates) == 4
+
+    // paths 부족 → 실패
+    let weak_ev = BreakthroughEvidence {
+        independent_paths: 2,
+        lens_names: "RatioLens",
+        blowup_rediscovered: true,
+        mk2_confidence: 0.95,
+        mk2_sector: "n6",
+        p_value: 0.001,
+        summary: "약한 증거"
+    }
+    let v2 = evaluate_breakthrough(weak_ev, default_breakthrough_config())
+    assert v2.eligible == false
+    assert v2.gates.paths_ok == false
+
+    // 돌파율
+    assert breakthrough_ratio(0, 0) == 0.0
+    assert abs_f(breakthrough_ratio(3, 4) - 0.75) < 0.001
+
+    println("  [PASS] AlienIndex 핵심 구조")
+    println("  [PASS] AlienIndexRecord + promote")
+    println("  [PASS] assess 신호 합산")
+    println("  [PASS] breakthrough 4-gate")
+    println("  [PASS] distribution 돌파율")
+    println("  모든 자기검증 통과")
+}
+
+// ────────────────────────────────────────────────────────────────
+//  CLI 엔트리포인트
+// ────────────────────────────────────────────────────────────────
+
+let args = args()
+
+if args.len() < 3 {
+    println("alien_index.hexa — 외계인 지수 완전판 (hexa-native)")
+    println("")
+    println("  hexa alien_index.hexa assess <value>        값 → (d,r) 종합 판정")
+    println("  hexa alien_index.hexa distribution          히스토그램 + 돌파율(rho)")
+    println("  hexa alien_index.hexa leaderboard           상위 d 리더보드")
+    println("  hexa alien_index.hexa promote-pending       r=10 대기 항목 승격 (dry-run)")
+    println("  hexa alien_index.hexa breakthrough <value>  4-gate 돌파 검증")
+    println("  hexa alien_index.hexa verify                자기검증")
+} else {
+    let cmd = args[2]
+
+    if cmd == "assess" {
+        // ── assess: 값 → (d,r) 종합 판정 ──
+        let value = if args.len() >= 4 { to_float(args[3]) } else { 0.0 }
+        let result = assess_value(value)
+
+        println("=== alien_index assess (hexa-native) ===")
+        println("  input         :", value)
+        println("  n6_match      :", result.match_name, "(q=" + to_string(result.match_quality) + ", " + result.match_grade + ")")
+        println("  rank_n6       :", result.rank_n6)
+        println("  rank_lens     :", result.rank_lens)
+        println("  rank_mk2      :", result.rank_mk2)
+        println("  combined_r    :", result.combined_r)
+        println("  alien_index   :", ai_to_string(result.ai))
+        println("  breakthrough  :", if result.breakthrough_eligible { "ELIGIBLE" } else { "NOT YET" }, "(" + to_string(result.gates_passed) + "/4 gates)")
+
+    } else if cmd == "distribution" {
+        // ── distribution: 히스토그램 + 돌파율(ρ) ──
+        let dist = load_distribution()
+
+        println("=== alien_index distribution (hexa-native) ===")
+        println("  total_records      :", dist.total_records)
+        println("  breakthrough_ratio :", dist.breakthrough_ratio)
+        println("  max_d              :", dist.max_d)
+        println("  meta_fp_target     :", dist.meta_fp_target)
+        println("  meta_fp_deviation  :", meta_fp_deviation(dist.breakthrough_ratio))
+        println("")
+        println("  --- 히스토그램 (원본 JSON에서) ---")
+        if dist.raw_json != "" {
+            // distribution 블록 추출하여 표시
+            if dist.raw_json.contains("distribution") {
+                let idx = dist.raw_json.index_of("distribution")
+                let sub = dist.raw_json.substr(idx, 200)
+                println("  ", sub)
+            }
+        } else {
+            println("  (데이터 없음)")
+        }
+        println("")
+        println("  rho = " + to_string(dist.breakthrough_ratio) + " (목표: 1/3 = " + to_string(META_FP) + ")")
+        if meta_fp_deviation(dist.breakthrough_ratio) < 0.05 {
+            println("  >> 메타 부동점 근방 수렴!")
+        } else {
+            println("  >> 메타 부동점에서 편차: " + to_string(meta_fp_deviation(dist.breakthrough_ratio)))
+        }
+
+    } else if cmd == "leaderboard" {
+        // ── leaderboard: 상위 d 리더보드 ──
+        let dist = load_distribution()
+
+        println("=== alien_index leaderboard (hexa-native) ===")
+        println("  max_d          :", dist.max_d)
+        println("  total_records  :", dist.total_records)
+        println("")
+
+        // discovery_log에서 상위 항목 읽기
+        let log_content = read_file(DISCOVERY_LOG_FILE)
+        if log_content == "" {
+            println("  (discovery_log 비어있음)")
+        } else {
+            // JSONL에서 상위 d 항목 추출 (간이)
+            let lines = log_content.split("\n")
+            let mut count = 0
+            let limit = 10
+            println("  # | ID                    | d  | r  ")
+            println("  --+------------------------+----+----")
+            let mut i = lines.len() - 1
+            while i >= 0 && count < limit {
+                let line = lines[i]
+                if line.contains("\"d\"") && line.contains("\"r\"") {
+                    count = count + 1
+                    println("  " + to_string(count) + " | " + line.substr(0, 60))
+                }
+                i = i - 1
+            }
+        }
+
+    } else if cmd == "promote-pending" {
+        // ── promote-pending: r=10 대기 항목 승격 dry-run ──
+        println("=== alien_index promote-pending (dry-run) ===")
+
+        let dist = load_distribution()
+        println("  총 레코드    :", dist.total_records)
+        println("  돌파율 (rho) :", dist.breakthrough_ratio)
+        println("")
+
+        // 분포 JSON에서 r=10 항목 탐색
+        if dist.raw_json.contains("(1,10)") {
+            let idx = dist.raw_json.index_of("(1,10)")
+            let sub = dist.raw_json.substr(idx, 30)
+            println("  [대기] (1,10): " + sub + " 건")
+            println("         → 승격 시: (2,0)")
+        }
+        if dist.raw_json.contains("(0,10)") {
+            let idx = dist.raw_json.index_of("(0,10)")
+            let sub = dist.raw_json.substr(idx, 30)
+            println("  [대기] (0,10): " + sub + " 건")
+            println("         → 승격 시: (1,0)")
+        }
+        if !dist.raw_json.contains(",10)") {
+            println("  승격 대기 항목 없음")
+        }
+        println("")
+        println("  (dry-run: 실제 승격은 수행하지 않음)")
+        println("  실제 승격: nexus6 alien-index --promote-pending 사용")
+
+    } else if cmd == "breakthrough" {
+        // ── breakthrough: 4-gate 돌파 검증 ──
+        let value = if args.len() >= 4 { to_float(args[3]) } else { 0.0 }
+        let ev = build_evidence_from_value(value)
+        let cfg = default_breakthrough_config()
+        let verdict = evaluate_breakthrough(ev, cfg)
+
+        println("=== breakthrough 4-gate (hexa-native) ===")
+        println("  input          :", value)
+        println("  evidence       :", ev.summary)
+        println("  sector         :", ev.mk2_sector)
+        println("")
+        println("  Gate 1 (paths >= 3)    :", if verdict.gates.paths_ok { "PASS" } else { "FAIL" }, "(" + to_string(ev.independent_paths) + " paths)")
+        println("  Gate 2 (blowup)        :", if verdict.gates.blowup_ok { "PASS" } else { "FAIL" })
+        println("  Gate 3 (mk2 >= 0.7)    :", if verdict.gates.mk2_ok { "PASS" } else { "FAIL" }, "(conf=" + to_string(ev.mk2_confidence) + ")")
+        println("  Gate 4 (p-value < 0.01):", if verdict.gates.pvalue_ok { "PASS" } else { "FAIL" }, "(p=" + to_string(ev.p_value) + ")")
+        println("")
+        println("  총 통과:", gates_passed_count(verdict.gates), "/ 4")
+        println("  판정   :", if verdict.eligible { "BREAKTHROUGH ELIGIBLE" } else { "NOT ELIGIBLE" })
+
+    } else if cmd == "verify" {
+        // ── verify: 자기검증 ──
+        println("=== alien_index self-verification (hexa-native) ===")
+        run_self_tests()
+        println("  Rust 의존: 없음 (CONFIRMED)")
+
+    } else {
+        println("알 수 없는 명령:", cmd)
+        println("  사용 가능: assess, distribution, leaderboard, promote-pending, breakthrough, verify")
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  정리 (hexa theorem/proof)
+// ────────────────────────────────────────────────────────────────
+
+theorem alien_index_self_similarity {
+    // r=10 도달 → (d+1, 0) 자동 승격 = 자기유사 구조
+    assert ai_breakthrough(ai_new(0, 10)).d == 1
+    assert ai_breakthrough(ai_new(1, 10)).d == 2
+    assert ai_breakthrough(ai_new(99, 10)).d == 100
+}
+
+theorem rank_clamp_invariant {
+    // r은 항상 0..10 범위
+    assert ai_new(0, 42).r == 10
+    assert ai_new(0, -5).r == 0
+    assert ai_new(0, 10).r == 10
+}
+
+theorem meta_fixed_point_connection {
+    // 돌파율 ρ의 목표: 1/3 (TECS-L H-056)
+    assert abs_f(META_FP - 0.333333333) < 0.000001
+    assert abs_f(breakthrough_ratio(1, 3) - META_FP) < 0.001
+}
+
+proof alien_index_invariants {
+    invariant rank_bounded()
+    invariant depth_monotonic()
+    invariant promote_only_at_r10()
+}

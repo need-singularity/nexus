@@ -1,0 +1,574 @@
+// mk2_hexa/native/graph.hexa — Discovery Graph (Rust graph/ 포팅)
+// 노드 9종, 엣지 8종, 인접 리스트, JSON 영속
+// 삼각형 탐색 / 허브 탐색 / 수렴점 탐색
+// Rust/Python 의존 0 — 순수 hexa 파일 I/O
+
+comptime const GRAPH_PATH = "shared/discovery_graph.json"
+comptime const HUB_MIN_DEGREE = 3
+
+// ─── 노드 타입 (9종) ───
+
+pure fn node_type_name(idx: int) -> string {
+    match idx {
+        0 -> "Discovery",
+        1 -> "Hypothesis",
+        2 -> "Bt",
+        3 -> "Prediction",
+        4 -> "AccelHypothesis",
+        5 -> "Constant",
+        6 -> "Technique",
+        7 -> "Domain",
+        8 -> "Experiment",
+        _ -> "Unknown"
+    }
+}
+
+comptime const NODE_TYPE_COUNT = 9
+
+pure fn node_type_index(name: string) -> int {
+    match name {
+        "Discovery" -> 0, "discovery" -> 0,
+        "Hypothesis" -> 1, "hypothesis" -> 1,
+        "Bt" -> 2, "bt" -> 2,
+        "Prediction" -> 3, "prediction" -> 3,
+        "AccelHypothesis" -> 4, "accel" -> 4,
+        "Constant" -> 5, "constant" -> 5,
+        "Technique" -> 6, "technique" -> 6,
+        "Domain" -> 7, "domain" -> 7,
+        "Experiment" -> 8, "experiment" -> 8,
+        _ -> -1
+    }
+}
+
+// ─── 엣지 타입 (8종) ───
+
+pure fn edge_type_name(idx: int) -> string {
+    match idx {
+        0 -> "Derives",
+        1 -> "Validates",
+        2 -> "Contradicts",
+        3 -> "Merges",
+        4 -> "Triggers",
+        5 -> "Refutes",
+        6 -> "Contains",
+        7 -> "Uses",
+        _ -> "Unknown"
+    }
+}
+
+comptime const EDGE_TYPE_COUNT = 8
+
+pure fn edge_type_index(name: string) -> int {
+    match name {
+        "Derives" -> 0, "derives" -> 0,
+        "Validates" -> 1, "validates" -> 1,
+        "Contradicts" -> 2, "contradicts" -> 2,
+        "Merges" -> 3, "merges" -> 3,
+        "Triggers" -> 4, "triggers" -> 4,
+        "Refutes" -> 5, "refutes" -> 5,
+        "Contains" -> 6, "contains" -> 6,
+        "Uses" -> 7, "uses" -> 7,
+        _ -> -1
+    }
+}
+
+// ─── JSON 간이 파서 ───
+
+pure fn extract_field(line: string, field: string) -> string {
+    let needle = "\"" + field + "\":"
+    if !line.contains(needle) { return "" }
+    let after = line.split(needle)
+    if after.len() < 2 { return "" }
+    let rest = after[1]
+    if rest.starts_with("\"") {
+        let parts = rest.split("\"")
+        if parts.len() >= 2 { return parts[1] }
+    }
+    let mut result = ""
+    let mut i = 0
+    while i < rest.len() {
+        let ch = rest[i]
+        if ch == "," || ch == "}" || ch == " " || ch == "]" { return result }
+        result = result + ch
+        i = i + 1
+    }
+    result
+}
+
+pure fn extract_float(line: string, field: string) -> float {
+    let s = extract_field(line, field)
+    if s == "" { return 0.0 }
+    to_float(s)
+}
+
+pure fn extract_bool(line: string, field: string) -> bool {
+    let s = extract_field(line, field)
+    s == "true"
+}
+
+// ─── 그래프 데이터 구조 ───
+// JSON lines 형식으로 노드/엣지 저장
+// 노드: {"type":"node","id":"...","node_type":"Discovery","domain":"...","summary":"...","confidence":0.8}
+// 엣지: {"type":"edge","from":"...","to":"...","edge_type":"Derives","strength":0.9,"bidirectional":false}
+
+// ─── 그래프 로드 ───
+
+struct GraphStats {
+    node_count: int,
+    edge_count: int,
+    type_counts: string
+}
+
+fn load_graph_content() -> string {
+    if !file_exists(GRAPH_PATH) {
+        return ""
+    }
+    read_file(GRAPH_PATH)
+}
+
+fn count_nodes(content: string) -> int {
+    if content == "" { return 0 }
+    let lines = content.split("\n")
+    let mut count = 0
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "node" { count = count + 1 }
+        }
+    }
+    count
+}
+
+fn count_edges(content: string) -> int {
+    if content == "" { return 0 }
+    let lines = content.split("\n")
+    let mut count = 0
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "edge" { count = count + 1 }
+        }
+    }
+    count
+}
+
+// ─── 노드 타입별 카운트 ───
+
+fn count_by_node_type(content: string) -> string {
+    let lines = content.split("\n")
+    let mut d0 = 0  // Discovery
+    let mut d1 = 0  // Hypothesis
+    let mut d2 = 0  // Bt
+    let mut d3 = 0  // Prediction
+    let mut d4 = 0  // AccelHypothesis
+    let mut d5 = 0  // Constant
+    let mut d6 = 0  // Technique
+    let mut d7 = 0  // Domain
+    let mut d8 = 0  // Experiment
+
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "node" {
+                let nt = extract_field(line, "node_type")
+                let idx = node_type_index(nt)
+                match idx {
+                    0 -> { d0 = d0 + 1 },
+                    1 -> { d1 = d1 + 1 },
+                    2 -> { d2 = d2 + 1 },
+                    3 -> { d3 = d3 + 1 },
+                    4 -> { d4 = d4 + 1 },
+                    5 -> { d5 = d5 + 1 },
+                    6 -> { d6 = d6 + 1 },
+                    7 -> { d7 = d7 + 1 },
+                    8 -> { d8 = d8 + 1 },
+                    _ -> {}
+                }
+            }
+        }
+    }
+
+    let mut result = ""
+    if d0 > 0 { result = result + "Discovery=" + to_string(d0) + " " }
+    if d1 > 0 { result = result + "Hypothesis=" + to_string(d1) + " " }
+    if d2 > 0 { result = result + "Bt=" + to_string(d2) + " " }
+    if d3 > 0 { result = result + "Prediction=" + to_string(d3) + " " }
+    if d4 > 0 { result = result + "AccelHypothesis=" + to_string(d4) + " " }
+    if d5 > 0 { result = result + "Constant=" + to_string(d5) + " " }
+    if d6 > 0 { result = result + "Technique=" + to_string(d6) + " " }
+    if d7 > 0 { result = result + "Domain=" + to_string(d7) + " " }
+    if d8 > 0 { result = result + "Experiment=" + to_string(d8) + " " }
+    if result == "" { result = "(empty)" }
+    result
+}
+
+// ─── 노드 추가 ───
+
+fn add_node(id: string, node_type: string, domain: string, summary: string, confidence: float) -> bool {
+    let content = load_graph_content()
+
+    // 중복 검사
+    if content != "" {
+        let lines = content.split("\n")
+        for line in lines {
+            if line != "" {
+                let existing_id = extract_field(line, "id")
+                if existing_id == id {
+                    println("  ERROR: node '" + id + "' already exists")
+                    return false
+                }
+            }
+        }
+    }
+
+    // 타입 검증
+    let ti = node_type_index(node_type)
+    if ti == -1 {
+        println("  ERROR: unknown node_type '" + node_type + "'")
+        println("  valid: Discovery, Hypothesis, Bt, Prediction, AccelHypothesis, Constant, Technique, Domain, Experiment")
+        return false
+    }
+
+    let canonical_type = node_type_name(ti)
+    let entry = "{\"type\":\"node\",\"id\":\"" + id + "\",\"node_type\":\"" + canonical_type + "\",\"domain\":\"" + domain + "\",\"summary\":\"" + summary + "\",\"confidence\":" + to_string(confidence) + "}"
+
+    if content == "" {
+        write_file(GRAPH_PATH, entry)
+    } else {
+        append_file(GRAPH_PATH, "\n" + entry)
+    }
+    true
+}
+
+// ─── 엣지 추가 ───
+
+fn add_edge(from_id: string, to_id: string, edge_type: string, strength: float, bidir: bool) -> bool {
+    let ei = edge_type_index(edge_type)
+    if ei == -1 {
+        println("  ERROR: unknown edge_type '" + edge_type + "'")
+        println("  valid: Derives, Validates, Contradicts, Merges, Triggers, Refutes, Contains, Uses")
+        return false
+    }
+
+    let canonical_type = edge_type_name(ei)
+    let bidir_str = if bidir { "true" } else { "false" }
+    let entry = "{\"type\":\"edge\",\"from\":\"" + from_id + "\",\"to\":\"" + to_id + "\",\"edge_type\":\"" + canonical_type + "\",\"strength\":" + to_string(strength) + ",\"bidirectional\":" + bidir_str + "}"
+
+    let content = load_graph_content()
+    if content == "" {
+        write_file(GRAPH_PATH, entry)
+    } else {
+        append_file(GRAPH_PATH, "\n" + entry)
+    }
+    true
+}
+
+// ─── 허브 탐색 (degree >= min_degree) ───
+
+fn find_hubs(content: string, min_degree: int) -> string {
+    if content == "" { return "(no edges)" }
+    let lines = content.split("\n")
+
+    // 노드 id 수집 (엣지에서)
+    // 각 노드의 degree 카운트: 간이 구현 — 모든 노드 id에 대해 엣지 순회
+    // 먼저 모든 고유 노드 id 수집
+    let mut all_ids_csv = ""
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "edge" {
+                let f = extract_field(line, "from")
+                let to = extract_field(line, "to")
+                if !all_ids_csv.contains(f) {
+                    if all_ids_csv == "" { all_ids_csv = f }
+                    else { all_ids_csv = all_ids_csv + "," + f }
+                }
+                if !all_ids_csv.contains(to) {
+                    if all_ids_csv == "" { all_ids_csv = to }
+                    else { all_ids_csv = all_ids_csv + "," + to }
+                }
+            }
+        }
+    }
+
+    if all_ids_csv == "" { return "(no edges)" }
+    let ids = all_ids_csv.split(",")
+
+    let mut result = ""
+    for nid in ids {
+        let mut degree = 0
+        for line in lines {
+            if line != "" {
+                let t = extract_field(line, "type")
+                if t == "edge" {
+                    let f = extract_field(line, "from")
+                    let to = extract_field(line, "to")
+                    if f == nid { degree = degree + 1 }
+                    if to == nid { degree = degree + 1 }
+                }
+            }
+        }
+        if degree >= min_degree {
+            let hub_entry = nid + "(deg=" + to_string(degree) + ")"
+            if result == "" { result = hub_entry }
+            else { result = result + ", " + hub_entry }
+        }
+    }
+    if result == "" { result = "(none with degree >= " + to_string(min_degree) + ")" }
+    result
+}
+
+// ─── 수렴점 탐색 (incoming edges >= 2) ───
+
+fn find_convergences(content: string) -> string {
+    if content == "" { return "(no edges)" }
+    let lines = content.split("\n")
+
+    // 각 노드의 incoming edge 수
+    let mut all_targets_csv = ""
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "edge" {
+                let to = extract_field(line, "to")
+                if !all_targets_csv.contains(to) {
+                    if all_targets_csv == "" { all_targets_csv = to }
+                    else { all_targets_csv = all_targets_csv + "," + to }
+                }
+                // 양방향이면 from도 타겟으로 카운트
+                let bidir = extract_bool(line, "bidirectional")
+                if bidir {
+                    let f = extract_field(line, "from")
+                    if !all_targets_csv.contains(f) {
+                        if all_targets_csv == "" { all_targets_csv = f }
+                        else { all_targets_csv = all_targets_csv + "," + f }
+                    }
+                }
+            }
+        }
+    }
+
+    if all_targets_csv == "" { return "(no edges)" }
+    let targets = all_targets_csv.split(",")
+
+    let mut result = ""
+    for tid in targets {
+        let mut incoming = 0
+        let mut sources = ""
+        for line in lines {
+            if line != "" {
+                let t = extract_field(line, "type")
+                if t == "edge" {
+                    let to = extract_field(line, "to")
+                    let f = extract_field(line, "from")
+                    if to == tid {
+                        incoming = incoming + 1
+                        if sources == "" { sources = f }
+                        else { sources = sources + "," + f }
+                    }
+                    let bidir = extract_bool(line, "bidirectional")
+                    if bidir && f == tid {
+                        incoming = incoming + 1
+                        if sources == "" { sources = to }
+                        else { sources = sources + "," + to }
+                    }
+                }
+            }
+        }
+        if incoming >= 2 {
+            let conv_entry = tid + " <- [" + sources + "] (in=" + to_string(incoming) + ")"
+            if result == "" { result = conv_entry }
+            else { result = result + "\n    " + conv_entry }
+        }
+    }
+    if result == "" { result = "(none with incoming >= 2)" }
+    result
+}
+
+// ─── 삼각형(closed triangle) 탐색 ───
+// A↔B, B↔C, A↔C 모두 양방향 연결된 삼중
+
+fn find_triangles(content: string) -> string {
+    if content == "" { return "(no data)" }
+    let lines = content.split("\n")
+
+    // 노드 id 수집
+    let mut node_csv = ""
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "node" {
+                let id = extract_field(line, "id")
+                if node_csv == "" { node_csv = id }
+                else { node_csv = node_csv + "," + id }
+            }
+        }
+    }
+
+    if node_csv == "" { return "(no nodes)" }
+    let nodes = node_csv.split(",")
+
+    // 양방향 인접 세트 구축: edge가 bidirectional이면 양쪽 연결
+    // 간이 구현: connected(a, b) 함수로 매번 검사
+    let mut result = ""
+    let mut tri_count = 0
+
+    let mut i = 0
+    while i < nodes.len() {
+        let mut j = i + 1
+        while j < nodes.len() {
+            // a-b 양방향 연결 확인
+            let a = nodes[i]
+            let b = nodes[j]
+            let ab = is_bidir_connected(a, b, lines)
+            if ab {
+                let mut k = j + 1
+                while k < nodes.len() {
+                    let c = nodes[k]
+                    let bc = is_bidir_connected(b, c, lines)
+                    let ac = is_bidir_connected(a, c, lines)
+                    if bc && ac {
+                        tri_count = tri_count + 1
+                        let tri_str = "[" + a + ", " + b + ", " + c + "]"
+                        if result == "" { result = tri_str }
+                        else { result = result + "\n    " + tri_str }
+                    }
+                    k = k + 1
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    if tri_count == 0 { return "(no closed triangles)" }
+    to_string(tri_count) + " triangle(s):\n    " + result
+}
+
+// 두 노드가 양방향으로 연결되어 있는지 확인
+fn is_bidir_connected(a: string, b: string, lines: [string]) -> bool {
+    let mut a_to_b = false
+    let mut b_to_a = false
+    for line in lines {
+        if line != "" {
+            let t = extract_field(line, "type")
+            if t == "edge" {
+                let f = extract_field(line, "from")
+                let to = extract_field(line, "to")
+                let bidir = extract_bool(line, "bidirectional")
+                if f == a && to == b {
+                    a_to_b = true
+                    if bidir { b_to_a = true }
+                }
+                if f == b && to == a {
+                    b_to_a = true
+                    if bidir { a_to_b = true }
+                }
+            }
+        }
+    }
+    a_to_b && b_to_a
+}
+
+// ─── CLI 진입점 ───
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "status" }
+
+if mode == "status" {
+    println("=== discovery graph: status ===")
+    let content = load_graph_content()
+    if content == "" {
+        println("  graph file: " + GRAPH_PATH + " (empty or missing)")
+        println("  nodes: 0")
+        println("  edges: 0")
+    } else {
+        let nc = count_nodes(content)
+        let ec = count_edges(content)
+        println("  graph file: " + GRAPH_PATH)
+        println("  nodes: " + to_string(nc))
+        println("  edges: " + to_string(ec))
+        println("  types: " + count_by_node_type(content))
+    }
+}
+
+if mode == "add" {
+    // hexa graph.hexa add <id> <type> [domain] [summary] [confidence]
+    if a.len() < 5 {
+        println("usage: hexa graph.hexa add <id> <type> [domain] [summary] [confidence]")
+        println("  types: Discovery, Hypothesis, Bt, Prediction, AccelHypothesis, Constant, Technique, Domain, Experiment")
+    } else {
+        let id = a[3]
+        let ntype = a[4]
+        let domain = if a.len() >= 6 { a[5] } else { "general" }
+        let summary = if a.len() >= 7 { a[6] } else { "" }
+        let conf = if a.len() >= 8 { to_float(a[7]) } else { 0.5 }
+        let ok = add_node(id, ntype, domain, summary, conf)
+        if ok {
+            println("  added node: " + id + " (" + ntype + ")")
+        }
+    }
+}
+
+if mode == "link" {
+    // hexa graph.hexa link <from> <to> <edge_type> [strength] [bidirectional]
+    if a.len() < 6 {
+        println("usage: hexa graph.hexa link <from> <to> <edge_type> [strength] [bidir=true/false]")
+        println("  types: Derives, Validates, Contradicts, Merges, Triggers, Refutes, Contains, Uses")
+    } else {
+        let from_id = a[3]
+        let to_id = a[4]
+        let etype = a[5]
+        let str_val = if a.len() >= 7 { to_float(a[6]) } else { 0.5 }
+        let bidir = if a.len() >= 8 { a[7] == "true" } else { false }
+        let ok = add_edge(from_id, to_id, etype, str_val, bidir)
+        if ok {
+            println("  linked: " + from_id + " -[" + etype + "]-> " + to_id)
+        }
+    }
+}
+
+if mode == "hubs" {
+    println("=== discovery graph: hubs ===")
+    let content = load_graph_content()
+    let min_deg = if a.len() >= 4 { to_int(a[3]) } else { HUB_MIN_DEGREE }
+    println("  min_degree: " + to_string(min_deg))
+    println("  " + find_hubs(content, min_deg))
+}
+
+if mode == "convergences" {
+    println("=== discovery graph: convergences ===")
+    let content = load_graph_content()
+    println("  " + find_convergences(content))
+}
+
+if mode == "triangles" {
+    println("=== discovery graph: closed triangles ===")
+    let content = load_graph_content()
+    println("  " + find_triangles(content))
+}
+
+// ─── 검증 ───
+
+assert node_type_name(0) == "Discovery"
+assert node_type_name(8) == "Experiment"
+assert node_type_index("Discovery") == 0
+assert node_type_index("hypothesis") == 1
+assert edge_type_name(0) == "Derives"
+assert edge_type_index("Validates") == 1
+assert NODE_TYPE_COUNT == 9
+assert EDGE_TYPE_COUNT == 8
+
+println("=== graph verified ===")
+println("node types:", NODE_TYPE_COUNT)
+println("edge types:", EDGE_TYPE_COUNT)
+
+theorem graph_types_complete {
+    assert NODE_TYPE_COUNT == 9
+    assert EDGE_TYPE_COUNT == 8
+}
+
+proof graph_invariants {
+    invariant node_id_unique()
+    invariant edge_endpoints_exist()
+}

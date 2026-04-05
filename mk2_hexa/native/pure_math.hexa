@@ -1,23 +1,13 @@
 // mk2_hexa/native/pure_math.hexa — pure 수론 함수
-// 사이드 이펙트 없음. 컴파일러 자동 메모이제이션 / 병렬화 힌트.
 
-use constants::{N, SIGMA, PHI, TAU}
-
-pure fn gcd(a: int, b: int) -> int
-    where a >= 0, b >= 0
-    ensures result >= 0, result | a, result | b
-{
+pure fn gcd(a: int, b: int) -> int {
     match b {
-        0 => a,
-        _ => gcd(b, a % b)
+        0 -> a,
+        _ -> gcd(b, a % b)
     }
 }
 
-pure fn tau(n: int) -> int
-    where n >= 1
-    ensures result >= 1
-{
-    // divisor count
+pure fn tau_fn(n: int) -> int {
     let mut count = 0
     let mut i = 1
     while i * i <= n {
@@ -30,11 +20,7 @@ pure fn tau(n: int) -> int
     return count
 }
 
-pure fn sigma(n: int) -> int
-    where n >= 1
-    ensures result >= n            // σ(n) ≥ n
-{
-    // divisor sum
+pure fn sigma_fn(n: int) -> int {
     let mut s = 0
     let mut i = 1
     while i * i <= n {
@@ -48,11 +34,7 @@ pure fn sigma(n: int) -> int
     return s
 }
 
-pure fn phi(n: int) -> int
-    where n >= 1
-    ensures result >= 1, result <= n
-{
-    // Euler totient via prime factorization
+pure fn phi_fn(n: int) -> int {
     if n == 1 { return 1 }
     let mut result = n
     let mut x = n
@@ -68,11 +50,7 @@ pure fn phi(n: int) -> int
     return result
 }
 
-pure fn sopfr(n: int) -> int
-    where n >= 1
-    ensures result >= 0
-{
-    // sum of prime factors with multiplicity
+pure fn sopfr(n: int) -> int {
     if n <= 1 { return 0 }
     let mut s = 0
     let mut x = n
@@ -88,51 +66,30 @@ pure fn sopfr(n: int) -> int
     return s
 }
 
-pure fn j2(n: int) -> int
-    where n >= 1
-{
-    // Jordan totient J₂(n)
-    // J₂(6) = 24
-    if n == 6 { return 24 }
-    // general formula: J₂(n) = n² · ∏(1 - 1/p²)
-    // TODO: pure 버전 구현
-    return 0
+pure fn is_perfect(n: int) -> bool {
+    sigma_fn(n) == 2 * n
 }
 
-pure fn is_perfect(n: int) -> bool comptime
-    where n >= 1
-{
-    // σ(n) = 2n iff perfect
-    sigma(n) == 2 * n
+pure fn is_n6_exact(n: int) -> bool {
+    sigma_fn(n) * phi_fn(n) == n * tau_fn(n)
 }
 
-pure fn is_n6_exact(n: int) -> bool comptime
-    where n >= 1
-{
-    // σ(n)·φ(n) = n·τ(n)
-    sigma(n) * phi(n) == n * tau(n)
-}
+// 검증
+assert is_perfect(6)
+assert is_n6_exact(6)
+assert tau_fn(6) == 4
+assert sigma_fn(6) == 12
+assert phi_fn(6) == 2
+assert sopfr(6) == 5
 
-// comptime assertions 활용 (정리 자동 검증)
-comptime assert is_perfect(6)
-comptime assert is_n6_exact(6)
-comptime assert tau(6) == TAU
-comptime assert sigma(6) == SIGMA
-comptime assert phi(6) == PHI
-comptime assert sopfr(6) == 5
+println("=== pure_math verified ===")
+println("sigma(6)=", sigma_fn(6))
+println("phi(6)=", phi_fn(6))
+println("tau(6)=", tau_fn(6))
+println("perfect(6):", is_perfect(6))
+println("n6_exact(6):", is_n6_exact(6))
 
-// euler_ratio (subset → Rational) - pure + optimize hint
-pure fn euler_ratio(primes: [int]) -> (int, int)     // (num, den, reduced)
-    where all(p in primes: p >= 2)
-    ensures result.1 > 0, gcd(result.0, result.1) == 1
-    optimize memoize, parallel
-{
-    let mut num = 1
-    let mut den = 1
-    for p in primes {
-        num = num * (p - 1)
-        den = den * p
-    }
-    let g = gcd(num, den)
-    return (num / g, den / g)
+proof pure_math_verify {
+    assert is_perfect(6)
+    assert is_n6_exact(6)
 }

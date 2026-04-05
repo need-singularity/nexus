@@ -80,8 +80,8 @@ loops back to measurement for the next iteration.
 ## Quick Start
 
 ```bash
-# Build NEXUS-6
-cd tools/nexus6 && ~/.cargo/bin/cargo build --release
+# NEXUS-6 HEXA 엔진
+# mk2_hexa/native/*.hexa — HEXA 네이티브 실행
 
 # Check current health
 ./scripts/measure.sh | python3 -m json.tool
