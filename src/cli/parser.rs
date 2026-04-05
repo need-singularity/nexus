@@ -112,7 +112,39 @@ pub enum CliCommand {
     AlienIndex {
         sub: AlienIndexSub,
     },
+    SingularityTick {
+        base_dir: Option<String>,
+    },
+    /// Pack: install/uninstall CLI-only nexus6 integration (symlink + CC hooks).
+    Pack { sub: PackSub },
+    /// Sentry: pure-Rust health watcher for nexus6 daemon (no API calls).
+    Sentry { sub: SentrySub },
+    /// Hook: toggle Claude Code hook scripts (local CLI, no API).
+    Hook { sub: HookSub },
     Help,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PackSub {
+    Install { force: bool },
+    Uninstall,
+    Status,
+    Doctor,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SentrySub {
+    Start { interval_sec: u64, foreground: bool },
+    Stop,
+    Status,
+    Tail { lines: usize },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HookSub {
+    List,
+    Enable { name: String },
+    Disable { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +217,10 @@ pub fn parse_args(args: &[String]) -> Result<CliCommand, String> {
         "status" | "st" => Ok(CliCommand::Status),
         "dispatch" | "dp" => parse_dispatch(rest),
         "alien-index" | "ai" => parse_alien_index(rest),
+        "singularity-tick" | "stk" => parse_singularity_tick(rest),
+        "pack" => parse_pack(rest),
+        "sentry" => parse_sentry(rest),
+        "hook" => parse_hook(rest),
         "help" | "--help" | "-h" => Ok(CliCommand::Help),
         other => Err(format!("Unknown command: '{}'. Run 'nexus6 help' for usage.", other)),
     }
@@ -874,6 +910,105 @@ fn parse_cycle(args: &[String]) -> Result<CliCommand, String> {
         experiment_type: args[0].clone(),
         target: args[1].clone(),
     })
+}
+
+fn parse_singularity_tick(args: &[String]) -> Result<CliCommand, String> {
+    let mut base_dir: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--base-dir" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("--base-dir requires a path".to_string());
+                }
+                base_dir = Some(args[i].clone());
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Ok(CliCommand::SingularityTick { base_dir })
+}
+
+fn parse_pack(args: &[String]) -> Result<CliCommand, String> {
+    let sub_name = args.first().map(|s| s.as_str()).unwrap_or("status");
+    let rest: &[String] = if args.is_empty() { &[] } else { &args[1..] };
+    let sub = match sub_name {
+        "install" | "in" => {
+            let force = rest.iter().any(|s| s == "--force" || s == "-f");
+            PackSub::Install { force }
+        }
+        "uninstall" | "un" => PackSub::Uninstall,
+        "status" | "st" | "" => PackSub::Status,
+        "doctor" | "dr" => PackSub::Doctor,
+        other => return Err(format!(
+            "Unknown pack sub-command: '{}'. Use install|uninstall|status|doctor.", other
+        )),
+    };
+    Ok(CliCommand::Pack { sub })
+}
+
+fn parse_sentry(args: &[String]) -> Result<CliCommand, String> {
+    let sub_name = args.first().map(|s| s.as_str()).unwrap_or("status");
+    let rest: &[String] = if args.is_empty() { &[] } else { &args[1..] };
+    let sub = match sub_name {
+        "start" => {
+            let mut interval_sec: u64 = 60;
+            let mut foreground = false;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--interval" => {
+                        i += 1;
+                        if i < rest.len() { interval_sec = rest[i].parse().unwrap_or(60); }
+                    }
+                    "--fg" | "--foreground" => foreground = true,
+                    _ => {}
+                }
+                i += 1;
+            }
+            SentrySub::Start { interval_sec, foreground }
+        }
+        "stop" => SentrySub::Stop,
+        "status" | "st" | "" => SentrySub::Status,
+        "tail" => {
+            let mut lines = 40;
+            let mut i = 0;
+            while i < rest.len() {
+                if rest[i] == "-n" || rest[i] == "--lines" {
+                    i += 1;
+                    if i < rest.len() { lines = rest[i].parse().unwrap_or(40); }
+                }
+                i += 1;
+            }
+            SentrySub::Tail { lines }
+        }
+        other => return Err(format!(
+            "Unknown sentry sub-command: '{}'. Use start|stop|status|tail.", other
+        )),
+    };
+    Ok(CliCommand::Sentry { sub })
+}
+
+fn parse_hook(args: &[String]) -> Result<CliCommand, String> {
+    let sub_name = args.first().map(|s| s.as_str()).unwrap_or("list");
+    let rest: &[String] = if args.is_empty() { &[] } else { &args[1..] };
+    let sub = match sub_name {
+        "list" | "ls" | "" => HookSub::List,
+        "enable" | "on" => {
+            let name = rest.first().ok_or("hook enable: requires <name>")?.clone();
+            HookSub::Enable { name }
+        }
+        "disable" | "off" => {
+            let name = rest.first().ok_or("hook disable: requires <name>")?.clone();
+            HookSub::Disable { name }
+        }
+        other => return Err(format!(
+            "Unknown hook sub-command: '{}'. Use list|enable|disable.", other
+        )),
+    };
+    Ok(CliCommand::Hook { sub })
 }
 
 #[cfg(test)]
