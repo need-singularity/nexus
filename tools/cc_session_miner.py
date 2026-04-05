@@ -1,4 +1,5 @@
 """Claude Code 세션 JSONL 마이너 — 로컬 처리만, 외부 API 호출 없음."""
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,6 +9,8 @@ def parse_session(jsonl_path: Path) -> dict:
     tool_result_bytes_total = 0
     tool_result_bytes_max = 0
     corrupt_lines = 0
+    call_signatures: list[str] = []
+    pending_tool_use: dict[str, tuple[str, str]] = {}  # id -> (name, sig)
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -19,6 +22,19 @@ def parse_session(jsonl_path: Path) -> dict:
             except json.JSONDecodeError:
                 corrupt_lines += 1
                 continue
+
+            # assistant tool_use 블록에서 (이름, 인자 해시) 기록
+            msg = obj.get("message") or {}
+            if msg.get("role") == "assistant":
+                content = msg.get("content") or []
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            name = block.get("name", "")
+                            inp = json.dumps(block.get("input", {}), sort_keys=True)
+                            sig = hashlib.sha1(inp.encode()).hexdigest()[:16]
+                            pending_tool_use[block.get("id", "")] = (name, sig)
+
             tur = obj.get("toolUseResult")
             if tur:
                 content = tur.get("content", "")
@@ -29,10 +45,21 @@ def parse_session(jsonl_path: Path) -> dict:
                 tool_result_bytes_total += size
                 if size > tool_result_bytes_max:
                     tool_result_bytes_max = size
+                tool_id = tur.get("tool_use_id", "")
+                if tool_id in pending_tool_use:
+                    name, sig = pending_tool_use[tool_id]
+                    call_signatures.append(f"{name}:{sig}")
+
+    unique_calls = len(set(call_signatures))
+    repeat_rate = 0.0
+    if tool_call_count > 0:
+        repeat_rate = (tool_call_count - unique_calls) / tool_call_count
 
     return {
         "tool_call_count": tool_call_count,
         "tool_result_bytes_total": tool_result_bytes_total,
         "tool_result_bytes_max": tool_result_bytes_max,
         "corrupt_lines": corrupt_lines,
+        "unique_calls": unique_calls,
+        "repeat_rate": repeat_rate,
     }

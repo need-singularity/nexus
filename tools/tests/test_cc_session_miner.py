@@ -18,5 +18,11 @@ class TestParseSession(unittest.TestCase):
         self.assertEqual(result["tool_call_count"], 1)
         self.assertEqual(result["corrupt_lines"], 1)
 
+    def test_repeat_call_rate(self):
+        result = parse_session(FIX / "sample_session.jsonl")
+        # 3 calls, 2 unique → repeat rate = (3-2)/3 = 1/3
+        self.assertEqual(result["unique_calls"], 2)
+        self.assertAlmostEqual(result["repeat_rate"], 1/3, places=5)
+
 if __name__ == "__main__":
     unittest.main()
