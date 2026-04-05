@@ -4,4 +4,5 @@
 
 pub mod budget;
 pub mod embedding;
+pub mod topology;
 pub mod wal;
