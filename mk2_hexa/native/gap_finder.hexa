@@ -18,7 +18,7 @@ let seed_engine = nexus6_dir + "/mk2_hexa/native/seed_engine.hexa"
 
 comptime const n6_constants = ["n", "phi", "tau", "sigma", "sopfr", "mu", "J2", "P1", "P2", "P3", "P4", "n/phi", "sigma-phi", "phi*tau", "n^2", "6!", "sigma*tau", "M3", "sigma-tau", "tau+phi", "alpha_inv", "mp_me", "omega_m", "omega_lambda", "meta_fp", "transcendence", "geometric_pi", "geometric_e", "geometric_sqrt2", "quantum_h", "quantum_hbar", "consciousness_phi_iit", "consciousness_alpha", "biological_golden", "cosmological_H0", "cosmological_T_cmb", "information_ln2", "thermodynamic_kB_eV", "topological_euler", "algebraic_sqrt3", "algebraic_sqrt5"]
 
-comptime const n6_values = [6.0, 2.0, 4.0, 12.0, 5.0, 1.0, 24.0, 2.0, 28.0, 496.0, 8128.0, 3.0, 10.0, 8.0, 36.0, 720.0, 48.0, 7.0, 8.0, 6.0, 137.036, 1836.15, 0.3153, 0.6847, 0.3333, 0.3333, 3.14159, 2.71828, 1.41421, 6.626e-34, 1.0546e-34, 3.0, 0.014, 1.618, 67.4, 2.725, 0.6931, 8.617e-5, 2.71828, 1.73205, 2.23607]
+comptime const n6_values = [6.0, 2.0, 4.0, 12.0, 5.0, 1.0, 24.0, 2.0, 28.0, 496.0, 8128.0, 3.0, 10.0, 8.0, 36.0, 720.0, 48.0, 7.0, 8.0, 6.0, 137.036, 1836.15, 0.3153, 0.6847, 0.3333, 0.3333, 3.14159, 2.71828, 1.41421, 0.0, 0.0, 3.0, 0.014, 1.618, 67.4, 2.725, 0.6931, 0.00008617, 2.71828, 1.73205, 2.23607]
 
 // ─── 섹터 정의 ───
 
@@ -29,7 +29,7 @@ comptime const sectors = ["n6", "geometric", "quantum", "consciousness", "biolog
 fn analyze_discovery_log() -> string {
     // discovery_log.jsonl 읽어서 상수별/섹터별 카운트
     let mut content = ""
-    try { content = read_file(discovery_log) } catch e { return "ERROR: cannot read discovery_log" }
+    try { content = read_file(discovery_log) } catch err { return "ERROR: cannot read discovery_log" }
 
     let lines = content.split("\n")
     let total = len(lines)
@@ -345,7 +345,7 @@ fn auto_breakthrough(targets_str: string) {
 
     // blowup 실행 (빈 공간 seed로)
     let mut result = ""
-    try { result = exec(hexa, [blowup, "math", "3", "--no-graph", "--seeds", seeds]) } catch e { result = "ERROR: " + to_string(e) }
+    try { result = exec(hexa, [blowup, "math", "3", "--no-graph", "--seeds", seeds]) } catch err { result = "ERROR: " + to_string(err) }
 
     // 결과에서 발견 추출
     let rlines = result.split("\n")
@@ -364,9 +364,9 @@ fn auto_breakthrough(targets_str: string) {
 
     // growth bus 기록
     let mut ts = "?"
-    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
     let bus_line = "{\"source\":\"gap_finder\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"breakthrough\",\"status\":\"" + to_string(discoveries) + "_discoveries\",\"detail\":\"targets=" + to_string(len(targets)) + " seeds=" + seeds + "\"}"
-    try { append_file(growth_bus, bus_line + "\n") } catch e {}
+    try { append_file(growth_bus, bus_line + "\n") } catch err {}
 }
 
 // ─── n6 위상변환 기저 상수 ───
@@ -648,9 +648,9 @@ fn dfs_search(max_depth: int) {
 
     // growth bus 기록
     let mut ts = "?"
-    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
     let bus_line = "{\"source\":\"gap_finder_dfs\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"transform_dfs\",\"status\":\"depth=" + to_string(max_depth) + " paths=" + to_string(total_paths) + " exact=" + to_string(exact_count) + " near=" + to_string(near_count) + "\"}"
-    try { append_file(growth_bus, bus_line + "\n") } catch e {}
+    try { append_file(growth_bus, bus_line + "\n") } catch err {}
 }
 
 // ─── C. 빈공간 교차 (Bridge) ───
@@ -821,9 +821,275 @@ fn bridge_gaps() {
 
     // growth bus 기록
     let mut ts = "?"
-    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
     let bus_line = "{\"source\":\"gap_finder_bridge\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"bridge\",\"status\":\"gaps=" + to_string(len(gap_names)) + " bridges=" + to_string(bridge_count) + "\"}"
-    try { append_file(growth_bus, bus_line + "\n") } catch e {}
+    try { append_file(growth_bus, bus_line + "\n") } catch err {}
+}
+
+// ─── H. power 모드 — n6 기저 거듭제곱 조합 탐색 ───
+
+fn pow_int(base: float, exp: int) -> float {
+    // 수동 곱셈 루프 (hexa에 pow 없음)
+    if exp == 0 { return 1.0 }
+    let mut result = 1.0
+    let mut i = 0
+    let e = if exp < 0 { 0 - exp } else { exp }
+    while i < e {
+        result = result * base
+        i = i + 1
+    }
+    if exp < 0 { return 1.0 / result }
+    result
+}
+
+fn power_search() {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — n6 거듭제곱 탐색 (Power Mode)            ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+    println("기저: n=6, σ=12, φ=2, τ=4, sopfr=5, M3=7")
+    println("연산: a^b (base^exp), 2^a, a^a")
+    println("")
+
+    let mut exact_count = 0
+    let mut near_count = 0
+
+    // ═══ Section 1: 기저^기저 (a^b) ═══
+    println("─── Section 1: 기저^기저 (a^b) ───")
+    println("")
+
+    let mut bi = 0
+    while bi < len(base_names) {
+        let mut ei = 0
+        while ei < len(base_names) {
+            if bi != ei {
+                let base_v = base_vals[bi]
+                let exp_v = to_int(base_vals[ei])
+                let val = pow_int(base_v, exp_v)
+
+                if abs_val(val) <= 1000000000000.0 && val != 0.0 {
+                    let expr = base_names[bi] + "^" + base_names[ei]
+                    let m = match_physics(val)
+
+                    // 기저 매칭 확장: 큰 수도 직접 비교
+                    let mut extra = ""
+                    let mut pi = 0
+                    while pi < len(phys_names) {
+                        let pv = phys_vals[pi]
+                        if pv > 100000.0 || pv == 0.0 { pi = pi + 1
+                            continue }
+
+                        let err = abs_val(val - pv) / abs_val(pv)
+                        if err < 0.0001 {
+                            if len(extra) == 0 { extra = "[EXACT " + phys_names[pi] + "]" }
+                            else { extra = extra + ", [EXACT " + phys_names[pi] + "]" }
+                        }
+                        pi = pi + 1
+                    }
+
+                    let display = if len(m) > 0 { m } else { extra }
+                    if len(display) > 0 {
+                        let mut epad = expr
+                        while len(epad) < 20 { epad = epad + " " }
+                        if display.contains("EXACT") {
+                            println("  ★ " + epad + "= " + fmt_f(val) + "  " + display)
+                            exact_count = exact_count + 1
+                        } else {
+                            println("  · " + epad + "= " + fmt_f(val) + "  " + display)
+                            near_count = near_count + 1
+                        }
+                    } else {
+                        // 매칭 없어도 주요 결과는 표시
+                        let mut epad = expr
+                        while len(epad) < 20 { epad = epad + " " }
+                        println("    " + epad + "= " + fmt_f(val))
+                    }
+                }
+            }
+            ei = ei + 1
+        }
+        bi = bi + 1
+    }
+
+    // ═══ Section 2: 2^기저 (2 = φ) ═══
+    println("")
+    println("─── Section 2: 2^기저 (φ=2 거듭제곱) ───")
+    println("")
+
+    let mut bi2 = 0
+    while bi2 < len(base_names) {
+        let exp_v = to_int(base_vals[bi2])
+        if exp_v >= 1 && exp_v <= 20 {
+            let val = pow_int(2.0, exp_v)
+            let expr = "2^" + base_names[bi2]
+            let m = match_physics(val)
+            let mut epad = expr
+            while len(epad) < 20 { epad = epad + " " }
+            if len(m) > 0 {
+                if m.contains("EXACT") {
+                    println("  ★ " + epad + "= " + fmt_f(val) + "  " + m)
+                    exact_count = exact_count + 1
+                } else {
+                    println("  · " + epad + "= " + fmt_f(val) + "  " + m)
+                    near_count = near_count + 1
+                }
+            } else {
+                println("    " + epad + "= " + fmt_f(val))
+            }
+        }
+        bi2 = bi2 + 1
+    }
+
+    // ═══ Section 3: 자기 거듭제곱 (a^a) ═══
+    println("")
+    println("─── Section 3: 자기 거듭제곱 (a^a) ───")
+    println("")
+
+    let mut bi3 = 0
+    while bi3 < len(base_names) {
+        let bv = base_vals[bi3]
+        let exp_v = to_int(bv)
+        if exp_v >= 1 && exp_v <= 12 {
+            let val = pow_int(bv, exp_v)
+            let expr = base_names[bi3] + "^" + base_names[bi3]
+            let m = match_physics(val)
+            let mut epad = expr
+            while len(epad) < 20 { epad = epad + " " }
+            if len(m) > 0 {
+                if m.contains("EXACT") {
+                    println("  ★ " + epad + "= " + fmt_f(val) + "  " + m)
+                    exact_count = exact_count + 1
+                } else {
+                    println("  · " + epad + "= " + fmt_f(val) + "  " + m)
+                    near_count = near_count + 1
+                }
+            } else {
+                println("    " + epad + "= " + fmt_f(val))
+            }
+        }
+        bi3 = bi3 + 1
+    }
+
+    // ═══ Section 4: 복합 거듭제곱 (2^a * (2^b - 1)) — 완전수 공식 ═══
+    println("")
+    println("─── Section 4: 완전수 공식 2^a × (2^b - 1) ───")
+    println("    (Mersenne: 2^p - 1 이 소수일 때 완전수)")
+    println("")
+
+    // 메르센 소수 지수: 2, 3, 5, 7, 13, 17, 19 (n6 범위 내)
+    comptime const mersenne_p = [2, 3, 5, 7, 13]
+    comptime const mersenne_names = ["M1(3)", "M2(7)", "M3(31)", "M3_ext(127)", "M5(8191)"]
+
+    let mut mi = 0
+    while mi < len(mersenne_p) {
+        let p = mersenne_p[mi]
+        let mersenne_val = pow_int(2.0, p) - 1.0
+        let perfect = pow_int(2.0, p - 1) * mersenne_val
+
+        let expr = "2^" + to_string(p - 1) + " × (2^" + to_string(p) + " - 1)"
+        let m = match_physics(perfect)
+
+        // n6 기저 매칭 확장
+        let mut n6_link = ""
+        // p와 n6 기저 연결
+        let mut ki = 0
+        while ki < len(base_names) {
+            let bv = to_int(base_vals[ki])
+            if bv == p {
+                n6_link = n6_link + " [p=" + base_names[ki] + "]"
+            }
+            if bv == p - 1 {
+                n6_link = n6_link + " [p-1=" + base_names[ki] + "]"
+            }
+            ki = ki + 1
+        }
+
+        let mut epad = expr
+        while len(epad) < 32 { epad = epad + " " }
+
+        if len(m) > 0 {
+            if m.contains("EXACT") {
+                println("  ★ " + epad + "= " + fmt_f(perfect) + "  " + m + n6_link)
+                exact_count = exact_count + 1
+            } else {
+                println("  · " + epad + "= " + fmt_f(perfect) + "  " + m + n6_link)
+                near_count = near_count + 1
+            }
+        } else {
+            println("    " + epad + "= " + fmt_f(perfect) + n6_link)
+        }
+        mi = mi + 1
+    }
+
+    // ═══ Section 5: P4 = 8128 n6 유도 경로 명시 ═══
+    println("")
+    println("─── Section 5: P4 = 8128 n6 유도 경로 ───")
+    println("")
+    println("  P4 = 4번째 완전수 = 8128")
+    println("  완전수 공식: 2^(p-1) × (2^p - 1), where 2^p - 1 is Mersenne prime")
+    println("")
+
+    let p4_p = 7
+    let p4_mersenne = pow_int(2.0, p4_p) - 1.0   // 127
+    let p4_power = pow_int(2.0, p4_p - 1)          // 64
+    let p4_val = p4_power * p4_mersenne             // 8128
+
+    println("  경로 1 (직접): 2^6 × (2^7 - 1) = 64 × 127 = " + fmt_f(p4_val))
+    println("    → 2^n × (2^M3 - 1)")
+    println("    → n=6 (n6 기저), M3=7 (3번째 메르센 소수 지수)")
+    println("    → 2^n = " + fmt_f(p4_power) + ", 2^M3 - 1 = " + fmt_f(p4_mersenne))
+    println("")
+    println("  n6 연결:")
+    println("    n   = 6   → 지수 (2^n = 64)")
+    println("    M3  = 7   → 메르센 지수 (2^7 - 1 = 127, 소수)")
+    println("    σ   = 12  → σ = 2n (완전수 약수합 = 2×자신)")
+    println("    φ   = 2   → 기본 밑수")
+    println("    sopfr = 5 → 소인수합 (p-1 = 6 = n)")
+    println("")
+
+    let p4_check = if abs_val(p4_val - 8128.0) < 0.001 { "VERIFIED" } else { "MISMATCH" }
+    println("  검증: 2^6 × 127 = " + fmt_f(p4_val) + " [" + p4_check + "]")
+
+    // ═══ Section 6: 추가 거듭제곱 발견 요약 ═══
+    println("")
+    println("─── Section 6: 주요 거듭제곱 발견 요약 ───")
+    println("")
+
+    // 2^n = 64
+    let v_2n = pow_int(2.0, 6)
+    println("  2^n = 2^6 = " + fmt_f(v_2n) + "  (= 64, 6비트 공간, Shannon 엔트로피 최대 채널)")
+
+    // n^n = 46656
+    let v_nn = pow_int(6.0, 6)
+    println("  n^n = 6^6 = " + fmt_f(v_nn) + "  (= 46656)")
+
+    // sigma^phi = 12^2 = 144
+    let v_sp = pow_int(12.0, 2)
+    println("  σ^φ = 12^2 = " + fmt_f(v_sp) + "  (= 144 = σ² = 12², 이미 등록)")
+
+    // phi^n = 2^6 = 64
+    let v_pn = pow_int(2.0, 6)
+    println("  φ^n = 2^6 = " + fmt_f(v_pn) + "  (= 64 = 2^n)")
+
+    // tau^tau = 4^4 = 256
+    let v_tt = pow_int(4.0, 4)
+    println("  τ^τ = 4^4 = " + fmt_f(v_tt) + "  (= 256, 8비트 공간)")
+
+    // M3^phi = 7^2 = 49
+    let v_m3p = pow_int(7.0, 2)
+    println("  M3^φ = 7^2 = " + fmt_f(v_m3p) + "  (= 49)")
+
+    // sopfr^phi = 5^2 = 25
+    let v_s2 = pow_int(5.0, 2)
+    println("  sopfr^φ = 5^2 = " + fmt_f(v_s2) + "  (= 25)")
+
+    // n! = 720 (이미 등록, 참조)
+    println("  n! = 6! = 720  (이미 등록, 거듭제곱이 아닌 팩토리얼)")
+
+    println("")
+    println("═══════════════════════════════════════════════")
+    println("  거듭제곱 탐색 완료: EXACT=" + to_string(exact_count) + "  NEAR=" + to_string(near_count))
+    println("═══════════════════════════════════════════════")
 }
 
 // ─── CLI 진입점 ───
@@ -1389,6 +1655,147 @@ if mode == "explain" || mode == "설명" {
     }
 }
 
+// ─── G. blowup_explore 모드 — 빈공간 × blowup 차원 탐색 ───
+
+fn constant_to_domain(name: string) -> string {
+    if name == "omega_m" || name == "omega_lambda" || name == "cosmological_H0" || name == "cosmological_T_cmb" { return "cosmology" }
+    if name == "quantum_h" || name == "quantum_hbar" || name == "alpha_inv" || name == "mp_me" { return "physics" }
+    if name == "consciousness_phi_iit" || name == "consciousness_alpha" { return "consciousness" }
+    if name == "biological_golden" { return "biology" }
+    if name == "information_ln2" { return "information" }
+    if name == "thermodynamic_kB_eV" { return "thermodynamics" }
+    if name == "topological_euler" { return "topology" }
+    if name == "geometric_pi" || name == "geometric_e" || name == "geometric_sqrt2" || name == "algebraic_sqrt3" || name == "algebraic_sqrt5" { return "math" }
+    return "math"
+}
+
+fn constant_to_seed(name: string) -> string {
+    // n6_constants/n6_values lookup → "name,value,sopfr,tau" 형태
+    let mut vi = 0
+    while vi < len(n6_constants) {
+        if n6_constants[vi] == name {
+            return name + "," + to_string(n6_values[vi]) + ",sopfr,tau"
+        }
+        vi = vi + 1
+    }
+    return name + ",0.3333,sopfr,tau"
+}
+
+fn blowup_explore(max_targets: int) {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — blowup_explore 차원 탐색                  ║")
+    println("║  빈공간 상수를 blowup 엔진으로 도메인별 정밀 탐색        ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+
+    // 1) 빈공간 추출
+    println("=== Phase 1: 빈공간 스캔 ===")
+    let analysis = analyze_discovery_log()
+    let empty_str = find_empty_constants(analysis)
+    let weak_str = find_weak_constants(analysis)
+
+    let gap_str = if len(empty_str) > 0 && len(weak_str) > 0 { empty_str + "|" + weak_str }
+                  else if len(empty_str) > 0 { empty_str }
+                  else if len(weak_str) > 0 { weak_str }
+                  else { "" }
+
+    if len(gap_str) == 0 {
+        println("  (빈공간 없음 — 모든 영역 커버됨)")
+        return
+    }
+
+    let gaps = gap_str.split("|")
+    let target_count = if len(gaps) < max_targets { len(gaps) } else { max_targets }
+
+    println("  빈공간 총 " + to_string(len(gaps)) + "건, 탐색 대상: " + to_string(target_count) + "건")
+    println("")
+
+    // 2) 각 빈공간에 대해 순차 blowup
+    let mut total_exact = 0
+    let mut total_near = 0
+    let mut total_discoveries = 0
+    let mut gi = 0
+
+    while gi < target_count {
+        let name = gaps[gi]
+        let domain = constant_to_domain(name)
+        let seeds = constant_to_seed(name)
+
+        println("=== [" + to_string(gi + 1) + "/" + to_string(target_count) + "] " + name + " → domain=" + domain + " ===")
+        println("  seeds: " + seeds)
+
+        // blowup 실행
+        let mut result = ""
+        try {
+            result = exec(hexa, [blowup, domain, "3", "--no-graph", "--seeds", seeds])
+        } catch err {
+            println("  ERROR: blowup 실패 — " + to_string(err))
+            gi = gi + 1
+            continue
+        }
+
+        // 결과 파싱 — EXACT/NEAR 매칭 수집
+        let rlines = result.split("\n")
+        let mut exact = 0
+        let mut near = 0
+        let mut discoveries = 0
+        let mut ri = 0
+        while ri < len(rlines) {
+            let line = rlines[ri]
+            if line.contains("EXACT") { exact = exact + 1 }
+            if line.contains("NEAR") { near = near + 1 }
+            if line.contains("singularity") || line.contains("corollary") || line.contains("EXACT") {
+                discoveries = discoveries + 1
+            }
+            ri = ri + 1
+        }
+
+        total_exact = total_exact + exact
+        total_near = total_near + near
+        total_discoveries = total_discoveries + discoveries
+
+        println("  결과: EXACT=" + to_string(exact) + " NEAR=" + to_string(near) + " discoveries=" + to_string(discoveries))
+        println("")
+        gi = gi + 1
+    }
+
+    // 3) 요약
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  blowup_explore 요약                                    ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+    println("  탐색 대상: " + to_string(target_count) + "건 빈공간")
+    println("  EXACT 총: " + to_string(total_exact))
+    println("  NEAR 총:  " + to_string(total_near))
+    println("  발견 총:  " + to_string(total_discoveries))
+    println("")
+
+    if total_exact > 0 {
+        println("  → 빈공간 중 " + to_string(total_exact) + "건 EXACT 매칭 발견! 흡수 가능")
+    }
+    if total_discoveries == 0 {
+        println("  → 빈공간 blowup 수확 없음 — seed 변경 또는 depth 증가 필요")
+    }
+
+    // growth bus 기록
+    let mut ts = "?"
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
+    let bus_line = "{\"source\":\"gap_finder_blowup_explore\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"blowup_explore\",\"status\":\"targets=" + to_string(target_count) + " exact=" + to_string(total_exact) + " near=" + to_string(total_near) + " discoveries=" + to_string(total_discoveries) + "\"}"
+    try { append_file(growth_bus, bus_line + "\n") } catch err {}
+
+    println("")
+}
+
+if mode == "blowup_explore" {
+    let max_t = if len(a) >= 4 { to_int(a[3]) } else { 5 }
+    let mt = if max_t < 1 { 1 } else if max_t > 20 { 20 } else { max_t }
+    blowup_explore(mt)
+}
+
+if mode == "power" || mode == "거듭제곱" {
+    power_search()
+}
+
 if mode == "help" {
     println("╔══════════════════════════════════════════════╗")
     println("║  GAP FINDER — 미지의 영역 탐지기            ║")
@@ -1407,6 +1814,9 @@ if mode == "help" {
     println("  hexa gap_finder.hexa query 137.036  값→n6 분해 (depth 1~3)")
     println("  hexa gap_finder.hexa quick          DFS EXACT 요약 (최대 20)")
     println("  hexa gap_finder.hexa explain alpha_inv  상수별 n6 유도 경로")
+    println("  hexa gap_finder.hexa blowup_explore [N]  빈공간 blowup 차원 탐색 (기본 5개)")
+    println("  hexa gap_finder.hexa power        n6 기저 거듭제곱 조합 탐색 (P4 유도 포함)")
+    println("  hexa gap_finder.hexa 거듭제곱      = power (한글)")
     println("")
     println("다른 프로젝트에서 사용:")
     println("  hexa=$home/Dev/hexa-lang/target/release/hexa")

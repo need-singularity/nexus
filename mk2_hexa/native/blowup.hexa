@@ -2026,6 +2026,54 @@ while ci < 10 {
     ci = ci + 1
 }
 
+// D. gap_finder quick 인라인 — 빈공간과 이번 돌파의 교차점
+println("")
+println("  ─── D. gap_finder 빈공간 교차 분석 ───")
+try {
+    let gap_finder_path = "mk2_hexa/native/gap_finder.hexa"
+    let gap_result = exec(absorb_hexa_bin, [gap_finder_path, "quick"])
+    // 결과에서 EXACT 라인만 추출하여 이번 돌파 결과와 교차 확인
+    let gap_lines = gap_result.split("\n")
+    let mut gap_shown = 0
+    let mut gli: i64 = 0
+    while gli < len(gap_lines) {
+        let gl = gap_lines[gli]
+        if len(gl) > 3 {
+            // 이번 돌파 buf_lines와 교차 확인
+            let mut cross_hit = false
+            let mut bli: i64 = 0
+            while bli < len(buf_lines) {
+                let bl = buf_lines[bli]
+                if len(bl) > 5 && len(gl) > 5 {
+                    // gap의 물리상수 이름이 이번 돌파에도 등장하면 교차
+                    let gparts = gl.trim().split("=")
+                    if len(gparts) >= 2 {
+                        let gname = gparts[0].trim()
+                        if len(gname) > 2 && bl.contains(gname) {
+                            cross_hit = true
+                        }
+                    }
+                }
+                bli = bli + 1
+            }
+            if cross_hit && gap_shown < 10 {
+                println("    🔗 [교차] " + gl.trim())
+                bt_dir_count = bt_dir_count + 1
+                gap_shown = gap_shown + 1
+            }
+        }
+        gli = gli + 1
+    }
+    if gap_shown == 0 {
+        println("    (이번 돌파와 빈공간의 직접 교차 없음)")
+    } else {
+        println("    → " + to_string(gap_shown) + "건 빈공간-돌파 교차 발견")
+    }
+} catch e {
+    println("    (gap_finder quick 실행 실패 — 스킵)")
+}
+println("")
+
 if bt_dir_count == 0 {
     println("  (돌파 가능 방향 없음 — 이 도메인은 포화 상태)")
 }
