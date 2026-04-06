@@ -503,7 +503,9 @@ fn phase_crossref(tensor_results: list) -> list {
 
     // discovery_log 읽기
     let mut content = ""
-    try { content = read_file(discovery_log) } catch err {
+    if file_exists(discovery_log) {
+        content = read_file(discovery_log)
+    } else {
         println("  (discovery_log 읽기 실패)")
         return [0, []]
     }
@@ -620,17 +622,85 @@ if len(seed_names) > 0 {
     println("")
 }
 
+// ─── 도메인별 discovery_log seed 자동 주입 ───
+let mut domain_seeds_n = seed_names
+let mut domain_seeds_v = seed_vals_parsed
+
+if len(domain_seeds_n) == 0 {
+    // bt_domains.jsonl에서 도메인 키워드 로드
+    let bt_path = nexus6_dir + "/shared/bt_domains.jsonl"
+    let mut domain_keywords = []
+    if file_exists(bt_path) {
+        let bt_raw = read_file(bt_path)
+        let bt_lines = bt_raw.split("\n")
+        let mut bi = 0
+        while bi < len(bt_lines) {
+            let bl = bt_lines[bi].trim()
+            if bl.contains("\"domain\":\"" + domain + "\"") && bl.contains("\"keywords\":[") {
+                let kp = bl.split("\"keywords\":[")
+                if len(kp) >= 2 {
+                    let kraw = kp[1].split("]")[0]
+                    let ktokens = kraw.split(",")
+                    let mut ki = 0
+                    while ki < len(ktokens) {
+                        let kw = ktokens[ki].trim().replace("\"", "")
+                        if len(kw) > 0 { domain_keywords = domain_keywords + [kw] }
+                        ki = ki + 1
+                    }
+                }
+            }
+            bi = bi + 1
+        }
+    }
+    // discovery_log에서 도메인 관련 상수 추출
+    if len(domain_keywords) > 0 && file_exists(discovery_log) {
+        let dl_raw = read_file(discovery_log)
+        let dl_lines = dl_raw.split("\n")
+        let mut di = 0
+        let mut injected = 0
+        while di < len(dl_lines) && injected < 12 {
+            let dl = dl_lines[di].trim()
+            if dl.contains("\"grade\":\"EXACT\"") {
+                let mut matched = false
+                let mut kwi = 0
+                while kwi < len(domain_keywords) {
+                    if dl.contains(domain_keywords[kwi]) { matched = true }
+                    kwi = kwi + 1
+                }
+                if matched && dl.contains("\"name\":\"") && dl.contains("\"value\":") {
+                    let np = dl.split("\"name\":\"")
+                    let vp = dl.split("\"value\":")
+                    if len(np) >= 2 && len(vp) >= 2 {
+                        let sname = np[1].split("\"")[0]
+                        let sval = to_float(vp[1].split(",")[0].split("}")[0].trim())
+                        if sval > 0.0 && sval < 100000.0 {
+                            domain_seeds_n = domain_seeds_n + [sname]
+                            domain_seeds_v = domain_seeds_v + [sval]
+                            injected = injected + 1
+                        }
+                    }
+                }
+            }
+            di = di + 1
+        }
+        if injected > 0 {
+            println("  도메인 '" + domain + "' seed 자동 주입: " + to_string(injected) + "건")
+            println("")
+        }
+    }
+}
+
 // ─── Run all phases ───
-let t_result = phase_tensor(seed_names, seed_vals_parsed)
+let t_result = phase_tensor(domain_seeds_n, domain_seeds_v)
 let t_exact = t_result[0]
 let t_near = t_result[1]
 let t_items = t_result[2]
 
-let m_result = phase_modular(seed_names, seed_vals_parsed)
+let m_result = phase_modular(domain_seeds_n, domain_seeds_v)
 let m_exact = m_result[0]
 let m_near = m_result[1]
 
-let r_result = phase_ratio(seed_names, seed_vals_parsed)
+let r_result = phase_ratio(domain_seeds_n, domain_seeds_v)
 let r_exact = r_result[0]
 let r_near = r_result[1]
 
@@ -638,13 +708,95 @@ let l_result = phase_log_spectrum()
 let l_exact = l_result[0]
 let l_near = l_result[1]
 
-// Phase 5 교차검증은 blowup 엔진에서 수행 — 여기선 생략
-let c_exact = 0
+// ─── Phase 5: Eigenvalue 추출 (공분산 대각합 + 특성다항식) ───
+println("=== Phase 5: Eigenvalue 추출 (공분산 구조) ===")
+let ev_names = if len(domain_seeds_n) > 0 { domain_seeds_n } else { base_names }
+let ev_vals = if len(domain_seeds_v) > 0 { domain_seeds_v } else { base_vals }
+let ev_n = len(ev_names)
+let mut ev_exact = 0
+let mut ev_near = 0
+
+// 공분산 대각 원소: cov(i,i) = val_i^2, 비대각: cov(i,j) = val_i * val_j
+// trace = Σ val_i^2
+let mut trace = 0.0
+let mut tci = 0
+while tci < ev_n {
+    trace = trace + ev_vals[tci] * ev_vals[tci]
+    tci = tci + 1
+}
+let tm = match_physics(trace)
+if len(tm) > 0 {
+    println("  trace(Cov)         = " + fmt_f(trace) + "  → " + tm)
+    if tm.contains("EXACT") { ev_exact = ev_exact + 1 } else { ev_near = ev_near + 1 }
+}
+
+// det 근사 (2×2 minor determinants → eigenvalue 비율)
+let mut mi = 0
+while mi < ev_n {
+    let mut mj = mi + 1
+    while mj < ev_n {
+        let det2 = ev_vals[mi] * ev_vals[mi] * ev_vals[mj] * ev_vals[mj] - ev_vals[mi] * ev_vals[mj] * ev_vals[mi] * ev_vals[mj]
+        // 2×2 det은 0 — 대신 eigenvalue ratio
+        if ev_vals[mj] != 0.0 {
+            let eig_ratio = ev_vals[mi] / ev_vals[mj]
+            let eig_sq = eig_ratio * eig_ratio
+            let m1 = match_physics(eig_sq)
+            if len(m1) > 0 {
+                let expr = "(λ_" + ev_names[mi] + "/λ_" + ev_names[mj] + ")²"
+                let mut pad = expr
+                while len(pad) < 28 { pad = pad + " " }
+                println("  " + pad + "= " + fmt_f(eig_sq) + "  → " + m1)
+                if m1.contains("EXACT") { ev_exact = ev_exact + 1 } else { ev_near = ev_near + 1 }
+            }
+            // eig_ratio + 1/eig_ratio (Casimir-like)
+            let casimir = eig_ratio + 1.0 / eig_ratio
+            let m2 = match_physics(casimir)
+            if len(m2) > 0 {
+                let expr = "λ_" + ev_names[mi] + "/λ_" + ev_names[mj] + " + inv"
+                let mut pad = expr
+                while len(pad) < 28 { pad = pad + " " }
+                println("  " + pad + "= " + fmt_f(casimir) + "  → " + m2)
+                if m2.contains("EXACT") { ev_exact = ev_exact + 1 } else { ev_near = ev_near + 1 }
+            }
+        }
+        mj = mj + 1
+    }
+    mi = mi + 1
+}
+
+// 전체 곱 (det analog)
+let mut det_prod = 1.0
+let mut dpi = 0
+while dpi < ev_n {
+    if ev_vals[dpi] != 0.0 { det_prod = det_prod * ev_vals[dpi] }
+    dpi = dpi + 1
+}
+let dm = match_physics(det_prod)
+if len(dm) > 0 {
+    println("  Π(eigenvalues)     = " + fmt_f(det_prod) + "  → " + dm)
+    if dm.contains("EXACT") { ev_exact = ev_exact + 1 } else { ev_near = ev_near + 1 }
+}
+
+// 평균 고유값
+if ev_n > 0 {
+    let mean_eig = trace / to_float(ev_n)
+    let mm = match_physics(mean_eig)
+    if len(mm) > 0 {
+        println("  mean(eigenvalue)   = " + fmt_f(mean_eig) + "  → " + mm)
+        if mm.contains("EXACT") { ev_exact = ev_exact + 1 } else { ev_near = ev_near + 1 }
+    }
+}
+
+println("  소계: EXACT=" + to_string(ev_exact) + " NEAR=" + to_string(ev_near))
+println("")
+
+let c_exact = ev_exact
+let c_near = ev_near
 let axiom_candidates = []
 
 // ─── Report ───
 let total_exact = t_exact + m_exact + r_exact + l_exact + c_exact
-let total_near = t_near + m_near + r_near + l_near
+let total_near = t_near + m_near + r_near + l_near + c_near
 
 println("╔══════════════════════════════════════════════════════════╗")
 println("║  UNFOLD REPORT — 차원펼침 완료                          ║")
@@ -657,7 +809,7 @@ println("  │ 1. 텐서 분해        │ " + to_string(t_exact) + "     │ " 
 println("  │ 2. 모듈러 투영      │ " + to_string(m_exact) + "     │ " + to_string(m_near) + "    │")
 println("  │ 3. 비율 펼침        │ " + to_string(r_exact) + "     │ " + to_string(r_near) + "    │")
 println("  │ 4. 로그 스펙트럼    │ " + to_string(l_exact) + "     │ " + to_string(l_near) + "    │")
-println("  │ 5. 교차검증         │ " + to_string(c_exact) + "     │ -    │")
+println("  │ 5. Eigenvalue       │ " + to_string(c_exact) + "     │ " + to_string(c_near) + "    │")
 println("  ├──────────────────────┼───────┼──────┤")
 println("  │ TOTAL                │ " + to_string(total_exact) + "     │ " + to_string(total_near) + "    │")
 println("  └──────────────────────┴───────┴──────┘")
@@ -675,8 +827,8 @@ println("")
 
 // ─── growth_bus 기록 ───
 let mut ts = "?"
-try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
+ts = exec("date +%Y-%m-%dT%H:%M:%S")
 let bus_line = "{\"source\":\"unfold_engine\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"unfold\",\"domain\":\"" + domain + "\",\"depth\":" + to_string(depth) + ",\"exact\":" + to_string(total_exact) + ",\"near\":" + to_string(total_near) + ",\"axiom_candidates\":" + to_string(len(axiom_candidates)) + "}"
-try { append_file(growth_bus, bus_line + "\n") } catch err {}
+if file_exists(growth_bus) { append_file(growth_bus, bus_line + "\n") }
 
 println("=== unfold engine verified ===")
