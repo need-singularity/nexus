@@ -652,28 +652,42 @@ if len(domain_seeds_n) == 0 {
             bi = bi + 1
         }
     }
-    // discovery_log에서 도메인 관련 상수 추출
-    if len(domain_keywords) > 0 && file_exists(discovery_log) {
-        let dl_raw = read_file(discovery_log)
-        let dl_lines = dl_raw.split("\n")
+    // 도메인별 seed 주입: 물리상수/n6상수에서 기저 6개 제외한 것 추가
+    // physics/cosmology/chemistry → n6_physics.jsonl 전체
+    // math/topology/consciousness → n6_constants.jsonl 중 기저 외
+    let seed_source = if domain == "math" || domain == "topology" || domain == "consciousness" {
+        nexus6_dir + "/shared/n6_constants.jsonl"
+    } else {
+        nexus6_dir + "/shared/n6_physics.jsonl"
+    }
+    if file_exists(seed_source) {
+        let sf_raw = read_file(seed_source)
+        let sf_lines = sf_raw.split("\n")
         let mut di = 0
         let mut injected = 0
-        while di < len(dl_lines) && injected < 12 {
-            let dl = dl_lines[di].trim()
-            if dl.contains("\"grade\":\"EXACT\"") {
-                let mut matched = false
-                let mut kwi = 0
-                while kwi < len(domain_keywords) {
-                    if dl.contains(domain_keywords[kwi]) { matched = true }
-                    kwi = kwi + 1
-                }
-                if matched && dl.contains("\"name\":\"") && dl.contains("\"value\":") {
-                    let np = dl.split("\"name\":\"")
-                    let vp = dl.split("\"value\":")
-                    if len(np) >= 2 && len(vp) >= 2 {
-                        let sname = np[1].split("\"")[0]
-                        let sval = to_float(vp[1].split(",")[0].split("}")[0].trim())
-                        if sval > 0.0 && sval < 100000.0 {
+        while di < len(sf_lines) && injected < 12 {
+            let sl = sf_lines[di].trim()
+            if len(sl) > 2 && sl.contains("\"name\":\"") && sl.contains("\"value\":") {
+                let np = sl.split("\"name\":\"")
+                let vp = sl.split("\"value\":")
+                if len(np) >= 2 && len(vp) >= 2 {
+                    let sname = np[1].split("\"")[0]
+                    let vraw = vp[1].split(",")[0].split("}")[0].trim()
+                    let sval = to_float(vraw)
+                    if sval > 0.001 && sval < 100000.0 {
+                        // 기저 6개 + 이미 추가된 것과 중복 확인
+                        let mut dup = false
+                        let mut bi2 = 0
+                        while bi2 < len(domain_seeds_n) {
+                            if domain_seeds_n[bi2] == sname { dup = true }
+                            bi2 = bi2 + 1
+                        }
+                        let mut bi3 = 0
+                        while bi3 < len(base_names) {
+                            if base_names[bi3] == sname { dup = true }
+                            bi3 = bi3 + 1
+                        }
+                        if !dup {
                             domain_seeds_n = domain_seeds_n + [sname]
                             domain_seeds_v = domain_seeds_v + [sval]
                             injected = injected + 1
