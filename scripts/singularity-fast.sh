@@ -31,7 +31,7 @@ run_one() {
   local domain=$1 depth=$2 label=$3
   local t0=$(date +%s)
   local seeds=$("$HEXA" "$HOME/Dev/nexus6/mk2_hexa/native/seed_engine.hexa" merge 2>/dev/null)
-  local out=$("$HEXA" "$BLOWUP" "$domain" "$depth" --no-graph --seeds "$seeds" 2>&1)
+  local out=$("$HEXA" "$BLOWUP" "$domain" "$depth" --no-graph --fast --seeds "$seeds" 2>&1)
   local t1=$(date +%s)
   local elapsed=$((t1 - t0))
 

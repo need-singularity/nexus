@@ -52,7 +52,7 @@ while [ $r -le $ROUNDS ]; do
   domain="${DOMAINS[$di]}"
 
   t0=$(date +%s)
-  out=$("$HEXA" "$BLOWUP" "$domain" "$DEPTH" --no-graph --seeds "$ALL_SEEDS" --pool-cap "$POOL_CAP" 2>&1)
+  out=$("$HEXA" "$BLOWUP" "$domain" "$DEPTH" --no-graph --fast --seeds "$ALL_SEEDS" --pool-cap "$POOL_CAP" 2>&1)
   t1=$(date +%s)
   elapsed=$((t1 - t0))
 
