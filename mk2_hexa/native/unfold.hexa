@@ -52,6 +52,34 @@ fn load_jsonl(path: string) -> list {
     [names, values]
 }
 
+// load_jsonl_kv: name→key, value→문자열 label 반환 (unfold_base/ext용)
+fn load_jsonl_kv(path: string) -> list {
+    if !file_exists(path) { return [[], []] }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut keys = []
+    let mut labels = []
+    for line in lines {
+        let trimmed = line.trim()
+        if trimmed == "" { continue }
+        let mut k = ""
+        let mut v = ""
+        if trimmed.contains("\"name\":\"") {
+            let p = trimmed.split("\"name\":\"")
+            if p.len() >= 2 { k = p[1].split("\"")[0] }
+        }
+        if trimmed.contains("\"value\":\"") {
+            let p = trimmed.split("\"value\":\"")
+            if p.len() >= 2 { v = p[1].split("\"")[0] }
+        }
+        if k != "" && v != "" {
+            keys = keys + [k]
+            labels = labels + [v]
+        }
+    }
+    [keys, labels]
+}
+
 fn ln_approx(x: float) -> float {
     if x <= 0.0 { return 0.0 }
     let mut val = x
@@ -78,17 +106,18 @@ let phys_data = load_jsonl(nexus6_dir + "/shared/n6_physics.jsonl")
 let phys_raw_names = phys_data[0]
 let phys_raw_vals = phys_data[1]
 
-// ─── base: n6 기저 6개 필터 ───
-let base_filter = ["n", "sigma", "phi", "tau", "sopfr", "sigma_minus_sopfr"]
-let base_labels = ["n", "sigma", "phi", "tau", "sopfr", "M3"]
+// ─── base: shared/unfold_base.jsonl에서 동적 로드 ───
+let base_cfg = load_jsonl_kv(nexus6_dir + "/shared/unfold_base.jsonl")
+let base_keys = base_cfg[0]   // n6_constants 조회용 key
+let base_lbls = base_cfg[1]   // 표시용 label
 let mut base_names = []
 let mut base_vals = []
 let mut bf = 0
-while bf < len(base_filter) {
+while bf < len(base_keys) {
     let mut fi = 0
     while fi < len(n6_all_names) {
-        if n6_all_names[fi] == base_filter[bf] {
-            base_names = base_names + [base_labels[bf]]
+        if n6_all_names[fi] == base_keys[bf] {
+            base_names = base_names + [base_lbls[bf]]
             base_vals = base_vals + [to_float(n6_all_vals[fi])]
             fi = len(n6_all_names)
         }
@@ -107,19 +136,21 @@ fn find_n6_val(names: list, vals: list, key: string) -> float {
     0.0
 }
 
-let val_n = find_n6_val(n6_all_names, n6_all_vals, "n")
-let val_sigma = find_n6_val(n6_all_names, n6_all_vals, "sigma")
-let val_phi = find_n6_val(n6_all_names, n6_all_vals, "phi")
-let val_tau = find_n6_val(n6_all_names, n6_all_vals, "tau")
-let val_sopfr = find_n6_val(n6_all_names, n6_all_vals, "sopfr")
-let val_m3 = find_n6_val(n6_all_names, n6_all_vals, "sigma_minus_sopfr")
-let val_j2 = find_n6_val(n6_all_names, n6_all_vals, "j2")
-let val_p2 = find_n6_val(n6_all_names, n6_all_vals, "P2")
-let val_sigma_tau = find_n6_val(n6_all_names, n6_all_vals, "sigma_tau")
-let val_p4 = find_n6_val(n6_all_names, n6_all_vals, "P4")
-
-let ext_names = ["n", "sigma", "phi", "tau", "sopfr", "M3", "J2", "n^2", "P2", "sigma*tau", "6!", "P4"]
-let ext_vals = [val_n, val_sigma, val_phi, val_tau, val_sopfr, val_m3, val_j2, val_n * val_n, val_p2, val_sigma_tau, 720.0, val_p4]
+// ─── ext: shared/unfold_ext.jsonl에서 동적 로드 ───
+let ext_cfg = load_jsonl_kv(nexus6_dir + "/shared/unfold_ext.jsonl")
+let ext_keys = ext_cfg[0]   // n6_constants 조회용 key
+let ext_lbls = ext_cfg[1]   // 표시명
+let mut ext_names = []
+let mut ext_vals = []
+let mut ei = 0
+while ei < len(ext_keys) {
+    let ev = find_n6_val(n6_all_names, n6_all_vals, ext_keys[ei])
+    if ev > 0.0 {
+        ext_names = ext_names + [ext_lbls[ei]]
+        ext_vals = ext_vals + [ev]
+    }
+    ei = ei + 1
+}
 
 // ext_lns: ln 값 런타임 계산
 let mut ext_lns = []
@@ -243,7 +274,7 @@ fn phase_tensor(seeds: list, seed_vals: list) -> list {
     }
     println("  소계: EXACT=" + to_string(exact) + " NEAR=" + to_string(near))
     println("")
-    [exact, near, results]
+    [exact, near]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -507,7 +538,7 @@ fn phase_crossref(tensor_results: list) -> list {
         content = read_file(discovery_log)
     } else {
         println("  (discovery_log 읽기 실패)")
-        return [0, []]
+        return [0, 0]
     }
 
     let lines = content.split("\n")
@@ -572,7 +603,7 @@ fn phase_crossref(tensor_results: list) -> list {
 
     println("  AXIOM 후보: " + to_string(len(axiom_candidates)) + "건")
     println("")
-    [exact, axiom_candidates]
+    [exact, len(axiom_candidates)]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -708,7 +739,6 @@ if len(domain_seeds_n) == 0 {
 let t_result = phase_tensor(domain_seeds_n, domain_seeds_v)
 let t_exact = t_result[0]
 let t_near = t_result[1]
-let t_items = t_result[2]
 
 let m_result = phase_modular(domain_seeds_n, domain_seeds_v)
 let m_exact = m_result[0]

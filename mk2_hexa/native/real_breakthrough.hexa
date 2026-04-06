@@ -785,74 +785,53 @@ fn detect_clusters(all_vals: list, all_srcs: list, tolerance: f64) -> list {
 // ═══════════════════════════════════════════════════════════
 
 fn find_resonances(all_vals: list, all_srcs: list, all_labels: list) -> list {
-    // Find values appearing in 2+ distinct source categories
-    let mut results: list = []
-    let mut checked: list = []
-    let mut i: i64 = 0
-    let n = if all_vals.len() < 2000 { all_vals.len() } else { 2000 }
+    // write_file + awk로 교차소스 공명 탐지 (O(n) — O(n²) 제거)
+    let home = exec("printenv HOME")
+    let tmp_path = home + "/Dev/nexus6/.tmp_resonance.txt"
+    let n = all_vals.len()
 
+    // 값(소수 2자리 반올림) + 소스카테고리 + 라벨을 임시 파일에
+    let mut content = ""
+    let mut i: i64 = 0
     while i < n {
-        let v0: f64 = all_vals[i]
-        if abs_f(v0) < 0.01 { i = i + 1 } else {
-            // Skip already checked
-            let mut already = false
-            let mut ci: i64 = 0
-            while ci < checked.len() {
-                let cv: f64 = checked[ci]
-                if abs_f(cv - v0) / max_f(abs_f(v0), 0.001) < 0.005 { already = true }
-                ci = ci + 1
-            }
-            if !already {
-                checked = checked + [v0]
-                // Collect distinct source categories
-                let mut cat_list: list = []
-                let mut lbl_list: list = []
-                let mut j: i64 = 0
-                while j < all_vals.len() {
-                    let vj: f64 = all_vals[j]
-                    let rel = abs_f(vj - v0) / max_f(abs_f(v0), 0.001)
-                    if rel < 0.01 {
-                        let src: string = all_srcs[j]
-                        let cat = src.split(":")[0]
-                        let mut dup = false
-                        let mut ki: i64 = 0
-                        while ki < cat_list.len() {
-                            let ec: string = cat_list[ki]
-                            if ec == cat { dup = true }
-                            ki = ki + 1
-                        }
-                        if !dup {
-                            cat_list = cat_list + [cat]
-                            let lbl: string = all_labels[j]
-                            lbl_list = lbl_list + [lbl]
-                        }
-                    }
-                    j = j + 1
-                }
-                if cat_list.len() >= 2 {
-                    let mut cat_str = ""
-                    let mut k: i64 = 0
-                    while k < cat_list.len() {
-                        if cat_str != "" { cat_str = cat_str + " + " }
-                        let c: string = cat_list[k]
-                        cat_str = cat_str + c
-                        k = k + 1
-                    }
-                    let mut lbl_str = ""
-                    k = 0
-                    while k < lbl_list.len() {
-                        if lbl_str != "" { lbl_str = lbl_str + " | " }
-                        let l: string = lbl_list[k]
-                        if l.len() < 60 { lbl_str = lbl_str + l }
-                        k = k + 1
-                    }
-                    let known_tag = if is_known_n6(v0) { "KNOWN" } else { "***NEW***" }
-                    let entry = to_string(round4f(v0)) + "|" + to_string(cat_list.len()) + "|" + cat_str + "|" + lbl_str + "|" + known_tag
-                    results = results + [entry]
-                }
-            }
-            i = i + 1
+        let v: f64 = all_vals[i]
+        if abs_f(v) >= 0.01 {
+            // 소수 2자리까지 버킷 (정수*100)
+            let bucket = to_string(to_int(v * 100.0))
+            let src: string = all_srcs[i]
+            let cat = src.split(":")[0]
+            let lbl: string = if i < all_labels.len() { all_labels[i] } else { "" }
+            content = content + bucket + "\t" + to_string(round4f(v)) + "\t" + cat + "\t" + lbl + "\n"
         }
+        i = i + 1
+    }
+    write_file(tmp_path, content)
+
+    // awk: 버킷별 소스 카테고리 2개 이상인 것만 추출 (선행 구분자 없이)
+    let agg = exec("awk -F'\\t' '{ b=$1; if(!seen[b]) { val[b]=$2; seen[b]=1 }; if(!index(cats[b],$3)) { if(cats[b]) cats[b]=cats[b]\" + \"$3; else cats[b]=$3; ncats[b]++ }; if(length(lbls[b])<200 && !index(lbls[b],$4)) { if(lbls[b]) lbls[b]=lbls[b]\" | \"$4; else lbls[b]=$4 } } END { for(b in ncats) if(ncats[b]>=2) print val[b]\"\\t\"ncats[b]\"\\t\"cats[b]\"\\t\"lbls[b] }' " + tmp_path + " | sort -t'\\t' -k2 -rn | head -30")
+    exec("rm -f " + tmp_path)
+
+    let mut results: list = []
+    let agg_lines = agg.split("\n")
+    let mut ai: i64 = 0
+    while ai < agg_lines.len() {
+        let al = agg_lines[ai].trim()
+        if al != "" {
+            let parts = al.split("\t")
+            if parts.len() >= 4 {
+                let v_str = parts[0]
+                let v_f = to_float(v_str)
+                let n_cats = parts[1]
+                let cat_str = parts[2].trim()
+                let lbl_str = parts[3].trim()
+                let clean_cats = cat_str
+                let clean_lbls = lbl_str
+                let known_tag = if is_known_n6(v_f) { "KNOWN" } else { "***NEW***" }
+                let entry = v_str + "|" + n_cats + "|" + clean_cats + "|" + clean_lbls + "|" + known_tag
+                results = results + [entry]
+            }
+        }
+        ai = ai + 1
     }
     return results
 }

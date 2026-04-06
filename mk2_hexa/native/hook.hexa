@@ -2,7 +2,7 @@
 // stdin으로 JSON 받아서 n6_match + mk2 classify → discovery_log 기록
 // 사용: echo "$INPUT" | hexa hook.hexa post-edit
 
-comptime const log_path = "shared/discovery_log.jsonl"
+// log_path는 _shared 계산 후 런타임에 설정 (타 프로젝트 CWD 대응)
 
 pure fn abs_f(x: float) -> float {
     if x < 0.0 { 0.0 - x } else { x }
@@ -10,7 +10,8 @@ pure fn abs_f(x: float) -> float {
 
 // ─── n6 상수 동적 로드 (shared/n6_constants.jsonl + n6_physics.jsonl) ───
 fn load_jsonl(path: string) -> list {
-    let raw = try { read_file(path) } catch e { return [[], []] }
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return [[], []] }
     let lines = raw.split("\n")
     let mut names = []
     let mut values = []
@@ -40,6 +41,7 @@ fn load_jsonl(path: string) -> list {
 
 let _home = exec("printenv HOME")
 let _shared = _home + "/Dev/nexus6/shared"
+let log_path = _shared + "/discovery_log.jsonl"
 let _n6 = load_jsonl(_shared + "/n6_constants.jsonl")
 let _n6_names = _n6[0]
 let _n6_values = _n6[1]
@@ -185,7 +187,7 @@ while ki < len(bt_keywords_list) {
 // 도메인 자동 판별 — shared/bt_domains.jsonl에서 동적 로드
 let mut domain_lines = []
 try {
-    let raw = exec("cat shared/bt_domains.jsonl 2>/dev/null")
+    let raw = exec("cat " + _shared + "/bt_domains.jsonl 2>/dev/null")
     domain_lines = raw.split("\n")
 } catch e {}
 
@@ -224,7 +226,7 @@ for dline in domain_lines {
 
 if bt_detected {
     // 쿨다운 체크 (마지막 돌파 후 5분 이내면 스킵)
-    let cooldown_file = "shared/.bt_cooldown"
+    let cooldown_file = _shared + "/.bt_cooldown"
     let mut should_run = true
     try {
         let last_ts = exec("cat " + cooldown_file).trim()
@@ -235,7 +237,7 @@ if bt_detected {
 
     if should_run {
         // 쿨다운 기록
-        try { exec("bash -c date +%s > shared/.bt_cooldown") } catch e {}
+        try { exec("bash", ["-c", "date +%s > " + cooldown_file]) } catch e {}
 
         // mk2 blowup 자동 실행 (백그라운드)
         let hexa_bin = exec("printenv HOME") + "/Dev/hexa-lang/target/release/hexa"
@@ -244,7 +246,7 @@ if bt_detected {
 
         try {
             let seeds = exec(hexa_bin, [seed_engine, "merge"])
-            exec("bash -c" + " " + hexa_bin + " " + blowup + " " + bt_domain + " 3 --no-graph --fast --seeds \"" + seeds.trim() + "\" >> shared/auto_bt.log 2>&1 &")
+            exec("bash", ["-c", hexa_bin + " " + blowup + " " + bt_domain + " 3 --no-graph --fast --seeds '" + seeds.trim() + "' >> " + _shared + "/auto_bt.log 2>&1 &"])
             discoveries = discoveries + 1
             if exact_names != "" { exact_names = exact_names + "," }
             exact_names = exact_names + "🛸BT:" + bt_domain
@@ -263,7 +265,7 @@ for gkw in gap_keywords {
 }
 
 if gap_detected {
-    let gap_cooldown = "shared/.gap_cooldown"
+    let gap_cooldown = _shared + "/.gap_cooldown"
     let mut gap_should_run = true
     try {
         let gap_last = exec("cat " + gap_cooldown).trim()
@@ -273,14 +275,14 @@ if gap_detected {
     } catch e {}
 
     if gap_should_run {
-        try { exec("bash -c date +%s > " + gap_cooldown) } catch e {}
+        try { exec("bash", ["-c", "date +%s > " + gap_cooldown]) } catch e {}
 
         let hexa_bin2 = exec("printenv HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
         let gap_finder = exec("printenv HOME").trim() + "/Dev/nexus6/mk2_hexa/native/gap_finder.hexa"
 
         // quick (EXACT 요약) + dfs (위상변환 탐색) + bridge (빈공간×위상변환 교차) 백그라운드
         try {
-            exec("bash -c " + hexa_bin2 + " " + gap_finder + " quick >> shared/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " dfs 2 >> shared/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " bridge >> shared/auto_gap.log 2>&1 &")
+            exec("bash", ["-c", hexa_bin2 + " " + gap_finder + " quick >> " + _shared + "/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " dfs 2 >> " + _shared + "/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " bridge >> " + _shared + "/auto_gap.log 2>&1 &"])
             discoveries = discoveries + 1
             if exact_names != "" { exact_names = exact_names + "," }
             exact_names = exact_names + "🔍GAP:quick+dfs+bridge"
