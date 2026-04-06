@@ -282,8 +282,10 @@ fn tv_add(vals: list, srcs: list, labels: list, v: f64, src: string, lbl: string
 // ═══════════════════════════════════════════════════════════
 
 fn load_discovery_log() -> list {
-    let path = "shared/discovery_log.jsonl"
-    let raw = read_file(path)
+    let home = exec("printenv HOME")
+    let path = home + "/Dev/nexus6/shared/discovery_log.jsonl"
+    // tail로 최근 5000라인만 읽기 (성능 — 61k+ 전체 로드 방지)
+    let raw = exec("tail -5000 " + path)
     if raw == "" {
         println("  [discovery_log] WARN: empty or not found")
         return [[], [], []]
@@ -292,7 +294,7 @@ fn load_discovery_log() -> list {
     let mut vals: list = []
     let mut srcs: list = []
     let mut labels: list = []
-    let max_lines = if lines.len() < 5000 { lines.len() } else { 5000 }
+    let max_lines = lines.len()
     let mut i: i64 = 0
     while i < max_lines {
         let line = lines[i]
@@ -706,97 +708,74 @@ fn print_histogram(hist: list, bin_size: f64, top_n: i64) {
 // ═══════════════════════════════════════════════════════════
 
 fn detect_clusters(all_vals: list, all_srcs: list, tolerance: f64) -> list {
-    // Returns list of "centroid|count|n_sources|src_summary|known" strings
-    let n = if all_vals.len() < 3000 { all_vals.len() } else { 3000 }
+    // write_file + awk로 O(n log n) 클러스터 감지
+    let n = if all_vals.len() < 5000 { all_vals.len() } else { 5000 }
+    let home = exec("printenv HOME")
+    let tmp_path = home + "/Dev/nexus6/.tmp_cluster_vals.txt"
 
-    // Sort values (with index tracking)
-    let mut sorted_vals: list = []
-    let mut sorted_idxs: list = []
+    // 값+소스를 임시 파일에 기록 (write_file 사용 — 따옴표 안전)
+    let mut content = ""
     let mut si: i64 = 0
     while si < n {
-        sorted_vals = sorted_vals + [all_vals[si]]
-        sorted_idxs = sorted_idxs + [si]
-        si = si + 1
-    }
-    // Selection sort
-    si = 0
-    while si < sorted_vals.len() {
-        let mut best = si
-        let mut sj = si + 1
-        while sj < sorted_vals.len() {
-            let va: f64 = sorted_vals[sj]
-            let vb: f64 = sorted_vals[best]
-            if va < vb { best = sj }
-            sj = sj + 1
-        }
-        if best != si {
-            let tv: f64 = sorted_vals[si]
-            sorted_vals[si] = sorted_vals[best]
-            sorted_vals[best] = tv
-            let ti: i64 = sorted_idxs[si]
-            sorted_idxs[si] = sorted_idxs[best]
-            sorted_idxs[best] = ti
+        let v: f64 = all_vals[si]
+        if abs_f(v) >= 0.0001 {
+            let bucket_key = to_string(to_int(v))
+            let src_prefix = if si < all_srcs.len() { to_string(all_srcs[si]).split(":")[0] } else { "?" }
+            content = content + bucket_key + "\t" + to_string(v) + "\t" + src_prefix + "\n"
         }
         si = si + 1
     }
+    write_file(tmp_path, content)
 
-    // Sweep through sorted values, group within tolerance
+    // shell에서 정수 버킷별 집계
+    let agg_raw = exec("awk -F'\t' '{key=$1; sum[key]+=$2; cnt[key]++; if(!index(src[key],$3)) src[key]=src[key]\",\"$3} END {for(k in cnt) if(cnt[k]>=3) print k\"\t\"cnt[k]\"\t\"sum[k]/cnt[k]\"\t\"src[k]}' " + tmp_path + " | sort -t'\\t' -k2 -rn | head -50")
+    exec("rm -f " + tmp_path)
+
     let mut clusters: list = []
-    let mut ci: i64 = 0
-    while ci < sorted_vals.len() {
-        let anchor: f64 = sorted_vals[ci]
-        if abs_f(anchor) < 0.0001 { ci = ci + 1 } else {
-            let mut members: list = [ci]
-            let mut sum = anchor
-            let mut cj = ci + 1
-            while cj < sorted_vals.len() {
-                let vj: f64 = sorted_vals[cj]
-                let rel = abs_f(vj - anchor) / max_f(abs_f(anchor), 0.001)
-                if rel < tolerance {
-                    members = members + [cj]
-                    sum = sum + vj
-                    cj = cj + 1
-                } else {
-                    cj = sorted_vals.len()
-                }
-            }
-            if members.len() >= 3 {
-                let centroid = sum / to_float(members.len())
-                // Count distinct sources
+    let agg_lines = agg_raw.split("\n")
+    let mut ai: i64 = 0
+    while ai < agg_lines.len() {
+        let al = agg_lines[ai].trim()
+        if al != "" {
+            let parts = al.split("\t")
+            if parts.len() >= 4 {
+                let mut count: i64 = 0
+                try { count = to_int(parts[1]) } catch e {}
+                let mut centroid: f64 = 0.0
+                try { centroid = to_float(parts[2]) } catch e {}
+                let src_raw = parts[3]
+                // 소스 카운트
+                let src_parts = src_raw.split(",")
                 let mut src_unique: list = []
-                let mut mi: i64 = 0
-                while mi < members.len() {
-                    let midx: i64 = members[mi]
-                    let orig_idx: i64 = sorted_idxs[midx]
-                    if orig_idx < all_srcs.len() {
-                        let src: string = all_srcs[orig_idx]
-                        // Check uniqueness (by prefix)
-                        let src_prefix = src.split(":")[0]
-                        let mut dup = false
-                        let mut ui: i64 = 0
-                        while ui < src_unique.len() {
-                            let existing: string = src_unique[ui]
-                            if existing == src_prefix { dup = true }
-                            ui = ui + 1
-                        }
-                        if !dup { src_unique = src_unique + [src_prefix] }
-                    }
-                    mi = mi + 1
-                }
-                let mut src_str = ""
                 let mut ui: i64 = 0
-                while ui < src_unique.len() {
-                    if src_str != "" { src_str = src_str + "+" }
-                    let s: string = src_unique[ui]
-                    src_str = src_str + s
+                while ui < src_parts.len() {
+                    let sp = src_parts[ui].trim()
+                    if sp != "" {
+                        let mut dup = false
+                        let mut uj: i64 = 0
+                        while uj < src_unique.len() {
+                            let existing: string = src_unique[uj]
+                            if existing == sp { dup = true }
+                            uj = uj + 1
+                        }
+                        if !dup { src_unique = src_unique + [sp] }
+                    }
                     ui = ui + 1
                 }
+                let mut src_str = ""
+                let mut ui2: i64 = 0
+                while ui2 < src_unique.len() {
+                    if src_str != "" { src_str = src_str + "+" }
+                    let s: string = src_unique[ui2]
+                    src_str = src_str + s
+                    ui2 = ui2 + 1
+                }
                 let known_tag = if is_known_n6(centroid) { "KNOWN" } else { "NEW" }
-                let entry = to_string(round4f(centroid)) + "|" + to_string(members.len()) + "|" + to_string(src_unique.len()) + "|" + src_str + "|" + known_tag
+                let entry = to_string(round4f(centroid)) + "|" + to_string(count) + "|" + to_string(src_unique.len()) + "|" + src_str + "|" + known_tag
                 clusters = clusters + [entry]
             }
-            ci = ci + members.len()
         }
+        ai = ai + 1
     }
     return clusters
 }

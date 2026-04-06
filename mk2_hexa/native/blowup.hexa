@@ -398,12 +398,14 @@ fn graph_count_type(content: string, ttype: string) -> i64 {
     return count
 }
 
-// Find hub node IDs (degree >= min_deg) and return count
+// Find hub node IDs (degree >= min_deg) — O(edges) single-pass counting
 fn graph_hub_count(content: string, min_deg: i64) -> i64 {
     if len(content) == 0 { return 0 }
     let lines = content.split("\n")
-    // collect all unique node IDs mentioned in edges
+    // Single pass: count degree per node ID using pipe-delimited parallel arrays
     let mut ids = ""
+    let mut degrees = ""
+    let mut num_ids: i64 = 0
     let mut li: i64 = 0
     while li < len(lines) {
         let line = lines[li]
@@ -412,39 +414,79 @@ fn graph_hub_count(content: string, min_deg: i64) -> i64 {
             if t == "edge" {
                 let f = graph_extract_field(line, "from")
                 let to = graph_extract_field(line, "to")
-                if len(f) > 0 && !ids.contains(f) {
-                    if len(ids) == 0 { ids = f } else { ids = ids + "|" + f }
+                // Increment degree for 'from' node
+                if len(f) > 0 {
+                    let id_arr = ids.split("|")
+                    let deg_arr = degrees.split("|")
+                    let mut found = false
+                    let mut new_deg = ""
+                    let mut fi: i64 = 0
+                    while fi < num_ids {
+                        if len(new_deg) > 0 { new_deg = new_deg + "|" }
+                        if id_arr[fi] == f {
+                            found = true
+                            let mut d: i64 = 0
+                            try { d = to_int(deg_arr[fi]) } catch e {}
+                            new_deg = new_deg + to_string(d + 1)
+                        } else {
+                            new_deg = new_deg + deg_arr[fi]
+                        }
+                        fi = fi + 1
+                    }
+                    if found {
+                        degrees = new_deg
+                    } else {
+                        if num_ids == 0 {
+                            ids = f
+                            degrees = "1"
+                        } else {
+                            ids = ids + "|" + f
+                            degrees = degrees + "|1"
+                        }
+                        num_ids = num_ids + 1
+                    }
                 }
-                if len(to) > 0 && !ids.contains(to) {
-                    if len(ids) == 0 { ids = to } else { ids = ids + "|" + to }
+                // Increment degree for 'to' node
+                if len(to) > 0 {
+                    let id_arr2 = ids.split("|")
+                    let deg_arr2 = degrees.split("|")
+                    let mut found2 = false
+                    let mut new_deg2 = ""
+                    let mut ti: i64 = 0
+                    while ti < num_ids {
+                        if len(new_deg2) > 0 { new_deg2 = new_deg2 + "|" }
+                        if id_arr2[ti] == to {
+                            found2 = true
+                            let mut d2: i64 = 0
+                            try { d2 = to_int(deg_arr2[ti]) } catch e {}
+                            new_deg2 = new_deg2 + to_string(d2 + 1)
+                        } else {
+                            new_deg2 = new_deg2 + deg_arr2[ti]
+                        }
+                        ti = ti + 1
+                    }
+                    if found2 {
+                        degrees = new_deg2
+                    } else {
+                        ids = ids + "|" + to
+                        degrees = degrees + "|1"
+                        num_ids = num_ids + 1
+                    }
                 }
             }
         }
         li = li + 1
     }
-    if len(ids) == 0 { return 0 }
-    let id_arr = ids.split("|")
+    // Count hubs
+    if num_ids == 0 { return 0 }
+    let final_deg = degrees.split("|")
     let mut hub_count: i64 = 0
-    let mut ni: i64 = 0
-    while ni < len(id_arr) {
-        let nid = id_arr[ni]
-        let mut degree: i64 = 0
-        let mut ej: i64 = 0
-        while ej < len(lines) {
-            let line = lines[ej]
-            if len(line) > 5 {
-                let t = graph_extract_field(line, "type")
-                if t == "edge" {
-                    let f = graph_extract_field(line, "from")
-                    let to = graph_extract_field(line, "to")
-                    if f == nid { degree = degree + 1 }
-                    if to == nid { degree = degree + 1 }
-                }
-            }
-            ej = ej + 1
-        }
-        if degree >= min_deg { hub_count = hub_count + 1 }
-        ni = ni + 1
+    let mut hi: i64 = 0
+    while hi < num_ids {
+        let mut d: i64 = 0
+        try { d = to_int(final_deg[hi]) } catch e {}
+        if d >= min_deg { hub_count = hub_count + 1 }
+        hi = hi + 1
     }
     return hub_count
 }
@@ -1737,11 +1779,12 @@ let mut absorb_graph_edges: i64 = 0
 let mut absorb_bus_events: i64 = 0
 let growth_bus_path = "shared/growth_bus.jsonl"
 
-// Read current discovery_log to check for duplicates
+// Duplicate check: use grep instead of loading entire 46K-line log into memory
 let mut absorb_existing_log = ""
-if file_exists(log_path) {
-    absorb_existing_log = read_file(log_path)
-}
+try {
+    // 최근 500줄만 로드 (중복은 최근 실행에서만 발생)
+    absorb_existing_log = exec("tail -500 " + log_path + " 2>/dev/null")
+} catch e {}
 
 // Read current graph for cross-ref
 let mut absorb_graph_content = ""
@@ -1831,11 +1874,9 @@ while ci < len(recurse_all_corollaries) {
     ci = ci + 1
 }
 
-// Write discovery_log entries
+// Write discovery_log entries (append only — 전체 읽기+쓰기 제거)
 if absorb_logged > 0 {
-    let mut prev_log = ""
-    if file_exists(log_path) { prev_log = read_file(log_path) }
-    write_file(log_path, prev_log + absorb_log_entries)
+    append_file(log_path, absorb_log_entries)
     println("  discovery_log  : +" + to_string(absorb_logged) + " EXACT entries")
 }
 
@@ -1849,11 +1890,9 @@ if !skip_graph && absorb_graph_nodes > 0 {
     println("  graph          : +" + to_string(absorb_graph_nodes) + " nodes, +" + to_string(absorb_graph_edges) + " edges")
 }
 
-// Write growth_bus events
+// Write growth_bus events (append only — 835KB 전체 재작성 제거)
 if absorb_bus_events > 0 {
-    let mut prev_bus = ""
-    if file_exists(growth_bus_path) { prev_bus = read_file(growth_bus_path) }
-    write_file(growth_bus_path, prev_bus + absorb_bus_entries)
+    append_file(growth_bus_path, absorb_bus_entries)
     println("  growth_bus     : +" + to_string(absorb_bus_events) + " absorb events")
 }
 
@@ -1935,11 +1974,7 @@ println("  breakthrough rho  :", rho)
 println("  meta fixed point  : 0.333... (target)")
 println("")
 
-// ── discovery_log append ──
-let mut existing_log = ""
-if file_exists(log_path) {
-    existing_log = read_file(log_path)
-}
+// ── discovery_log append (append_file 사용 — 전체 읽기 제거) ──
 let mut new_entries = ""
 li = 0
 while li < len(buf_lines) {
@@ -1977,7 +2012,7 @@ while li < len(buf_lines) {
     li = li + 1
 }
 if logged > 0 {
-    write_file(log_path, existing_log + new_entries)
+    append_file(log_path, new_entries)
 }
 
 if logged > 0 {
