@@ -968,9 +968,11 @@ let max_depth: i64 = if len(a) >= 4 { to_int(a[3]) } else { 6 }
 let mut skip_graph = false
 let mut ext_seeds = ""
 let mut ext_pool_cap: i64 = 0
+let mut fast_mode = false
 let mut ai: i64 = 2
 while ai < len(a) {
     if a[ai] == "--no-graph" { skip_graph = true }
+    if a[ai] == "--fast" { fast_mode = true }
     if a[ai] == "--seeds" && ai + 1 < len(a) {
         ext_seeds = a[ai + 1]
         ai = ai + 1
@@ -2025,7 +2027,16 @@ println("")
 
 // ═══════════════════════════════════════════════════════════
 // Phase 7.1: 다음 돌파 방향 제시 — 돌파 가능 지점 전수 탐색
+// --fast 모드: Phase 7.1 + 7.5 스킵 (142초 → ~40초)
 // ═══════════════════════════════════════════════════════════
+
+if fast_mode {
+    println("═══ Phase 7.1: (skipped --fast) ═══")
+    println("═══ Phase 7.5: (skipped --fast) ═══")
+    println("")
+    println("done.")
+    // fast 모드는 여기서 종료 — Phase 1~7만 실행
+} else {
 
 println("═══ Phase 7.1: Next Breakthrough Directions ═══")
 println("")
@@ -2125,33 +2136,29 @@ try {
     let gap_finder_path = "mk2_hexa/native/gap_finder.hexa"
     let gap_result = exec(absorb_hexa_bin, [gap_finder_path, "quick"])
     // 결과에서 EXACT 라인만 추출하여 이번 돌파 결과와 교차 확인
+    // buf_lines를 하나의 문자열로 합쳐서 O(1) contains 체크 (O(gap×buf) → O(gap))
+    let mut buf_concat = ""
+    let mut bci: i64 = 0
+    while bci < len(buf_lines) && bci < 100 {
+        buf_concat = buf_concat + " " + buf_lines[bci]
+        bci = bci + 1
+    }
     let gap_lines = gap_result.split("\n")
     let mut gap_shown = 0
     let mut gli: i64 = 0
     while gli < len(gap_lines) {
         let gl = gap_lines[gli]
         if len(gl) > 3 {
-            // 이번 돌파 buf_lines와 교차 확인
-            let mut cross_hit = false
-            let mut bli: i64 = 0
-            while bli < len(buf_lines) {
-                let bl = buf_lines[bli]
-                if len(bl) > 5 && len(gl) > 5 {
-                    // gap의 물리상수 이름이 이번 돌파에도 등장하면 교차
-                    let gparts = gl.trim().split("=")
-                    if len(gparts) >= 2 {
-                        let gname = gparts[0].trim()
-                        if len(gname) > 2 && bl.contains(gname) {
-                            cross_hit = true
-                        }
+            let gparts = gl.trim().split("=")
+            if len(gparts) >= 2 {
+                let gname = gparts[0].trim()
+                if len(gname) > 2 && buf_concat.contains(gname) {
+                    if gap_shown < 10 {
+                        println("    🔗 [교차] " + gl.trim())
+                        bt_dir_count = bt_dir_count + 1
+                        gap_shown = gap_shown + 1
                     }
                 }
-                bli = bli + 1
-            }
-            if cross_hit && gap_shown < 10 {
-                println("    🔗 [교차] " + gl.trim())
-                bt_dir_count = bt_dir_count + 1
-                gap_shown = gap_shown + 1
             }
         }
         gli = gli + 1
@@ -2181,43 +2188,47 @@ try { exec(absorb_hexa_bin, [directions_path, "update"]) } catch e {}
 // Phase 7.5: Auto-Link — 후속 파이프라인 자동 연결
 // ═══════════════════════════════════════════════════════════
 
-println("═══ Phase 7.5: Auto-Link ═══")
+println("═══ Phase 7.5: Auto-Link (parallel) ═══")
 
 let engine_dir = "mk2_hexa/native"
 let hexa_bin = exec("echo $HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
+let autolink_log = "shared/.autolink_out.log"
 
-// 7.5a: lens_forge — 발견 기반 자동 렌즈 생성
+// 4개 프로세스를 백그라운드 병렬 실행 → wait로 일괄 대기
+// 순차 80초 → 병렬 ~20초 (가장 느린 1개 기준)
 let forge_path = engine_dir + "/lens_forge.hexa"
-println("  [7.5a] lens_forge forge ...")
-let mut forge_result = "SKIP: lens_forge unavailable"
-try { forge_result = exec(hexa_bin, [forge_path, "forge"]) } catch e {}
-println("  ", forge_result.split("\n")[0])
-
-// 7.5b: auto_register sync — 발견 자동 분류+등록
 let ar_path = engine_dir + "/auto_register.hexa"
-println("  [7.5b] auto_register sync ...")
-let mut ar_result = "SKIP: auto_register unavailable"
-try { ar_result = exec(hexa_bin, [ar_path, "sync", log_path]) } catch e {}
-println("  ", ar_result.split("\n")[0])
-
-// 7.5c: gap_finder target — 다음 타겟 추천
 let gf_path = engine_dir + "/gap_finder.hexa"
-println("  [7.5c] gap_finder target ...")
-let mut gf_result = "SKIP: gap_finder unavailable"
-try { gf_result = exec(hexa_bin, [gf_path, "target"]) } catch e {}
-println("  ", gf_result.split("\n")[0])
-
-// 7.5d: alien_index assess — 신규 발견 AI 등급 일괄 부여
 let ai_path = engine_dir + "/alien_index.hexa"
+
+let mut par_cmd = hexa_bin + " " + forge_path + " forge > " + autolink_log + ".a 2>&1 & "
+par_cmd = par_cmd + hexa_bin + " " + ar_path + " sync " + log_path + " > " + autolink_log + ".b 2>&1 & "
+par_cmd = par_cmd + hexa_bin + " " + gf_path + " target > " + autolink_log + ".c 2>&1 & "
 if logged > 0 {
-    println("  [7.5d] alien_index batch assess (", logged, "entries) ...")
-    // 대표값 1개만 assess (전체 batch는 autolink에서)
-    let sample_val = "6.0"
-    let mut ai_result = "SKIP: alien_index unavailable"
-    try { ai_result = exec(hexa_bin, [ai_path, "alien_index.hexa", "assess", sample_val]) } catch e {}
-    println("  ", ai_result.split("\n")[0])
+    par_cmd = par_cmd + hexa_bin + " " + ai_path + " alien_index.hexa assess 6.0 > " + autolink_log + ".d 2>&1 & "
 }
+par_cmd = par_cmd + "wait"
+
+println("  [parallel] lens_forge + auto_register + gap_finder + alien_index ...")
+try { exec("bash", ["-c", par_cmd]) } catch e {}
+
+// 결과 수집
+let mut al_a = ""
+let mut al_b = ""
+let mut al_c = ""
+let mut al_d = ""
+try { al_a = exec("head -1 " + autolink_log + ".a 2>/dev/null") } catch e {}
+try { al_b = exec("head -1 " + autolink_log + ".b 2>/dev/null") } catch e {}
+try { al_c = exec("head -1 " + autolink_log + ".c 2>/dev/null") } catch e {}
+if logged > 0 {
+    try { al_d = exec("head -1 " + autolink_log + ".d 2>/dev/null") } catch e {}
+}
+println("  [7.5a] ", al_a.trim())
+println("  [7.5b] ", al_b.trim())
+println("  [7.5c] ", al_c.trim())
+if logged > 0 { println("  [7.5d] ", al_d.trim()) }
 
 println("═══ Phase 7.5 complete ═══")
 println("")
 println("done.")
+} // end if !fast_mode
