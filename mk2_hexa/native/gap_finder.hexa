@@ -369,6 +369,463 @@ fn auto_breakthrough(targets_str: string) {
     try { append_file(growth_bus, bus_line + "\n") } catch e {}
 }
 
+// ─── n6 위상변환 기저 상수 ───
+
+comptime const base_names = ["n", "sigma", "phi", "tau", "sopfr", "M3"]
+comptime const base_vals  = [6.0, 12.0, 2.0, 4.0, 5.0, 7.0]
+
+// ─── 물리 상수 매칭 테이블 ───
+
+comptime const phys_names = ["alpha_inv", "omega_m", "omega_lambda", "meta_fp", "mp_me", "J2", "n^2", "6!", "sigma*tau", "P2", "P3", "P4", "n/phi", "phi*tau"]
+comptime const phys_vals  = [137.036, 0.3153, 0.6847, 0.3333, 1836.15, 24.0, 36.0, 720.0, 48.0, 28.0, 496.0, 8128.0, 3.0, 8.0]
+
+// ─── 유틸: 절대값 ───
+
+fn abs_val(x: float) -> float {
+    if x < 0.0 { return 0.0 - x }
+    x
+}
+
+// ─── 유틸: float→정수문자열(소수점 6자리) ───
+
+fn fmt_f(x: float) -> string {
+    // hexa 기본 to_string 사용
+    to_string(x)
+}
+
+// ─── 유틸: 연산 이름 ───
+
+fn op_symbol(op: int) -> string {
+    if op == 0 { return "+" }
+    if op == 1 { return "-" }
+    if op == 2 { return "*" }
+    if op == 3 { return "/" }
+    "?"
+}
+
+fn apply_op(a: float, b: float, op: int) -> float {
+    if op == 0 { return a + b }
+    if op == 1 { return a - b }
+    if op == 2 { return a * b }
+    if op == 3 {
+        if b == 0.0 { return 99999999.0 }
+        return a / b
+    }
+    0.0
+}
+
+// ─── A. 위상변환 매트릭스 출력 ───
+
+fn print_transform_matrix() {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — n6 위상변환 매트릭스                      ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+    println("기저 상수: n=6, σ=12, φ=2, τ=4, sopfr=5, M3=7")
+    println("")
+    println("─── 사칙연산 변환표 (a OP b) ───")
+    println("")
+
+    let mut bi = 0
+    while bi < len(base_names) {
+        let mut bj = bi + 1
+        while bj < len(base_names) {
+            let a = base_vals[bi]
+            let b = base_vals[bj]
+            let na = base_names[bi]
+            let nb = base_names[bj]
+
+            let mut oi = 0
+            while oi < 4 {
+                let val = apply_op(a, b, oi)
+                let rval = apply_op(b, a, oi)
+
+                // a OP b
+                let expr = na + op_symbol(oi) + nb
+                let mut match_str = match_physics(val)
+                let mut mut_expr_pad = expr
+                while len(mut_expr_pad) < 16 { mut_expr_pad = mut_expr_pad + " " }
+                if len(match_str) > 0 {
+                    println("  " + mut_expr_pad + "= " + fmt_f(val) + "  → " + match_str)
+                }
+
+                // b OP a (비대칭 연산만: - / )
+                if oi >= 1 {
+                    let rexpr = nb + op_symbol(oi) + na
+                    let rmatch = match_physics(rval)
+                    let mut rpad = rexpr
+                    while len(rpad) < 16 { rpad = rpad + " " }
+                    if len(rmatch) > 0 {
+                        println("  " + rpad + "= " + fmt_f(rval) + "  → " + rmatch)
+                    }
+                }
+
+                oi = oi + 1
+            }
+            bj = bj + 1
+        }
+        bi = bi + 1
+    }
+    println("")
+}
+
+fn match_physics(val: float) -> string {
+    // 물리상수 매칭: EXACT (오차 < 0.01%) 또는 NEAR (< 1%)
+    if val == 0.0 { return "" }
+    if abs_val(val) > 100000.0 { return "" }
+
+    let mut result = ""
+    let mut pi = 0
+    while pi < len(phys_names) {
+        let pv = phys_vals[pi]
+        if pv != 0.0 {
+            let err = abs_val(val - pv) / abs_val(pv)
+            if err < 0.0001 {
+                if len(result) > 0 { result = result + ", " }
+                result = result + "[EXACT " + phys_names[pi] + "=" + fmt_f(pv) + "]"
+            } else if err < 0.01 {
+                if len(result) > 0 { result = result + ", " }
+                result = result + "[NEAR " + phys_names[pi] + "=" + fmt_f(pv) + " err=" + fmt_f(err * 100.0) + "%]"
+            }
+        }
+        pi = pi + 1
+    }
+
+    // 기저 상수 자기 매칭도 체크
+    let mut ki = 0
+    while ki < len(base_names) {
+        let bv = base_vals[ki]
+        let err = abs_val(val - bv) / abs_val(bv)
+        if err < 0.0001 {
+            if len(result) > 0 { result = result + ", " }
+            result = result + "[=" + base_names[ki] + "]"
+        }
+        ki = ki + 1
+    }
+
+    result
+}
+
+// ─── B. DFS 탐색 ───
+
+fn dfs_search(max_depth: int) {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — DFS 위상변환 탐색 (depth=" + to_string(max_depth) + ")             ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+    println("기저: n=6, σ=12, φ=2, τ=4, sopfr=5, M3=7")
+    println("연산: +, -, *, /")
+    println("")
+
+    let mut exact_count = 0
+    let mut near_count = 0
+    let mut total_paths = 0
+
+    // depth 1: 모든 쌍 × 4연산 (비대칭 포함)
+    println("─── Depth 1 ───")
+    let mut d1_vals = []
+    let mut d1_exprs = []
+
+    let mut bi = 0
+    while bi < len(base_names) {
+        let mut bj = 0
+        while bj < len(base_names) {
+            if bi != bj {
+                let mut oi = 0
+                while oi < 4 {
+                    let val = apply_op(base_vals[bi], base_vals[bj], oi)
+                    let expr = base_names[bi] + op_symbol(oi) + base_names[bj]
+                    total_paths = total_paths + 1
+
+                    let m = match_physics(val)
+                    if len(m) > 0 {
+                        let mut epad = expr
+                        while len(epad) < 20 { epad = epad + " " }
+                        if m.contains("EXACT") {
+                            println("  ★ " + epad + "= " + fmt_f(val) + "  " + m)
+                            exact_count = exact_count + 1
+                        } else {
+                            println("  · " + epad + "= " + fmt_f(val) + "  " + m)
+                            near_count = near_count + 1
+                        }
+                    }
+
+                    d1_vals = d1_vals + [val]
+                    d1_exprs = d1_exprs + [expr]
+                    oi = oi + 1
+                }
+            }
+            bj = bj + 1
+        }
+        bi = bi + 1
+    }
+
+    if max_depth >= 2 {
+        println("")
+        println("─── Depth 2 (중간결과 OP 기저) ───")
+
+        let mut di = 0
+        while di < len(d1_vals) {
+            let v1 = d1_vals[di]
+            let e1 = d1_exprs[di]
+
+            if abs_val(v1) <= 100000.0 && v1 != 0.0 {
+                let mut bk = 0
+                while bk < len(base_names) {
+                    let mut oi = 0
+                    while oi < 4 {
+                        let val = apply_op(v1, base_vals[bk], oi)
+                        let expr = "(" + e1 + ")" + op_symbol(oi) + base_names[bk]
+                        total_paths = total_paths + 1
+
+                        let m = match_physics(val)
+                        if len(m) > 0 && !m.contains("[=") {
+                            let mut epad = expr
+                            while len(epad) < 28 { epad = epad + " " }
+                            if m.contains("EXACT") {
+                                println("  ★ " + epad + "= " + fmt_f(val) + "  " + m)
+                                exact_count = exact_count + 1
+                            } else if m.contains("NEAR") {
+                                println("  · " + epad + "= " + fmt_f(val) + "  " + m)
+                                near_count = near_count + 1
+                            }
+                        }
+
+                        oi = oi + 1
+                    }
+                    bk = bk + 1
+                }
+            }
+            di = di + 1
+        }
+    }
+
+    if max_depth >= 3 {
+        println("")
+        println("─── Depth 3 (샘플링 — 물리상수 EXACT만) ───")
+
+        let mut di = 0
+        let d1_len = len(d1_vals)
+        let cap = if d1_len > 30 { 30 } else { d1_len }
+        while di < cap {
+            let v1 = d1_vals[di]
+            let e1 = d1_exprs[di]
+            if abs_val(v1) <= 10000.0 && v1 != 0.0 {
+                let mut dj = di + 1
+                while dj < cap {
+                    let v2 = d1_vals[dj]
+                    let e2 = d1_exprs[dj]
+                    if abs_val(v2) <= 10000.0 && v2 != 0.0 {
+                        let mut oi = 0
+                        while oi < 4 {
+                            let val = apply_op(v1, v2, oi)
+                            let expr = "(" + e1 + ")" + op_symbol(oi) + "(" + e2 + ")"
+                            total_paths = total_paths + 1
+
+                            let m = match_physics(val)
+                            if len(m) > 0 && m.contains("EXACT") {
+                                let mut epad = expr
+                                while len(epad) < 36 { epad = epad + " " }
+                                println("  ★ " + epad + "= " + fmt_f(val) + "  " + m)
+                                exact_count = exact_count + 1
+                            }
+                            oi = oi + 1
+                        }
+                    }
+                    dj = dj + 1
+                }
+            }
+            di = di + 1
+        }
+    }
+
+    println("")
+    println("─── DFS 요약 ───")
+    println("  탐색 경로: " + to_string(total_paths))
+    println("  EXACT 매칭: " + to_string(exact_count))
+    println("  NEAR 매칭:  " + to_string(near_count))
+    println("")
+
+    // growth bus 기록
+    let mut ts = "?"
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
+    let bus_line = "{\"source\":\"gap_finder_dfs\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"transform_dfs\",\"status\":\"depth=" + to_string(max_depth) + " paths=" + to_string(total_paths) + " exact=" + to_string(exact_count) + " near=" + to_string(near_count) + "\"}"
+    try { append_file(growth_bus, bus_line + "\n") } catch e {}
+}
+
+// ─── C. 빈공간 교차 (Bridge) ───
+
+fn bridge_gaps() {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — 빈공간 × 위상변환 교차 (Bridge)           ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+
+    // 1) 빈공간 추출
+    let analysis = analyze_discovery_log()
+    let empty_str = find_empty_constants(analysis)
+    let weak_str = find_weak_constants(analysis)
+
+    let gap_str = if len(empty_str) > 0 && len(weak_str) > 0 { empty_str + "|" + weak_str }
+                  else if len(empty_str) > 0 { empty_str }
+                  else { weak_str }
+
+    if len(gap_str) == 0 {
+        println("  빈 공간 없음 — 모든 상수 커버됨")
+        return
+    }
+
+    let gap_names = gap_str.split("|")
+    println("빈 공간 상수 " + to_string(len(gap_names)) + "건:")
+    let mut gi = 0
+    while gi < len(gap_names) {
+        // 해당 값 찾기
+        let mut gval = 0.0
+        let mut found = false
+        let mut ci = 0
+        while ci < len(n6_constants) {
+            if n6_constants[ci] == gap_names[gi] {
+                gval = n6_values[ci]
+                found = true
+            }
+            ci = ci + 1
+        }
+        if found {
+            println("  " + gap_names[gi] + " = " + fmt_f(gval))
+        } else {
+            println("  " + gap_names[gi] + " (값 미등록)")
+        }
+        gi = gi + 1
+    }
+    println("")
+
+    // 2) depth-1 변환 결과와 교차
+    println("─── 위상변환으로 빈 공간 도달 경로 탐색 ───")
+    println("")
+
+    let mut bridge_count = 0
+
+    let mut bi = 0
+    while bi < len(base_names) {
+        let mut bj = 0
+        while bj < len(base_names) {
+            if bi != bj {
+                let mut oi = 0
+                while oi < 4 {
+                    let val = apply_op(base_vals[bi], base_vals[bj], oi)
+                    let expr = base_names[bi] + op_symbol(oi) + base_names[bj]
+
+                    let mut gi2 = 0
+                    while gi2 < len(gap_names) {
+                        let mut gval = 0.0
+                        let mut gfound = false
+                        let mut ci2 = 0
+                        while ci2 < len(n6_constants) {
+                            if n6_constants[ci2] == gap_names[gi2] {
+                                gval = n6_values[ci2]
+                                gfound = true
+                            }
+                            ci2 = ci2 + 1
+                        }
+
+                        if gfound && gval != 0.0 {
+                            let err = abs_val(val - gval) / abs_val(gval)
+                            if err < 0.0001 {
+                                println("  ★ EXACT  " + expr + " = " + fmt_f(val) + "  →  " + gap_names[gi2] + " = " + fmt_f(gval))
+                                bridge_count = bridge_count + 1
+                            } else if err < 0.01 {
+                                println("  · NEAR   " + expr + " = " + fmt_f(val) + "  →  " + gap_names[gi2] + " = " + fmt_f(gval) + "  (err=" + fmt_f(err * 100.0) + "%)")
+                                bridge_count = bridge_count + 1
+                            }
+                        }
+                        gi2 = gi2 + 1
+                    }
+
+                    oi = oi + 1
+                }
+            }
+            bj = bj + 1
+        }
+        bi = bi + 1
+    }
+
+    // depth-2 도 간단히 시도
+    println("")
+    println("─── Depth-2 경로 ───")
+
+    let mut bi2 = 0
+    while bi2 < len(base_names) {
+        let mut bj2 = 0
+        while bj2 < len(base_names) {
+            if bi2 != bj2 {
+                let mut o1 = 0
+                while o1 < 4 {
+                    let v1 = apply_op(base_vals[bi2], base_vals[bj2], o1)
+                    if abs_val(v1) <= 100000.0 && v1 != 0.0 {
+                        let e1 = base_names[bi2] + op_symbol(o1) + base_names[bj2]
+
+                        let mut bk2 = 0
+                        while bk2 < len(base_names) {
+                            let mut o2 = 0
+                            while o2 < 4 {
+                                let val = apply_op(v1, base_vals[bk2], o2)
+                                let expr = "(" + e1 + ")" + op_symbol(o2) + base_names[bk2]
+
+                                let mut gi3 = 0
+                                while gi3 < len(gap_names) {
+                                    let mut gval = 0.0
+                                    let mut gfound = false
+                                    let mut ci3 = 0
+                                    while ci3 < len(n6_constants) {
+                                        if n6_constants[ci3] == gap_names[gi3] {
+                                            gval = n6_values[ci3]
+                                            gfound = true
+                                        }
+                                        ci3 = ci3 + 1
+                                    }
+
+                                    if gfound && gval != 0.0 {
+                                        let err = abs_val(val - gval) / abs_val(gval)
+                                        if err < 0.0001 {
+                                            println("  ★ EXACT  " + expr + " = " + fmt_f(val) + "  →  " + gap_names[gi3] + " = " + fmt_f(gval))
+                                            bridge_count = bridge_count + 1
+                                        } else if err < 0.01 && abs_val(gval) > 1.0 {
+                                            println("  · NEAR   " + expr + " = " + fmt_f(val) + "  →  " + gap_names[gi3] + " = " + fmt_f(gval) + "  (err=" + fmt_f(err * 100.0) + "%)")
+                                            bridge_count = bridge_count + 1
+                                        }
+                                    }
+                                    gi3 = gi3 + 1
+                                }
+
+                                o2 = o2 + 1
+                            }
+                            bk2 = bk2 + 1
+                        }
+                    }
+                    o1 = o1 + 1
+                }
+            }
+            bj2 = bj2 + 1
+        }
+        bi2 = bi2 + 1
+    }
+
+    println("")
+    println("─── Bridge 요약 ───")
+    println("  빈 공간: " + to_string(len(gap_names)) + "건")
+    println("  도달 경로: " + to_string(bridge_count) + "건")
+    if bridge_count == 0 {
+        println("  → 기저 사칙연산으로 도달 불가 — DFS depth 3+ 또는 거듭제곱 확장 필요")
+    }
+    println("")
+
+    // growth bus 기록
+    let mut ts = "?"
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
+    let bus_line = "{\"source\":\"gap_finder_bridge\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"bridge\",\"status\":\"gaps=" + to_string(len(gap_names)) + " bridges=" + to_string(bridge_count) + "\"}"
+    try { append_file(growth_bus, bus_line + "\n") } catch e {}
+}
+
 // ─── CLI 진입점 ───
 
 let a = args()
@@ -478,6 +935,20 @@ if mode == "breakthrough" || mode == "돌파" {
     auto_breakthrough(targets_str)
 }
 
+if mode == "transform" || mode == "변환" {
+    print_transform_matrix()
+}
+
+if mode == "dfs" {
+    let depth = if len(a) >= 4 { to_int(a[3]) } else { 2 }
+    let d = if depth < 1 { 1 } else if depth > 3 { 3 } else { depth }
+    dfs_search(d)
+}
+
+if mode == "bridge" || mode == "교차" {
+    bridge_gaps()
+}
+
 if mode == "help" {
     println("╔══════════════════════════════════════════════╗")
     println("║  GAP FINDER — 미지의 영역 탐지기            ║")
@@ -490,11 +961,15 @@ if mode == "help" {
     println("  hexa gap_finder.hexa strategy     빈 공간 돌파 전략 출력")
     println("  hexa gap_finder.hexa breakthrough 빈 공간 자동 돌파 실행")
     println("  hexa gap_finder.hexa 돌파          = breakthrough (한글)")
+    println("  hexa gap_finder.hexa transform    n6 위상변환 매트릭스 출력")
+    println("  hexa gap_finder.hexa dfs [depth]  DFS 탐색 (depth=1~3, 기본 2)")
+    println("  hexa gap_finder.hexa bridge       빈공간 × 위상변환 교차")
     println("")
     println("다른 프로젝트에서 사용:")
     println("  hexa=$home/Dev/hexa-lang/target/release/hexa")
     println("  $hexa $home/Dev/nexus6/mk2_hexa/native/gap_finder.hexa target")
     println("  $hexa $home/Dev/nexus6/mk2_hexa/native/gap_finder.hexa 돌파")
+    println("  $hexa $home/Dev/nexus6/mk2_hexa/native/gap_finder.hexa dfs 3")
 }
 
 println("")
