@@ -16,7 +16,7 @@
 // 34. exotic_matter           35. expanding_scan           36. extrapolation
 // 37. faraday_induction
 
-// ─── 상수 정의 ───
+// ─── 수학 상수 (수식 계산용, 불변) ───
 
 comptime const pi = 3.141592653589793
 comptime const e_const = 2.718281828459045
@@ -24,28 +24,79 @@ comptime const phi_golden = 1.618033988749895
 comptime const sqrt2 = 1.4142135623730951
 comptime const sqrt3 = 1.7320508075688772
 comptime const ln2 = 0.6931471805599453
-comptime const fine_structure_inv = 137.036
-comptime const fine_structure = 0.007297353
-comptime const proton_electron = 1836.15
-comptime const omega_m = 0.3153
-comptime const omega_l = 0.6847
 
-// n=6 상수
-comptime const n6 = 6.0
-comptime const sigma = 12.0
-comptime const tau = 4.0
-comptime const phi_euler = 2.0
-comptime const j2 = 24.0
-comptime const sopfr = 5.0
-comptime const sigma_minus_phi = 10.0
-comptime const sigma_minus_tau = 8.0
-comptime const sigma_sq = 144.0
-comptime const sigma_times_j2 = 288.0
-comptime const ln_4_3 = 0.28768207245178085
+// ─── n6 + 물리 상수 동적 로드 (shared/*.jsonl) ───
 
-comptime const known_names = ["pi", "e", "phi_golden", "sqrt2", "sqrt3", "ln2", "fine_structure_inv", "fine_structure", "n", "sigma", "tau", "phi_euler", "j2", "sopfr", "sigma_minus_phi", "sigma_minus_tau", "sigma_sq", "sigma_times_J2", "ln_4_3"]
+fn load_jsonl_kv(path: string) -> list {
+    let raw = try { read_file(path) } catch e { return [[], []] }
+    let lines = raw.split("\n")
+    let mut names = []
+    let mut values = []
+    for line in lines {
+        let trimmed = line.trim()
+        if trimmed == "" { continue }
+        let mut name = ""
+        let mut value = 0.0
+        if trimmed.contains("\"name\":\"") {
+            let p = trimmed.split("\"name\":\"")
+            if p.len() >= 2 { name = p[1].split("\"")[0] }
+        }
+        if trimmed.contains("\"value\":") {
+            let p = trimmed.split("\"value\":")
+            if p.len() >= 2 {
+                let num_str = p[1].split(",")[0].split("}")[0].trim()
+                value = to_float(num_str)
+            }
+        }
+        if name != "" {
+            names = names + [name]
+            values = values + [value]
+        }
+    }
+    [names, values]
+}
 
-comptime const known_values = [3.141592653589793, 2.718281828459045, 1.618033988749895, 1.4142135623730951, 1.7320508075688772, 0.6931471805599453, 137.036, 0.007297353, 6.0, 12.0, 4.0, 2.0, 24.0, 5.0, 10.0, 8.0, 144.0, 288.0, 0.28768207245178085]
+fn kv_lookup(data: list, key: string) -> float {
+    let names = data[0]
+    let values = data[1]
+    let mut i = 0
+    while i < len(names) {
+        if names[i] == key { return values[i] }
+        i = i + 1
+    }
+    0.0
+}
+
+let _home = exec("printenv HOME")
+let _shared = _home + "/Dev/nexus6/shared"
+let _n6_data = load_jsonl_kv(_shared + "/n6_constants.jsonl")
+let _ph_data = load_jsonl_kv(_shared + "/n6_physics.jsonl")
+
+// n6 상수 (jsonl에서 로드)
+let n6 = kv_lookup(_n6_data, "n")
+let sigma = kv_lookup(_n6_data, "sigma")
+let tau = kv_lookup(_n6_data, "tau")
+let phi_euler = kv_lookup(_n6_data, "phi")
+let j2 = kv_lookup(_n6_data, "j2")
+let sopfr = kv_lookup(_n6_data, "sopfr")
+let sigma_minus_phi = kv_lookup(_n6_data, "sigma_minus_phi")
+let sigma_minus_tau = kv_lookup(_n6_data, "phi_tau")
+let sigma_sq = kv_lookup(_n6_data, "sigma_sq")
+let sigma_times_j2 = kv_lookup(_n6_data, "sigma_j2")
+let ln_4_3 = kv_lookup(_n6_data, "ln_4_3")
+
+// 물리 상수 (jsonl에서 로드)
+let fine_structure_inv = kv_lookup(_ph_data, "alpha_inv")
+let fine_structure = kv_lookup(_n6_data, "fine_structure")
+let proton_electron = kv_lookup(_ph_data, "mp_me")
+let omega_m = kv_lookup(_ph_data, "omega_m")
+let omega_l = kv_lookup(_ph_data, "omega_lambda")
+
+// known_names / known_values — 수학 상수 + jsonl 상수 합쳐서 동적 구성
+let _math_names = ["pi", "e", "phi_golden", "sqrt2", "sqrt3", "ln2"]
+let _math_values = [pi, e_const, phi_golden, sqrt2, sqrt3, ln2]
+let known_names = _math_names + _n6_data[0] + _ph_data[0]
+let known_values = _math_values + _n6_data[1] + _ph_data[1]
 
 // ─── 유틸 (telescope.hexa 에 없는 것들) ───
 

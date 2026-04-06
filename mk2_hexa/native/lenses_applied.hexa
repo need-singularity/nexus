@@ -134,10 +134,43 @@ pure fn row_dist(data, d: int, i: int, j: int) -> float {
     sqrt_f(s)
 }
 
-// ─── n=6 상수 ───
+// ─── n6 + 물리 상수 (shared/*.jsonl에서 동적 로드) ───
 
-comptime const n6_vals = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
-comptime const phys_vals = [137.036, 1836.15, 0.3153, 0.6847, 0.0729]
+fn load_ph_consts() -> list {
+    let home = exec("printenv HOME")
+    let path = home + "/Dev/nexus6/shared/n6_physics.jsonl"
+    let raw = try { read_file(path) } catch e { return [[], []] }
+    let lines = raw.split("\n")
+    let mut names = []
+    let mut values = []
+    for line in lines {
+        let trimmed = line.trim()
+        if trimmed == "" { continue }
+        let mut name = ""
+        let mut value = 0.0
+        if trimmed.contains("\"name\":\"") {
+            let p = trimmed.split("\"name\":\"")
+            if p.len() >= 2 { name = p[1].split("\"")[0] }
+        }
+        if trimmed.contains("\"value\":") {
+            let p = trimmed.split("\"value\":")
+            if p.len() >= 2 {
+                let num_str = p[1].split(",")[0].split("}")[0].trim()
+                value = to_float(num_str)
+            }
+        }
+        if name != "" {
+            names = names + [name]
+            values = values + [value]
+        }
+    }
+    [names, values]
+}
+
+let _n6c = load_n6_consts()
+let _phc = load_ph_consts()
+let n6_vals = _n6c[1]
+let phys_vals = _phc[1]
 
 comptime const solar_constants = [1.333, 0.33, 60.0, 72.0, 120.0, 144.0, 6.0, 12.0, 24.0, 48.0, 1.12, 1.5, 25.7]
 comptime const transformer_constants = [12.0, 8.0, 24.0, 6.0, 128.0, 256.0, 512.0, 768.0, 1024.0, 2048.0, 4096.0, 2.667, 0.1, 0.288, 32.0, 16.0, 96.0, 48.0, 64.0]
@@ -2020,13 +2053,13 @@ fn register_applied_lenses(data)  {
 
 // ─── 검증 ───
 
-let test_data = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 137.036, 1836.15, 0.3153, 0.6847, 7.0, 144.0]
+let test_data = n6_vals + phys_vals
 let entries = register_applied_lenses(test_data)
 assert entries.len() == 34
 
 println("=== lenses_applied: 34 lenses registered ===")
 println("  scan functions: 34/34")
-println("  test data points: " + to_string(test_data.len()))
+println("  test data: " + to_string(len(n6_vals)) + " n6 + " + to_string(len(phys_vals)) + " physics = " + to_string(test_data.len()) + " points")
 
 let mut signal_count = 0
 for e in entries {
