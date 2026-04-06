@@ -653,13 +653,13 @@ if args.len() < 3 {
         println("  total_records  :", dist.total_records)
         println("")
 
-        // discovery_log에서 상위 항목 읽기
-        let log_content = read_file(discovery_log_file)
-        if log_content == "" {
+        // discovery_log에서 상위 항목 읽기 (tail로 최근 100줄만 — 113MB 풀 리드 방지)
+        let mut log_tail = ""
+        try { log_tail = exec("tail", ["-n", "100", discovery_log_file]) } catch e {}
+        if log_tail == "" {
             println("  (discovery_log 비어있음)")
         } else {
-            // JSONL에서 상위 d 항목 추출 (간이)
-            let lines = log_content.split("\n")
+            let lines = log_tail.split("\n")
             let mut count = 0
             let limit = 10
             println("  # | ID                    | d  | r  ")
@@ -699,8 +699,7 @@ if args.len() < 3 {
                 let ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
                 let promote_entry = "{\"constant\":\"promote_(1,10)→(2,0)\",\"value\":\"self-similar\",\"source\":\"alien_index_promote\",\"timestamp\":\"" + ts + "\",\"grade\":\"EXACT\",\"processed\":true,\"alien_index\":{\"d\":2,\"r\":0},\"mk2\":{\"sector\":\"meta\",\"confidence\":1.0,\"paths\":1,\"prime_set\":[],\"layer\":2},\"promoted_from\":{\"d\":1,\"r\":10}}"
                 try {
-                    let existing = read_file(discovery_log_file)
-                    write_file(discovery_log_file, existing + promote_entry + "\n")
+                    append_file(discovery_log_file, promote_entry + "\n")
                     promoted = promoted + 1
                     println("  ✓ (2,0) 레코드 생성 → discovery_log")
                 } catch e {
@@ -717,8 +716,7 @@ if args.len() < 3 {
                 let ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
                 let promote_entry = "{\"constant\":\"promote_(0,10)→(1,0)\",\"value\":\"self-similar\",\"source\":\"alien_index_promote\",\"timestamp\":\"" + ts + "\",\"grade\":\"EXACT\",\"processed\":true,\"alien_index\":{\"d\":1,\"r\":0},\"mk2\":{\"sector\":\"meta\",\"confidence\":1.0,\"paths\":1,\"prime_set\":[],\"layer\":1},\"promoted_from\":{\"d\":0,\"r\":10}}"
                 try {
-                    let existing = read_file(discovery_log_file)
-                    write_file(discovery_log_file, existing + promote_entry + "\n")
+                    append_file(discovery_log_file, promote_entry + "\n")
                     promoted = promoted + 1
                     println("  ✓ (1,0) 레코드 생성 → discovery_log")
                 } catch e {

@@ -27,73 +27,97 @@ comptime const sectors = ["n6", "geometric", "quantum", "consciousness", "biolog
 // ─── 발견 로그 분석 ───
 
 fn analyze_discovery_log() -> string {
-    // discovery_log.jsonl 읽어서 상수별/섹터별 카운트
+    // discovery_log.jsonl — 단일 패스로 상수별/섹터별 카운트 (O(n²)→O(n))
     let mut content = ""
     try { content = read_file(discovery_log) } catch err { return "ERROR: cannot read discovery_log" }
 
     let lines = content.split("\n")
     let total = len(lines)
 
-    // 상수별 카운트 (간이 파싱)
-    let mut constant_counts = []   // parallel arrays
-    let mut constant_names = []
-    let mut constant_exact = []
+    // HashMap으로 상수별/섹터별 카운트 (단일 패스)
+    let mut const_counts = #{}
+    let mut const_exact = #{}
+    let mut sec_totals = #{}
+    let mut sec_exacts = #{}
+    let mut sec_misses = #{}
 
+    // 초기화
     let mut ni = 0
     while ni < len(n6_constants) {
-        let name = n6_constants[ni]
-        let marker = "\"constant\":\"" + name + "\""
-        let exact_marker = "\"grade\":\"EXACT\""
-        let mut count = 0
-        let mut exact = 0
+        const_counts[n6_constants[ni]] = 0
+        const_exact[n6_constants[ni]] = 0
+        ni = ni + 1
+    }
+    let mut si = 0
+    while si < len(sectors) {
+        sec_totals[sectors[si]] = 0
+        sec_exacts[sectors[si]] = 0
+        sec_misses[sectors[si]] = 0
+        si = si + 1
+    }
 
-        let mut li = 0
-        while li < len(lines) {
-            let line = lines[li]
-            if line.contains(marker) {
-                count = count + 1
-                if line.contains(exact_marker) {
-                    exact = exact + 1
-                }
-            }
+    // ── 단일 패스: 한 번만 순회하면서 상수+섹터 동시 집계 ──
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line.len() < 10 {
             li = li + 1
+            continue
         }
 
+        let is_exact = line.contains("\"EXACT\"")
+        let is_miss = line.contains("\"MISS\"")
+
+        // 상수 매칭
+        let mut ci = 0
+        while ci < len(n6_constants) {
+            let name = n6_constants[ci]
+            let marker = "\"constant\":\"" + name + "\""
+            if line.contains(marker) {
+                const_counts[name] = const_counts[name] + 1
+                if is_exact { const_exact[name] = const_exact[name] + 1 }
+            }
+            ci = ci + 1
+        }
+
+        // 섹터 매칭
+        let mut ski = 0
+        while ski < len(sectors) {
+            let sec = sectors[ski]
+            let marker = "\"sector\":\"" + sec + "\""
+            if line.contains(marker) {
+                sec_totals[sec] = sec_totals[sec] + 1
+                if is_exact { sec_exacts[sec] = sec_exacts[sec] + 1 }
+                if is_miss { sec_misses[sec] = sec_misses[sec] + 1 }
+            }
+            ski = ski + 1
+        }
+
+        li = li + 1
+    }
+
+    // parallel arrays 복원 (하위 호환)
+    let mut constant_names = []
+    let mut constant_counts = []
+    let mut constant_exact = []
+    ni = 0
+    while ni < len(n6_constants) {
+        let name = n6_constants[ni]
         constant_names = constant_names + [name]
-        constant_counts = constant_counts + [count]
-        constant_exact = constant_exact + [exact]
+        constant_counts = constant_counts + [const_counts[name]]
+        constant_exact = constant_exact + [const_exact[name]]
         ni = ni + 1
     }
 
-    // 섹터별 카운트
     let mut sector_totals = []
     let mut sector_exacts = []
     let mut sector_misses = []
-
-    let mut si = 0
+    si = 0
     while si < len(sectors) {
-        let sector = sectors[si]
-        let marker = "\"sector\":\"" + sector + "\""
-        let exact_marker = "\"grade\":\"EXACT\""
-        let miss_marker = "\"grade\":\"MISS\""
-        let mut stotal = 0
-        let mut sexact = 0
-        let mut smiss = 0
-
-        let mut li = 0
-        while li < len(lines) {
-            let line = lines[li]
-            if line.contains(marker) {
-                stotal = stotal + 1
-                if line.contains(exact_marker) { sexact = sexact + 1 }
-                if line.contains(miss_marker) { smiss = smiss + 1 }
-            }
-            li = li + 1
-        }
-
-        sector_totals = sector_totals + [stotal]
-        sector_exacts = sector_exacts + [sexact]
-        sector_misses = sector_misses + [smiss]
+        let sec = sectors[si]
+        sector_totals = sector_totals + [sec_totals[sec]]
+        sector_exacts = sector_exacts + [sec_exacts[sec]]
+        sector_misses = sector_misses + [sec_misses[sec]]
         si = si + 1
     }
 
