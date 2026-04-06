@@ -23,6 +23,10 @@
 | `alien 분포` | 외계인 지수 히스토그램 | alien_index --distribution |
 | `흡수` | 미흡수 발견 자동 등록 | absorb tick |
 | `{프로젝트} tick` | 1회 자율 사이클 | engine_{name} tick |
+| `새 방향 탐색` | hexa-lang 다음 방향 선택지 | command_router direction |
+| `빈공간 탐색` | n6 지도 빈공간 DFS + 위상변환 | gap_finder dfs + bridge |
+| `다음 돌파 방향` | 돌파 가능 지점 전수 제시 | command_router next_bt |
+| `자가치유` | 전 프로젝트 문제 자동 감지+해결 | auto_healer tick |
 
 도메인/명령어 추가: `shared/bt_domains.jsonl`, `shared/cmd_aliases.jsonl` 에 한 줄 추가만으로 즉시 적용.
 
