@@ -7,22 +7,22 @@
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const VERSION = "1.0.0"
-comptime const NAME = "fathom"
-comptime const PERSONALITY = "Oracle"
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/fathom"
-let LENS_RS = PROJECT_DIR + "/src/lens.rs"
-let SHARED_LINK = PROJECT_DIR + "/.shared"
-let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
-let STATE_FILE = DEV + "/nexus6/shared/engine_fathom_state.json"
-let NEXUS6_SHARED = DEV + "/nexus6/shared"
+comptime const version = "1.0.0"
+comptime const name = "fathom"
+comptime const personality = "Oracle"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/fathom"
+let lens_rs = project_dir + "/src/lens.rs"
+let shared_link = project_dir + "/.shared"
+let bus_file = dev + "/nexus6/shared/growth_bus.jsonl"
+let state_file = dev + "/nexus6/shared/engine_fathom_state.json"
+let nexus6_shared = dev + "/nexus6/shared"
 
-comptime const GOAL_LENSES = 22
-comptime const STAGNANT_THRESHOLD = 0.40
-comptime const BUILD_HISTORY_MAX = 20
-comptime const DATA_FRESH_SECONDS = 3600  // 1 hour
+comptime const goal_lenses = 22
+comptime const stagnant_threshold = 0.40
+comptime const build_history_max = 20
+comptime const data_fresh_seconds = 3600  // 1 hour
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -62,12 +62,12 @@ fn clamp01(x: f64) -> f64 {
 }
 
 fn timestamp() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     r.trim()
 }
 
 fn epoch_now() -> i64 {
-    let r = exec("date", ["+%s"])
+    let r = exec("date +%s")
     return safe_int(r.trim())
 }
 
@@ -98,9 +98,9 @@ fn read_file_safe(path: string) -> string {
 
 fn append_bus(phase: string, status: string, detail: string) {
     let ts = timestamp()
-    let line = "{\"source\":\"" + NAME + "\",\"personality\":\"" + PERSONALITY + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    let line = "{\"source\":\"" + name + "\",\"personality\":\"" + personality + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
     try {
-        append_file(BUS_FILE, line + "\n")
+        append_file(bus_file, line + "\n")
     } catch e {}
 }
 
@@ -110,28 +110,31 @@ fn append_bus(phase: string, status: string, detail: string) {
 
 // Count lens definitions in lens.rs
 fn count_lenses() -> i64 {
-    if !file_exists(LENS_RS) {
+    if !file_exists(lens_rs) {
         // fallback: search for lens definitions across src/
-        let r = try {
-            exec("bash", ["-c", "grep -c 'struct.*Lens\\|impl.*Lens\\|fn.*lens\\|pub fn new_lens\\|LensConfig' " + PROJECT_DIR + "/src/*.rs 2>/dev/null || echo 0"])
-        } catch e { "0" }
+        let mut r = "0"
+        try {
+            r = exec("bash -c grep -c 'struct.*Lens\\|impl.*Lens\\|fn.*lens\\|pub fn new_lens\\|LensConfig' " + project_dir + "/src/*.rs 2>/dev/null || echo 0")
+        } catch e {}
         return safe_int(r.trim())
     }
 
-    let content = read_file_safe(LENS_RS)
+    let content = read_file_safe(lens_rs)
     if content == "" { return 0 }
 
     // Count struct definitions that look like lens types
-    let r = try {
-        exec("bash", ["-c", "grep -cE '(struct\\s+\\w*Lens|impl\\s+\\w*Lens|pub\\s+fn\\s+new|LensKind::\\w+)' " + LENS_RS + " 2>/dev/null || echo 0"])
-    } catch e { "0" }
+    let mut r = "0"
+    try {
+        r = exec("bash -c grep -cE '(struct\\s+\\w*Lens|impl\\s+\\w*Lens|pub\\s+fn\\s+new|LensKind::\\w+)' " + lens_rs + " 2>/dev/null || echo 0")
+    } catch e {}
 
     let count = safe_int(r.trim())
     // Also check for lens enum variants if count is low
     if count < 5 {
-        let r2 = try {
-            exec("bash", ["-c", "grep -cE '^\\s+(\\w+Lens|\\w+),?\\s*//.*lens' " + LENS_RS + " 2>/dev/null || echo 0"])
-        } catch e { "0" }
+        let mut r2 = "0"
+        try {
+            r2 = exec("bash -c grep -cE '^\\s+(\\w+Lens|\\w+),?\\s*//.*lens' " + lens_rs + " 2>/dev/null || echo 0")
+        } catch e {}
         return count + safe_int(r2.trim())
     }
     return count
@@ -146,29 +149,32 @@ struct BuildResult {
 }
 
 fn cargo_build(release: bool) -> BuildResult {
-    if !file_exists(PROJECT_DIR + "/Cargo.toml") {
+    if !file_exists(project_dir + "/Cargo.toml") {
         return BuildResult { success: false, output: "Cargo.toml not found", warnings: 0, errors: 0 }
     }
 
     let flag = if release { "--release" } else { "" }
-    let r = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build " + flag + " 2>&1 | tail -30"])
+    let mut r = "0"
+    try {
+        r = exec("bash -c cd " + project_dir + " && cargo build " + flag + " 2>&1 | tail -30")
     } catch e {
-        "build error: " + to_string(e)
+        r = "build error: " + to_string(e)
     }
 
     let success = !r.contains("error[") && !r.contains("could not compile")
 
     // Count warnings
-    let warn_r = try {
-        exec("bash", ["-c", "echo '" + r + "' | grep -c 'warning\\[' 2>/dev/null || echo 0"])
-    } catch e { "0" }
+    let mut warn_r = ""
+    try {
+        r = exec("bash -c echo '" + r + "' | grep -c 'warning\\[' 2>/dev/null || echo 0")
+    } catch e {}
     let warnings = safe_int(warn_r.trim())
 
     // Count errors
-    let err_r = try {
-        exec("bash", ["-c", "echo '" + r + "' | grep -c 'error\\[' 2>/dev/null || echo 0"])
-    } catch e { "0" }
+    let mut err_r = "0"
+    try {
+        err_r = exec("bash -c echo '" + r + "' | grep -c 'error\\[' 2>/dev/null || echo 0")
+    } catch e {}
     let errors = safe_int(err_r.trim())
 
     return BuildResult { success: success, output: r, warnings: warnings, errors: errors }
@@ -183,28 +189,30 @@ struct FreshnessResult {
 }
 
 fn check_shared_freshness() -> FreshnessResult {
-    if !link_exists(SHARED_LINK) && !dir_exists(SHARED_LINK) {
+    if !link_exists(shared_link) && !dir_exists(shared_link) {
         return FreshnessResult { linked: false, fresh: false, age_seconds: -1, detail: ".shared not found" }
     }
 
     // Check if symlink target is valid
-    let target_r = try {
-        exec("bash", ["-c", "readlink -f " + SHARED_LINK + " 2>/dev/null"])
-    } catch e { "" }
+    let mut target_r = ""
+    try {
+        target_r = exec("bash -c readlink -f " + shared_link + " 2>/dev/null")
+    } catch e {}
 
     if target_r.trim() == "" || !dir_exists(target_r.trim()) {
         return FreshnessResult { linked: true, fresh: false, age_seconds: -1, detail: "symlink broken" }
     }
 
     // Find most recent file modification in .shared/
-    let age_r = try {
-        exec("bash", ["-c", "find " + SHARED_LINK + " -type f -printf '%T@\\n' 2>/dev/null | sort -nr | head -1 || stat -f '%m' " + SHARED_LINK + " 2>/dev/null"])
-    } catch e { "0" }
+    let mut age_r = "0"
+    try {
+        age_r = exec("bash -c find " + shared_link + " -type f -printf '%T@\\n' 2>/dev/null | sort -nr | head -1 || stat -f '%m' " + shared_link + " 2>/dev/null")
+    } catch e {}
 
     let file_epoch = safe_int(age_r.split(".")[0].trim())
     let now = epoch_now()
     let age = if file_epoch > 0 { now - file_epoch } else { 99999 }
-    let fresh = age < DATA_FRESH_SECONDS
+    let fresh = age < data_fresh_seconds
 
     return FreshnessResult {
         linked: true,
@@ -221,15 +229,15 @@ fn check_shared_freshness() -> FreshnessResult {
 struct EngineState {
     lens_count: i64,
     build_ok: bool,
-    build_history: list[bool],   // last N build results
+    build_history: str,   // last N build results
     data_fresh: bool,
     tick_count: i64,
     last_tick: string,
-    error_log: list[string]      // recent build errors
+    error_log      // recent build errors
 }
 
 fn load_state() -> EngineState {
-    let content = read_file_safe(STATE_FILE)
+    let content = read_file_safe(state_file)
     let mut state = EngineState {
         lens_count: 0,
         build_ok: false,
@@ -292,7 +300,7 @@ fn save_state(state: EngineState) {
 
     let json = "{\n  \"lens_count\": " + to_string(state.lens_count) + ",\n  \"build_ok\": " + if state.build_ok { "true" } else { "false" } + ",\n  \"data_fresh\": " + if state.data_fresh { "true" } else { "false" } + ",\n  \"tick_count\": " + to_string(state.tick_count) + ",\n  \"last_tick\": \"" + state.last_tick + "\",\n  \"build_history\": " + build_hist_str + ",\n  \"error_log\": " + err_str + "\n}\n"
     try {
-        write_file(STATE_FILE, json)
+        write_file(state_file, json)
     } catch e {}
 }
 
@@ -300,9 +308,9 @@ fn save_state(state: EngineState) {
 // ─── HEALTH CALCULATION ───
 // ═══════════════════════════════════════════════════════════
 
-fn compute_health(lens_count: i64, build_ok: bool, data_fresh: bool, build_history: list[bool]) -> f64 {
+fn compute_health(lens_count: i64, build_ok: bool, data_fresh: bool, build_history) -> f64 {
     // 40% lens progress, 30% build success, 20% data freshness, 10% build stability
-    let lens_score = clamp01(to_float(lens_count) / to_float(GOAL_LENSES))
+    let lens_score = clamp01(to_float(lens_count) / to_float(goal_lenses))
     let build_score = if build_ok { 1.0 } else { 0.0 }
     let fresh_score = if data_fresh { 1.0 } else { 0.3 }
 
@@ -326,20 +334,20 @@ fn classify_status(lens_count: i64, build_ok: bool, health: f64, prev_lenses: i6
     if !build_ok { return "STAGNANT" }
 
     // Goal reached
-    if lens_count >= GOAL_LENSES { return "GOAL_NEAR" }
+    if lens_count >= goal_lenses { return "GOAL_NEAR" }
 
     // New lenses detected = breakthrough
     if prev_lenses > 0 && lens_count > prev_lenses { return "BREAKTHROUGH" }
 
     // Low health
-    if health < STAGNANT_THRESHOLD { return "STAGNANT" }
+    if health < stagnant_threshold { return "STAGNANT" }
 
     return "HEALTHY"
 }
 
 // ─── Evolve: recurring failure analysis ───
 
-fn analyze_build_failures(error_log: list[string]) -> string {
+fn analyze_build_failures(error_log) -> string {
     // Look for patterns in errors
     let mut pattern_counts = []  // pairs of [pattern, count]
     let patterns = ["lifetime", "borrow", "type mismatch", "unresolved", "trait", "missing field", "unused"]
@@ -377,7 +385,7 @@ fn analyze_build_failures(error_log: list[string]) -> string {
 
 fn mode_status() {
     println("╔═══════════════════════════════════════════════╗")
-    println("║  ENGINE: fathom [Oracle] v" + VERSION + "             ║")
+    println("║  ENGINE: fathom [Oracle] v" + version + "             ║")
     println("║  " + timestamp() + "                            ║")
     println("╚═══════════════════════════════════════════════╝")
 
@@ -388,7 +396,7 @@ fn mode_status() {
     let status = classify_status(lenses, state.build_ok, health, state.lens_count)
 
     println("")
-    println("  lenses:     " + to_string(lenses) + "/" + to_string(GOAL_LENSES))
+    println("  lenses:     " + to_string(lenses) + "/" + to_string(goal_lenses))
     println("  build:      " + if state.build_ok { "OK" } else { "FAIL" })
     println("  shared:     " + freshness.detail)
     println("  ticks:      " + to_string(state.tick_count))
@@ -411,7 +419,7 @@ fn mode_tick() {
 
     // 1. Count lenses
     let lenses = count_lenses()
-    println("  [1/4] lenses: " + to_string(lenses) + "/" + to_string(GOAL_LENSES))
+    println("  [1/4] lenses: " + to_string(lenses) + "/" + to_string(goal_lenses))
 
     let lens_changed = prev_lenses > 0 && lenses != prev_lenses
     if lens_changed {
@@ -434,9 +442,9 @@ fn mode_tick() {
 
     // 4. Build history + error tracking
     let mut build_history = state.build_history + [build.success]
-    if build_history.len() > BUILD_HISTORY_MAX {
+    if build_history.len() > build_history_max {
         let mut trimmed = []
-        let start = build_history.len() - BUILD_HISTORY_MAX
+        let start = build_history.len() - build_history_max
         let mut i = start
         while i < build_history.len() {
             trimmed = trimmed + [build_history[i]]
@@ -546,10 +554,10 @@ fn mode_report() {
     println("## Overview")
     println("- Personality: Oracle (오라클)")
     println("- Goal: 22렌즈 실시간 대시보드 완성")
-    println("- Version: " + VERSION)
+    println("- Version: " + version)
     println("")
     println("## Metrics")
-    println("- Lens count: " + to_string(lenses) + "/" + to_string(GOAL_LENSES))
+    println("- Lens count: " + to_string(lenses) + "/" + to_string(goal_lenses))
     println("- Build: " + if state.build_ok { "OK" } else { "FAIL" })
     println("- Shared data: " + freshness.detail)
     println("- Health: " + to_string(health))
@@ -586,16 +594,16 @@ fn mode_report() {
 
     // Lens progress bar
     println("## Lens Progress")
-    let filled = to_int(to_float(lenses) / to_float(GOAL_LENSES) * 30.0)
+    let filled = to_int(to_float(lenses) / to_float(goal_lenses) * 30.0)
     let mut pbar = "  ["
     let mut i = 0
     while i < 30 {
         if i < filled { pbar = pbar + "█" } else { pbar = pbar + "░" }
         i = i + 1
     }
-    pbar = pbar + "] " + to_string(lenses) + "/" + to_string(GOAL_LENSES)
+    pbar = pbar + "] " + to_string(lenses) + "/" + to_string(goal_lenses)
     println(pbar)
-    let remaining = GOAL_LENSES - lenses
+    let remaining = goal_lenses - lenses
     if remaining > 0 {
         println("  " + to_string(remaining) + " lenses remaining")
     } else {
@@ -615,7 +623,7 @@ if mode == "tick" { mode_tick() }
 if mode == "report" { mode_report() }
 
 if mode == "help" {
-    println("engine_fathom.hexa [Oracle] v" + VERSION)
+    println("engine_fathom.hexa [Oracle] v" + version)
     println("  6-layer terminal dashboard engine")
     println("")
     println("Usage:")

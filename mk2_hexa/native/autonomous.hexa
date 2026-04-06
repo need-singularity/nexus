@@ -7,12 +7,12 @@
 // 에이전트 모드
 // ──────────────────────────────────────
 
-comptime const MODE_EXPLORE = 0     // 넓은 탐색 (세렌디피티)
-comptime const MODE_DEEPEN = 1      // 기존 발견 심화
-comptime const MODE_VERIFY = 2      // 미검증 발견 확인
-comptime const MODE_REDTEAM = 3     // 적대적 반증 시도
-comptime const MODE_FORGE = 4       // 새 렌즈 생성
-comptime const MODE_EXPERIMENT = 5  // 자동 실험
+comptime const mode_explore = 0     // 넓은 탐색 (세렌디피티)
+comptime const mode_deepen = 1      // 기존 발견 심화
+comptime const mode_verify = 2      // 미검증 발견 확인
+comptime const mode_redteam = 3     // 적대적 반증 시도
+comptime const mode_forge = 4       // 새 렌즈 생성
+comptime const mode_experiment = 5  // 자동 실험
 
 pure fn mode_name(m: int) -> string {
     match m {
@@ -43,10 +43,10 @@ pure fn next_mode(m: int) -> int {
 // 에이전트 상태
 // ──────────────────────────────────────
 
-comptime const STATUS_IDLE = 0
-comptime const STATUS_RUNNING = 1
-comptime const STATUS_PAUSED = 2
-comptime const STATUS_COMPLETED = 3
+comptime const status_idle = 0
+comptime const status_running = 1
+comptime const status_paused = 2
+comptime const status_completed = 3
 
 pure fn status_name(s: int) -> string {
     match s {
@@ -73,7 +73,7 @@ struct AgentConfig {
 fn default_agent_config() -> AgentConfig {
     AgentConfig {
         max_cycles: 6,       // n=6
-        mode: MODE_EXPLORE,
+        mode: mode_explore,
         auto_register: true,
         serendipity: 0.2,
         domain: "general"
@@ -113,7 +113,7 @@ fn create_agent(config: AgentConfig) -> AutonomousAgent {
     AutonomousAgent {
         id: id,
         mode: config.mode,
-        status: STATUS_IDLE,
+        status: status_idle,
         config: config
     }
 }
@@ -122,7 +122,7 @@ fn create_agent_with_id(id: string, config: AgentConfig) -> AutonomousAgent {
     AutonomousAgent {
         id: id,
         mode: config.mode,
-        status: STATUS_IDLE,
+        status: status_idle,
         config: config
     }
 }
@@ -182,11 +182,11 @@ fn run_domain_cycle(agent: AutonomousAgent) -> AgentReport {
     }
 
     // forge/experiment 모드
-    if agent.mode == MODE_FORGE {
+    if agent.mode == mode_forge {
         lenses_forged = 1
         cycles = 1
     }
-    if agent.mode == MODE_EXPERIMENT {
+    if agent.mode == mode_experiment {
         experiments = 1
         cycles = 1
     }
@@ -201,7 +201,7 @@ fn run_domain_cycle(agent: AutonomousAgent) -> AgentReport {
         experiments_run: experiments,
         lenses_forged: lenses_forged,
         time_elapsed_ms: elapsed,
-        final_status: status_name(STATUS_COMPLETED),
+        final_status: status_name(status_completed),
         domain: agent.config.domain,
         saturated: saturated
     }
@@ -219,7 +219,7 @@ pure fn simulate_scan(domain: string, serendipity: float, cycle: int) -> int {
 // 에이전트 전체 실행 (모드 자동 전환 포함)
 fn run_agent(config: AgentConfig) -> AgentReport {
     let mut agent = create_agent(config)
-    agent.status = STATUS_RUNNING
+    agent.status = status_running
 
     let report = run_domain_cycle(agent)
 
@@ -246,8 +246,8 @@ struct SchedulerResult {
 }
 
 // 순차 실행
-fn scheduler_run_all(configs: [AgentConfig]) -> SchedulerResult {
-    let count = length(configs)
+fn scheduler_run_all(configs) -> SchedulerResult {
+    let count = len(configs)
     let mut total_cycles = 0
     let mut total_disc = 0
     let mut total_exp = 0
@@ -276,8 +276,8 @@ fn scheduler_run_all(configs: [AgentConfig]) -> SchedulerResult {
 }
 
 // 라운드 로빈 실행 (인터리빙)
-fn scheduler_round_robin(configs: [AgentConfig], rounds: int) -> SchedulerResult {
-    let count = length(configs)
+fn scheduler_round_robin(configs, rounds: int) -> SchedulerResult {
+    let count = len(configs)
     let mut total_cycles = 0
     let mut total_disc = 0
     let mut total_exp = 0
@@ -316,9 +316,9 @@ fn scheduler_round_robin(configs: [AgentConfig], rounds: int) -> SchedulerResult
 // Watchdog: 건강 모니터
 // ──────────────────────────────────────
 
-comptime const ALERT_OK = 0
-comptime const ALERT_WARNING = 1
-comptime const ALERT_CRITICAL = 2
+comptime const alert_ok = 0
+comptime const alert_warning = 1
+comptime const alert_critical = 2
 
 pure fn alert_name(a: int) -> string {
     match a {
@@ -361,23 +361,23 @@ fn check_health(report: AgentReport, config: WatchdogConfig) -> HealthCheck {
     } else { 0.0 }
 
     // 경보 수준 판정
-    let mut alert = ALERT_OK
+    let mut alert = alert_ok
     let mut msg = ""
 
     if report.cycles_completed == 0 {
-        alert = ALERT_CRITICAL
+        alert = alert_critical
         msg = "에이전트가 사이클 0회 완료"
     } else if dpc < config.min_discoveries_per_cycle && report.discovery_count == 0 {
-        alert = ALERT_CRITICAL
+        alert = alert_critical
         msg = to_string(report.cycles_completed) + "사이클 동안 발견 없음 (정체)"
     } else if avg_time > to_float(config.max_cycle_time_ms) {
-        alert = ALERT_WARNING
+        alert = alert_warning
         msg = "사이클 느림: 평균 " + to_string(to_int(avg_time)) + "ms (한도 " + to_string(config.max_cycle_time_ms) + "ms)"
     } else if dpc < config.min_discoveries_per_cycle {
-        alert = ALERT_WARNING
+        alert = alert_warning
         msg = "낮은 발견율: " + to_string(dpc) + "/cycle"
     } else {
-        alert = ALERT_OK
+        alert = alert_ok
         msg = "정상: " + to_string(dpc) + " discoveries/cycle"
     }
 
@@ -424,8 +424,8 @@ println("simulate_scan(test,0.1,6):", simulate_scan("test", 0.1, 6))
 // 에이전트 생성 테스트
 let test_config = default_agent_config()
 let test_agent = create_agent(test_config)
-assert test_agent.status == STATUS_IDLE
-assert test_agent.mode == MODE_EXPLORE
+assert test_agent.status == status_idle
+assert test_agent.mode == mode_explore
 println("agent_id:", test_agent.id)
 println("agent_status:", status_name(test_agent.status))
 

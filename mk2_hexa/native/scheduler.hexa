@@ -8,7 +8,7 @@
 //       hexa scheduler.hexa defaults
 
 // ─── 설정 ───
-comptime const TASK_FILE = "shared/scheduler_tasks.jsonl"
+comptime const task_file = "shared/scheduler_tasks.jsonl"
 
 // ─── 태스크 구조체 ───
 struct ScheduledTask {
@@ -41,8 +41,8 @@ fn jstr(json: string, key: string) -> string {
     let needle = "\"" + key + "\":\""
     let idx = json.index_of(needle)
     if idx < 0 { return "" }
-    let start = idx + needle.length()
-    let rest = json.slice(start, json.length())
+    let start = idx + len(needle)
+    let rest = json.slice(start, len(json))
     let end = rest.index_of("\"")
     if end < 0 { return "" }
     rest.slice(0, end)
@@ -52,11 +52,11 @@ fn jnum(json: string, key: string) -> string {
     let needle = "\"" + key + "\":"
     let idx = json.index_of(needle)
     if idx < 0 { return "0" }
-    let start = idx + needle.length()
-    let rest = json.slice(start, json.length())
+    let start = idx + len(needle)
+    let rest = json.slice(start, len(json))
     let end_c = rest.index_of(",")
     let end_b = rest.index_of("}")
-    let mut end = rest.length()
+    let mut end = len(rest)
     if end_c >= 0 { end = end_c }
     if end_b >= 0 {
         if end_b < end { end = end_b }
@@ -78,7 +78,7 @@ fn parse_task(line: string) -> ScheduledTask {
     let mut interval = 3600
     try {
         interval = to_int(jnum(line, "interval"))
-    } catch {
+    } catch e {
         interval = 3600
     }
     ScheduledTask {
@@ -92,11 +92,11 @@ fn parse_task(line: string) -> ScheduledTask {
 
 // ─── 전체 태스크 로드 ───
 fn load_tasks() -> string {
-    read_file(TASK_FILE)
+    read_file(task_file)
 }
 
 fn save_tasks_raw(content: string) {
-    write_file(TASK_FILE, content)
+    write_file(task_file, content)
 }
 
 // ─── 태스크 추가 (동일 이름 시 교체) ───
@@ -107,7 +107,7 @@ fn add_task(name: string, command: string, interval_secs: int) {
     if raw != "" {
         let parts = raw.split("\n")
         let mut i = 0
-        while i < parts.length() {
+        while i < len(parts) {
             let line = parts[i].trim()
             if line != "" {
                 let existing = parse_task(line)
@@ -121,7 +121,7 @@ fn add_task(name: string, command: string, interval_secs: int) {
     lines = lines.push(task_to_json(task))
     let mut out = ""
     let mut j = 0
-    while j < lines.length() {
+    while j < len(lines) {
         out = out + lines[j] + "\n"
         j = j + 1
     }
@@ -140,7 +140,7 @@ fn remove_task(name: string) -> bool {
     let mut lines = []
     let mut found = false
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         let line = parts[i].trim()
         if line != "" {
             let t = parse_task(line)
@@ -158,7 +158,7 @@ fn remove_task(name: string) -> bool {
     }
     let mut out = ""
     let mut j = 0
-    while j < lines.length() {
+    while j < len(lines) {
         out = out + lines[j] + "\n"
         j = j + 1
     }
@@ -177,7 +177,7 @@ fn list_tasks() -> int {
     let parts = raw.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         let line = parts[i].trim()
         if line != "" {
             let t = parse_task(line)
@@ -202,7 +202,7 @@ fn toggle_task(name: string) {
     let mut lines = []
     let mut found = false
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         let line = parts[i].trim()
         if line != "" {
             let t = parse_task(line)
@@ -230,7 +230,7 @@ fn toggle_task(name: string) {
     }
     let mut out = ""
     let mut j = 0
-    while j < lines.length() {
+    while j < len(lines) {
         out = out + lines[j] + "\n"
         j = j + 1
     }
@@ -248,7 +248,7 @@ fn run_due(now_secs: int) -> int {
     let mut lines = []
     let mut due_count = 0
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         let line = parts[i].trim()
         if line != "" {
             let t = parse_task(line)
@@ -260,7 +260,7 @@ fn run_due(now_secs: int) -> int {
                     let mut last_secs = 0
                     try {
                         last_secs = to_int(t.last_run)
-                    } catch {
+                    } catch e {
                         is_due = true
                     }
                     if !is_due {
@@ -291,7 +291,7 @@ fn run_due(now_secs: int) -> int {
     // 저장
     let mut out = ""
     let mut j = 0
-    while j < lines.length() {
+    while j < len(lines) {
         out = out + lines[j] + "\n"
         j = j + 1
     }
@@ -317,7 +317,7 @@ fn install_defaults() {
 // ─── CLI ───
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("scheduler.hexa — task scheduling & job management")
         print("usage:")
         print("  hexa scheduler.hexa add <name> <command> <interval_secs>")
@@ -331,7 +331,7 @@ fn main() {
     let cmd = a[1]
     match cmd {
         "add" -> {
-            if a.length() < 5 {
+            if len(a) < 5 {
                 print("usage: hexa scheduler.hexa add <name> <command> <interval_secs>")
                 return
             }
@@ -340,7 +340,7 @@ fn main() {
             let mut interval = 3600
             try {
                 interval = to_int(a[4])
-            } catch {
+            } catch e {
                 print("invalid interval: " + a[4])
                 return
             }
@@ -352,10 +352,10 @@ fn main() {
         },
         "run" -> {
             let mut now = to_int(to_string(time()))
-            if a.length() >= 3 {
+            if len(a) >= 3 {
                 try {
                     now = to_int(a[2])
-                } catch {
+                } catch e {
                     print("invalid timestamp: " + a[2])
                     return
                 }
@@ -363,14 +363,14 @@ fn main() {
             run_due(now)
         },
         "remove" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa scheduler.hexa remove <name>")
                 return
             }
             remove_task(a[2])
         },
         "toggle" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa scheduler.hexa toggle <name>")
                 return
             }

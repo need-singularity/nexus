@@ -6,8 +6,8 @@
 //       hexa distributed.hexa merge
 
 // ─── 설정 ───
-comptime const WORKERS_FILE = "shared/distributed_workers.json"
-comptime const RESULTS_FILE = "shared/distributed_results.json"
+comptime const workers_file = "shared/distributed_workers.json"
+comptime const results_file = "shared/distributed_results.json"
 
 // ─── 구조체 ───
 
@@ -36,13 +36,13 @@ fn is_available(w: WorkerNode) -> bool {
 // ─── 워커 목록 로드/저장 ───
 
 fn load_workers() -> string {
-    let raw = read_file(WORKERS_FILE)
+    let raw = read_file(workers_file)
     if raw == "" { return "[]" }
     raw
 }
 
 fn save_workers(json: string) {
-    write_file(WORKERS_FILE, json)
+    write_file(workers_file, json)
 }
 
 fn parse_workers(raw: string) -> int {
@@ -50,7 +50,7 @@ fn parse_workers(raw: string) -> int {
     let lines = raw.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line.contains("\"id\"") {
             count = count + 1
@@ -64,10 +64,10 @@ fn extract_worker_field(raw: string, idx: int, field: string) -> string {
     // raw JSON 배열에서 idx번째 객체의 field 값 추출
     let needle = "\"" + field + "\":"
     let parts = raw.split(needle)
-    if parts.length() <= idx + 1 { return "" }
+    if len(parts) <= idx + 1 { return "" }
     let after = parts[idx + 1].trim()
     if after.starts_with("\"") {
-        let inner = after.slice(1, after.length())
+        let inner = after.slice(1, len(after))
         let end_q = inner.index_of("\"")
         if end_q < 0 { return "" }
         return inner.slice(0, end_q)
@@ -87,7 +87,7 @@ fn distribute_domains(worker_ids: string, domain_list: string) -> string {
     // worker_ids: comma-sep, domain_list: comma-sep
     let wids = worker_ids.split(",")
     let doms = domain_list.split(",")
-    let n = wids.length()
+    let n = len(wids)
     if n == 0 { return "{}" }
 
     // 버킷 할당 (라운드 로빈)
@@ -100,13 +100,14 @@ fn distribute_domains(worker_ids: string, domain_list: string) -> string {
     }
 
     let mut di = 0
-    while di < doms.length() {
+    while di < len(doms) {
         let slot = di % n
         let cur = buckets[slot]
         if cur == "" {
             buckets[slot] = doms[di].trim()
         } else {
-            buckets[slot] = cur + ";" + doms[di].trim()
+            buckets[slot] = cur + "
+            " + doms[di].trim()
         }
         di = di + 1
     }
@@ -135,7 +136,7 @@ fn merge_results(results_json: string) -> string {
     let parts = results_json.split("\"results\":\"")
     let mut merged = ""
     let mut i = 1
-    while i < parts.length() {
+    while i < len(parts) {
         let after = parts[i]
         let end_q = after.index_of("\"")
         if end_q > 0 {
@@ -143,7 +144,8 @@ fn merge_results(results_json: string) -> string {
             if merged == "" {
                 merged = val
             } else {
-                merged = merged + ";" + val
+                merged = merged + "
+                " + val
             }
         }
         i = i + 1
@@ -158,18 +160,18 @@ fn worker_to_json(id: string, address: string, status: string) -> string {
 }
 
 fn add_worker_to_file(id: string, address: string, status: string) {
-    let raw = read_file(WORKERS_FILE)
+    let raw = read_file(workers_file)
     let entry = worker_to_json(id, address, status)
     if raw == "" {
-        write_file(WORKERS_FILE, "[" + entry + "]")
+        write_file(workers_file, "[" + entry + "]")
     } else {
         // 기존 ] 앞에 삽입
         let trimmed = raw.trim()
         if trimmed == "[]" {
-            write_file(WORKERS_FILE, "[" + entry + "]")
+            write_file(workers_file, "[" + entry + "]")
         } else {
-            let without_bracket = trimmed.slice(0, trimmed.length() - 1)
-            write_file(WORKERS_FILE, without_bracket + "," + entry + "]")
+            let without_bracket = trimmed.slice(0, len(trimmed) - 1)
+            write_file(workers_file, without_bracket + "," + entry + "]")
         }
     }
 }
@@ -182,18 +184,18 @@ fn get_available_ids(raw: string) -> string {
     let mut cur_id = ""
     let mut cur_status = ""
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line.contains("\"id\"") {
             let p = line.split("\"id\":")
-            if p.length() > 1 {
+            if len(p) > 1 {
                 let v = p[1].trim().replace("\"", "").replace(",", "")
                 cur_id = v
             }
         }
         if line.contains("\"status\"") {
             let p = line.split("\"status\":")
-            if p.length() > 1 {
+            if len(p) > 1 {
                 let v = p[1].trim().replace("\"", "").replace(",", "").replace("}", "")
                 cur_status = v
                 if cur_status != "offline" {
@@ -216,7 +218,7 @@ fn get_available_ids(raw: string) -> string {
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("distributed.hexa — 분산 탐색 스케줄러")
         print("Usage:")
         print("  add <id> <address> [idle|busy|offline]")
@@ -228,14 +230,14 @@ fn main() {
     let cmd = a[1]
 
     if cmd == "add" {
-        if a.length() < 4 {
+        if len(a) < 4 {
             print("Usage: add <id> <address> [status=idle]")
             return
         }
         let id = a[2]
         let address = a[3]
         let mut status = "idle"
-        if a.length() > 4 { status = a[4] }
+        if len(a) > 4 { status = a[4] }
         add_worker_to_file(id, address, status)
         print("[distributed] added worker " + id + " (" + address + ") status=" + status)
     }
@@ -244,7 +246,7 @@ fn main() {
         let raw = load_workers()
         let count = parse_workers(raw)
         let avail_ids = get_available_ids(raw)
-        let avail_count = if avail_ids == "" { 0 } else { avail_ids.split(",").length() }
+        let avail_count = if avail_ids == "" { 0 } else { avail_ids.split(",").len() }
         print("=== distributed scheduler status ===")
         print("  total workers : " + to_string(count))
         print("  available     : " + to_string(avail_count))
@@ -254,13 +256,13 @@ fn main() {
     }
 
     if cmd == "distribute" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: distribute <domain1> <domain2> ...")
             return
         }
         let mut domains = ""
         let mut di = 2
-        while di < a.length() {
+        while di < len(a) {
             if domains == "" { domains = a[di] }
             else { domains = domains + "," + a[di] }
             di = di + 1
@@ -272,13 +274,13 @@ fn main() {
             return
         }
         let plan = distribute_domains(avail_ids, domains)
-        write_file(RESULTS_FILE, plan)
+        write_file(results_file, plan)
         print("[distributed] plan:")
         print(plan)
     }
 
     if cmd == "merge" {
-        let raw = read_file(RESULTS_FILE)
+        let raw = read_file(results_file)
         if raw == "" {
             print("[distributed] no results to merge")
             return

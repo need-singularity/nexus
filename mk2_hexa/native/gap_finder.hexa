@@ -5,31 +5,31 @@
 // 모든 프로젝트가 "돌파"할 때 이 모듈로 빈 공간을 먼저 확인
 // → 허공이 아닌 실제 미발견 영역으로 정밀 타격
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let NEXUS6_DIR = DEV + "/nexus6"
-let DISCOVERY_LOG = NEXUS6_DIR + "/shared/discovery_log.jsonl"
-let GROWTH_BUS = NEXUS6_DIR + "/shared/growth_bus.jsonl"
-let HEXA = DEV + "/hexa-lang/target/release/hexa"
-let BLOWUP = NEXUS6_DIR + "/mk2_hexa/native/blowup.hexa"
-let SEED_ENGINE = NEXUS6_DIR + "/mk2_hexa/native/seed_engine.hexa"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let nexus6_dir = dev + "/nexus6"
+let discovery_log = nexus6_dir + "/shared/discovery_log.jsonl"
+let growth_bus = nexus6_dir + "/shared/growth_bus.jsonl"
+let hexa = dev + "/hexa-lang/target/release/hexa"
+let blowup = nexus6_dir + "/mk2_hexa/native/blowup.hexa"
+let seed_engine = nexus6_dir + "/mk2_hexa/native/seed_engine.hexa"
 
 // ─── n=6 기본 상수 전체 맵 ───
 
-comptime const N6_CONSTANTS = ["n", "phi", "tau", "sigma", "sopfr", "mu", "J2", "P1", "P2", "P3", "P4", "n/phi", "sigma-phi", "phi*tau", "n^2", "6!", "sigma*tau", "M3", "sigma-tau", "tau+phi", "alpha_inv", "mp_me", "omega_m", "omega_lambda", "meta_fp", "transcendence"]
+comptime const n6_constants = ["n", "phi", "tau", "sigma", "sopfr", "mu", "J2", "P1", "P2", "P3", "P4", "n/phi", "sigma-phi", "phi*tau", "n^2", "6!", "sigma*tau", "M3", "sigma-tau", "tau+phi", "alpha_inv", "mp_me", "omega_m", "omega_lambda", "meta_fp", "transcendence"]
 
-comptime const N6_VALUES = [6.0, 2.0, 4.0, 12.0, 5.0, 1.0, 24.0, 2.0, 28.0, 496.0, 8128.0, 3.0, 10.0, 8.0, 36.0, 720.0, 48.0, 7.0, 8.0, 6.0, 137.036, 1836.15, 0.3153, 0.6847, 0.3333, 0.3333]
+comptime const n6_values = [6.0, 2.0, 4.0, 12.0, 5.0, 1.0, 24.0, 2.0, 28.0, 496.0, 8128.0, 3.0, 10.0, 8.0, 36.0, 720.0, 48.0, 7.0, 8.0, 6.0, 137.036, 1836.15, 0.3153, 0.6847, 0.3333, 0.3333]
 
 // ─── 섹터 정의 ───
 
-comptime const SECTORS = ["n6", "geometric", "quantum", "consciousness", "biological", "cosmological", "cosmology", "information", "thermodynamic", "topological", "algebraic"]
+comptime const sectors = ["n6", "geometric", "quantum", "consciousness", "biological", "cosmological", "cosmology", "information", "thermodynamic", "topological", "algebraic"]
 
 // ─── 발견 로그 분석 ───
 
 fn analyze_discovery_log() -> string {
     // discovery_log.jsonl 읽어서 상수별/섹터별 카운트
     let mut content = ""
-    try { content = read_file(DISCOVERY_LOG) } catch e { return "ERROR: cannot read discovery_log" }
+    try { content = read_file(discovery_log) } catch e { return "ERROR: cannot read discovery_log" }
 
     let lines = content.split("\n")
     let total = len(lines)
@@ -40,8 +40,8 @@ fn analyze_discovery_log() -> string {
     let mut constant_exact = []
 
     let mut ni = 0
-    while ni < len(N6_CONSTANTS) {
-        let name = N6_CONSTANTS[ni]
+    while ni < len(n6_constants) {
+        let name = n6_constants[ni]
         let marker = "\"constant\":\"" + name + "\""
         let exact_marker = "\"grade\":\"EXACT\""
         let mut count = 0
@@ -71,8 +71,8 @@ fn analyze_discovery_log() -> string {
     let mut sector_misses = []
 
     let mut si = 0
-    while si < len(SECTORS) {
-        let sector = SECTORS[si]
+    while si < len(sectors) {
+        let sector = sectors[si]
         let marker = "\"sector\":\"" + sector + "\""
         let exact_marker = "\"grade\":\"EXACT\""
         let miss_marker = "\"grade\":\"MISS\""
@@ -114,14 +114,14 @@ fn analyze_discovery_log() -> string {
         i = i + 1
     }
 
-    result = result + "SECTORS:\n"
+    result = result + "sectors:\n"
     i = 0
-    while i < len(SECTORS) {
+    while i < len(sectors) {
         let gap_ratio = if sector_totals[i] > 0 { to_float(sector_misses[i]) / to_float(sector_totals[i]) } else { 1.0 }
         let flag = if sector_totals[i] == 0 { "EMPTY" }
                    else if gap_ratio > 0.5 { "HIGH_MISS" }
                    else { "OK" }
-        result = result + SECTORS[i] + ":" + to_string(sector_totals[i]) + ":" + to_string(sector_exacts[i]) + ":" + to_string(sector_misses[i]) + ":" + flag + "\n"
+        result = result + sectors[i] + ":" + to_string(sector_totals[i]) + ":" + to_string(sector_exacts[i]) + ":" + to_string(sector_misses[i]) + ":" + flag + "\n"
         i = i + 1
     }
 
@@ -139,7 +139,7 @@ fn find_empty_constants(analysis: string) -> string {
         let line = lines[li]
         if line.contains(":EMPTY") || line.contains(":NO_EXACT") {
             let name = line.split(":")[0]
-            if len(name) > 0 && name != "CONSTANTS" && name != "SECTORS" {
+            if len(name) > 0 && name != "CONSTANTS" && name != "sectors" {
                 if len(empties) == 0 { empties = name } else { empties = empties + "|" + name }
             }
         }
@@ -172,7 +172,7 @@ fn find_empty_sectors(analysis: string) -> string {
     let mut li = 0
     while li < len(lines) {
         let line = lines[li]
-        if line == "SECTORS:" { in_sectors = true }
+        if line == "sectors:" { in_sectors = true }
         else if in_sectors && (line.contains(":EMPTY") || line.contains(":HIGH_MISS")) {
             let name = line.split(":")[0]
             if len(name) > 0 {
@@ -326,10 +326,10 @@ fn auto_breakthrough(targets_str: string) {
             let target_name = parts[2].split(" ")[0]
             // N6_VALUES에서 해당 상수 값 찾기
             let mut vi = 0
-            while vi < len(N6_CONSTANTS) {
-                if N6_CONSTANTS[vi] == target_name {
+            while vi < len(n6_constants) {
+                if n6_constants[vi] == target_name {
                     if len(seeds) > 0 { seeds = seeds + "," }
-                    seeds = seeds + to_string(N6_VALUES[vi])
+                    seeds = seeds + to_string(n6_values[vi])
                 }
                 vi = vi + 1
             }
@@ -345,7 +345,7 @@ fn auto_breakthrough(targets_str: string) {
 
     // blowup 실행 (빈 공간 seed로)
     let mut result = ""
-    try { result = exec(HEXA, [BLOWUP, "math", "3", "--no-graph", "--seeds", seeds]) } catch e { result = "ERROR: " + to_string(e) }
+    try { result = exec(hexa, [blowup, "math", "3", "--no-graph", "--seeds", seeds]) } catch e { result = "ERROR: " + to_string(e) }
 
     // 결과에서 발견 추출
     let rlines = result.split("\n")
@@ -364,9 +364,9 @@ fn auto_breakthrough(targets_str: string) {
 
     // growth bus 기록
     let mut ts = "?"
-    try { ts = exec("date", ["+%Y-%m-%dT%H:%M:%S"]) } catch e {}
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch e {}
     let bus_line = "{\"source\":\"gap_finder\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"breakthrough\",\"status\":\"" + to_string(discoveries) + "_discoveries\",\"detail\":\"targets=" + to_string(len(targets)) + " seeds=" + seeds + "\"}"
-    try { append_file(GROWTH_BUS, bus_line + "\n") } catch e {}
+    try { append_file(growth_bus, bus_line + "\n") } catch e {}
 }
 
 // ─── CLI 진입점 ───
@@ -395,7 +395,7 @@ if mode == "scan" || mode == "map" {
     while li < len(lines) {
         let line = lines[li]
         if line == "CONSTANTS:" { in_constants = true }
-        else if line == "SECTORS:" { in_constants = false }
+        else if line == "sectors:" { in_constants = false }
         else if in_constants && len(line) > 0 {
             let parts = line.split(":")
             if len(parts) >= 4 {
@@ -419,7 +419,7 @@ if mode == "scan" || mode == "map" {
     let mut li2 = 0
     while li2 < len(lines) {
         let line = lines[li2]
-        if line == "SECTORS:" { in_sectors = true }
+        if line == "sectors:" { in_sectors = true }
         else if in_sectors && len(line) > 0 {
             let parts = line.split(":")
             if len(parts) >= 5 {
@@ -492,9 +492,9 @@ if mode == "help" {
     println("  hexa gap_finder.hexa 돌파          = breakthrough (한글)")
     println("")
     println("다른 프로젝트에서 사용:")
-    println("  HEXA=$HOME/Dev/hexa-lang/target/release/hexa")
-    println("  $HEXA $HOME/Dev/nexus6/mk2_hexa/native/gap_finder.hexa target")
-    println("  $HEXA $HOME/Dev/nexus6/mk2_hexa/native/gap_finder.hexa 돌파")
+    println("  hexa=$home/Dev/hexa-lang/target/release/hexa")
+    println("  $hexa $home/Dev/nexus6/mk2_hexa/native/gap_finder.hexa target")
+    println("  $hexa $home/Dev/nexus6/mk2_hexa/native/gap_finder.hexa 돌파")
 }
 
 println("")

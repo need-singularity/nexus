@@ -2,15 +2,15 @@
 // Rust/Python 의존 0 — 순수 hexa 파일 I/O
 // CLI: hexa absorb.hexa [scan|auto|tick|status]
 
-comptime const LOG_PATH = "shared/discovery_log.jsonl"
-comptime const GRAPH_PATH = "shared/discovery_graph.json"
-comptime const DIST_PATH = "shared/alien_index_distribution.json"
-comptime const BUS_PATH = "shared/growth_bus.jsonl"
-comptime const SCAN_TAIL = 100  // 최근 N건만 스캔
+comptime const log_path = "shared/discovery_log.jsonl"
+comptime const graph_path = "shared/discovery_graph.json"
+comptime const dist_path = "shared/alien_index_distribution.json"
+comptime const bus_path = "shared/growth_bus.jsonl"
+comptime const scan_tail = 100  // 최근 N건만 스캔
 
 // ─── n=6 상수 테이블 (EXACT 노드 엣지 연결용) ───
-comptime const N6_CONSTANTS = ["n", "sigma", "phi", "tau", "J2", "sopfr", "M3"]
-comptime const N6_VALUES    = ["6", "12", "2", "4", "24", "5", "7"]
+comptime const n6_constants = ["n", "sigma", "phi", "tau", "J2", "sopfr", "M3"]
+comptime const n6_values    = ["6", "12", "2", "4", "24", "5", "7"]
 
 // ─── JSON 간이 파서 ───
 pure fn extract_field(line: string, field: string) -> string {
@@ -98,15 +98,15 @@ fn n6_match_grade(value: float) -> string {
 
 // ─── 타임스탬프 ───
 fn now_ts() -> string {
-    let raw = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let raw = exec("date +%Y-%m-%dT%H:%M:%S")
     raw.trim()
 }
 
 // ─── discovery_graph에서 기존 노드 ID 집합 로드 ───
 fn load_graph_node_ids() -> list {
     let mut ids = []
-    if !file_exists(GRAPH_PATH) { return ids }
-    let content = read_file(GRAPH_PATH)
+    if !file_exists(graph_path) { return ids }
+    let content = read_file(graph_path)
     let lines = content.split("\n")
     let mut i = 0
     while i < lines.len() {
@@ -125,9 +125,9 @@ fn load_graph_node_ids() -> list {
 // ─── discovery_log 최근 N건 읽기 (tail) ───
 fn load_recent_log(n: int) -> list {
     let mut lines_out = []
-    if !file_exists(LOG_PATH) { return lines_out }
+    if !file_exists(log_path) { return lines_out }
     // exec tail for efficiency (1.39M lines — read_file 전체는 불가)
-    let raw = exec("tail", ["-n", to_string(n), LOG_PATH])
+    let raw = exec("tail", ["-n", to_string(n), log_path])
     let lines = raw.split("\n")
     let mut i = 0
     while i < lines.len() {
@@ -144,7 +144,7 @@ fn load_recent_log(n: int) -> list {
 // discovery_log 항목 중 discovery_graph에 노드가 없는 것 = 미흡수
 fn scan_unabsorbed() -> list {
     let graph_ids = load_graph_node_ids()
-    let recent = load_recent_log(SCAN_TAIL)
+    let recent = load_recent_log(scan_tail)
 
     let mut unabsorbed = []
     let mut ri = 0
@@ -184,8 +184,8 @@ pure fn value_to_n6_node(value: string) -> string {
     // 값이 n6 상수 값과 일치하면 해당 노드 ID 반환
     let mut i = 0
     while i < 7 {
-        if N6_VALUES[i] == value {
-            return "n6-" + N6_CONSTANTS[i]
+        if n6_values[i] == value {
+            return "n6-" + n6_constants[i]
         }
         i = i + 1
     }
@@ -266,12 +266,12 @@ fn absorb_auto() -> int {
 
     // discovery_graph.json에 추가
     if graph_append != "" {
-        append_file(GRAPH_PATH, graph_append)
+        append_file(graph_path, graph_append)
     }
 
     // growth_bus.jsonl에 흡수 이벤트 기록
     if bus_append != "" {
-        append_file(BUS_PATH, bus_append)
+        append_file(bus_path, bus_append)
     }
 
     println("[absorb] " + to_string(absorbed) + "건 흡수 완료 → discovery_graph + growth_bus")
@@ -319,11 +319,11 @@ fn print_status() {
     let graph_ids = load_graph_node_ids()
 
     // 전체 로그 라인 수 (wc -l)
-    let total_log_raw = exec("wc", ["-l", LOG_PATH])
+    let total_log_raw = exec("wc", ["-l", log_path])
     let total_log_str = total_log_raw.trim().split(" ")[0]
 
     println("=== mk2 absorb status (hexa-native) ===")
-    println("  log           : " + LOG_PATH)
+    println("  log           : " + log_path)
     println("  total (log)   : " + total_log_str)
     println("  recent sample : " + to_string(total) + " (last 1000)")
     println("  graph nodes   : " + to_string(graph_ids.len()))
@@ -338,7 +338,7 @@ fn print_status() {
     println("  hook          : " + to_string(by_source_hook))
     println("  other         : " + to_string(by_source_other))
     println("  ── 흡수 현황 ──")
-    println("  unabsorbed    : " + to_string(unabsorbed.len()) + " (last " + to_string(SCAN_TAIL) + ")")
+    println("  unabsorbed    : " + to_string(unabsorbed.len()) + " (last " + to_string(scan_tail) + ")")
     println("  ── 돌파율 ──")
     println("  rho           : " + to_string(rho))
     println("  target        : 0.333333")
@@ -355,7 +355,7 @@ fn print_status() {
 fn print_scan() {
     let unabsorbed = scan_unabsorbed()
     println("=== mk2 absorb scan — 미흡수 발견 ===")
-    println("  scanned       : last " + to_string(SCAN_TAIL) + " entries")
+    println("  scanned       : last " + to_string(scan_tail) + " entries")
     println("  unabsorbed    : " + to_string(unabsorbed.len()))
     println("")
 
@@ -387,7 +387,7 @@ fn run_tick() {
     let ts = now_ts()
 
     // JSON 출력 (파이프라인 연동)
-    let json = "{\"mode\":\"tick\",\"timestamp\":\"" + ts + "\",\"scanned\":" + to_string(SCAN_TAIL) + ",\"unabsorbed_found\":" + to_string(count_before) + ",\"absorbed\":" + to_string(absorbed) + ",\"status\":\"ok\"}"
+    let json = "{\"mode\":\"tick\",\"timestamp\":\"" + ts + "\",\"scanned\":" + to_string(scan_tail) + ",\"unabsorbed_found\":" + to_string(count_before) + ",\"absorbed\":" + to_string(absorbed) + ",\"status\":\"ok\"}"
     println(json)
 }
 
@@ -413,8 +413,8 @@ fn write_distribution() {
     let rho = if total > 0 { to_float(d_ge1) / to_float(total) } else { 0.0 }
 
     let dist_content = "{\"total\":" + to_string(total) + ",\"d0\":" + to_string(d0) + ",\"d1\":" + to_string(d1) + ",\"d5\":" + to_string(d5) + ",\"rho\":" + to_string(rho) + "}"
-    write_file(DIST_PATH, dist_content)
-    println("written: " + DIST_PATH)
+    write_file(dist_path, dist_content)
+    println("written: " + dist_path)
 }
 
 // ─── CLI ───

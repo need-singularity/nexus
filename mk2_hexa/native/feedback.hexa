@@ -10,10 +10,10 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const LEARNING_RATE = 0.166666667
-comptime const WEIGHT_MIN = 0.0
-comptime const WEIGHT_MAX = 2.0
-comptime const DEFAULT_FEEDBACK_FILE = "shared/feedback.tsv"
+comptime const learning_rate = 0.166666667
+comptime const weight_min = 0.0
+comptime const weight_max = 2.0
+comptime const default_feedback_file = "shared/feedback.tsv"
 
 // ────────────────────────────────────────────────────────────────
 //  Feedback 타입 + 점수 (mod.rs 포팅)
@@ -41,7 +41,7 @@ fn validate_type_tag(tag: string) -> bool {
 // ────────────────────────────────────────────────────────────────
 
 fn serialize_feedback(ts: string, type_tag: string, discovery_id: string, reason: string) -> string {
-    if length(reason) > 0 {
+    if len(reason) > 0 {
         return ts + "\t" + type_tag + "\t" + discovery_id + "\t" + reason
     }
     return ts + "\t" + type_tag + "\t" + discovery_id
@@ -50,12 +50,12 @@ fn serialize_feedback(ts: string, type_tag: string, discovery_id: string, reason
 fn parse_feedback_line(line: string) -> string {
     // 반환: "ts|type|id|reason" (파이프 구분)
     let parts = split(line, "\t")
-    if length(parts) < 3 { return "" }
+    if len(parts) < 3 { return "" }
     let ts = parts[0]
     let typ = parts[1]
     let did = parts[2]
     let reason = ""
-    if length(parts) >= 4 { reason = parts[3] }
+    if len(parts) >= 4 { reason = parts[3] }
     return ts + "|" + typ + "|" + did + "|" + reason
 }
 
@@ -85,15 +85,15 @@ fn append_feedback(path: string, type_tag: string, discovery_id: string, reason:
     let lines = split(existing, "\n")
     let count = 0
     let li = 0
-    while li < length(lines) {
-        if length(trim(lines[li])) > 0 { count = count + 1 }
+    while li < len(lines) {
+        if len(trim(lines[li])) > 0 { count = count + 1 }
         li = li + 1
     }
     let ts = to_string(count + 1)
 
     let new_line = serialize_feedback(ts, type_tag, discovery_id, reason)
     let content = existing
-    if length(content) > 0 {
+    if len(content) > 0 {
         if !ends_with(content, "\n") {
             content = content + "\n"
         }
@@ -124,14 +124,14 @@ fn compute_stats(path: string) -> string {
     let irrelevant = 0
 
     let li = 0
-    while li < length(lines) {
+    while li < len(lines) {
         let line = trim(lines[li])
-        if length(line) == 0 {
+        if len(line) == 0 {
             li = li + 1
             continue
         }
         let parsed = parse_feedback_line(line)
-        if length(parsed) == 0 {
+        if len(parsed) == 0 {
             li = li + 1
             continue
         }
@@ -172,14 +172,14 @@ fn compute_net_scores(path: string) -> string {
     let scores = []
 
     let li = 0
-    while li < length(lines) {
+    while li < len(lines) {
         let line = trim(lines[li])
-        if length(line) == 0 {
+        if len(line) == 0 {
             li = li + 1
             continue
         }
         let parsed = parse_feedback_line(line)
-        if length(parsed) == 0 {
+        if len(parsed) == 0 {
             li = li + 1
             continue
         }
@@ -191,7 +191,7 @@ fn compute_net_scores(path: string) -> string {
         // 기존 id 찾기
         let found = false
         let si = 0
-        while si < length(ids) {
+        while si < len(ids) {
             if ids[si] == did {
                 scores[si] = scores[si] + sc
                 found = true
@@ -207,9 +207,9 @@ fn compute_net_scores(path: string) -> string {
 
     // 버블 정렬 (내림차순)
     let ni = 0
-    while ni < length(scores) {
+    while ni < len(scores) {
         let nj = ni + 1
-        while nj < length(scores) {
+        while nj < len(scores) {
             if scores[nj] > scores[ni] {
                 let tmp_s = scores[ni]
                 scores[ni] = scores[nj]
@@ -225,7 +225,7 @@ fn compute_net_scores(path: string) -> string {
 
     let out = ""
     let oi = 0
-    while oi < length(ids) {
+    while oi < len(ids) {
         out = out + ids[oi] + ":" + to_string(scores[oi]) + "\n"
         oi = oi + 1
     }
@@ -246,14 +246,14 @@ fn compute_weight_updates(path: string) -> string {
     let lens_counts = []
 
     let li = 0
-    while li < length(lines) {
+    while li < len(lines) {
         let line = trim(lines[li])
-        if length(line) == 0 {
+        if len(line) == 0 {
             li = li + 1
             continue
         }
         let parsed = parse_feedback_line(line)
-        if length(parsed) == 0 {
+        if len(parsed) == 0 {
             li = li + 1
             continue
         }
@@ -265,12 +265,12 @@ fn compute_weight_updates(path: string) -> string {
         // 렌즈 이름 추출: "domain-lens-N" → "domain"
         let id_parts = split(did, "-")
         let lens_name = "unknown"
-        if length(id_parts) >= 2 { lens_name = id_parts[0] }
+        if len(id_parts) >= 2 { lens_name = id_parts[0] }
 
         // 기존 렌즈 찾기
         let found = false
         let si = 0
-        while si < length(lens_names) {
+        while si < len(lens_names) {
             if lens_names[si] == lens_name {
                 lens_totals[si] = lens_totals[si] + sc
                 lens_counts[si] = lens_counts[si] + 1
@@ -289,9 +289,9 @@ fn compute_weight_updates(path: string) -> string {
     // 정규화: avg_score * learning_rate (1/n = 1/6)
     let out = "=== Lens Weight Updates (lr=1/6) ===\n"
     let wi = 0
-    while wi < length(lens_names) {
+    while wi < len(lens_names) {
         let avg = lens_totals[wi] / to_float(lens_counts[wi])
-        let delta = avg * LEARNING_RATE
+        let delta = avg * learning_rate
         let sign = "+"
         if delta < 0.0 { sign = "" }
         out = out + "  " + lens_names[wi] + ": " + sign + to_string(delta) + "\n"
@@ -314,7 +314,7 @@ fn clamp(val: float, lo: float, hi: float) -> float {
 fn main() {
     let argv = args()
 
-    if length(argv) < 2 {
+    if len(argv) < 2 {
         println("feedback.hexa — 발견 품질 피드백 루프 (n=6)")
         println("")
         println("Usage:")
@@ -330,19 +330,19 @@ fn main() {
         println("  irrelevant   = -0.5")
         println("  bad          = -1.0")
         println("")
-        println("Default file: " + DEFAULT_FEEDBACK_FILE)
+        println("Default file: " + default_feedback_file)
         return 0
     }
 
     let cmd = argv[1]
 
     if cmd == "report" {
-        let path = DEFAULT_FEEDBACK_FILE
-        if length(argv) >= 3 { path = argv[2] }
+        let path = default_feedback_file
+        if len(argv) >= 3 { path = argv[2] }
         println(compute_stats(path))
 
     } else if cmd == "rate" {
-        if length(argv) < 4 {
+        if len(argv) < 4 {
             println("[ERROR] 사용법: hexa feedback.hexa rate <discovery_id> <score>")
             println("  score: good | bad | interesting | irrelevant")
             return 1
@@ -355,10 +355,10 @@ fn main() {
             return 1
         }
         let reason = ""
-        if length(argv) >= 5 { reason = argv[4] }
+        if len(argv) >= 5 { reason = argv[4] }
 
-        let path = DEFAULT_FEEDBACK_FILE
-        if length(argv) >= 6 { path = argv[5] }
+        let path = default_feedback_file
+        if len(argv) >= 6 { path = argv[5] }
 
         let ok = append_feedback(path, type_tag, did, reason)
         if ok {
@@ -368,21 +368,21 @@ fn main() {
 
     } else if cmd == "top" {
         let n = 6
-        if length(argv) >= 3 {
+        if len(argv) >= 3 {
             try { n = to_int(argv[2]) } catch e { n = 6 }
         }
-        let path = DEFAULT_FEEDBACK_FILE
-        if length(argv) >= 4 { path = argv[3] }
+        let path = default_feedback_file
+        if len(argv) >= 4 { path = argv[3] }
 
         println("=== Top " + to_string(n) + " Discoveries ===")
         let scores_str = compute_net_scores(path)
         let score_lines = split(scores_str, "\n")
         let printed = 0
         let si = 0
-        while si < length(score_lines) {
+        while si < len(score_lines) {
             if printed >= n { break }
             let sl = trim(score_lines[si])
-            if length(sl) > 0 {
+            if len(sl) > 0 {
                 let rank = printed + 1
                 println("  #" + to_string(rank) + " " + sl)
                 printed = printed + 1
@@ -392,8 +392,8 @@ fn main() {
         if printed == 0 { println("  (피드백 없음)") }
 
     } else if cmd == "weights" {
-        let path = DEFAULT_FEEDBACK_FILE
-        if length(argv) >= 3 { path = argv[2] }
+        let path = default_feedback_file
+        if len(argv) >= 3 { path = argv[2] }
         println(compute_weight_updates(path))
 
     } else {

@@ -6,21 +6,21 @@
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const VERSION = "1.0.0"
-comptime const PROJECT = "hexa_lang"
-comptime const PERSONALITY = "Mathematician"
-comptime const GOAL = "테스트 800+, 이머전스 100% 수렴"
+comptime const version = "1.0.0"
+comptime const project = "hexa_lang"
+comptime const personality = "Mathematician"
+comptime const goal = "테스트 800+, 이머전스 100% 수렴"
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/hexa-lang"
-let METRICS_PATH = PROJECT_DIR + "/config/eso_metrics.json"
-let PATTERNS_PATH = PROJECT_DIR + "/config/emergence_patterns.json"
-let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
-let STATE_PATH = DEV + "/nexus6/shared/engine_hexa_lang_state.json"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/hexa-lang"
+let metrics_path = project_dir + "/config/eso_metrics.json"
+let patterns_path = project_dir + "/config/emergence_patterns.json"
+let bus_file = dev + "/nexus6/shared/growth_bus.jsonl"
+let state_path = dev + "/nexus6/shared/engine_hexa_lang_state.json"
 
-comptime const TEST_GOAL = 800
-comptime const EMERGENCE_TARGET = 1.0
+comptime const test_goal = 800
+comptime const emergence_target = 1.0
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -60,7 +60,7 @@ fn clamp01(x: f64) -> f64 {
 }
 
 fn timestamp() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     r.trim()
 }
 
@@ -102,8 +102,8 @@ fn json_int(content: string, field: string) -> i64 {
 
 fn append_bus(phase: string, status: string, detail: string) {
     let ts = timestamp()
-    let line = "{\"source\":\"" + PROJECT + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
-    try { append_file(BUS_FILE, line + "\n") } catch e {}
+    let line = "{\"source\":\"" + project + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(bus_file, line + "\n") } catch e {}
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -120,10 +120,11 @@ struct Metrics {
     build_ok: bool
 }
 
-fn count_tests() -> [i64, i64, i64] {
+fn count_tests() {
     // Run cargo test in hexa-lang dir, parse results
-    let result = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+    let mut result = ""
+    try {
+        exec("bash -c cd " + project_dir + " && cargo test 2>&1 | tail -5")
     } catch e {
         ""
     }
@@ -142,7 +143,10 @@ fn count_tests() -> [i64, i64, i64] {
             let mut i = tokens.len() - 1
             while i >= 0 {
                 let n = safe_int(tokens[i])
-                if n > 0 { passed = n; break }
+                if n > 0 {
+                    passed = n
+                    break
+                }
                 i = i - 1
             }
         }
@@ -156,7 +160,10 @@ fn count_tests() -> [i64, i64, i64] {
             let mut i = tokens.len() - 1
             while i >= 0 {
                 let n = safe_int(tokens[i])
-                if n >= 0 { failed = n; break }
+                if n >= 0 {
+                    failed = n
+                    break
+                }
                 i = i - 1
             }
         }
@@ -166,8 +173,8 @@ fn count_tests() -> [i64, i64, i64] {
     return [total, passed, failed]
 }
 
-fn read_emergence_metrics() -> [f64, i64] {
-    let content = read_file_safe(METRICS_PATH)
+fn read_emergence_metrics() {
+    let content = read_file_safe(metrics_path)
     if content == "" { return [0.0, 0] }
     let density = json_float(content, "emergence_density")
     let round = json_int(content, "convergence_round")
@@ -175,7 +182,7 @@ fn read_emergence_metrics() -> [f64, i64] {
 }
 
 fn read_pattern_count() -> i64 {
-    let content = read_file_safe(PATTERNS_PATH)
+    let content = read_file_safe(patterns_path)
     if content == "" { return 0 }
     // Count entries by counting occurrences of a key field
     let parts = content.split("\"pattern\"")
@@ -208,14 +215,14 @@ fn collect_metrics() -> Metrics {
 
 fn calc_health(m: Metrics) -> f64 {
     // 40% test progress toward 800
-    let test_ratio = clamp01(to_float(m.test_count) / to_float(TEST_GOAL))
+    let test_ratio = clamp01(to_float(m.test_count) / to_float(test_goal))
     let test_score = test_ratio * 0.4
 
     // 20% no failures
     let fail_score = if m.test_fail == 0 { 0.2 } else { 0.2 * max_f(0.0, 1.0 - to_float(m.test_fail) / 10.0) }
 
     // 25% emergence density toward 1.0
-    let emergence_score = clamp01(m.emergence_density / EMERGENCE_TARGET) * 0.25
+    let emergence_score = clamp01(m.emergence_density / emergence_target) * 0.25
 
     // 15% pattern accumulation (100 patterns = full)
     let pattern_score = clamp01(to_float(m.pattern_count) / 100.0) * 0.15
@@ -225,8 +232,8 @@ fn calc_health(m: Metrics) -> f64 {
 
 fn classify(m: Metrics, health: f64) -> string {
     if m.test_fail > 0 { return "STAGNANT" }
-    if m.emergence_density >= 0.95 && m.test_count >= TEST_GOAL { return "BREAKTHROUGH" }
-    if m.test_count >= to_int(to_float(TEST_GOAL) * 0.9) || m.emergence_density >= 0.9 { return "GOAL_NEAR" }
+    if m.emergence_density >= 0.95 && m.test_count >= test_goal { return "BREAKTHROUGH" }
+    if m.test_count >= to_int(to_float(test_goal) * 0.9) || m.emergence_density >= 0.9 { return "GOAL_NEAR" }
     if health >= 0.3 { return "HEALTHY" }
     return "STAGNANT"
 }
@@ -235,8 +242,8 @@ fn classify(m: Metrics, health: f64) -> string {
 // ─── EVOLVE — Track growth rates ───
 // ═══════════════════════════════════════════════════════════
 
-fn load_prev_state() -> [i64, i64, f64] {
-    let content = read_file_safe(STATE_PATH)
+fn load_prev_state() {
+    let content = read_file_safe(state_path)
     if content == "" { return [0, 0, 0.0] }
     let prev_tests = json_int(content, "test_count")
     let prev_patterns = json_int(content, "pattern_count")
@@ -245,18 +252,9 @@ fn load_prev_state() -> [i64, i64, f64] {
 }
 
 fn save_state(m: Metrics, health: f64) {
-    let content = "{\n" +
-        "  \"test_count\": " + to_string(m.test_count) + ",\n" +
-        "  \"test_pass\": " + to_string(m.test_pass) + ",\n" +
-        "  \"test_fail\": " + to_string(m.test_fail) + ",\n" +
-        "  \"emergence_density\": " + to_string(m.emergence_density) + ",\n" +
-        "  \"convergence_round\": " + to_string(m.convergence_round) + ",\n" +
-        "  \"pattern_count\": " + to_string(m.pattern_count) + ",\n" +
-        "  \"health\": " + to_string(health) + ",\n" +
-        "  \"timestamp\": \"" + timestamp() + "\"\n" +
-        "}\n"
+    let content = "{\n" + "  \"test_count\": " + to_string(m.test_count) + ",\n" + "  \"test_pass\": " + to_string(m.test_pass) + ",\n" + "  \"test_fail\": " + to_string(m.test_fail) + ",\n" + "  \"emergence_density\": " + to_string(m.emergence_density) + ",\n" + "  \"convergence_round\": " + to_string(m.convergence_round) + ",\n" + "  \"pattern_count\": " + to_string(m.pattern_count) + ",\n" + "  \"health\": " + to_string(health) + ",\n" + "  \"timestamp\": \"" + timestamp() + "\"\n" + "}\n"
     try {
-        exec("bash", ["-c", "cat > " + STATE_PATH + " << 'JSONEOF'\n" + content + "JSONEOF"])
+        result = exec("bash -c cat > " + state_path + " << 'JSONEOF'\n" + content + "JSONEOF")
     } catch e {}
 }
 
@@ -300,7 +298,7 @@ fn tick_priority_fix(m: Metrics) {
 
     // Re-run cargo build to surface errors
     let build_out = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -20"])
+        exec("bash -c cd " + project_dir + " && cargo build --release 2>&1 | tail -20")
     } catch e {
         "build error: " + to_string(e)
     }
@@ -320,14 +318,14 @@ fn tick_adaptive_optimization(m: Metrics) {
 
     // Focus: build release + run tests to capture new passes
     let result = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -3"])
+        exec("bash -c cd " + project_dir + " && cargo build --release 2>&1 | tail -3")
     } catch e {
         "error"
     }
     println("  build: " + result.split("\n")[0])
 
     let test_out = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+        exec("bash -c cd " + project_dir + " && cargo test 2>&1 | tail -5")
     } catch e {
         "error"
     }
@@ -347,14 +345,14 @@ fn tick_default(m: Metrics) {
     append_bus("tick", "default", "build+test")
 
     let build_out = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -3"])
+        exec("bash -c cd " + project_dir + " && cargo build --release 2>&1 | tail -3")
     } catch e {
         "build error"
     }
     println("  build: " + build_out.split("\n")[0])
 
     let test_out = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+        exec("bash -c cd " + project_dir + " && cargo test 2>&1 | tail -5")
     } catch e {
         "test error"
     }
@@ -377,12 +375,12 @@ fn mode_status() {
     let health = calc_health(m)
     let class = classify(m, health)
 
-    println("═══ " + PERSONALITY + " Engine [" + PROJECT + "] v" + VERSION + " ═══")
-    println("project: " + PROJECT_DIR)
-    println("goal: " + GOAL)
+    println("═══ " + personality + " Engine [" + project + "] v" + version + " ═══")
+    println("project: " + project_dir)
+    println("goal: " + goal)
     println("")
     println("tests: " + to_string(m.test_pass) + "/" + to_string(m.test_count) + " pass (" + to_string(m.test_fail) + " fail)")
-    println("test_progress: " + to_string(m.test_count) + "/" + to_string(TEST_GOAL))
+    println("test_progress: " + to_string(m.test_count) + "/" + to_string(test_goal))
     println("emergence_density: " + to_string(m.emergence_density))
     println("convergence_round: " + to_string(m.convergence_round))
     println("pattern_count: " + to_string(m.pattern_count))
@@ -394,7 +392,7 @@ fn mode_status() {
 }
 
 fn mode_tick() {
-    println("═══ " + PERSONALITY + " Tick — " + timestamp() + " ═══")
+    println("═══ " + personality + " Tick — " + timestamp() + " ═══")
 
     let m = collect_metrics()
     let health = calc_health(m)
@@ -434,14 +432,14 @@ fn mode_report() {
     let class = classify(m, health)
     let evo = evolve_report(m)
 
-    println("# " + PERSONALITY + " Engine Report")
+    println("# " + personality + " Engine Report")
     println("## " + timestamp())
     println("")
     println("| Metric | Value | Target | Progress |")
     println("|--------|-------|--------|----------|")
 
-    let test_pct = if TEST_GOAL > 0 { to_float(m.test_count) * 100.0 / to_float(TEST_GOAL) } else { 0.0 }
-    println("| Tests | " + to_string(m.test_count) + " | " + to_string(TEST_GOAL) + " | " + to_string(test_pct) + "% |")
+    let test_pct = if test_goal > 0 { to_float(m.test_count) * 100.0 / to_float(test_goal) } else { 0.0 }
+    println("| Tests | " + to_string(m.test_count) + " | " + to_string(test_goal) + " | " + to_string(test_pct) + "% |")
 
     let em_pct = m.emergence_density * 100.0
     println("| Emergence | " + to_string(m.emergence_density) + " | 1.0 | " + to_string(em_pct) + "% |")
@@ -459,8 +457,8 @@ fn mode_report() {
     if m.test_fail > 0 {
         println("- URGENT: Fix " + to_string(m.test_fail) + " failing tests before any new work")
     }
-    if m.test_count < TEST_GOAL {
-        let remaining = TEST_GOAL - m.test_count
+    if m.test_count < test_goal {
+        let remaining = test_goal - m.test_count
         println("- Need " + to_string(remaining) + " more tests to reach goal")
     }
     if m.emergence_density < 0.5 {

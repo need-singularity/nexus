@@ -11,18 +11,18 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const SIGMA = 12
-comptime const PHI = 2
-comptime const TAU = 4
-comptime const SOPFR = 5
-comptime const J2 = 24
-comptime const META_FP = 0.333333333
-comptime const MAX_RANK = 10
-comptime const SHARED_DIR = "shared"
-comptime const DISTRIBUTION_FILE = "shared/alien_index_distribution.json"
-comptime const DISCOVERY_LOG_FILE = "shared/discovery_log.jsonl"
-comptime const ALIEN_INDEX_DIST_FILE = DISTRIBUTION_FILE
-comptime const GROWTH_BUS_FILE = "shared/growth_bus.jsonl"
+comptime const sigma = 12
+comptime const phi = 2
+comptime const tau = 4
+comptime const sopfr = 5
+comptime const j2 = 24
+comptime const meta_fp = 0.333333333
+comptime const max_rank = 10
+comptime const shared_dir = "shared"
+comptime const distribution_file = "shared/alien_index_distribution.json"
+comptime const discovery_log_file = "shared/discovery_log.jsonl"
+comptime const alien_index_dist_file = distribution_file
+comptime const growth_bus_file = "shared/growth_bus.jsonl"
 
 // ────────────────────────────────────────────────────────────────
 //  AlienIndex 핵심 구조 (index.rs 포팅)
@@ -201,10 +201,10 @@ fn n6_match(value: float) -> MatchResult {
     if abs_f(value - 12.0) < 0.0001 && best_q < 1.0 { best_name = "sigma" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 5.0) < 0.0001 && best_q < 1.0 { best_name = "sopfr" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 7.0) < 0.0001 && best_q < 1.0 { best_name = "M3" best_q = 1.0 best_grade = "EXACT" }
-    if abs_f(value - 24.0) < 0.0001 && best_q < 1.0 { best_name = "J2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 24.0) < 0.0001 && best_q < 1.0 { best_name = "j2" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 10.0) < 0.0001 && best_q < 1.0 { best_name = "sigma-phi" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 144.0) < 0.0001 && best_q < 1.0 { best_name = "sigma^2" best_q = 1.0 best_grade = "EXACT" }
-    if abs_f(value - 288.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*J2" best_q = 1.0 best_grade = "EXACT" }
+    if abs_f(value - 288.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*j2" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 8.0) < 0.0001 && best_q < 1.0 { best_name = "phi*tau" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 28.0) < 0.0001 && best_q < 1.0 { best_name = "P2" best_q = 1.0 best_grade = "EXACT" }
     if abs_f(value - 496.0) < 0.0001 && best_q < 1.0 { best_name = "P3" best_q = 1.0 best_grade = "EXACT" }
@@ -364,14 +364,14 @@ struct DistributionData {
 }
 
 fn load_distribution() -> DistributionData {
-    let content = read_file(DISTRIBUTION_FILE)
+    let content = read_file(distribution_file)
     if content == "" {
-        println("[WARN] 분포 파일 없음: " + DISTRIBUTION_FILE)
+        println("[WARN] 분포 파일 없음: " + distribution_file)
         return DistributionData {
             total_records: 0,
             breakthrough_ratio: 0.0,
             max_d: 0,
-            meta_fp_target: META_FP,
+            meta_fp_target: meta_fp,
             raw_json: ""
         }
     }
@@ -409,7 +409,7 @@ fn load_distribution() -> DistributionData {
         total_records: total,
         breakthrough_ratio: ratio,
         max_d: maxd,
-        meta_fp_target: META_FP,
+        meta_fp_target: meta_fp,
         raw_json: content
     }
 }
@@ -422,7 +422,7 @@ pure fn breakthrough_ratio(d_ge_1: int, total: int) -> float {
 
 // 메타 부동점 편차 — |ρ - 1/3|
 pure fn meta_fp_deviation(ratio: float) -> float {
-    abs_f(ratio - META_FP)
+    abs_f(ratio - meta_fp)
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -484,12 +484,7 @@ fn assess_value(value: float) -> AssessResult {
 // ────────────────────────────────────────────────────────────────
 
 fn record_to_json(rec: AlienIndexRecord) -> string {
-    "{\"id\":\"" + rec.id + "\""
-    + ",\"current\":{\"d\":" + to_string(rec.current_d) + ",\"r\":" + to_string(rec.current_r) + "}"
-    + ",\"history_count\":" + to_string(rec.history_count)
-    + ",\"promotion_candidate\":" + if rec.promotion_candidate { "true" } else { "false" }
-    + ",\"promoted_from\":\"" + rec.promoted_from + "\""
-    + "}"
+    "{\"id\":\"" + rec.id + "\"" + ",\"current\":{\"d\":" + to_string(rec.current_d) + ",\"r\":" + to_string(rec.current_r) + "}" + ",\"history_count\":" + to_string(rec.history_count) + ",\"promotion_candidate\":" + if rec.promotion_candidate { "true" } else { "false" } + ",\"promoted_from\":\"" + rec.promoted_from + "\"" + "}"
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -642,7 +637,7 @@ if args.len() < 3 {
             println("  (데이터 없음)")
         }
         println("")
-        println("  rho = " + to_string(dist.breakthrough_ratio) + " (목표: 1/3 = " + to_string(META_FP) + ")")
+        println("  rho = " + to_string(dist.breakthrough_ratio) + " (목표: 1/3 = " + to_string(meta_fp) + ")")
         if meta_fp_deviation(dist.breakthrough_ratio) < 0.05 {
             println("  >> 메타 부동점 근방 수렴!")
         } else {
@@ -659,7 +654,7 @@ if args.len() < 3 {
         println("")
 
         // discovery_log에서 상위 항목 읽기
-        let log_content = read_file(DISCOVERY_LOG_FILE)
+        let log_content = read_file(discovery_log_file)
         if log_content == "" {
             println("  (discovery_log 비어있음)")
         } else {
@@ -701,11 +696,11 @@ if args.len() < 3 {
             println("         → 승격: (2,0)")
             if !dry_run {
                 // 실제 승격: (1,10) → (2,0) 레코드 생성
-                let ts = exec("date", ["+%Y-%m-%dT%H:%M:%S"]).trim()
+                let ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
                 let promote_entry = "{\"constant\":\"promote_(1,10)→(2,0)\",\"value\":\"self-similar\",\"source\":\"alien_index_promote\",\"timestamp\":\"" + ts + "\",\"grade\":\"EXACT\",\"processed\":true,\"alien_index\":{\"d\":2,\"r\":0},\"mk2\":{\"sector\":\"meta\",\"confidence\":1.0,\"paths\":1,\"prime_set\":[],\"layer\":2},\"promoted_from\":{\"d\":1,\"r\":10}}"
                 try {
-                    let existing = read_file(DISCOVERY_LOG_FILE)
-                    write_file(DISCOVERY_LOG_FILE, existing + promote_entry + "\n")
+                    let existing = read_file(discovery_log_file)
+                    write_file(discovery_log_file, existing + promote_entry + "\n")
                     promoted = promoted + 1
                     println("  ✓ (2,0) 레코드 생성 → discovery_log")
                 } catch e {
@@ -719,11 +714,11 @@ if args.len() < 3 {
             println("  [대기] (0,10): " + sub + " 건")
             println("         → 승격: (1,0)")
             if !dry_run {
-                let ts = exec("date", ["+%Y-%m-%dT%H:%M:%S"]).trim()
+                let ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
                 let promote_entry = "{\"constant\":\"promote_(0,10)→(1,0)\",\"value\":\"self-similar\",\"source\":\"alien_index_promote\",\"timestamp\":\"" + ts + "\",\"grade\":\"EXACT\",\"processed\":true,\"alien_index\":{\"d\":1,\"r\":0},\"mk2\":{\"sector\":\"meta\",\"confidence\":1.0,\"paths\":1,\"prime_set\":[],\"layer\":1},\"promoted_from\":{\"d\":0,\"r\":10}}"
                 try {
-                    let existing = read_file(DISCOVERY_LOG_FILE)
-                    write_file(DISCOVERY_LOG_FILE, existing + promote_entry + "\n")
+                    let existing = read_file(discovery_log_file)
+                    write_file(discovery_log_file, existing + promote_entry + "\n")
                     promoted = promoted + 1
                     println("  ✓ (1,0) 레코드 생성 → discovery_log")
                 } catch e {
@@ -742,16 +737,16 @@ if args.len() < 3 {
             // distribution.json 즉시 갱신
             if promoted > 0 {
                 let new_max_d = if dist.raw_json.contains("(1,10)") { 2 } else { dist.max_d }
-                let new_dist = "{\"total_records\":" + to_string(dist.total_records + promoted) + ",\"breakthrough_ratio\":" + to_string(dist.breakthrough_ratio) + ",\"max_d\":" + to_string(new_max_d) + ",\"distribution\":{},\"source\":\"alien_index_promote\",\"last_promote\":\"" + exec("date", ["+%Y-%m-%dT%H:%M:%S"]).trim() + "\"}"
+                let new_dist = "{\"total_records\":" + to_string(dist.total_records + promoted) + ",\"breakthrough_ratio\":" + to_string(dist.breakthrough_ratio) + ",\"max_d\":" + to_string(new_max_d) + ",\"distribution\":{},\"source\":\"alien_index_promote\",\"last_promote\":\"" + exec("date +%Y-%m-%dT%H:%M:%S").trim() + "\"}"
                 try {
-                    write_file(ALIEN_INDEX_DIST_FILE, new_dist)
+                    write_file(alien_index_dist_file, new_dist)
                     println("  ✓ distribution.json 갱신 (max_d=" + to_string(new_max_d) + ")")
                 } catch e {}
                 // growth_bus 이벤트 발행
-                let bus_entry = "{\"source\":\"alien_index\",\"timestamp\":\"" + exec("date", ["+%Y-%m-%dT%H:%M:%S"]).trim() + "\",\"phase\":\"promote\",\"status\":\"ok\",\"detail\":\"" + to_string(promoted) + " promoted, max_d=" + to_string(new_max_d) + "\"}"
+                let bus_entry = "{\"source\":\"alien_index\",\"timestamp\":\"" + exec("date +%Y-%m-%dT%H:%M:%S").trim() + "\",\"phase\":\"promote\",\"status\":\"ok\",\"detail\":\"" + to_string(promoted) + " promoted, max_d=" + to_string(new_max_d) + "\"}"
                 try {
-                    let bus = read_file(GROWTH_BUS_FILE)
-                    write_file(GROWTH_BUS_FILE, bus + bus_entry + "\n")
+                    let bus = read_file(growth_bus_file)
+                    write_file(growth_bus_file, bus + bus_entry + "\n")
                 } catch e {}
             }
         }
@@ -808,8 +803,8 @@ theorem rank_clamp_invariant {
 
 theorem meta_fixed_point_connection {
     // 돌파율 ρ의 목표: 1/3 (TECS-L H-056)
-    assert abs_f(META_FP - 0.333333333) < 0.000001
-    assert abs_f(breakthrough_ratio(1, 3) - META_FP) < 0.001
+    assert abs_f(meta_fp - 0.333333333) < 0.000001
+    assert abs_f(breakthrough_ratio(1, 3) - meta_fp) < 0.001
 }
 
 proof alien_index_invariants {

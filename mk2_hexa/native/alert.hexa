@@ -6,8 +6,8 @@
 //       hexa alert.hexa emit <level> <source> <pattern> <confidence> <message>
 
 // ─── 설정 ───
-comptime const ALERT_LOG = "shared/alert_history.jsonl"
-comptime const THRESHOLD_FILE = "shared/alert_thresholds.json"
+comptime const alert_log = "shared/alert_history.jsonl"
+comptime const threshold_file = "shared/alert_thresholds.json"
 
 // ─── 알림 레벨 우선순위 ───
 // INFO=0, WARNING=1, CRITICAL=2, DISCOVERY=3
@@ -66,8 +66,8 @@ fn extract_json_str(json: string, key: string) -> string {
     let needle = "\"" + key + "\":\""
     let idx = json.index_of(needle)
     if idx < 0 { return "" }
-    let start = idx + needle.length()
-    let rest = json.slice(start, json.length())
+    let start = idx + len(needle)
+    let rest = json.slice(start, len(json))
     let end = rest.index_of("\"")
     if end < 0 { return "" }
     rest.slice(0, end)
@@ -77,11 +77,11 @@ fn extract_json_num(json: string, key: string) -> string {
     let needle = "\"" + key + "\":"
     let idx = json.index_of(needle)
     if idx < 0 { return "0" }
-    let start = idx + needle.length()
-    let rest = json.slice(start, json.length())
+    let start = idx + len(needle)
+    let rest = json.slice(start, len(json))
     let end_c = rest.index_of(",")
     let end_b = rest.index_of("}")
-    let mut end = rest.length()
+    let mut end = len(rest)
     if end_c >= 0 { end = end_c }
     if end_b >= 0 {
         if end_b < end { end = end_b }
@@ -98,7 +98,7 @@ fn parse_alert_line(line: string) -> Alert {
     let mut confidence = 0.0
     try {
         confidence = to_float(extract_json_num(line, "confidence"))
-    } catch {
+    } catch e {
         confidence = 0.0
     }
     Alert {
@@ -113,13 +113,13 @@ fn parse_alert_line(line: string) -> Alert {
 
 // ─── 알림 저장 (중복 제거: source+pattern 동일 시 높은 confidence 유지) ───
 fn ingest_alert(a: Alert) -> string {
-    let raw = read_file(ALERT_LOG)
+    let raw = read_file(alert_log)
     let mut lines = []
     let mut replaced = false
     if raw != "" {
         let parts = raw.split("\n")
         let mut i = 0
-        while i < parts.length() {
+        while i < len(parts) {
             let line = parts[i].trim()
             if line != "" {
                 let existing = parse_alert_line(line)
@@ -147,11 +147,11 @@ fn ingest_alert(a: Alert) -> string {
     }
     let mut out = ""
     let mut j = 0
-    while j < lines.length() {
+    while j < len(lines) {
         out = out + lines[j] + "\n"
         j = j + 1
     }
-    write_file(ALERT_LOG, out)
+    write_file(alert_log, out)
     let label = "[" + a.level + "] " + a.message
     print(label)
     label
@@ -160,7 +160,7 @@ fn ingest_alert(a: Alert) -> string {
 // ─── 레벨 필터 (min_level 이상만) ───
 fn filter_by_level(min_level: string) -> int {
     let min_pri = level_priority(min_level)
-    let raw = read_file(ALERT_LOG)
+    let raw = read_file(alert_log)
     if raw == "" {
         print("(no alerts)")
         return 0
@@ -168,7 +168,7 @@ fn filter_by_level(min_level: string) -> int {
     let lines = raw.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line != "" {
             let a = parse_alert_line(line)
@@ -184,7 +184,7 @@ fn filter_by_level(min_level: string) -> int {
 
 // ─── 우선순위 정렬 출력 ───
 fn show_prioritized() -> int {
-    let raw = read_file(ALERT_LOG)
+    let raw = read_file(alert_log)
     if raw == "" {
         print("(no alerts)")
         return 0
@@ -196,7 +196,7 @@ fn show_prioritized() -> int {
     let mut warn = []
     let mut info = []
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line != "" {
             let a = parse_alert_line(line)
@@ -212,28 +212,28 @@ fn show_prioritized() -> int {
     let mut count = 0
     // 각 버킷 출력
     let mut j = 0
-    while j < disc.length() {
+    while j < len(disc) {
         let a = parse_alert_line(disc[j])
         print("[DISCOVERY] " + a.source_lens + "/" + a.pattern_id + " conf=" + to_string(a.confidence))
         j = j + 1
         count = count + 1
     }
     j = 0
-    while j < crit.length() {
+    while j < len(crit) {
         let a = parse_alert_line(crit[j])
         print("[CRITICAL] " + a.source_lens + "/" + a.pattern_id + " conf=" + to_string(a.confidence))
         j = j + 1
         count = count + 1
     }
     j = 0
-    while j < warn.length() {
+    while j < len(warn) {
         let a = parse_alert_line(warn[j])
         print("[WARNING] " + a.source_lens + "/" + a.pattern_id + " conf=" + to_string(a.confidence))
         j = j + 1
         count = count + 1
     }
     j = 0
-    while j < info.length() {
+    while j < len(info) {
         let a = parse_alert_line(info[j])
         print("[INFO] " + a.source_lens + "/" + a.pattern_id + " conf=" + to_string(a.confidence))
         j = j + 1
@@ -244,7 +244,7 @@ fn show_prioritized() -> int {
 
 // ─── 임계값 관리 ───
 fn set_threshold(metric: string, value: float) {
-    let raw = read_file(THRESHOLD_FILE)
+    let raw = read_file(threshold_file)
     let entry = "\"" + metric + "\":" + to_string(value)
     // 간이: 전체 파일을 키-값으로 재구성
     let mut pairs = []
@@ -255,7 +255,7 @@ fn set_threshold(metric: string, value: float) {
         if inner != "" {
             let parts = inner.split(",")
             let mut i = 0
-            while i < parts.length() {
+            while i < len(parts) {
                 let p = parts[i].trim()
                 if p != "" {
                     let colon = p.index_of(":")
@@ -278,27 +278,27 @@ fn set_threshold(metric: string, value: float) {
     }
     let mut json = "{"
     let mut j = 0
-    while j < pairs.length() {
+    while j < len(pairs) {
         if j > 0 { json = json + "," }
         json = json + pairs[j]
         j = j + 1
     }
     json = json + "}"
-    write_file(THRESHOLD_FILE, json)
+    write_file(threshold_file, json)
     print("threshold set: " + metric + " = " + to_string(value))
 }
 
 fn get_threshold(metric: string) -> float {
-    let raw = read_file(THRESHOLD_FILE)
+    let raw = read_file(threshold_file)
     if raw == "" { return -1.0 }
     let needle = "\"" + metric + "\":"
     let idx = raw.index_of(needle)
     if idx < 0 { return -1.0 }
-    let start = idx + needle.length()
-    let rest = raw.slice(start, raw.length())
+    let start = idx + len(needle)
+    let rest = raw.slice(start, len(raw))
     let end_c = rest.index_of(",")
     let end_b = rest.index_of("}")
-    let mut end = rest.length()
+    let mut end = len(rest)
     if end_c >= 0 { end = end_c }
     if end_b >= 0 {
         if end_b < end { end = end_b }
@@ -307,7 +307,7 @@ fn get_threshold(metric: string) -> float {
     let mut val = -1.0
     try {
         val = to_float(val_str)
-    } catch {
+    } catch e {
         val = -1.0
     }
     val
@@ -323,7 +323,7 @@ fn check_alerts() {
 // ─── CLI ───
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("alert.hexa — growth regression monitoring & alerts")
         print("usage:")
         print("  hexa alert.hexa check                              — show all alerts (prioritized)")
@@ -339,7 +339,7 @@ fn main() {
             check_alerts()
         },
         "history" -> {
-            let min_level = if a.length() >= 3 { a[2] } else { "INFO" }
+            let min_level = if len(a) >= 3 { a[2] } else { "INFO" }
             if !level_valid(min_level) {
                 print("invalid level: " + min_level + " (use INFO/WARNING/CRITICAL/DISCOVERY)")
                 return
@@ -348,16 +348,16 @@ fn main() {
             print("--- " + to_string(n) + " alert(s) at " + min_level + " or above")
         },
         "threshold" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa alert.hexa threshold <metric> [value]")
                 return
             }
             let metric = a[2]
-            if a.length() >= 4 {
+            if len(a) >= 4 {
                 let mut value = 0.0
                 try {
                     value = to_float(a[3])
-                } catch {
+                } catch e {
                     print("invalid number: " + a[3])
                     return
                 }
@@ -372,7 +372,7 @@ fn main() {
             }
         },
         "emit" -> {
-            if a.length() < 7 {
+            if len(a) < 7 {
                 print("usage: hexa alert.hexa emit <level> <source> <pattern> <confidence> <message>")
                 return
             }
@@ -386,7 +386,7 @@ fn main() {
             let mut confidence = 0.0
             try {
                 confidence = to_float(a[5])
-            } catch {
+            } catch e {
                 print("invalid confidence: " + a[5])
                 return
             }
@@ -395,7 +395,7 @@ fn main() {
             ingest_alert(al)
         },
         "clear" -> {
-            write_file(ALERT_LOG, "")
+            write_file(alert_log, "")
             print("alert history cleared")
         },
         _ -> {

@@ -4,18 +4,18 @@
 
 // ─── 상수 ───
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/TECS-L"
-let LOOP_STATE_PATH = PROJECT_DIR + "/config/loop_state.json"
-let DOMAIN_REG_PATH = PROJECT_DIR + "/config/domain_registry.json"
-let GROWTH_BUS = DEV + "/nexus6/shared/growth_bus.jsonl"
-let STRATEGY_PATH = DEV + "/nexus6/shared/engine_tecs_l_strategy.json"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/TECS-L"
+let loop_state_path = project_dir + "/config/loop_state.json"
+let domain_reg_path = project_dir + "/config/domain_registry.json"
+let growth_bus = dev + "/nexus6/shared/growth_bus.jsonl"
+let strategy_path = dev + "/nexus6/shared/engine_tecs_l_strategy.json"
 
-comptime const DISCOVERY_GOAL = 10000
-comptime const EXACT_RATE_GOAL = 0.6
-comptime const STAGNATION_THRESHOLD = 3
-comptime const MODES = ["dfs", "pair", "tree", "forge"]
+comptime const discovery_goal = 10000
+comptime const exact_rate_goal = 0.6
+comptime const stagnation_threshold = 3
+comptime const modes = ["dfs", "pair", "tree", "forge"]
 
 // ─── 유틸 ───
 
@@ -51,7 +51,7 @@ fn json_int(content: string, field: string) -> i64 {
 }
 
 fn timestamp() -> string {
-    let result = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let result = exec("date +%Y-%m-%dT%H:%M:%S")
     return result.split("\n")[0]
 }
 
@@ -70,7 +70,7 @@ struct TecsState {
     cycle: i64,
     mode: string,
     total_discoveries: i64,
-    domains: list[DomainInfo],
+    domains: str,
     worst_domain: string,
     worst_exact_rate: f64,
     avg_exact_rate: f64,
@@ -91,8 +91,8 @@ fn read_state() -> TecsState {
     }
 
     // 1) loop_state.json
-    if file_exists(LOOP_STATE_PATH) {
-        let content = read_file(LOOP_STATE_PATH)
+    if file_exists(loop_state_path) {
+        let content = read_file(loop_state_path)
         st.cycle = json_int(content, "cycle")
         st.mode = json_str(content, "mode")
         if st.mode == "" { st.mode = "dfs" }
@@ -103,13 +103,10 @@ fn read_state() -> TecsState {
     }
 
     // 2) domain_registry.json — parse 8 domains
-    if file_exists(DOMAIN_REG_PATH) {
-        let content = read_file(DOMAIN_REG_PATH)
+    if file_exists(domain_reg_path) {
+        let content = read_file(domain_reg_path)
         // split by domain objects — look for "name" fields
-        let domain_names = [
-            "number_theory", "algebra", "geometry", "topology",
-            "analysis", "combinatorics", "probability", "physics"
-        ]
+        let domain_names = [ "number_theory", "algebra", "geometry", "topology", "analysis", "combinatorics", "probability", "physics" ]
         let mut di = 0
         while di < domain_names.len() {
             let dname = domain_names[di]
@@ -142,7 +139,7 @@ fn read_state() -> TecsState {
                 }
 
                 // track stagnation
-                if stag >= STAGNATION_THRESHOLD {
+                if stag >= stagnation_threshold {
                     st.any_stagnant = true
                     st.stagnant_domain = dname
                 }
@@ -159,17 +156,17 @@ fn read_state() -> TecsState {
     }
 
     // 3) compute health & status flag
-    let disc_ratio = to_float(st.total_discoveries) / to_float(DISCOVERY_GOAL)
-    let rate_score = st.avg_exact_rate / EXACT_RATE_GOAL
+    let disc_ratio = to_float(st.total_discoveries) / to_float(discovery_goal)
+    let rate_score = st.avg_exact_rate / exact_rate_goal
     let stag_penalty = if st.any_stagnant { 0.2 } else { 0.0 }
 
     st.health = disc_ratio * 0.4 + rate_score * 0.4 + (1.0 - stag_penalty) * 0.2
     if st.health > 1.0 { st.health = 1.0 }
     if st.health < 0.0 { st.health = 0.0 }
 
-    if st.total_discoveries >= DISCOVERY_GOAL {
+    if st.total_discoveries >= discovery_goal {
         st.status_flag = "GOAL_NEAR"
-    } else if st.avg_exact_rate >= EXACT_RATE_GOAL {
+    } else if st.avg_exact_rate >= exact_rate_goal {
         st.status_flag = "BREAKTHROUGH"
     } else if st.any_stagnant {
         st.status_flag = "STAGNANT"
@@ -183,7 +180,7 @@ fn read_state() -> TecsState {
 // ─── 전략 가중치 ───
 
 struct Strategy {
-    mode_weights: list[f64],    // dfs, pair, tree, forge
+    mode_weights: str,    // dfs, pair, tree, forge
     current_mode: i64,
     domain_focus: string,
     total_ticks: i64,
@@ -205,9 +202,9 @@ fn load_strategy() -> Strategy {
         current_mode: 0, domain_focus: "",
         total_ticks: 0, total_gained: 0, cross_pollinate_count: 0
     }
-    if file_exists(STRATEGY_PATH) {
+    if file_exists(strategy_path) {
         try {
-            let content = read_file(STRATEGY_PATH)
+            let content = read_file(strategy_path)
             s.current_mode = json_int(content, "current_mode")
             s.domain_focus = json_str(content, "domain_focus")
             s.total_ticks = json_int(content, "total_ticks")
@@ -226,18 +223,8 @@ fn load_strategy() -> Strategy {
 }
 
 fn save_strategy(s: Strategy) {
-    let content = "{" +
-        "\"current_mode\":" + to_string(s.current_mode) + "," +
-        "\"domain_focus\":\"" + s.domain_focus + "\"," +
-        "\"total_ticks\":" + to_string(s.total_ticks) + "," +
-        "\"total_gained\":" + to_string(s.total_gained) + "," +
-        "\"cross_pollinate_count\":" + to_string(s.cross_pollinate_count) + "," +
-        "\"w0\":" + to_string(s.mode_weights[0]) + "," +
-        "\"w1\":" + to_string(s.mode_weights[1]) + "," +
-        "\"w2\":" + to_string(s.mode_weights[2]) + "," +
-        "\"w3\":" + to_string(s.mode_weights[3]) +
-    "}"
-    write_file(STRATEGY_PATH, content)
+    let content = "{" + "\"current_mode\":" + to_string(s.current_mode) + "," + "\"domain_focus\":\"" + s.domain_focus + "\"," + "\"total_ticks\":" + to_string(s.total_ticks) + "," + "\"total_gained\":" + to_string(s.total_gained) + "," + "\"cross_pollinate_count\":" + to_string(s.cross_pollinate_count) + "," + "\"w0\":" + to_string(s.mode_weights[0]) + "," + "\"w1\":" + to_string(s.mode_weights[1]) + "," + "\"w2\":" + to_string(s.mode_weights[2]) + "," + "\"w3\":" + to_string(s.mode_weights[3]) + "}"
+    write_file(strategy_path, content)
 }
 
 // ─── select_task ───
@@ -267,28 +254,28 @@ fn execute_task(task: string, st: TecsState, strat: Strategy) -> string {
     if task == "mode_switch" {
         // rotate: dfs→pair→tree→forge
         let next_idx = (strat.current_mode + 1) % 4
-        let next_mode = MODES[next_idx]
+        let next_mode = modes[next_idx]
         println("[" + ts + "] TASK: mode_switch — stagnant=" + st.stagnant_domain + " switching to " + next_mode)
-        let result = exec("python3", [PROJECT_DIR + "/discovery_loop.py", "--cycles", "1", "--mode", next_mode])
+        let result = exec("python3", [project_dir + "/discovery_loop.py", "--cycles", "1", "--mode", next_mode])
         return result
     }
 
     if task == "final_push" {
         println("[" + ts + "] TASK: final_push — discoveries=" + to_string(st.total_discoveries) + " pushing for 10000")
-        let result = exec("python3", [PROJECT_DIR + "/discovery_loop.py", "--cycles", "3", "--mode", "forge"])
+        let result = exec("python3", [project_dir + "/discovery_loop.py", "--cycles", "3", "--mode", "forge"])
         return result
     }
 
     if task == "cross_pollinate" {
         println("[" + ts + "] TASK: cross_pollinate — worst=" + st.worst_domain + " rate=" + to_string(st.worst_exact_rate))
-        let result = exec("python3", [PROJECT_DIR + "/discovery_loop.py", "--cycles", "1", "--mode", "pair", "--focus", st.worst_domain])
+        let result = exec("python3", [project_dir + "/discovery_loop.py", "--cycles", "1", "--mode", "pair", "--focus", st.worst_domain])
         return result
     }
 
     // default sweep
-    let cur_mode = MODES[strat.current_mode]
+    let cur_mode = modes[strat.current_mode]
     println("[" + ts + "] TASK: sweep — cycle=" + to_string(st.cycle) + " mode=" + cur_mode)
-    let result = exec("python3", [PROJECT_DIR + "/discovery_loop.py", "--cycles", "1", "--mode", cur_mode])
+    let result = exec("python3", [project_dir + "/discovery_loop.py", "--cycles", "1", "--mode", cur_mode])
     return result
 }
 
@@ -296,18 +283,8 @@ fn execute_task(task: string, st: TecsState, strat: Strategy) -> string {
 
 fn feedback(task: string, st: TecsState, result: string) {
     let ts = timestamp()
-    let entry = "{" +
-        "\"engine\":\"tecs_l\"," +
-        "\"task\":\"" + task + "\"," +
-        "\"timestamp\":\"" + ts + "\"," +
-        "\"discoveries\":" + to_string(st.total_discoveries) + "," +
-        "\"cycle\":" + to_string(st.cycle) + "," +
-        "\"mode\":\"" + st.mode + "\"," +
-        "\"avg_exact_rate\":" + to_string(st.avg_exact_rate) + "," +
-        "\"health\":" + to_string(st.health) + "," +
-        "\"status\":\"" + st.status_flag + "\"" +
-    "}"
-    append_file(GROWTH_BUS, entry + "\n")
+    let entry = "{" + "\"engine\":\"tecs_l\"," + "\"task\":\"" + task + "\"," + "\"timestamp\":\"" + ts + "\"," + "\"discoveries\":" + to_string(st.total_discoveries) + "," + "\"cycle\":" + to_string(st.cycle) + "," + "\"mode\":\"" + st.mode + "\"," + "\"avg_exact_rate\":" + to_string(st.avg_exact_rate) + "," + "\"health\":" + to_string(st.health) + "," + "\"status\":\"" + st.status_flag + "\"" + "}"
+    append_file(growth_bus, entry + "\n")
     println("  feedback -> growth_bus.jsonl")
 }
 
@@ -345,12 +322,7 @@ fn evolve(st: TecsState, strat: Strategy, pre_discoveries: i64) -> Strategy {
     }
 
     save_strategy(s)
-    println("  evolve -> mode_weights=[" +
-        to_string(s.mode_weights[0]) + ", " +
-        to_string(s.mode_weights[1]) + ", " +
-        to_string(s.mode_weights[2]) + ", " +
-        to_string(s.mode_weights[3]) + "]" +
-        " focus=" + s.domain_focus)
+    println("  evolve -> mode_weights=[" + to_string(s.mode_weights[0]) + ", " + to_string(s.mode_weights[1]) + ", " + to_string(s.mode_weights[2]) + ", " + to_string(s.mode_weights[3]) + "]" + " focus=" + s.domain_focus)
     return s
 }
 
@@ -364,32 +336,22 @@ if mode == "status" {
     println("=== engine_tecs_l (Librarian) status ===")
     println("cycle: " + to_string(st.cycle))
     println("mode: " + st.mode)
-    println("discoveries: " + to_string(st.total_discoveries) + " / " + to_string(DISCOVERY_GOAL))
+    println("discoveries: " + to_string(st.total_discoveries) + " / " + to_string(discovery_goal))
     println("avg_exact_rate: " + to_string(st.avg_exact_rate))
     println("health:" + to_string(st.health))
     println("status: " + st.status_flag)
     println("")
     println("--- domains ---")
     for d in st.domains {
-        let flag = if d.stagnant_cycles >= STAGNATION_THRESHOLD { " [STAGNANT]" } else { "" }
-        println("  " + d.name +
-            " hyp=" + to_string(d.hypothesis_count) +
-            " ver=" + to_string(d.verified_count) +
-            " exact=" + to_string(d.exact_count) +
-            " rate=" + to_string(d.exact_rate) +
-            " stag=" + to_string(d.stagnant_cycles) +
-            flag)
+        let flag = if d.stagnant_cycles >= stagnation_threshold { " [STAGNANT]" } else { "" }
+        println("  " + d.name + " hyp=" + to_string(d.hypothesis_count) + " ver=" + to_string(d.verified_count) + " exact=" + to_string(d.exact_count) + " rate=" + to_string(d.exact_rate) + " stag=" + to_string(d.stagnant_cycles) + flag)
     }
 
     let strat = load_strategy()
     println("")
     println("--- strategy ---")
-    println("mode_weights: [" +
-        to_string(strat.mode_weights[0]) + ", " +
-        to_string(strat.mode_weights[1]) + ", " +
-        to_string(strat.mode_weights[2]) + ", " +
-        to_string(strat.mode_weights[3]) + "]")
-    println("current_mode: " + MODES[strat.current_mode])
+    println("mode_weights: [" + to_string(strat.mode_weights[0]) + ", " + to_string(strat.mode_weights[1]) + ", " + to_string(strat.mode_weights[2]) + ", " + to_string(strat.mode_weights[3]) + "]")
+    println("current_mode: " + modes[strat.current_mode])
     println("domain_focus: " + strat.domain_focus)
     println("total_ticks: " + to_string(strat.total_ticks))
 }
@@ -430,8 +392,8 @@ if mode == "report" {
     println("|--------|-------|")
     println("| Cycle | " + to_string(st.cycle) + " |")
     println("| Mode | " + st.mode + " |")
-    println("| Discoveries | " + to_string(st.total_discoveries) + " / " + to_string(DISCOVERY_GOAL) + " |")
-    println("| Avg Exact Rate | " + to_string(st.avg_exact_rate) + " (goal: " + to_string(EXACT_RATE_GOAL) + ") |")
+    println("| Discoveries | " + to_string(st.total_discoveries) + " / " + to_string(discovery_goal) + " |")
+    println("| Avg Exact Rate | " + to_string(st.avg_exact_rate) + " (goal: " + to_string(exact_rate_goal) + ") |")
     println("| Health | " + to_string(st.health) + " |")
     println("| Status | **" + st.status_flag + "** |")
     println("")
@@ -440,13 +402,8 @@ if mode == "report" {
     println("| Domain | Hypotheses | Verified | Exact | Rate | Stagnant |")
     println("|--------|-----------|----------|-------|------|----------|")
     for d in st.domains {
-        let flag = if d.stagnant_cycles >= STAGNATION_THRESHOLD { " !" } else { "" }
-        println("| " + d.name +
-            " | " + to_string(d.hypothesis_count) +
-            " | " + to_string(d.verified_count) +
-            " | " + to_string(d.exact_count) +
-            " | " + to_string(d.exact_rate) +
-            " | " + to_string(d.stagnant_cycles) + flag + " |")
+        let flag = if d.stagnant_cycles >= stagnation_threshold { " !" } else { "" }
+        println("| " + d.name + " | " + to_string(d.hypothesis_count) + " | " + to_string(d.verified_count) + " | " + to_string(d.exact_count) + " | " + to_string(d.exact_rate) + " | " + to_string(d.stagnant_cycles) + flag + " |")
     }
     println("")
     println("Worst domain: **" + st.worst_domain + "** (rate=" + to_string(st.worst_exact_rate) + ")")
@@ -458,7 +415,7 @@ if mode == "report" {
     let mut mi = 0
     while mi < 4 {
         let marker = if mi == strat.current_mode { " <-- active" } else { "" }
-        println("| " + MODES[mi] + " | " + to_string(strat.mode_weights[mi]) + marker + " |")
+        println("| " + modes[mi] + " | " + to_string(strat.mode_weights[mi]) + marker + " |")
         mi = mi + 1
     }
     println("")

@@ -11,17 +11,17 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6.0
-comptime const SIGMA = 12.0
-comptime const PHI = 2.0
-comptime const TAU = 4.0
-comptime const J2 = 24.0
-comptime const SIGMA_TAU = 48.0
-comptime const SIGMA_SQ = 144.0
-comptime const META_FP = 0.333333333
+comptime const sigma = 12.0
+comptime const phi = 2.0
+comptime const tau = 4.0
+comptime const j2 = 24.0
+comptime const sigma_tau = 48.0
+comptime const sigma_sq = 144.0
+comptime const meta_fp = 0.333333333
 
-// n=6 어트랙터: n, sigma, J2, sigma*tau, sigma^2
-fn n6_attractors() -> [float] {
-    [N, SIGMA, J2, SIGMA_TAU, SIGMA_SQ]
+// n=6 어트랙터: n, sigma, j2, sigma*tau, sigma^2
+fn n6_attractors() {
+    [N, sigma, j2, sigma_tau, sigma_sq]
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -59,10 +59,10 @@ struct ParamRange {
     steps: int
 }
 
-fn grid_values(r: ParamRange) -> [float] {
+fn grid_values(r: ParamRange) {
     let n = if r.steps < 1 { 1 } else { r.steps }
     if n == 1 {
-        return [(r.min + r.max) / PHI]
+        return [(r.min + r.max) / phi]
     }
     let mut vals = []
     let mut i = 0
@@ -79,7 +79,7 @@ fn grid_values(r: ParamRange) -> [float] {
 // ────────────────────────────────────────────────────────────────
 
 struct SweepResult {
-    best_params: [float],
+    best_params: str,
     best_value: float,
     total_evaluated: int
 }
@@ -220,7 +220,7 @@ fn parameter_sweep_2d(r1: ParamRange, r2: ParamRange, target_x: float, target_y:
 //  민감도 분석 (중심 유한차분)
 // ────────────────────────────────────────────────────────────────
 
-fn sensitivity_analysis(baseline: [float], names: [string], delta: float) -> [SensitivityEntry] {
+fn sensitivity_analysis(baseline, names, delta: float) {
     let actual_delta = if delta <= 0.0 { 0.01 } else { delta }
     let n_params = len(baseline)
 
@@ -258,7 +258,7 @@ fn sensitivity_analysis(baseline: [float], names: [string], delta: float) -> [Se
             mi = mi + 1
         }
 
-        let deriv = (f_plus - f_minus) / (PHI * h)
+        let deriv = (f_plus - f_minus) / (phi * h)
         let abs_deriv = if deriv < 0.0 { 0.0 - deriv } else { deriv }
         abs_sum = abs_sum + abs_deriv
         results = results.push(SensitivityEntry { name: name, derivative: deriv, relative_importance: abs_deriv })
@@ -284,7 +284,7 @@ fn sensitivity_analysis(baseline: [float], names: [string], delta: float) -> [Se
 //  적대적 시뮬레이션
 // ────────────────────────────────────────────────────────────────
 
-fn adversarial_sim(baseline: [float], budget: float, n_samples: int, seed: int) -> AdversarialResult {
+fn adversarial_sim(baseline, budget: float, n_samples: int, seed: int) -> AdversarialResult {
     let n_dims = len(baseline)
     let mut rng = lcg_new(seed)
 
@@ -304,7 +304,7 @@ fn adversarial_sim(baseline: [float], budget: float, n_samples: int, seed: int) 
         let mut perturbed_val = 1.0
         let mut di = 0
         while di < n_dims {
-            let p = lcg_next_centered(rng) * PHI * budget
+            let p = lcg_next_centered(rng) * phi * budget
             perturbed_val = perturbed_val * (baseline[di] + p)
             di = di + 1
         }
@@ -334,15 +334,15 @@ fn adversarial_sim(baseline: [float], budget: float, n_samples: int, seed: int) 
 // ────────────────────────────────────────────────────────────────
 
 struct LandscapePoint {
-    coords: [float],
+    coords: str,
     basin_depth: float
 }
 
-fn n6_landscape(dims: int, grid_per_dim: int) -> [LandscapePoint] {
+fn n6_landscape(dims: int, grid_per_dim: int) {
     let actual_dims = if dims < 1 { 1 } else if dims > 4 { 4 } else { dims }
     let actual_grid = if grid_per_dim < 2 { 2 } else { grid_per_dim }
     let attractors = n6_attractors()
-    let range_max = SIGMA_SQ  // 144
+    let range_max = sigma_sq  // 144
 
     // 1D/2D만 지원 (고차원은 조합 폭발)
     let mut results = []
@@ -360,7 +360,7 @@ fn n6_landscape(dims: int, grid_per_dim: int) -> [LandscapePoint] {
                 ai = ai + 1
             }
             let depth = 1.0 / (1.0 + min_dist)
-            results = results.push(LandscapePoint { coords: [x], basin_depth: depth })
+            results = results.push(LandscapePoint { coords: coords, basin_depth: depth })
             i = i + 1
         }
     } else {
@@ -404,20 +404,16 @@ fn n6_landscape(dims: int, grid_per_dim: int) -> [LandscapePoint] {
 // ────────────────────────────────────────────────────────────────
 
 // 수렴 테스트: 0 -> sigma=12, rate=0.1
-let conv = convergence_test(0.0, 200, SIGMA, 0.1)
+let conv = convergence_test(0.0, 200, sigma, 0.1)
 assert conv.converged
-assert conv.attractor == SIGMA
+assert conv.attractor == sigma
 assert conv.final_distance < 0.02
 println("=== simulation verified ===")
 println("convergence to sigma=12:", conv.converged, "at step:", conv.convergence_step)
 println("final_distance:", conv.final_distance)
 
 // 파라미터 스윕
-let sweep = parameter_sweep_2d(
-    ParamRange { name: "x", min: 0.0, max: SIGMA, steps: 13 },
-    ParamRange { name: "y", min: 0.0, max: J2, steps: 25 },
-    N, SIGMA
-)
+let sweep = parameter_sweep_2d( ParamRange { name: "x", min: 0.0, max: sigma, steps: 13 }, ParamRange { name: "y", min: 0.0, max: j2, steps: 25 }, N, sigma )
 assert sweep.total_evaluated == 325
 let dx_best = sweep.best_params[0] - N
 let abs_dx = if dx_best < 0.0 { 0.0 - dx_best } else { dx_best }
@@ -425,7 +421,7 @@ assert abs_dx < 1.5
 println("sweep best:", sweep.best_params[0], sweep.best_params[1], "value:", sweep.best_value)
 
 // 민감도
-let sens = sensitivity_analysis([N, SIGMA], ["x", "y"], 0.01)
+let sens = sensitivity_analysis([N, sigma], ["x", "y"], 0.01)
 assert len(sens) == 2
 let rel_sum = sens[0].relative_importance + sens[1].relative_importance
 let sum_err = rel_sum - 1.0
@@ -434,8 +430,8 @@ assert abs_sum_err < 0.0001
 println("sensitivity x:", sens[0].derivative, "y:", sens[1].derivative)
 
 // 적대적
-let adv = adversarial_sim([N, SIGMA], 1.0, 100, 42)
-assert adv.worst_case_value < N * SIGMA
+let adv = adversarial_sim([N, sigma], 1.0, 100, 42)
+assert adv.worst_case_value < N * sigma
 assert adv.robustness >= 0.0
 assert adv.robustness <= 1.0
 println("adversarial worst:", adv.worst_case_value, "best:", adv.best_case_value, "robustness:", adv.robustness)
@@ -471,16 +467,16 @@ fn main() {
         "run" -> {
             let hypothesis = if len(argv) >= 3 { argv[2] } else { "sigma" }
             let mut steps = 200
-            if len(argv) >= 4 { try { steps = to_int(argv[3]) } catch {} }
+            if len(argv) >= 4 { try { steps = to_int(argv[3]) } catch e {} }
 
             // 가설에 따른 수렴 목표 결정
             let target = match hypothesis {
                 "n"        -> N,
-                "sigma"    -> SIGMA,
-                "j2"       -> J2,
-                "sigma_tau" -> SIGMA_TAU,
-                "sigma_sq" -> SIGMA_SQ,
-                _          -> SIGMA
+                "sigma"    -> sigma,
+                "j2"       -> j2,
+                "sigma_tau" -> sigma_tau,
+                "sigma_sq" -> sigma_sq,
+                _          -> sigma
             }
 
             println("Hypothesis:", hypothesis, "-> target:", target)
@@ -497,18 +493,18 @@ fn main() {
         },
         "sweep" -> {
             println("Parameter sweep: (x, y) -> n=6 attractors")
-            let r1 = ParamRange { name: "x", min: 0.0, max: SIGMA, steps: 13 }
-            let r2 = ParamRange { name: "y", min: 0.0, max: J2, steps: 25 }
-            let result = parameter_sweep_2d(r1, r2, N, SIGMA)
+            let r1 = ParamRange { name: "x", min: 0.0, max: sigma, steps: 13 }
+            let r2 = ParamRange { name: "y", min: 0.0, max: j2, steps: 25 }
+            let result = parameter_sweep_2d(r1, r2, N, sigma)
             println("Total evaluated:", result.total_evaluated)
             println("Best params: x=", result.best_params[0], "y=", result.best_params[1])
             println("Best value:", result.best_value)
         },
         "sensitivity" -> {
-            let mut base = [N, SIGMA]
+            let mut base = [N, sigma]
             let names = ["x", "y"]
             let result = sensitivity_analysis(base, names, 0.01)
-            println("Sensitivity analysis (baseline: [" + to_string(N) + ", " + to_string(SIGMA) + "]):")
+            println("Sensitivity analysis (baseline: [" + to_string(N) + ", " + to_string(sigma) + "]):")
             let mut i = 0
             while i < len(result) {
                 println("  " + result[i].name + ": derivative=" + to_string(result[i].derivative) + " importance=" + to_string(result[i].relative_importance))
@@ -516,9 +512,9 @@ fn main() {
             }
         },
         "adversarial" -> {
-            let mut base = [N, SIGMA]
+            let mut base = [N, sigma]
             let mut budget = 1.0
-            if len(argv) >= 3 { try { budget = to_float(argv[2]) } catch {} }
+            if len(argv) >= 3 { try { budget = to_float(argv[2]) } catch e {} }
             let result = adversarial_sim(base, budget, 100, 42)
             println("Adversarial simulation (budget=" + to_string(budget) + "):")
             println("  Worst case:", result.worst_case_value)
@@ -529,8 +525,8 @@ fn main() {
         "landscape" -> {
             let mut dims = 1
             let mut grid = 25
-            if len(argv) >= 3 { try { dims = to_int(argv[2]) } catch {} }
-            if len(argv) >= 4 { try { grid = to_int(argv[3]) } catch {} }
+            if len(argv) >= 3 { try { dims = to_int(argv[2]) } catch e {} }
+            if len(argv) >= 4 { try { grid = to_int(argv[3]) } catch e {} }
             let result = n6_landscape(dims, grid)
             println("n=6 attractor landscape: dims=" + to_string(dims) + " grid=" + to_string(grid))
             println("Points:", len(result))

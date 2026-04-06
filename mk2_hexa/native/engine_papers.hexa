@@ -2,25 +2,24 @@
 // Papers: Academic paper pipeline
 // 사용: hexa engine_papers.hexa status|tick|report
 //
-// 목표: 드래프트 0건 (100% 발행), DOI 100+
-// 프로젝트: $HOME/Dev/papers
+// 목표: 드래프트 0건 (100% 발행), DOI 100+ // 프로젝트: $home/Dev/papers
 
 // ═══════════════════════════════════════════════════════════
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const VERSION = "1.0.0"
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PAPERS_DIR = DEV + "/papers"
-let MANIFEST_FILE = PAPERS_DIR + "/manifest.json"
-let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
-let EVOLVE_FILE = DEV + "/nexus6/shared/engine_papers_evolve.jsonl"
-let DISCOVERY_LOG = DEV + "/nexus6/shared/discovery_log.jsonl"
+comptime const version = "1.0.0"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let papers_dir = dev + "/papers"
+let manifest_file = papers_dir + "/manifest.json"
+let bus_file = dev + "/nexus6/shared/growth_bus.jsonl"
+let evolve_file = dev + "/nexus6/shared/engine_papers_evolve.jsonl"
+let discovery_log = dev + "/nexus6/shared/discovery_log.jsonl"
 
-comptime const GOAL_DRAFTS = 0
-comptime const GOAL_DOI = 100
-comptime const BATCH_THRESHOLD = 3
+comptime const goal_drafts = 0
+comptime const goal_doi = 100
+comptime const batch_threshold = 3
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -54,7 +53,7 @@ fn safe_int(s: string) -> i64 {
 }
 
 fn timestamp_now() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     return r.trim()
 }
 
@@ -100,8 +99,8 @@ fn parse_manifest() -> PaperStats {
         total: 0, published: 0, drafts: 0, doi_count: 0,
         draft_titles: "", no_doi_titles: "", fail_count: 0
     }
-    if !file_exists(MANIFEST_FILE) { return stats }
-    let content = read_file(MANIFEST_FILE)
+    if !file_exists(manifest_file) { return stats }
+    let content = read_file(manifest_file)
 
     // split by paper entries — each entry has "status" field
     // approach: split on "},", count status values
@@ -159,7 +158,7 @@ fn parse_manifest() -> PaperStats {
 // ═══════════════════════════════════════════════════════════
 
 fn compute_status_flag(stats: PaperStats) -> string {
-    if stats.drafts == 0 && stats.doi_count >= GOAL_DOI {
+    if stats.drafts == 0 && stats.doi_count >= goal_doi {
         return "GOAL_NEAR"
     }
     if stats.drafts == 0 {
@@ -176,7 +175,7 @@ fn compute_health_metric(stats: PaperStats) -> f64 {
     let draft_ratio = if stats.total > 0 {
         to_float(stats.published) / to_float(stats.total)
     } else { 0.0 }
-    let doi_ratio = min_f(to_float(stats.doi_count) / to_float(GOAL_DOI), 1.0)
+    let doi_ratio = min_f(to_float(stats.doi_count) / to_float(goal_doi), 1.0)
     let fail_penalty = if stats.total > 0 {
         min_f(to_float(stats.fail_count) / to_float(stats.total), 1.0)
     } else { 0.0 }
@@ -190,7 +189,7 @@ fn compute_health_metric(stats: PaperStats) -> f64 {
 fn bus_emit(event: string, detail: string) {
     let ts = timestamp_now()
     let entry = "{\"ts\":\"" + ts + "\",\"engine\":\"papers\",\"personality\":\"Amplifier\",\"event\":\"" + event + "\",\"detail\":\"" + detail + "\"}"
-    append_file(BUS_FILE, entry + "\n")
+    append_file(bus_file, entry + "\n")
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -202,12 +201,12 @@ fn evolve_record(action: string, drafts_before: i64, drafts_after: i64, doi_befo
     let d_delta = drafts_before - drafts_after
     let doi_delta = doi_after - doi_before
     let entry = "{\"ts\":\"" + ts + "\",\"action\":\"" + action + "\",\"drafts_resolved\":" + to_string(d_delta) + ",\"doi_gained\":" + to_string(doi_delta) + "}"
-    append_file(EVOLVE_FILE, entry + "\n")
+    append_file(evolve_file, entry + "\n")
 }
 
 fn read_evolve_stats() -> string {
-    if !file_exists(EVOLVE_FILE) { return "no evolve history" }
-    let content = read_file(EVOLVE_FILE)
+    if !file_exists(evolve_file) { return "no evolve history" }
+    let content = read_file(evolve_file)
     let lines = content.split("\n")
     let mut total_resolved: i64 = 0
     let mut total_doi: i64 = 0
@@ -233,8 +232,8 @@ fn read_evolve_stats() -> string {
 // ═══════════════════════════════════════════════════════════
 
 fn count_recent_discoveries() -> i64 {
-    if !file_exists(DISCOVERY_LOG) { return 0 }
-    let content = read_file(DISCOVERY_LOG)
+    if !file_exists(discovery_log) { return 0 }
+    let content = read_file(discovery_log)
     let lines = content.split("\n")
     let mut count: i64 = 0
     let mut i = 0
@@ -257,7 +256,7 @@ fn cmd_status() {
     let flag = compute_status_flag(stats)
     let h = compute_health_metric(stats)
 
-    print("=== engine_papers v" + VERSION + " ===")
+    print("=== engine_papers v" + version + " ===")
     print("project: papers (Academic paper pipeline)")
     print("personality: Amplifier (증폭기)")
     print("health:" + to_string(h))
@@ -265,8 +264,8 @@ fn cmd_status() {
     print("")
     print("[total]     " + to_string(stats.total))
     print("[published] " + to_string(stats.published))
-    print("[drafts]    " + to_string(stats.drafts) + "  (goal: " + to_string(GOAL_DRAFTS) + ")")
-    print("[doi_count] " + to_string(stats.doi_count) + "  (goal: " + to_string(GOAL_DOI) + ")")
+    print("[drafts]    " + to_string(stats.drafts) + "  (goal: " + to_string(goal_drafts) + ")")
+    print("[doi_count] " + to_string(stats.doi_count) + "  (goal: " + to_string(goal_doi) + ")")
     print("[fail_flag] " + to_string(stats.fail_count) + " papers with fail_count >= 2")
     print("")
 
@@ -297,9 +296,9 @@ fn cmd_tick() {
     // 2. select action
     let mut action = "consistency"
 
-    if stats_before.drafts >= BATCH_THRESHOLD {
+    if stats_before.drafts >= batch_threshold {
         action = "batch_publish"
-        print("[decision] drafts >= " + to_string(BATCH_THRESHOLD) + " → batch publish queue")
+        print("[decision] drafts >= " + to_string(batch_threshold) + " → batch publish queue")
 
         // log recommendation (no actual upload without tokens)
         let draft_list = stats_before.draft_titles
@@ -395,7 +394,7 @@ fn cmd_report() {
     print("# Papers Engine Report (Amplifier / 증폭기)")
     print("")
     print("**Generated**: " + ts)
-    print("**Version**: " + VERSION)
+    print("**Version**: " + version)
     print("")
     print("## Status: " + flag)
     print("")
@@ -405,9 +404,9 @@ fn cmd_report() {
     let draft_pct = if stats.total > 0 {
         to_float(stats.published) / to_float(stats.total) * 100.0
     } else { 0.0 }
-    let doi_pct = to_float(stats.doi_count) / to_float(GOAL_DOI) * 100.0
-    print("| Drafts | " + to_string(stats.drafts) + " | " + to_string(GOAL_DRAFTS) + " | " + to_string(draft_pct) + "% published |")
-    print("| DOI Count | " + to_string(stats.doi_count) + " | " + to_string(GOAL_DOI) + " | " + to_string(doi_pct) + "% |")
+    let doi_pct = to_float(stats.doi_count) / to_float(goal_doi) * 100.0
+    print("| Drafts | " + to_string(stats.drafts) + " | " + to_string(goal_drafts) + " | " + to_string(draft_pct) + "% published |")
+    print("| DOI Count | " + to_string(stats.doi_count) + " | " + to_string(goal_doi) + " | " + to_string(doi_pct) + "% |")
     print("")
 
     print("## Pipeline Summary")
@@ -465,7 +464,7 @@ fn cmd_report() {
         print("## Recommendation")
         print("")
         print("- All drafts published — monitor for new discovery-driven papers")
-        print("- DOI target: " + to_string(GOAL_DOI - stats.doi_count) + " remaining")
+        print("- DOI target: " + to_string(goal_doi - stats.doi_count) + " remaining")
     }
 }
 

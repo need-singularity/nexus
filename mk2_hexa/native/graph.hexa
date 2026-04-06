@@ -3,8 +3,8 @@
 // 삼각형 탐색 / 허브 탐색 / 수렴점 탐색
 // Rust/Python 의존 0 — 순수 hexa 파일 I/O
 
-comptime const GRAPH_PATH = "shared/discovery_graph.json"
-comptime const HUB_MIN_DEGREE = 3
+comptime const graph_path = "shared/discovery_graph.json"
+comptime const hub_min_degree = 3
 
 // ─── 노드 타입 (9종) ───
 
@@ -23,7 +23,7 @@ pure fn node_type_name(idx: int) -> string {
     }
 }
 
-comptime const NODE_TYPE_COUNT = 9
+comptime const node_type_count = 9
 
 pure fn node_type_index(name: string) -> int {
     match name {
@@ -56,7 +56,7 @@ pure fn edge_type_name(idx: int) -> string {
     }
 }
 
-comptime const EDGE_TYPE_COUNT = 8
+comptime const edge_type_count = 8
 
 pure fn edge_type_index(name: string) -> int {
     match name {
@@ -120,10 +120,10 @@ struct GraphStats {
 }
 
 fn load_graph_content() -> string {
-    if !file_exists(GRAPH_PATH) {
+    if !file_exists(graph_path) {
         return ""
     }
-    read_file(GRAPH_PATH)
+    read_file(graph_path)
 }
 
 fn count_nodes(content: string) -> int {
@@ -233,9 +233,9 @@ fn add_node(id: string, node_type: string, domain: string, summary: string, conf
     let entry = "{\"type\":\"node\",\"id\":\"" + id + "\",\"node_type\":\"" + canonical_type + "\",\"domain\":\"" + domain + "\",\"summary\":\"" + summary + "\",\"confidence\":" + to_string(confidence) + "}"
 
     if content == "" {
-        write_file(GRAPH_PATH, entry)
+        write_file(graph_path, entry)
     } else {
-        append_file(GRAPH_PATH, "\n" + entry)
+        append_file(graph_path, "\n" + entry)
     }
     true
 }
@@ -256,9 +256,9 @@ fn add_edge(from_id: string, to_id: string, edge_type: string, strength: float, 
 
     let content = load_graph_content()
     if content == "" {
-        write_file(GRAPH_PATH, entry)
+        write_file(graph_path, entry)
     } else {
-        append_file(GRAPH_PATH, "\n" + entry)
+        append_file(graph_path, "\n" + entry)
     }
     true
 }
@@ -446,7 +446,7 @@ fn find_triangles(content: string) -> string {
 }
 
 // 두 노드가 양방향으로 연결되어 있는지 확인
-fn is_bidir_connected(a: string, b: string, lines: [string]) -> bool {
+fn is_bidir_connected(a: string, b: string, lines) -> bool {
     let mut a_to_b = false
     let mut b_to_a = false
     for line in lines {
@@ -479,13 +479,13 @@ if mode == "status" {
     println("=== discovery graph: status ===")
     let content = load_graph_content()
     if content == "" {
-        println("  graph file: " + GRAPH_PATH + " (empty or missing)")
+        println("  graph file: " + graph_path + " (empty or missing)")
         println("  nodes: 0")
         println("  edges: 0")
     } else {
         let nc = count_nodes(content)
         let ec = count_edges(content)
-        println("  graph file: " + GRAPH_PATH)
+        println("  graph file: " + graph_path)
         println("  nodes: " + to_string(nc))
         println("  edges: " + to_string(ec))
         println("  types: " + count_by_node_type(content))
@@ -531,7 +531,7 @@ if mode == "link" {
 if mode == "hubs" {
     println("=== discovery graph: hubs ===")
     let content = load_graph_content()
-    let min_deg = if a.len() >= 4 { to_int(a[3]) } else { HUB_MIN_DEGREE }
+    let min_deg = if a.len() >= 4 { to_int(a[3]) } else { hub_min_degree }
     println("  min_degree: " + to_string(min_deg))
     println("  " + find_hubs(content, min_deg))
 }
@@ -556,16 +556,16 @@ assert node_type_index("Discovery") == 0
 assert node_type_index("hypothesis") == 1
 assert edge_type_name(0) == "Derives"
 assert edge_type_index("Validates") == 1
-assert NODE_TYPE_COUNT == 9
-assert EDGE_TYPE_COUNT == 8
+assert node_type_count == 9
+assert edge_type_count == 8
 
 println("=== graph verified ===")
-println("node types:", NODE_TYPE_COUNT)
-println("edge types:", EDGE_TYPE_COUNT)
+println("node types:", node_type_count)
+println("edge types:", edge_type_count)
 
 theorem graph_types_complete {
-    assert NODE_TYPE_COUNT == 9
-    assert EDGE_TYPE_COUNT == 8
+    assert node_type_count == 9
+    assert edge_type_count == 8
 }
 
 proof graph_invariants {

@@ -12,12 +12,12 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const SIGMA = 12
-comptime const J2 = 24
-comptime const PI = 3.14159265358979
-comptime const TAU_2PI = 6.28318530717959
-comptime const EXPERIMENT_COUNT = 22
-comptime const LOG_FILE = "shared/discovery_log.jsonl"
+comptime const sigma = 12
+comptime const j2 = 24
+comptime const pi = 3.14159265358979
+comptime const tau_2pi = 6.28318530717959
+comptime const experiment_count = 22
+comptime const log_file = "shared/discovery_log.jsonl"
 
 // ─── 22 experiment type names (canonical order) ───
 
@@ -224,7 +224,7 @@ fn domain_variability(target: string) -> float {
 fn str_hash(s: string) -> float {
     let mut h = 0.0
     let mut i = 0
-    while i < length(s) {
+    while i < len(s) {
         h = h * 31.0 + to_float(char_at(s, i))
         i = i + 1
     }
@@ -235,7 +235,7 @@ fn generate_probe_data(target: string) {
     let base = domain_base_values(target)
     let variability = domain_variability(target)
     let seed = str_hash(target)
-    let profile_len = length(base)
+    let profile_len = len(base)
     let data_len = 24
     let mut data = []
     let mut i = 0
@@ -331,7 +331,7 @@ fn min_i(a: int, b: int) -> int {
 }
 
 fn measure_metrics(data) -> Metrics {
-    let n = length(data)
+    let n = len(data)
     if n == 0 { return metrics_zero() }
     let nf = to_float(n)
 
@@ -432,7 +432,7 @@ fn measure_metrics(data) -> Metrics {
     let n6_consts = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 24.0]
     let mut min_dist = 999999999.0
     let mut ni = 0
-    while ni < length(n6_consts) {
+    while ni < len(n6_consts) {
         let d = abs(mean - n6_consts[ni])
         if d < min_dist { min_dist = d }
         ni = ni + 1
@@ -476,7 +476,7 @@ fn apply_acceleration(data, intensity: float) {
     let factor = 1.0 + intensity * 6.0
     let mut result = []
     let mut i = 0
-    while i < length(data) {
+    while i < len(data) {
         let result = result.push(data[i] * factor)
         i = i + 1
     }
@@ -484,7 +484,7 @@ fn apply_acceleration(data, intensity: float) {
 }
 
 fn apply_collision(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let shift = to_int(to_float(n) * intensity) + 1
     let mut result = []
     let mut i = 0
@@ -498,7 +498,7 @@ fn apply_collision(data, intensity: float) {
 }
 
 fn apply_separation(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let keep = to_int((1.0 - intensity) * to_float(n)) + 1
     let mut result = []
     let mut i = 0
@@ -514,7 +514,7 @@ fn apply_separation(data, intensity: float) {
 }
 
 fn apply_fusion(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let window = to_int(intensity * 5.0) + 1
     let mut result = []
     let mut i = 0
@@ -534,7 +534,7 @@ fn apply_fusion(data, intensity: float) {
 }
 
 fn apply_reversal(data) {
-    let n = length(data)
+    let n = len(data)
     let mut result = []
     let mut i = n - 1
     while i >= 0 {
@@ -547,7 +547,7 @@ fn apply_reversal(data) {
 fn apply_destruction(data, intensity: float) {
     let mut result = []
     let mut i = 0
-    while i < length(data) {
+    while i < len(data) {
         let noise = sin_approx(to_float(i) * 7.3 + 13.7) * intensity * abs(data[i])
         let result = result.push(data[i] + noise)
         i = i + 1
@@ -556,10 +556,13 @@ fn apply_destruction(data, intensity: float) {
 }
 
 fn apply_amplification(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let mut sum = 0.0
     let mut i = 0
-    while i < n { sum = sum + data[i]; i = i + 1 }
+    while i < n {
+        sum = sum + data[i]
+        i = i + 1
+    }
     let mean = sum / to_float(n)
     let factor = 1.0 + intensity * 12.0
     let mut result = []
@@ -572,10 +575,13 @@ fn apply_amplification(data, intensity: float) {
 }
 
 fn apply_suppression(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let mut sum = 0.0
     let mut i = 0
-    while i < n { sum = sum + data[i]; i = i + 1 }
+    while i < n {
+        sum = sum + data[i]
+        i = i + 1
+    }
     let mean = sum / to_float(n)
     let factor = 1.0 - intensity * 0.9
     let mut result = []
@@ -590,7 +596,7 @@ fn apply_suppression(data, intensity: float) {
 fn apply_mutation(data, intensity: float) {
     let mut result = []
     let mut i = 0
-    while i < length(data) {
+    while i < len(data) {
         let perturbation = cos_approx(to_float(i) * 3.7 + 2.1) * intensity * 6.0
         let result = result.push(data[i] + perturbation)
         i = i + 1
@@ -599,7 +605,7 @@ fn apply_mutation(data, intensity: float) {
 }
 
 fn apply_crossover(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let mid = n / 2
     let mut result = []
     let mut i = 0
@@ -620,7 +626,7 @@ fn apply_crossover(data, intensity: float) {
 }
 
 fn apply_isolation(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let keep = to_int((1.0 - intensity) * to_float(n)) + 1
     let start = (n - keep) / 2
     let end = start + keep
@@ -646,7 +652,7 @@ fn apply_overload(data, duration: int) {
     let mut rep = 0
     while rep < duration {
         let mut i = 0
-        while i < length(data) {
+        while i < len(data) {
             let result = result.push(data[i])
             i = i + 1
         }
@@ -656,7 +662,7 @@ fn apply_overload(data, duration: int) {
 }
 
 fn apply_starvation(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let keep = max_i(1, to_int((1.0 - intensity * 0.9) * to_float(n)) + 1)
     let mut result = []
     let mut i = 0
@@ -668,7 +674,7 @@ fn apply_starvation(data, intensity: float) {
 }
 
 fn apply_time_warp(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let rate = 1.0 + intensity * 2.0
     let new_len = to_int(to_float(n) * rate) + 1
     let mut result = []
@@ -686,7 +692,7 @@ fn apply_time_warp(data, intensity: float) {
 }
 
 fn apply_dimension_shift(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let extra = to_int(intensity * to_float(n)) + 1
     let mut result = []
     let mut i = 0
@@ -703,10 +709,13 @@ fn apply_dimension_shift(data, intensity: float) {
 }
 
 fn apply_symmetry_breaking(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let mut sum = 0.0
     let mut i = 0
-    while i < n { sum = sum + data[i]; i = i + 1 }
+    while i < n {
+        sum = sum + data[i]
+        i = i + 1
+    }
     let mean = sum / to_float(n)
     let mut result = []
     let mut j = 0
@@ -718,10 +727,13 @@ fn apply_symmetry_breaking(data, intensity: float) {
 }
 
 fn apply_resonance(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let mut sum = 0.0
     let mut i = 0
-    while i < n { sum = sum + data[i]; i = i + 1 }
+    while i < n {
+        sum = sum + data[i]
+        i = i + 1
+    }
     let mean = sum / to_float(n)
 
     // find dominant lag via autocorrelation
@@ -754,7 +766,7 @@ fn apply_resonance(data, intensity: float) {
 
 fn apply_tension(data, intensity: float, duration: int) {
     // returns [breakpoint, modified_data...]
-    let n = length(data)
+    let n = len(data)
     let orig_metrics = measure_metrics(data)
     let base_stab = orig_metrics.stability
     let threshold = base_stab * 0.5
@@ -794,7 +806,7 @@ fn apply_tension(data, intensity: float, duration: int) {
     let mut out = []
     let out = out.push(breakpoint)
     let mut oi = 0
-    while oi < length(result) {
+    while oi < len(result) {
         let out = out.push(result[oi])
         oi = oi + 1
     }
@@ -802,7 +814,7 @@ fn apply_tension(data, intensity: float, duration: int) {
 }
 
 fn apply_compression(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let keep = max_i(1, to_int((1.0 - intensity * 0.8) * to_float(n)) + 1)
 
     // build indexed array, sort by magnitude desc, keep top-k
@@ -847,7 +859,7 @@ fn apply_compression(data, intensity: float) {
 fn apply_vibration(data, intensity: float) {
     let mut result = []
     let mut i = 0
-    while i < length(data) {
+    while i < len(data) {
         let fi = to_float(i)
         let v1 = sin_approx(fi * 1.0) * intensity
         let v2 = sin_approx(fi * 2.5) * intensity * 0.5
@@ -859,7 +871,7 @@ fn apply_vibration(data, intensity: float) {
 }
 
 fn apply_elasticity(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let recovery = 1.0 - intensity * 0.3
     let mut result = []
     let mut i = 0
@@ -874,7 +886,7 @@ fn apply_elasticity(data, intensity: float) {
 }
 
 fn apply_friction(data, intensity: float) {
-    let n = length(data)
+    let n = len(data)
     let passes = to_int(intensity * 6.0) + 1
     let mut result = []
     let mut i = 0
@@ -930,12 +942,12 @@ fn apply_experiment(exp_type: string, data, intensity: float, duration: int) {
     if exp_type == "Vibration" { modified = apply_vibration(data, intensity) }
     if exp_type == "Elasticity" { modified = apply_elasticity(data, intensity) }
     if exp_type == "Friction" { modified = apply_friction(data, intensity) }
-    if length(modified) == 0 { modified = data }
+    if len(modified) == 0 { modified = data }
     // prepend -1.0 (no breakpoint)
     let mut out = []
     let out = out.push(-1.0)
     let mut oi = 0
-    while oi < length(modified) {
+    while oi < len(modified) {
         let out = out.push(modified[oi])
         oi = oi + 1
     }
@@ -988,7 +1000,7 @@ struct ExperimentResult {
     after: Metrics,
     delta: Metrics,
     breakpoint: float,
-    discoveries: [string]
+    discoveries: str
 }
 
 fn run_experiment(exp_type: string, target: string) -> ExperimentResult {
@@ -1003,7 +1015,7 @@ fn run_experiment(exp_type: string, target: string) -> ExperimentResult {
     let breakpoint = raw[0]
     let mut modified = []
     let mut i = 1
-    while i < length(raw) {
+    while i < len(raw) {
         let modified = modified.push(raw[i])
         i = i + 1
     }
@@ -1026,7 +1038,7 @@ fn run_experiment(exp_type: string, target: string) -> ExperimentResult {
 
 fn pad_right(s: string, width: int) -> string {
     let mut out = s
-    while length(out) < width {
+    while len(out) < width {
         out = out + " "
     }
     out
@@ -1048,21 +1060,15 @@ fn format_report(results) {
     let mut all_disc = []
 
     let mut i = 0
-    while i < length(results) {
+    while i < len(results) {
         let r = results[i]
         let bp_str = if r.breakpoint >= 0.0 { to_string(r.breakpoint) } else { "-" }
-        println("| " + pad_right(r.exp_type, 15) + " | " +
-            pad_right(to_string(r.delta.phi), 8) + " | " +
-            pad_right(to_string(r.delta.entropy), 8) + " | " +
-            pad_right(to_string(r.delta.connectivity), 8) + " | " +
-            pad_right(to_string(r.delta.stability), 8) + " | " +
-            pad_right(to_string(r.after.n6_score), 8) + " | " +
-            pad_right(bp_str, 8) + " |")
+        println("| " + pad_right(r.exp_type, 15) + " | " + pad_right(to_string(r.delta.phi), 8) + " | " + pad_right(to_string(r.delta.entropy), 8) + " | " + pad_right(to_string(r.delta.connectivity), 8) + " | " + pad_right(to_string(r.delta.stability), 8) + " | " + pad_right(to_string(r.after.n6_score), 8) + " | " + pad_right(bp_str, 8) + " |")
 
         sum_n6 = sum_n6 + r.after.n6_score
         if r.breakpoint >= 0.0 { bp_count = bp_count + 1 }
         let mut di = 0
-        while di < length(r.discoveries) {
+        while di < len(r.discoveries) {
             total_disc = total_disc + 1
             let all_disc = all_disc.push(r.discoveries[di])
             di = di + 1
@@ -1072,17 +1078,16 @@ fn format_report(results) {
 
     println("+-----------------+----------+----------+----------+----------+----------+----------+")
 
-    let n = length(results)
+    let n = len(results)
     let avg_n6 = if n > 0 { sum_n6 / to_float(n) } else { 0.0 }
     println("")
-    println("  Experiments: " + to_string(n) + "  |  Breakpoints: " + to_string(bp_count) +
-        "  |  Discoveries: " + to_string(total_disc) + "  |  Avg N6: " + to_string(avg_n6))
+    println("  Experiments: " + to_string(n) + "  |  Breakpoints: " + to_string(bp_count) + "  |  Discoveries: " + to_string(total_disc) + "  |  Avg N6: " + to_string(avg_n6))
 
     if total_disc > 0 {
         println("")
         println("  Discoveries:")
         let mut di = 0
-        while di < length(all_disc) {
+        while di < len(all_disc) {
             println("    * " + all_disc[di])
             di = di + 1
         }
@@ -1093,7 +1098,7 @@ fn format_report(results) {
 
 fn main() {
     let a = args()
-    let argc = length(a)
+    let argc = len(a)
 
     if argc < 2 {
         println("Usage:")
@@ -1109,7 +1114,7 @@ fn main() {
         let names = all_type_names()
         println("=== 22 Experiment Types ===")
         let mut i = 0
-        while i < length(names) {
+        while i < len(names) {
             println("  " + to_string(i + 1) + ". " + names[i])
             i = i + 1
         }
@@ -1148,13 +1153,9 @@ fn main() {
             }
             println("=== Running " + t + " on " + domain + " ===")
             let result = run_experiment(t, domain)
-            println("[" + result.exp_type + "] phi=" + to_string(result.delta.phi) +
-                " entropy=" + to_string(result.delta.entropy) +
-                " n6=" + to_string(result.after.n6_score) +
-                " bp=" + to_string(result.breakpoint) +
-                " discoveries=" + to_string(length(result.discoveries)))
+            println("[" + result.exp_type + "] phi=" + to_string(result.delta.phi) + " entropy=" + to_string(result.delta.entropy) + " n6=" + to_string(result.after.n6_score) + " bp=" + to_string(result.breakpoint) + " discoveries=" + to_string(len(result.discoveries)))
             let mut di = 0
-            while di < length(result.discoveries) {
+            while di < len(result.discoveries) {
                 println("  * " + result.discoveries[di])
                 di = di + 1
             }
@@ -1166,7 +1167,7 @@ fn main() {
         let names = all_type_names()
         let mut results = []
         let mut i = 0
-        while i < length(names) {
+        while i < len(names) {
             let r = run_experiment(names[i], domain)
             let results = results.push(r)
             i = i + 1

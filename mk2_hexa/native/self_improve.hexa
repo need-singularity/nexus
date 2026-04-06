@@ -8,7 +8,7 @@
 // 코어 렌즈 목록 (22개)
 // ──────────────────────────────────────
 
-fn core_lens_list() -> [string] {
+fn core_lens_list() {
     let lenses = []
     let lenses = lenses.push("consciousness")
     let lenses = lenses.push("gravity")
@@ -73,8 +73,8 @@ fn priority_score(s: ImprovementSuggestion) -> float {
 }
 
 // 우선순위 정렬 (삽입 정렬 — 제안 수 보통 소량)
-fn prioritize_suggestions(suggestions: [ImprovementSuggestion]) -> [ImprovementSuggestion] {
-    let n = length(suggestions)
+fn prioritize_suggestions(suggestions) {
+    let n = len(suggestions)
     if n <= 1 { return suggestions }
     let mut arr = suggestions
     let mut i = 1
@@ -101,11 +101,11 @@ fn prioritize_suggestions(suggestions: [ImprovementSuggestion]) -> [ImprovementS
 // ──────────────────────────────────────
 
 struct PerformanceAnalysis {
-    bottlenecks: [string],
-    unused_lenses: [string],
-    low_hit_lenses: [string],      // "name:rate" 형식
-    slow_operations: [string],     // "name:time_ms" 형식
-    suggestions: [ImprovementSuggestion],
+    bottlenecks: str,
+    unused_lenses: str,
+    low_hit_lenses: str,      // "name:rate" 형식
+    slow_operations: str,     // "name:time_ms" 형식
+    suggestions: str,
     health_score: float
 }
 
@@ -117,12 +117,12 @@ struct SelfImproveReport {
     agent_id: string,
     mode: string,
     cycles_completed: int,
-    discoveries: [string],
+    discoveries: str,
     time_elapsed_ms: int,
-    domains_covered: [string]
+    domains_covered: str
 }
 
-fn make_report(id: string, mode: string, cycles: int, discoveries: [string], time_ms: int, domains: [string]) -> SelfImproveReport {
+fn make_report(id: string, mode: string, cycles: int, discoveries, time_ms: int, domains) -> SelfImproveReport {
     SelfImproveReport {
         agent_id: id,
         mode: mode,
@@ -137,9 +137,9 @@ fn make_report(id: string, mode: string, cycles: int, discoveries: [string], tim
 // analyze — 성능 분석
 // ──────────────────────────────────────
 
-fn contains_str(arr: [string], s: string) -> bool {
+fn contains_str(arr, s: string) -> bool {
     let mut i = 0
-    while i < length(arr) {
+    while i < len(arr) {
         if arr[i] == s { return true }
         i = i + 1
     }
@@ -148,8 +148,8 @@ fn contains_str(arr: [string], s: string) -> bool {
 
 fn str_contains(haystack: string, needle: string) -> bool {
     // 간이 substring 검사
-    let hl = length(haystack)
-    let nl = length(needle)
+    let hl = len(haystack)
+    let nl = len(needle)
     if nl > hl { return false }
     let mut i = 0
     while i <= hl - nl {
@@ -159,9 +159,9 @@ fn str_contains(haystack: string, needle: string) -> bool {
     false
 }
 
-fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
+fn analyze_performance(reports) -> PerformanceAnalysis {
     let core = core_lens_list()
-    let n_reports = length(reports)
+    let n_reports = len(reports)
 
     // 사용된 렌즈 수집 (도메인 기반)
     let mut used = []
@@ -169,7 +169,7 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
     while ri < n_reports {
         let r = reports[ri]
         let mut di = 0
-        while di < length(r.domains_covered) {
+        while di < len(r.domains_covered) {
             let d = r.domains_covered[di]
             if !contains_str(used, d) {
                 let used = used.push(d)
@@ -182,11 +182,11 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
     // 미사용 렌즈
     let mut unused = []
     let mut ci = 0
-    while ci < length(core) {
+    while ci < len(core) {
         let lens = core[ci]
         let mut found = false
         let mut ui = 0
-        while ui < length(used) {
+        while ui < len(used) {
             if str_contains(used[ui], lens) { found = true }
             ui = ui + 1
         }
@@ -208,7 +208,7 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
                 let slow_ops = slow_ops.push(r.agent_id + ":" + to_string(avg_time))
             }
         }
-        if length(r.discoveries) == 0 && r.cycles_completed > 3 {
+        if len(r.discoveries) == 0 && r.cycles_completed > 3 {
             let msg = "Agent '" + r.agent_id + "' unproductive: 0 discoveries in " + to_string(r.cycles_completed) + " cycles"
             let bottlenecks = bottlenecks.push(msg)
         }
@@ -218,9 +218,9 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
     // 제안 생성
     let mut suggestions = []
 
-    if length(unused) > 0 {
-        let n_unused = length(unused)
-        let n_core = length(core)
+    if len(unused) > 0 {
+        let n_unused = len(unused)
+        let n_core = len(core)
         let pct = if n_core > 0 { (n_unused * 100) / n_core } else { 0 }
         // 처음 6개만 표시
         let mut preview = ""
@@ -236,8 +236,8 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
         let suggestions = suggestions.push(make_suggestion("lens", desc, imp, "easy"))
     }
 
-    if length(bottlenecks) > 0 {
-        let desc = to_string(length(bottlenecks)) + " bottleneck(s) detected -- consider reducing max_cycles or adjusting serendipity"
+    if len(bottlenecks) > 0 {
+        let desc = to_string(len(bottlenecks)) + " bottleneck(s) detected -- consider reducing max_cycles or adjusting serendipity"
         let suggestions = suggestions.push(make_suggestion("engine", desc, "30-50% cycle time reduction", "medium"))
     }
 
@@ -246,7 +246,7 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
     let mut total_cycles = 0
     let mut ri3 = 0
     while ri3 < n_reports {
-        total_discoveries = total_discoveries + length(reports[ri3].discoveries)
+        total_discoveries = total_discoveries + len(reports[ri3].discoveries)
         total_cycles = total_cycles + reports[ri3].cycles_completed
         ri3 = ri3 + 1
     }
@@ -262,9 +262,9 @@ fn analyze_performance(reports: [SelfImproveReport]) -> PerformanceAnalysis {
         if raw > 1.0 { 1.0 } else { raw }
     } else { 0.0 }
 
-    let bottleneck_penalty_raw = to_float(length(bottlenecks)) * 0.1
+    let bottleneck_penalty_raw = to_float(len(bottlenecks)) * 0.1
     let bottleneck_penalty = if bottleneck_penalty_raw > 0.5 { 0.5 } else { bottleneck_penalty_raw }
-    let unused_penalty_raw = to_float(length(unused)) * 0.02
+    let unused_penalty_raw = to_float(len(unused)) * 0.02
     let unused_penalty = if unused_penalty_raw > 0.3 { 0.3 } else { unused_penalty_raw }
     let health_raw = discovery_score - bottleneck_penalty - unused_penalty
     let health_score = if health_raw < 0.0 { 0.0 } else if health_raw > 1.0 { 1.0 } else { health_raw }
@@ -287,7 +287,7 @@ struct AgentConfig {
     max_cycles: int,
     mode: string,
     serendipity: float,
-    domains: [string]
+    domains: str
 }
 
 fn default_config() -> AgentConfig {
@@ -302,10 +302,10 @@ fn default_config() -> AgentConfig {
 struct OptimizationResult {
     original: AgentConfig,
     optimized: AgentConfig,
-    changes: [string]
+    changes: str
 }
 
-fn optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationResult {
+fn do_optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationResult {
     let mut opt = config
     let mut changes = []
 
@@ -316,7 +316,7 @@ fn optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationR
     }
 
     // 느린 작업 → max_cycles 절반
-    if length(analysis.slow_operations) > 0 && config.max_cycles > 3 {
+    if len(analysis.slow_operations) > 0 && config.max_cycles > 3 {
         opt.max_cycles = config.max_cycles / 2
         let changes = changes.push("max_cycles: " + to_string(config.max_cycles) + " -> " + to_string(opt.max_cycles) + " (slow operations detected)")
     }
@@ -324,7 +324,7 @@ fn optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationR
     // 낮은 발견율 → serendipity 증가
     let mut has_low_rate = false
     let mut si = 0
-    while si < length(analysis.suggestions) {
+    while si < len(analysis.suggestions) {
         if analysis.suggestions[si].category == "algorithm" { has_low_rate = true }
         si = si + 1
     }
@@ -335,10 +335,10 @@ fn optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationR
     }
 
     // 미사용 렌즈 많음 → 도메인 확장
-    if length(analysis.unused_lenses) > 10 && length(config.domains) < 3 {
+    if len(analysis.unused_lenses) > 10 && len(config.domains) < 3 {
         let new_domains = ["physics", "biology", "computing"]
         let mut ni = 0
-        while ni < length(new_domains) {
+        while ni < len(new_domains) {
             let d = new_domains[ni]
             if !contains_str(opt.domains, d) {
                 opt.domains = opt.domains.push(d)
@@ -348,7 +348,7 @@ fn optimize(config: AgentConfig, analysis: PerformanceAnalysis) -> OptimizationR
         }
     }
 
-    if length(changes) == 0 {
+    if len(changes) == 0 {
         let changes = changes.push("No changes needed -- configuration is optimal")
     }
 
@@ -384,18 +384,18 @@ fn apply_optimization(result: OptimizationResult, config_path: string) -> bool {
 // CLI 엔트리포인트
 // ──────────────────────────────────────
 
-fn load_reports_from_file(path: string) -> [SelfImproveReport] {
+fn load_reports_from_file(path: string) {
     let mut reports = []
     try {
         let data = read_file(path)
         let lines = split(data, "\n")
         let mut i = 0
-        while i < length(lines) {
+        while i < len(lines) {
             let line = trim(lines[i])
-            if length(line) > 0 {
+            if len(line) > 0 {
                 // 간이 파서: "id|mode|cycles|time_ms|domain"
                 let parts = split(line, "|")
-                if length(parts) >= 5 {
+                if len(parts) >= 5 {
                     try {
                         let cycles = to_int(trim(parts[2]))
                         let time_ms = to_int(trim(parts[3]))
@@ -417,18 +417,18 @@ fn load_reports_from_file(path: string) -> [SelfImproveReport] {
 fn print_analysis(analysis: PerformanceAnalysis) {
     println("=== Performance Analysis ===")
     println("  Health score: " + to_string(analysis.health_score))
-    println("  Bottlenecks: " + to_string(length(analysis.bottlenecks)))
+    println("  Bottlenecks: " + to_string(len(analysis.bottlenecks)))
     let mut bi = 0
-    while bi < length(analysis.bottlenecks) {
+    while bi < len(analysis.bottlenecks) {
         println("    - " + analysis.bottlenecks[bi])
         bi = bi + 1
     }
-    println("  Unused lenses: " + to_string(length(analysis.unused_lenses)))
-    println("  Slow operations: " + to_string(length(analysis.slow_operations)))
-    println("  Suggestions: " + to_string(length(analysis.suggestions)))
+    println("  Unused lenses: " + to_string(len(analysis.unused_lenses)))
+    println("  Slow operations: " + to_string(len(analysis.slow_operations)))
+    println("  Suggestions: " + to_string(len(analysis.suggestions)))
     let sorted = prioritize_suggestions(analysis.suggestions)
     let mut si = 0
-    while si < length(sorted) {
+    while si < len(sorted) {
         let s = sorted[si]
         println("    [" + s.difficulty + "] " + s.category + ": " + s.description)
         println("      -> " + s.expected_improvement)
@@ -439,7 +439,7 @@ fn print_analysis(analysis: PerformanceAnalysis) {
 fn print_optimization(result: OptimizationResult) {
     println("=== Optimization Result ===")
     let mut ci = 0
-    while ci < length(result.changes) {
+    while ci < len(result.changes) {
         println("  " + result.changes[ci])
         ci = ci + 1
     }
@@ -448,9 +448,9 @@ fn print_optimization(result: OptimizationResult) {
 
 fn main() {
     let argv = args()
-    let cmd = if length(argv) > 1 { argv[1] } else { "analyze" }
-    let report_path = if length(argv) > 2 { argv[2] } else { "shared/agent_reports.txt" }
-    let config_path = if length(argv) > 3 { argv[3] } else { "shared/agent_config.txt" }
+    let cmd = if len(argv) > 1 { argv[1] } else { "analyze" }
+    let report_path = if len(argv) > 2 { argv[2] } else { "shared/agent_reports.txt" }
+    let config_path = if len(argv) > 3 { argv[3] } else { "shared/agent_config.txt" }
 
     let reports = load_reports_from_file(report_path)
 
@@ -462,14 +462,14 @@ fn main() {
         "suggest" -> {
             let analysis = analyze_performance(reports)
             let config = default_config()
-            let result = optimize(config, analysis)
+            let result = do_optimize(config, analysis)
             print_analysis(analysis)
             print_optimization(result)
         },
         "apply" -> {
             let analysis = analyze_performance(reports)
             let config = default_config()
-            let result = optimize(config, analysis)
+            let result = do_optimize(config, analysis)
             print_optimization(result)
             let ok = apply_optimization(result, config_path)
             if ok { println("Applied.") } else { println("Apply failed.") }
@@ -497,40 +497,40 @@ assert sorted[0].category == "algorithm"
 
 // analyze empty reports
 let empty_analysis = analyze_performance([])
-assert length(empty_analysis.bottlenecks) == 0
+assert len(empty_analysis.bottlenecks) == 0
 assert empty_analysis.health_score == 0.0
 
 // analyze healthy report
 let healthy_reports = [make_report("a1", "explore", 6, ["d1","d2","d3","d4","d5","d6"], 300, ["physics"])]
 let healthy_analysis = analyze_performance(healthy_reports)
-assert length(healthy_analysis.bottlenecks) == 0
+assert len(healthy_analysis.bottlenecks) == 0
 assert healthy_analysis.health_score > 0.0
 
 // analyze slow report
 let slow_reports = [make_report("slow", "explore", 3, ["d1","d2","d3"], 30000, ["physics"])]
 let slow_analysis = analyze_performance(slow_reports)
-assert length(slow_analysis.bottlenecks) > 0
-assert length(slow_analysis.slow_operations) > 0
+assert len(slow_analysis.bottlenecks) > 0
+assert len(slow_analysis.slow_operations) > 0
 
 // analyze unproductive report
 let lazy_reports = [make_report("lazy", "explore", 6, [], 600, ["physics"])]
 let lazy_analysis = analyze_performance(lazy_reports)
-assert length(lazy_analysis.bottlenecks) > 0
+assert len(lazy_analysis.bottlenecks) > 0
 
 // optimize: healthy config = no changes
-let opt_healthy = optimize(default_config(), healthy_analysis)
-assert length(opt_healthy.changes) == 1  // "No changes needed"
+let opt_healthy = do_optimize(default_config(), healthy_analysis)
+assert len(opt_healthy.changes) == 1  // "No changes needed"
 
 // optimize: low health → explore mode
 let deepen_config = AgentConfig { max_cycles: 6, mode: "deepen", serendipity: 0.2, domains: ["general"] }
 let low_health = PerformanceAnalysis { bottlenecks: ["b1","b2"], unused_lenses: [], low_hit_lenses: [], slow_operations: [], suggestions: [], health_score: 0.1 }
-let opt_low = optimize(deepen_config, low_health)
+let opt_low = do_optimize(deepen_config, low_health)
 assert opt_low.optimized.mode == "explore"
 
 // optimize: slow → halve max_cycles
 let big_config = AgentConfig { max_cycles: 12, mode: "explore", serendipity: 0.2, domains: ["general"] }
 let slow_pa = PerformanceAnalysis { bottlenecks: [], unused_lenses: [], low_hit_lenses: [], slow_operations: ["op:5000"], suggestions: [], health_score: 0.5 }
-let opt_slow = optimize(big_config, slow_pa)
+let opt_slow = do_optimize(big_config, slow_pa)
 assert opt_slow.optimized.max_cycles == 6
 
 println("=== self_improve verified ===")

@@ -37,7 +37,7 @@ fn extract_domain(text: string) -> string {
 
     let domains = ["physics", "biology", "chemistry", "energy", "chip", "semiconductor", "fusion", "cosmology", "quantum", "ai", "battery", "solar", "plasma", "robotics", "crypto", "network", "material", "display", "audio", "math", "software", "environment"]
     let mut i = 0
-    while i < domains.length() {
+    while i < len(domains) {
         if text.contains(domains[i]) { return domains[i] }
         i = i + 1
     }
@@ -49,7 +49,7 @@ fn extract_domain(text: string) -> string {
 fn extract_first_number(text: string) -> string {
     let tokens = text.split(" ")
     let mut i = 0
-    while i < tokens.length() {
+    while i < len(tokens) {
         let tok = tokens[i].trim()
         if tok != "" {
             try {
@@ -76,7 +76,7 @@ fn extract_first_number(text: string) -> string {
 fn contains_any(text: string, keywords: string) -> bool {
     let kws = keywords.split(",")
     let mut i = 0
-    while i < kws.length() {
+    while i < len(kws) {
         if text.contains(kws[i].trim()) { return true }
         i = i + 1
     }
@@ -167,46 +167,46 @@ fn classify_intent(text: string) -> string {
 
 // ─── 의도 → CLI 인자 변환 ───
 
-fn intent_to_cli(intent: string) -> string {
-    let parts = intent.split(":")
+fn intent_to_cli(intent_val: string) -> string {
+    let parts = intent_val.split(":")
     let action = parts[0]
 
     if action == "help" {
         return "nexus6 help"
     }
     if action == "verify" {
-        if parts.length() > 1 {
+        if len(parts) > 1 {
             return "nexus6 verify " + parts[1]
         }
         return "nexus6 verify"
     }
     if action == "scan" {
         let mut cmd = "nexus6 scan"
-        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
-        if parts.length() > 2 {
+        if len(parts) > 1 { cmd = cmd + " " + parts[1] }
+        if len(parts) > 2 {
             if parts[2] == "true" { cmd = cmd + " --full" }
         }
         return cmd
     }
     if action == "experiment" {
         let mut cmd = "nexus6 experiment"
-        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
-        if parts.length() > 2 { cmd = cmd + " " + parts[2] }
+        if len(parts) > 1 { cmd = cmd + " " + parts[1] }
+        if len(parts) > 2 { cmd = cmd + " " + parts[2] }
         return cmd
     }
     if action == "search" {
         let mut cmd = "nexus6 search"
-        if parts.length() > 1 { cmd = cmd + " " + parts[1] }
+        if len(parts) > 1 { cmd = cmd + " " + parts[1] }
         return cmd
     }
-    "nexus6 " + intent
+    "nexus6 " + intent_val
 }
 
 // ─── CLI ───
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("nlp.hexa — NLP 의도 파서 (한국어 + 영어)")
         print("Usage:")
         print("  classify <text>   의도 분류")
@@ -218,47 +218,47 @@ fn main() {
     let cmd = a[1]
     let mut text = ""
     let mut ti = 2
-    while ti < a.length() {
+    while ti < len(a) {
         if text == "" { text = a[ti] }
         else { text = text + " " + a[ti] }
         ti = ti + 1
     }
 
     if cmd == "classify" {
-        let intent = classify_intent(text)
-        print("[nlp] intent: " + intent)
+        let user_intent = classify_intent(text)
+        print("[nlp] intent_val: " + intent_val)
     }
 
     if cmd == "parse" {
-        let intent = classify_intent(text)
-        let parts = intent.split(":")
+        let user_intent = classify_intent(text)
+        let parts = intent_val.split(":")
         let action = parts[0]
         print("[nlp] action : " + action)
         if action == "scan" {
-            if parts.length() > 1 { print("  domain : " + parts[1]) }
-            if parts.length() > 2 { print("  full   : " + parts[2]) }
+            if len(parts) > 1 { print("  domain : " + parts[1]) }
+            if len(parts) > 2 { print("  full   : " + parts[2]) }
         }
         if action == "verify" {
-            if parts.length() > 1 { print("  value  : " + parts[1]) }
+            if len(parts) > 1 { print("  value  : " + parts[1]) }
         }
         if action == "experiment" {
-            if parts.length() > 1 { print("  type   : " + parts[1]) }
-            if parts.length() > 2 { print("  target : " + parts[2]) }
-            if parts.length() > 3 {
+            if len(parts) > 1 { print("  type   : " + parts[1]) }
+            if len(parts) > 2 { print("  target : " + parts[2]) }
+            if len(parts) > 3 {
                 if parts[3] != "" { print("  lens   : " + parts[3]) }
             }
         }
         if action == "search" {
-            if parts.length() > 1 { print("  query  : " + parts[1]) }
+            if len(parts) > 1 { print("  query  : " + parts[1]) }
         }
         if action == "unknown" {
-            if parts.length() > 1 { print("  text   : " + parts[1]) }
+            if len(parts) > 1 { print("  text   : " + parts[1]) }
         }
     }
 
     if cmd == "to-cli" {
-        let intent = classify_intent(text)
-        let cli = intent_to_cli(intent)
+        let user_intent = classify_intent(text)
+        let cli = intent_to_cli(intent_val)
         print("[nlp] " + cli)
     }
 }

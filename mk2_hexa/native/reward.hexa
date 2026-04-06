@@ -7,7 +7,7 @@
 //       hexa reward.hexa status
 
 // ─── 설정 ───
-comptime const REWARD_FILE = "shared/reward_tracker.jsonl"
+comptime const reward_file = "shared/reward_tracker.jsonl"
 
 // ─── 보상 시그널 배율 (n=6 약수 구조: 1, 2, 3, 6) ───
 
@@ -38,11 +38,11 @@ fn effective_score(score: float, signal: string) -> float {
 fn record_entry(signal: string, lens: string, score: float) {
     let eff = effective_score(score, signal)
     let line = "{\"signal\":\"" + signal + "\",\"lens\":\"" + lens + "\",\"score\":" + to_string(score) + ",\"effective\":" + to_string(eff) + "}"
-    let raw = read_file(REWARD_FILE)
+    let raw = read_file(reward_file)
     if raw == "" {
-        write_file(REWARD_FILE, line + "\n")
+        write_file(reward_file, line + "\n")
     } else {
-        write_file(REWARD_FILE, raw + line + "\n")
+        write_file(reward_file, raw + line + "\n")
     }
 }
 
@@ -55,7 +55,7 @@ fn compute_lens_scores(raw: string) -> string {
     let mut lens_scores = []
 
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         i = i + 1
         if line == "" { continue }
@@ -64,14 +64,14 @@ fn compute_lens_scores(raw: string) -> string {
         let ln = "\"lens\":\""
         if !line.contains(ln) { continue }
         let lp = line.split(ln)
-        if lp.length() < 2 { continue }
+        if len(lp) < 2 { continue }
         let lens = lp[1].split("\"")[0]
 
         // effective 추출
         let en = "\"effective\":"
         if !line.contains(en) { continue }
         let ep = line.split(en)
-        if ep.length() < 2 { continue }
+        if len(ep) < 2 { continue }
         let eff_str = ep[1].split("}")[0].split(",")[0].trim()
         let mut eff = 0.0
         try {
@@ -83,7 +83,7 @@ fn compute_lens_scores(raw: string) -> string {
         // 누적
         let mut found = false
         let mut j = 0
-        while j < lens_names.length() {
+        while j < len(lens_names) {
             if lens_names[j] == lens {
                 lens_scores[j] = lens_scores[j] + eff
                 found = true
@@ -99,7 +99,7 @@ fn compute_lens_scores(raw: string) -> string {
     // 문자열로 조합
     let mut result = ""
     let mut k = 0
-    while k < lens_names.length() {
+    while k < len(lens_names) {
         if result != "" { result = result + "," }
         result = result + lens_names[k] + ":" + to_string(lens_scores[k])
         k = k + 1
@@ -116,9 +116,9 @@ fn top_k(scores_str: string, k: int) -> string {
     let mut names = []
     let mut vals = []
     let mut i = 0
-    while i < pairs.length() {
+    while i < len(pairs) {
         let p = pairs[i].split(":")
-        if p.length() >= 2 {
+        if len(p) >= 2 {
             names = names.push(p[0])
             try {
                 vals = vals.push(to_float(p[1]))
@@ -131,9 +131,9 @@ fn top_k(scores_str: string, k: int) -> string {
 
     // 버블 정렬
     let mut si = 0
-    while si < vals.length() {
+    while si < len(vals) {
         let mut sj = 0
-        while sj < vals.length() - 1 - si {
+        while sj < len(vals) - 1 - si {
             if vals[sj] < vals[sj + 1] {
                 let tmp_v = vals[sj]
                 vals[sj] = vals[sj + 1]
@@ -149,7 +149,7 @@ fn top_k(scores_str: string, k: int) -> string {
 
     let mut result = ""
     let mut ri = 0
-    let limit = if k < names.length() { k } else { names.length() }
+    let limit = if k < len(names) { k } else { len(names) }
     while ri < limit {
         if result != "" { result = result + "\n" }
         result = result + "  " + to_string(ri + 1) + ". " + names[ri] + "  score=" + to_string(vals[ri])
@@ -165,7 +165,7 @@ fn novelty_score(value: float, history_csv: string) -> float {
     let parts = history_csv.split(",")
     let mut hist = []
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         try {
             let v = to_float(parts[i].trim())
             hist = hist.push(v)
@@ -174,13 +174,13 @@ fn novelty_score(value: float, history_csv: string) -> float {
         }
         i = i + 1
     }
-    if hist.length() == 0 { return 1.0 }
+    if len(hist) == 0 { return 1.0 }
 
     // range
     let mut min_val = hist[0]
     let mut max_val = hist[0]
     let mut hi = 0
-    while hi < hist.length() {
+    while hi < len(hist) {
         if hist[hi] < min_val { min_val = hist[hi] }
         if hist[hi] > max_val { max_val = hist[hi] }
         hi = hi + 1
@@ -196,7 +196,7 @@ fn novelty_score(value: float, history_csv: string) -> float {
     // min distance
     let mut min_dist = 999999999.0
     let mut di = 0
-    while di < hist.length() {
+    while di < len(hist) {
         let d = value - hist[di]
         let abs_d = if d < 0.0 { 0.0 - d } else { d }
         if abs_d < min_dist { min_dist = abs_d }
@@ -218,7 +218,7 @@ fn n6_alignment_reward(values_csv: string) -> float {
     let mut count = 0
 
     let mut i = 0
-    while i < parts.length() {
+    while i < len(parts) {
         try {
             let v = to_float(parts[i].trim())
             let v_abs = if v < 0.0 { 0.0 - v } else { v }
@@ -227,7 +227,7 @@ fn n6_alignment_reward(values_csv: string) -> float {
             let mut min_dist = 999999999.0
             let mut nearest = 6.0
             let mut ti = 0
-            while ti < targets.length() {
+            while ti < len(targets) {
                 let d = v_abs - targets[ti]
                 let abs_d = if d < 0.0 { 0.0 - d } else { d }
                 if abs_d < min_dist {
@@ -260,7 +260,7 @@ fn n6_alignment_reward(values_csv: string) -> float {
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("reward.hexa — 보상 추적 시스템")
         print("Usage:")
         print("  record <signal> <lens> <score>   기록")
@@ -275,7 +275,7 @@ fn main() {
     let cmd = a[1]
 
     if cmd == "record" {
-        if a.length() < 5 {
+        if len(a) < 5 {
             print("Usage: record <signal> <lens> <score>")
             return
         }
@@ -294,10 +294,10 @@ fn main() {
     }
 
     if cmd == "top" {
-        let k = if a.length() > 2 {
+        let k = if len(a) > 2 {
             try { to_float(a[2]) } catch e { 5.0 }
         } else { 5.0 }
-        let raw = read_file(REWARD_FILE)
+        let raw = read_file(reward_file)
         if raw == "" {
             print("[reward] no entries recorded")
             return
@@ -309,7 +309,7 @@ fn main() {
     }
 
     if cmd == "novelty" {
-        if a.length() < 4 {
+        if len(a) < 4 {
             print("Usage: novelty <value> <history_csv>")
             return
         }
@@ -325,7 +325,7 @@ fn main() {
     }
 
     if cmd == "n6-align" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: n6-align <values_csv>")
             return
         }
@@ -334,7 +334,7 @@ fn main() {
     }
 
     if cmd == "status" {
-        let raw = read_file(REWARD_FILE)
+        let raw = read_file(reward_file)
         if raw == "" {
             print("[reward] no entries")
             return
@@ -342,7 +342,7 @@ fn main() {
         let lines = raw.split("\n")
         let mut count = 0
         let mut li = 0
-        while li < lines.length() {
+        while li < len(lines) {
             if lines[li].trim() != "" { count = count + 1 }
             li = li + 1
         }

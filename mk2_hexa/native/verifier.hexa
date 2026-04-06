@@ -5,19 +5,19 @@
 //       hexa verifier.hexa grade <score>
 
 // ─── comptime 상수 ───
-comptime const META_ALPHA = 0.7
-comptime const META_BETA  = 0.1
-comptime const META_TOL   = 0.000000000001
-comptime const META_MAX   = 200
-comptime const META_FP    = 0.333333333
+comptime const meta_alpha = 0.7
+comptime const meta_beta  = 0.1
+comptime const meta_tol   = 0.000000000001
+comptime const meta_max   = 200
+comptime const meta_fp    = 0.333333333
 
 // 가중치 (feasibility 6차원)
-comptime const W_LENS       = 0.25
-comptime const W_CROSS      = 0.20
-comptime const W_PHYSICAL   = 0.25
-comptime const W_GRAPH      = 0.15
-comptime const W_NOVELTY    = 0.05
-comptime const W_N6_EXACT   = 0.10
+comptime const w_lens       = 0.25
+comptime const w_cross      = 0.20
+comptime const w_physical   = 0.25
+comptime const w_graph      = 0.15
+comptime const w_novelty    = 0.05
+comptime const w_n6_exact   = 0.10
 
 // ─── 유틸 ───
 pure fn abs_f(x: float) -> float {
@@ -52,20 +52,8 @@ struct VerificationResult {
 
 // ─── feasibility: 6차원 가중합 ───
 // score = lens*0.25 + cross*0.20 + physical*0.25 + graph*0.15 + novelty*0.05 + n6*0.10
-pure fn feasibility(
-    lens_consensus: float,
-    cross_validation: float,
-    physical_check: float,
-    graph_bonus: float,
-    novelty: float,
-    n6_exact: float
-) -> VerificationResult {
-    let score = lens_consensus   * W_LENS
-              + cross_validation * W_CROSS
-              + physical_check   * W_PHYSICAL
-              + graph_bonus      * W_GRAPH
-              + novelty          * W_NOVELTY
-              + n6_exact         * W_N6_EXACT
+pure fn feasibility( lens_consensus: float, cross_validation: float, physical_check: float, graph_bonus: float, novelty: float, n6_exact: float ) -> VerificationResult {
+    let score = lens_consensus   * w_lens + cross_validation * w_cross + physical_check   * w_physical + graph_bonus      * w_graph + novelty          * w_novelty + n6_exact         * w_n6_exact
     let grade = grade_from_score(score)
     VerificationResult {
         score: score,
@@ -334,8 +322,8 @@ pure fn meta_iterate(initial: float, alpha: float, beta: float, tol: float, max_
 // ─── meta_converges_to_third ───
 // 표준 축소사상 (alpha=0.7, beta=0.1)으로 1/3 수렴 여부 판정
 pure fn meta_converges_to_third(value: float, tolerance: float) -> bool {
-    let r = meta_iterate(value, META_ALPHA, META_BETA, META_TOL, META_MAX)
-    r.converged && abs_f(r.value - META_FP) < tolerance
+    let r = meta_iterate(value, meta_alpha, meta_beta, meta_tol, meta_max)
+    r.converged && abs_f(r.value - meta_fp) < tolerance
 }
 
 // ─── 출력 헬퍼 ───
@@ -359,14 +347,14 @@ fn print_verification(vr: VerificationResult) {
 
 fn print_meta(r: MetaResult, initial: float) {
     println("  initial    :", initial)
-    println("  alpha      :", META_ALPHA)
-    println("  beta       :", META_BETA)
+    println("  alpha      :", meta_alpha)
+    println("  beta       :", meta_beta)
     println("  final      :", r.value)
     println("  steps      :", r.steps)
     println("  converged  :", r.converged)
-    println("  target 1/3 :", META_FP)
-    println("  delta      :", abs_f(r.value - META_FP))
-    println("  is_fp      :", abs_f(r.value - META_FP) < 0.001)
+    println("  target 1/3 :", meta_fp)
+    println("  delta      :", abs_f(r.value - meta_fp))
+    println("  is_fp      :", abs_f(r.value - meta_fp) < 0.001)
 }
 
 // ─── CLI ───
@@ -388,7 +376,7 @@ if args.len() < 3 {
         // Banach 축소사상 반복
         let initial = if args.len() >= 4 { to_float(args[3]) } else { 0.0 }
         println("=== meta iterate (hexa-native) ===")
-        let r = meta_iterate(initial, META_ALPHA, META_BETA, META_TOL, META_MAX)
+        let r = meta_iterate(initial, meta_alpha, meta_beta, meta_tol, meta_max)
         print_meta(r, initial)
 
     } else if cmd == "feasibility" {
@@ -452,14 +440,14 @@ if args.len() < 3 {
         println("  n6_match(9999.0) = none: OK")
 
         // meta_iterate 수렴
-        let r0 = meta_iterate(0.0, META_ALPHA, META_BETA, META_TOL, META_MAX)
+        let r0 = meta_iterate(0.0, meta_alpha, meta_beta, meta_tol, meta_max)
         assert r0.converged
-        assert abs_f(r0.value - META_FP) < 0.001
+        assert abs_f(r0.value - meta_fp) < 0.001
         println("  meta(0.0) → 1/3 converged: OK")
 
-        let r1 = meta_iterate(1.0, META_ALPHA, META_BETA, META_TOL, META_MAX)
+        let r1 = meta_iterate(1.0, meta_alpha, meta_beta, meta_tol, meta_max)
         assert r1.converged
-        assert abs_f(r1.value - META_FP) < 0.001
+        assert abs_f(r1.value - meta_fp) < 0.001
         println("  meta(1.0) → 1/3 converged: OK")
 
         // meta_converges_to_third

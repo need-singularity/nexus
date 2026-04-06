@@ -7,14 +7,14 @@
 // 파이프라인 단계 타입
 // ──────────────────────────────────────
 
-comptime const STEP_SCAN = 0
-comptime const STEP_VERIFY = 1
-comptime const STEP_EXPERIMENT = 2
-comptime const STEP_FILTER = 3
-comptime const STEP_REGISTER = 4
-comptime const STEP_REDTEAM = 5
-comptime const STEP_PUBLISH = 6
-comptime const STEP_CUSTOM = 7
+comptime const step_scan = 0
+comptime const step_verify = 1
+comptime const step_experiment = 2
+comptime const step_filter = 3
+comptime const step_register = 4
+comptime const step_redteam = 5
+comptime const step_publish = 6
+comptime const step_custom = 7
 
 pure fn step_type_name(t: int) -> string {
     match t {
@@ -48,7 +48,7 @@ struct PipelineStep {
 // 단계 생성 헬퍼
 fn step_scan(domain: string, tier: int) -> PipelineStep {
     PipelineStep {
-        step_type: STEP_SCAN, domain: domain, tier: tier,
+        step_type: step_scan, domain: domain, tier: tier,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -56,7 +56,7 @@ fn step_scan(domain: string, tier: int) -> PipelineStep {
 
 fn step_verify(tolerance: float) -> PipelineStep {
     PipelineStep {
-        step_type: STEP_VERIFY, domain: "", tier: 0,
+        step_type: step_verify, domain: "", tier: 0,
         tolerance: tolerance, min_confidence: 0.0,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -64,7 +64,7 @@ fn step_verify(tolerance: float) -> PipelineStep {
 
 fn step_filter(min_confidence: float) -> PipelineStep {
     PipelineStep {
-        step_type: STEP_FILTER, domain: "", tier: 0,
+        step_type: step_filter, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: min_confidence,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -72,7 +72,7 @@ fn step_filter(min_confidence: float) -> PipelineStep {
 
 fn step_experiment(exp_type: string) -> PipelineStep {
     PipelineStep {
-        step_type: STEP_EXPERIMENT, domain: "", tier: 0,
+        step_type: step_experiment, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: exp_type, custom_name: "", custom_desc: ""
     }
@@ -80,7 +80,7 @@ fn step_experiment(exp_type: string) -> PipelineStep {
 
 fn step_register() -> PipelineStep {
     PipelineStep {
-        step_type: STEP_REGISTER, domain: "", tier: 0,
+        step_type: step_register, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -88,7 +88,7 @@ fn step_register() -> PipelineStep {
 
 fn step_redteam() -> PipelineStep {
     PipelineStep {
-        step_type: STEP_REDTEAM, domain: "", tier: 0,
+        step_type: step_redteam, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -96,7 +96,7 @@ fn step_redteam() -> PipelineStep {
 
 fn step_publish() -> PipelineStep {
     PipelineStep {
-        step_type: STEP_PUBLISH, domain: "", tier: 0,
+        step_type: step_publish, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: "", custom_name: "", custom_desc: ""
     }
@@ -104,7 +104,7 @@ fn step_publish() -> PipelineStep {
 
 fn step_custom(name: string, desc: string) -> PipelineStep {
     PipelineStep {
-        step_type: STEP_CUSTOM, domain: "", tier: 0,
+        step_type: step_custom, domain: "", tier: 0,
         tolerance: 0.0, min_confidence: 0.0,
         exp_type: "", custom_name: name, custom_desc: desc
     }
@@ -131,11 +131,11 @@ pure fn step_display(s: PipelineStep) -> string {
 
 struct Pipeline {
     name: string,
-    steps: [PipelineStep]
+    steps: str
 }
 
-fn pipeline_len(p: Pipeline) -> int { length(p.steps) }
-fn pipeline_is_empty(p: Pipeline) -> bool { length(p.steps) == 0 }
+fn pipeline_len(p: Pipeline) -> int { len(p.steps) }
+fn pipeline_is_empty(p: Pipeline) -> bool { len(p.steps) == 0 }
 
 // 파이프라인 직렬화 (사람이 읽을 수 있는 형태)
 fn pipeline_display(p: Pipeline) -> string {
@@ -206,7 +206,7 @@ fn execute_pipeline(p: Pipeline) -> PipelineResult {
                 // Verify: tolerance 이하 제거
                 let mut kept = []
                 let mut j = 0
-                while j < length(pool) {
+                while j < len(pool) {
                     if pool[j].confidence > step.tolerance {
                         kept = append(kept, pool[j])
                     } else {
@@ -219,7 +219,7 @@ fn execute_pipeline(p: Pipeline) -> PipelineResult {
             2 -> {
                 // Experiment: confidence 1.1배 부스트
                 let mut j = 0
-                while j < length(pool) {
+                while j < len(pool) {
                     let boosted = pool[j].confidence * 1.1
                     pool[j].confidence = if boosted > 1.0 { 1.0 } else { boosted }
                     j = j + 1
@@ -229,7 +229,7 @@ fn execute_pipeline(p: Pipeline) -> PipelineResult {
                 // Filter: min_confidence 미만 제거
                 let mut kept = []
                 let mut j = 0
-                while j < length(pool) {
+                while j < len(pool) {
                     if pool[j].confidence >= step.min_confidence {
                         kept = append(kept, pool[j])
                     } else {
@@ -241,19 +241,19 @@ fn execute_pipeline(p: Pipeline) -> PipelineResult {
             },
             4 -> {
                 // Register: 생존 항목을 발견으로 기록
-                disc_count = disc_count + length(pool)
+                disc_count = disc_count + len(pool)
             },
             5 -> {
                 // RedTeam: 최하위 1/6 제거 (n=6)
-                if length(pool) > 6 {
+                if len(pool) > 6 {
                     // 간이 정렬 후 하위 cut개 제거
-                    let cut = length(pool) / 6
+                    let cut = len(pool) / 6
                     // confidence 기준 정렬 (선택 정렬)
                     let mut j = 0
-                    while j < length(pool) - 1 {
+                    while j < len(pool) - 1 {
                         let mut min_idx = j
                         let mut k = j + 1
-                        while k < length(pool) {
+                        while k < len(pool) {
                             if pool[k].confidence < pool[min_idx].confidence {
                                 min_idx = k
                             }
@@ -269,7 +269,7 @@ fn execute_pipeline(p: Pipeline) -> PipelineResult {
                     // 하위 cut개 제거
                     let mut kept = []
                     let mut j2 = cut
-                    while j2 < length(pool) {
+                    while j2 < len(pool) {
                         kept = append(kept, pool[j2])
                         j2 = j2 + 1
                     }
@@ -322,10 +322,10 @@ fn parse_dsl_step(s: string) -> PipelineStep {
     }
 }
 
-fn build_from_dsl(name: string, dsl_steps: [string]) -> Pipeline {
+fn build_from_dsl(name: string, dsl_steps) -> Pipeline {
     let mut steps = []
     let mut i = 0
-    while i < length(dsl_steps) {
+    while i < len(dsl_steps) {
         steps = append(steps, parse_dsl_step(dsl_steps[i]))
         i = i + 1
     }
@@ -340,15 +340,7 @@ fn build_from_dsl(name: string, dsl_steps: [string]) -> Pipeline {
 fn standard_discovery(domain: string) -> Pipeline {
     Pipeline {
         name: "standard-discovery-" + domain,
-        steps: [
-            step_scan(domain, 1),
-            step_verify(0.05),
-            step_filter(0.6),
-            step_experiment("tension"),
-            step_redteam(),
-            step_register(),
-            step_publish()
-        ]
+        steps: [ step_scan(domain, 1), step_verify(0.05), step_filter(0.6), step_experiment("tension"), step_redteam(), step_register(), step_publish() ]
     }
 }
 
@@ -356,16 +348,7 @@ fn standard_discovery(domain: string) -> Pipeline {
 fn deep_exploration(domain: string) -> Pipeline {
     Pipeline {
         name: "deep-exploration-" + domain,
-        steps: [
-            step_scan(domain, 3),
-            step_verify(0.01),
-            step_filter(0.8),
-            step_experiment("perturbation"),
-            step_experiment("cross_domain"),
-            step_redteam(),
-            step_register(),
-            step_publish()
-        ]
+        steps: [ step_scan(domain, 3), step_verify(0.01), step_filter(0.8), step_experiment("perturbation"), step_experiment("cross_domain"), step_redteam(), step_register(), step_publish() ]
     }
 }
 

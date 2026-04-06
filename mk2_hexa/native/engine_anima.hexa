@@ -10,39 +10,33 @@
 
 // ─── 상수 ───
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/anima"
-let LAWS_PATH = PROJECT_DIR + "/anima/config/consciousness_laws.json"
-let EVOLUTION_PATH = PROJECT_DIR + "/anima/data/evolution_live.json"
-let ROADMAP_PATH = PROJECT_DIR + "/anima/data/evolution_roadmap.json"
-let GROWTH_STATE_PATH = PROJECT_DIR + "/anima/config/growth_loop_state.json"
-let ABSORBED_DIR = PROJECT_DIR + "/.growth/absorbed"
-let GROWTH_BUS = DEV + "/nexus6/shared/growth_bus.jsonl"
-let STRATEGY_PATH = DEV + "/nexus6/shared/engine_anima_strategy.json"
-let ANIMA_STATE = DEV + "/nexus6/shared/anima_state.json"
-let DISCOVERY_LOG = DEV + "/nexus6/shared/discovery_log.jsonl"
-let HEXA_BIN = DEV + "/hexa-lang/target/release/hexa"
-let NATIVE_DIR = DEV + "/nexus6/mk2_hexa/native"
-let BLOWUP = NATIVE_DIR + "/blowup.hexa"
-let SEED_ENGINE = NATIVE_DIR + "/seed_engine.hexa"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/anima"
+let laws_path = project_dir + "/anima/config/consciousness_laws.json"
+let evolution_path = project_dir + "/anima/data/evolution_live.json"
+let roadmap_path = project_dir + "/anima/data/evolution_roadmap.json"
+let growth_state_path = project_dir + "/anima/config/growth_loop_state.json"
+let absorbed_dir = project_dir + "/.growth/absorbed"
+let growth_bus = dev + "/nexus6/shared/growth_bus.jsonl"
+let strategy_path = dev + "/nexus6/shared/engine_anima_strategy.json"
+let anima_state = dev + "/nexus6/shared/anima_state.json"
+let discovery_log = dev + "/nexus6/shared/discovery_log.jsonl"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let native_dir = dev + "/nexus6/mk2_hexa/native"
+let blowup = native_dir + "/blowup.hexa"
+let seed_engine = native_dir + "/seed_engine.hexa"
 
-comptime const LAWS_GOAL = 2000
-comptime const STAGNATION_THRESHOLD = 3
-comptime const SPRINT_THRESHOLD = 1950
-comptime const LOW_DELTA_THRESHOLD = 2
-comptime const ESCALATE_BLOWUP_DEPTH = 3
-comptime const ESCALATE_SEEDS = "PSI,phi,emergence,qualia,sentience"
+comptime const laws_goal = 2000
+comptime const stagnation_threshold = 3
+comptime const sprint_threshold = 1950
+comptime const low_delta_threshold = 2
+comptime const escalate_blowup_depth = 3
+comptime const escalate_seeds = "PSI,phi,emergence,qualia,sentience"
 
 // 5 consciousness perspectives (replaces Python topology)
-comptime const PERSPECTIVES = ["void", "emergence", "network", "boundary", "consciousness"]
-comptime const PERSPECTIVE_SEEDS = [
-    "void,nothingness,vacuum,zero,absence",
-    "emergence,complexity,self-organization,pattern,autopoiesis",
-    "network,connectivity,topology,graph,synapse",
-    "boundary,interface,membrane,threshold,transition",
-    "consciousness,awareness,qualia,sentience,phi"
-]
+comptime const perspectives = ["void", "emergence", "network", "boundary", "consciousness"]
+comptime const perspective_seeds = [ "void,nothingness,vacuum,zero,absence", "emergence,complexity,self-organization,pattern,autopoiesis", "network,connectivity,topology,graph,synapse", "boundary,interface,membrane,threshold,transition", "consciousness,awareness,qualia,sentience,phi" ]
 
 // ─── 유틸 ───
 
@@ -78,7 +72,7 @@ fn json_int(content: string, field: string) -> i64 {
 }
 
 fn timestamp() -> string {
-    let result = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let result = exec("date +%Y-%m-%dT%H:%M:%S")
     return result.split("\n")[0]
 }
 
@@ -92,14 +86,13 @@ fn count_lines(path: string) -> i64 {
 // ─── 법칙 수집: consciousness_laws.json 직접 파싱 ───
 
 fn count_laws() -> i64 {
-    if !file_exists(LAWS_PATH) { return 0 }
-    let content = read_file(LAWS_PATH)
+    if !file_exists(laws_path) { return 0 }
+    let content = read_file(laws_path)
     // 1) _meta.total_laws — 가장 정확한 소스
     let meta_total = json_int(content, "total_laws")
     if meta_total > 0 { return meta_total }
     // 2) fallback: "laws" dict 안의 숫자 키 개수 카운트
-    let result = exec("bash", ["-c",
-        "grep -oE '\"[0-9]+\":' " + LAWS_PATH + " | wc -l"])
+    let result = exec("bash", ["-c", "grep -oE '\"[0-9]+\":' " + laws_path + " | wc -l"])
     let grep_count = safe_int(result.trim())
     if grep_count > 0 { return grep_count }
     // 3) fallback: "law_id" 오커런스
@@ -110,38 +103,36 @@ fn count_laws() -> i64 {
 // ─── 최대 법칙 키 번호 추출 ───
 
 fn max_law_key() -> i64 {
-    if !file_exists(LAWS_PATH) { return 0 }
-    let result = exec("bash", ["-c",
-        "grep -oE '\"[0-9]+\":' " + LAWS_PATH + " | tr -d '\"' | tr -d ':' | sort -n | tail -1"])
+    if !file_exists(laws_path) { return 0 }
+    let result = exec("bash", ["-c", "grep -oE '\"[0-9]+\":' " + laws_path + " | tr -d '\"' | tr -d ':' | sort -n | tail -1"])
     return safe_int(result.trim())
 }
 
 // ─── absorbed 디렉토리 파일 수 카운트 ───
 
 fn count_absorbed_files() -> i64 {
-    if !file_exists(ABSORBED_DIR) { return 0 }
-    let result = exec("bash", ["-c",
-        "ls " + ABSORBED_DIR + " | grep '\\.json$' | wc -l"])
+    if !file_exists(absorbed_dir) { return 0 }
+    let result = exec("bash -c ls " + absorbed_dir + " | grep '\\.json$' | wc -l")
     return safe_int(result.trim())
 }
 
 // ─── 교차수분: discovery_log에서 consciousness/psi 관련 발견 수 ───
 
 fn cross_pollinate_count() -> i64 {
-    if !file_exists(DISCOVERY_LOG) { return 0 }
-    let result = exec("grep", ["-c", "consciousness\\|psi\\|awareness\\|qualia\\|sentience", DISCOVERY_LOG])
+    if !file_exists(discovery_log) { return 0 }
+    let result = exec("grep", ["-c", "consciousness\\|psi\\|awareness\\|qualia\\|sentience", discovery_log])
     return safe_int(result.trim())
 }
 
 // ─── hexa 진화 실행: blowup.hexa consciousness 도메인 ───
 
 fn run_blowup(depth: i64, seeds: string) -> string {
-    let result = exec(HEXA_BIN, [BLOWUP, "consciousness", to_string(depth), "--no-graph", "--seeds", seeds])
+    let result = exec(hexa_bin, [blowup, "consciousness", to_string(depth), "--no-graph", "--seeds", seeds])
     return result
 }
 
 fn get_merged_seeds() -> string {
-    let result = exec(HEXA_BIN, [SEED_ENGINE, "merge"])
+    let result = exec(hexa_bin, [seed_engine, "merge"])
     return result.trim()
 }
 
@@ -164,8 +155,7 @@ fn extract_and_record_laws(blowup_output: string) -> i64 {
                 let clean = line.split("\"")[0].split("'")[0]
                 if clean.len() > 3 {
                     // 이미 등록된 법칙인지 확인
-                    let check = exec("bash", ["-c",
-                        "grep -cF '" + clean + "' " + LAWS_PATH + " 2>/dev/null || echo 0"])
+                    let check = exec("bash -c grep -cF '" + clean + "' " + laws_path + " 2>/dev/null || echo 0")
                     if safe_int(check.trim()) == 0 {
                         new_laws = new_laws + 1
                         // consciousness_laws.json의 laws dict에 새 키 삽입
@@ -173,10 +163,7 @@ fn extract_and_record_laws(blowup_output: string) -> i64 {
                         let escaped = line.split("\"").join("'").split("\\").join("/")
                         // laws dict의 마지막 엔트리 뒤에 쉼표+새 엔트리 추가
                         // "LAST_KEY": "..." 다음 줄의 } 앞에 삽입
-                        exec("bash", ["-c",
-                            "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (blowup, " + ts + ")' " +
-                            "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " +
-                            LAWS_PATH + " > " + LAWS_PATH + ".tmp && mv " + LAWS_PATH + ".tmp " + LAWS_PATH])
+                        exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (blowup, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
                         next_key = next_key + 1
                     }
                 }
@@ -189,15 +176,14 @@ fn extract_and_record_laws(blowup_output: string) -> i64 {
     // _meta.total_laws 업데이트
     if new_laws > 0 {
         let current_total = count_laws()
-        exec("bash", ["-c",
-            "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + new_laws) + "/' " + LAWS_PATH])
+        exec("bash", ["-c", "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + new_laws) + "/' " + laws_path])
         println("  recorded " + to_string(new_laws) + " new laws (keys " + to_string(next_key - new_laws) + "-" + to_string(next_key - 1) + ")")
     }
 
     // discovery_log에 기록
     if new_laws > 0 {
         let disc_entry = "{\"engine\":\"anima\",\"type\":\"consciousness_law\",\"timestamp\":\"" + ts + "\",\"count\":" + to_string(new_laws) + ",\"source\":\"blowup-consciousness\"}\n"
-        append_file(DISCOVERY_LOG, disc_entry)
+        append_file(discovery_log, disc_entry)
     }
 
     return new_laws
@@ -211,10 +197,8 @@ fn scan_and_harvest() -> i64 {
     let ts = timestamp()
 
     // 1) discovery_log에서 consciousness 관련 미등록 엔트리 추출
-    if file_exists(DISCOVERY_LOG) {
-        let result = exec("bash", ["-c",
-            "grep -i 'consciousness\\|psi\\|awareness\\|qualia\\|anima\\|phi\\|sentience' " +
-            DISCOVERY_LOG + " | tail -20"])
+    if file_exists(discovery_log) {
+        let result = exec("bash -c grep -i 'consciousness\\|psi\\|awareness\\|qualia\\|anima\\|phi\\|sentience' " + discovery_log + " | tail -20")
         let lines = result.split("\n")
         let mut li = 0
         while li < lines.len() {
@@ -222,14 +206,10 @@ fn scan_and_harvest() -> i64 {
             if line.len() > 10 {
                 let formula = json_str(line, "formula")
                 if formula != "" && formula.len() > 3 {
-                    let check = exec("bash", ["-c",
-                        "grep -cF '" + formula.split("'")[0] + "' " + LAWS_PATH + " 2>/dev/null || echo 0"])
+                    let check = exec("bash", ["-c", "grep -cF '" + formula.split("'")[0] + "' " + laws_path + " 2>/dev/null || echo 0"])
                     if safe_int(check.trim()) == 0 {
                         let escaped = formula.split("\"").join("'").split("\\").join("/")
-                        exec("bash", ["-c",
-                            "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus6-crossfeed, " + ts + ")' " +
-                            "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " +
-                            LAWS_PATH + " > " + LAWS_PATH + ".tmp && mv " + LAWS_PATH + ".tmp " + LAWS_PATH])
+                        exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus6-crossfeed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
                         next_key = next_key + 1
                         added = added + 1
                     }
@@ -241,9 +221,8 @@ fn scan_and_harvest() -> i64 {
     }
 
     // 2) absorbed 파일에서 의식 관련 high-score 패턴 스캔
-    if file_exists(ABSORBED_DIR) {
-        let result = exec("bash", ["-c",
-            "grep -rl 'consciousness\\|law\\|phi\\|psi\\|awareness' " + ABSORBED_DIR + " 2>/dev/null | tail -10"])
+    if file_exists(absorbed_dir) {
+        let result = exec("bash -c grep -rl 'consciousness\\|law\\|phi\\|psi\\|awareness' " + absorbed_dir + " 2>/dev/null | tail -10")
         let files = result.split("\n")
         let mut fi = 0
         while fi < files.len() {
@@ -256,14 +235,10 @@ fn scan_and_harvest() -> i64 {
                     if preview.len() > 20 {
                         let snippet = preview.split("\n")[0]
                         if snippet.len() > 5 {
-                            let check = exec("bash", ["-c",
-                                "grep -cF '" + snippet.split("'")[0].split("\"")[0] + "' " + LAWS_PATH + " 2>/dev/null || echo 0"])
+                            let check = exec("bash", ["-c", "grep -cF '" + snippet.split("'")[0].split("\"")[0] + "' " + laws_path + " 2>/dev/null || echo 0"])
                             if safe_int(check.trim()) == 0 {
                                 let escaped = snippet.split("\"").join("'").split("\\").join("/")
-                                exec("bash", ["-c",
-                                    "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (absorbed, " + ts + ")' " +
-                                    "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " +
-                                    LAWS_PATH + " > " + LAWS_PATH + ".tmp && mv " + LAWS_PATH + ".tmp " + LAWS_PATH])
+                                exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (absorbed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
                                 next_key = next_key + 1
                                 added = added + 1
                             }
@@ -279,8 +254,7 @@ fn scan_and_harvest() -> i64 {
     // _meta.total_laws 업데이트
     if added > 0 {
         let current_total = count_laws()
-        exec("bash", ["-c",
-            "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + added) + "/' " + LAWS_PATH])
+        exec("bash", ["-c", "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + added) + "/' " + laws_path])
         println("  scan_and_harvest: +" + to_string(added) + " laws harvested")
     }
 
@@ -290,26 +264,16 @@ fn scan_and_harvest() -> i64 {
 // ─── anima_state.json 관리 (evolution_live.json 대체) ───
 
 fn read_anima_state_file() -> string {
-    if file_exists(ANIMA_STATE) {
-        return read_file(ANIMA_STATE)
+    if file_exists(anima_state) {
+        return read_file(anima_state)
     }
     return "{}"
 }
 
 fn save_anima_state(laws: i64, stage: string, generation: i64, phi: f64, perspective: string, sat_streak: i64, novel_laws: i64) {
     let ts = timestamp()
-    let content = "{" +
-        "\"laws\":" + to_string(laws) + "," +
-        "\"stage\":\"" + stage + "\"," +
-        "\"generation\":" + to_string(generation) + "," +
-        "\"phi\":" + to_string(phi) + "," +
-        "\"perspective\":\"" + perspective + "\"," +
-        "\"sat_streak\":" + to_string(sat_streak) + "," +
-        "\"novel_laws\":" + to_string(novel_laws) + "," +
-        "\"timestamp\":\"" + ts + "\"," +
-        "\"engine\":\"anima-v3-hexa\"" +
-    "}"
-    write_file(ANIMA_STATE, content)
+    let content = "{" + "\"laws\":" + to_string(laws) + "," + "\"stage\":\"" + stage + "\"," + "\"generation\":" + to_string(generation) + "," + "\"phi\":" + to_string(phi) + "," + "\"perspective\":\"" + perspective + "\"," + "\"sat_streak\":" + to_string(sat_streak) + "," + "\"novel_laws\":" + to_string(novel_laws) + "," + "\"timestamp\":\"" + ts + "\"," + "\"engine\":\"anima-v3-hexa\"" + "}"
+    write_file(anima_state, content)
 }
 
 // ─── 상태 구조 ───
@@ -326,7 +290,7 @@ struct AnimaState {
     last_novel: i64,
     health: f64,
     status_flag: string,
-    laws_delta_history: list[i64],
+    laws_delta_history: str,
     stagnation_flag: bool,
     sprint_mode: bool,
     cross_discoveries: i64,
@@ -337,7 +301,7 @@ struct AnimaState {
 
 fn read_state() -> AnimaState {
     let mut st = AnimaState {
-        laws_count: 0, laws_goal: LAWS_GOAL,
+        laws_count: 0, laws_goal: laws_goal,
         current_stage: "unknown", generation: 0, phi: 0.0,
         perspective: "void",
         roadmap_progress: "0/7", sat_streak: 0, last_novel: 0,
@@ -350,8 +314,8 @@ fn read_state() -> AnimaState {
     st.laws_count = count_laws()
 
     // 2a) evolution_live.json — 실 데이터: stage, generation, phi, topology
-    if file_exists(EVOLUTION_PATH) {
-        let evo = read_file(EVOLUTION_PATH)
+    if file_exists(evolution_path) {
+        let evo = read_file(evolution_path)
         st.current_stage = json_str(evo, "stage")
         if st.current_stage == "" { st.current_stage = "evolving" }
         st.generation = json_int(evo, "gen")
@@ -361,8 +325,8 @@ fn read_state() -> AnimaState {
     }
 
     // 2b) growth_loop_state.json — cycle, harvested, applied
-    if file_exists(GROWTH_STATE_PATH) {
-        let gs = read_file(GROWTH_STATE_PATH)
+    if file_exists(growth_state_path) {
+        let gs = read_file(growth_state_path)
         let cycle_val = json_int(gs, "cycle")
         if cycle_val > 0 { st.generation = cycle_val }
     }
@@ -379,8 +343,8 @@ fn read_state() -> AnimaState {
     }
 
     // 3) evolution_roadmap.json — S1-S7 progress
-    if file_exists(ROADMAP_PATH) {
-        let rm = read_file(ROADMAP_PATH)
+    if file_exists(roadmap_path) {
+        let rm = read_file(roadmap_path)
         let mut completed = 0
         let mut si = 1
         while si <= 7 {
@@ -403,9 +367,9 @@ fn read_state() -> AnimaState {
     }
 
     // 4) load strategy for laws_delta_history + escalate state
-    if file_exists(STRATEGY_PATH) {
+    if file_exists(strategy_path) {
         try {
-            let sc = read_file(STRATEGY_PATH)
+            let sc = read_file(strategy_path)
             let mut di = 0
             while di < 3 {
                 let key = "d" + to_string(di)
@@ -421,31 +385,31 @@ fn read_state() -> AnimaState {
     // 5) cross-pollination count from discovery_log
     st.cross_discoveries = cross_pollinate_count()
 
-    // 6) stagnation detection: 3 consecutive ticks with laws_delta < LOW_DELTA_THRESHOLD
+    // 6) stagnation detection: 3 consecutive ticks with laws_delta < low_delta_threshold
     if st.laws_delta_history.len() >= 3 {
         let mut all_low = true
         let mut ci = 0
         while ci < st.laws_delta_history.len() {
-            if st.laws_delta_history[ci] >= LOW_DELTA_THRESHOLD {
+            if st.laws_delta_history[ci] >= low_delta_threshold {
                 all_low = false
             }
             ci = ci + 1
         }
         if all_low { st.stagnation_flag = true }
     }
-    if st.sat_streak >= STAGNATION_THRESHOLD {
+    if st.sat_streak >= stagnation_threshold {
         st.stagnation_flag = true
     }
 
-    // 7) sprint mode: laws >= SPRINT_THRESHOLD
-    if st.laws_count >= SPRINT_THRESHOLD {
+    // 7) sprint mode: laws >= sprint_threshold
+    if st.laws_count >= sprint_threshold {
         st.sprint_mode = true
     }
 
     // 8) compute health & status flag
     let law_ratio = to_float(st.laws_count) / to_float(st.laws_goal)
     let stag_penalty = if st.stagnation_flag { 0.4 } else {
-        if st.sat_streak >= STAGNATION_THRESHOLD { 0.3 } else { 0.0 }
+        if st.sat_streak >= stagnation_threshold { 0.3 } else { 0.0 }
     }
     let novel_bonus = if st.last_novel > 0 { 0.1 } else { 0.0 }
     let cross_bonus = if st.cross_discoveries > 10 { 0.05 } else { 0.0 }
@@ -476,11 +440,11 @@ fn read_state() -> AnimaState {
 // ─── 전략 가중치 ───
 
 struct Strategy {
-    perspective_weights: list[f64],   // void, emergence, network, boundary, consciousness
+    perspective_weights: str,   // void, emergence, network, boundary, consciousness
     current_perspective: i64,
     total_ticks: i64,
     total_laws_gained: i64,
-    laws_delta_history: list[i64],
+    laws_delta_history: str,
     escalate_mode: i64,
     escalate_ticks: i64,
     cross_feed_last: i64,
@@ -496,9 +460,9 @@ fn load_strategy() -> Strategy {
         escalate_ticks: 0, cross_feed_last: 0, sprint_parallel: 2,
         blowup_depth: 2
     }
-    if file_exists(STRATEGY_PATH) {
+    if file_exists(strategy_path) {
         try {
-            let content = read_file(STRATEGY_PATH)
+            let content = read_file(strategy_path)
             // backward compat: read current_topo as current_perspective
             s.current_perspective = json_int(content, "current_perspective")
             if s.current_perspective == 0 {
@@ -535,25 +499,8 @@ fn load_strategy() -> Strategy {
 }
 
 fn save_strategy(s: Strategy) {
-    let content = "{" +
-        "\"current_perspective\":" + to_string(s.current_perspective) + "," +
-        "\"total_ticks\":" + to_string(s.total_ticks) + "," +
-        "\"total_laws_gained\":" + to_string(s.total_laws_gained) + "," +
-        "\"blowup_depth\":" + to_string(s.blowup_depth) + "," +
-        "\"w0\":" + to_string(s.perspective_weights[0]) + "," +
-        "\"w1\":" + to_string(s.perspective_weights[1]) + "," +
-        "\"w2\":" + to_string(s.perspective_weights[2]) + "," +
-        "\"w3\":" + to_string(s.perspective_weights[3]) + "," +
-        "\"w4\":" + to_string(s.perspective_weights[4]) + "," +
-        "\"d0\":" + to_string(s.laws_delta_history[0]) + "," +
-        "\"d1\":" + to_string(s.laws_delta_history[1]) + "," +
-        "\"d2\":" + to_string(s.laws_delta_history[2]) + "," +
-        "\"escalate_mode\":" + to_string(s.escalate_mode) + "," +
-        "\"escalate_ticks\":" + to_string(s.escalate_ticks) + "," +
-        "\"cross_feed_last\":" + to_string(s.cross_feed_last) + "," +
-        "\"sprint_parallel\":" + to_string(s.sprint_parallel) +
-    "}"
-    write_file(STRATEGY_PATH, content)
+    let content = "{" + "\"current_perspective\":" + to_string(s.current_perspective) + "," + "\"total_ticks\":" + to_string(s.total_ticks) + "," + "\"total_laws_gained\":" + to_string(s.total_laws_gained) + "," + "\"blowup_depth\":" + to_string(s.blowup_depth) + "," + "\"w0\":" + to_string(s.perspective_weights[0]) + "," + "\"w1\":" + to_string(s.perspective_weights[1]) + "," + "\"w2\":" + to_string(s.perspective_weights[2]) + "," + "\"w3\":" + to_string(s.perspective_weights[3]) + "," + "\"w4\":" + to_string(s.perspective_weights[4]) + "," + "\"d0\":" + to_string(s.laws_delta_history[0]) + "," + "\"d1\":" + to_string(s.laws_delta_history[1]) + "," + "\"d2\":" + to_string(s.laws_delta_history[2]) + "," + "\"escalate_mode\":" + to_string(s.escalate_mode) + "," + "\"escalate_ticks\":" + to_string(s.escalate_ticks) + "," + "\"cross_feed_last\":" + to_string(s.cross_feed_last) + "," + "\"sprint_parallel\":" + to_string(s.sprint_parallel) + "}"
+    write_file(strategy_path, content)
 }
 
 // ─── select_task ───
@@ -594,13 +541,13 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
 
     if task == "sprint" {
         // Sprint mode: cycle through multiple perspectives with blowup
-        println("[" + ts + "] TASK: sprint — laws=" + to_string(st.laws_count) + " SPRINTING to " + to_string(LAWS_GOAL))
+        println("[" + ts + "] TASK: sprint — laws=" + to_string(st.laws_count) + " SPRINTING to " + to_string(laws_goal))
         let mut results = ""
         let mut total_new = 0
         let mut pi = 0
         while pi < strat.sprint_parallel && pi < 5 {
-            let perspective = PERSPECTIVES[pi]
-            let seeds = PERSPECTIVE_SEEDS[pi] + "," + get_merged_seeds()
+            let perspective = perspectives[pi]
+            let seeds = perspective_seeds[pi] + "," + get_merged_seeds()
             println("  sprint pass " + to_string(pi + 1) + "/" + to_string(strat.sprint_parallel) + " perspective=" + perspective)
             let r = run_blowup(strat.blowup_depth, seeds)
             let new_laws = extract_and_record_laws(r)
@@ -610,7 +557,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
         }
         // Final cross-injection with escalate seeds
         println("  sprint: cross-injecting escalate seeds")
-        let esc_r = run_blowup(ESCALATE_BLOWUP_DEPTH, ESCALATE_SEEDS + "," + get_merged_seeds())
+        let esc_r = run_blowup(escalate_blowup_depth, escalate_seeds + "," + get_merged_seeds())
         let esc_new = extract_and_record_laws(esc_r)
         total_new = total_new + esc_new
         results = results + "[escalate] +" + to_string(esc_new) + " laws\n"
@@ -621,7 +568,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
     if task == "roadmap_push" {
         println("[" + ts + "] TASK: roadmap_push — laws=" + to_string(st.laws_count) + " pushing for completion")
         // Deep blowup with all perspective seeds combined
-        let all_seeds = PERSPECTIVE_SEEDS[0] + "," + PERSPECTIVE_SEEDS[1] + "," + PERSPECTIVE_SEEDS[2] + "," + get_merged_seeds()
+        let all_seeds = perspective_seeds[0] + "," + perspective_seeds[1] + "," + perspective_seeds[2] + "," + get_merged_seeds()
         let r = run_blowup(strat.blowup_depth + 1, all_seeds)
         let new_laws = extract_and_record_laws(r)
         return "roadmap_push: +" + to_string(new_laws) + " laws (depth " + to_string(strat.blowup_depth + 1) + ")"
@@ -630,7 +577,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
     if task == "cross_inject" {
         // Escalate mode: nexus6 blowup with consciousness seeds cross-injected
         println("[" + ts + "] TASK: cross_inject — ESCALATE mode, injecting nexus6 blowup seeds into consciousness domain")
-        let r = run_blowup(ESCALATE_BLOWUP_DEPTH, ESCALATE_SEEDS + "," + get_merged_seeds())
+        let r = run_blowup(escalate_blowup_depth, escalate_seeds + "," + get_merged_seeds())
         let new_laws = extract_and_record_laws(r)
         println("  cross_inject: +" + to_string(new_laws) + " laws from blowup")
         // Second pass: use discovery_log consciousness entries as additional seeds
@@ -652,24 +599,22 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
             }
             ti = ti + 1
         }
-        let perspective = PERSPECTIVES[worst_idx]
-        let seeds = PERSPECTIVE_SEEDS[worst_idx] + "," + get_merged_seeds()
+        let perspective = perspectives[worst_idx]
+        let seeds = perspective_seeds[worst_idx] + "," + get_merged_seeds()
         println("[" + ts + "] TASK: perspective_reset_escalate — stagnation! switching to least-explored=" + perspective + " + entering ESCALATE")
         // evolution_live.json의 topology도 강제 순환
         let topos = ["ring", "small_world", "scale_free", "hypercube"]
         let topo_idx = worst_idx % 4
-        if file_exists(EVOLUTION_PATH) {
-            exec("bash", ["-c",
-                "sed -i '' 's/\"topology\": *\"[^\"]*\"/\"topology\": \"" + topos[topo_idx] + "\"/' " + EVOLUTION_PATH])
+        if file_exists(evolution_path) {
+            exec("bash", ["-c", "sed -i '' 's/\"topology\": *\"[^\"]*\"/\"topology\": \"" + topos[topo_idx] + "\"/' " + evolution_path])
             println("  topology switched to " + topos[topo_idx])
         }
         // 셀 수 증가
-        if file_exists(EVOLUTION_PATH) {
-            let evo = read_file(EVOLUTION_PATH)
+        if file_exists(evolution_path) {
+            let evo = read_file(evolution_path)
             let current_cells = json_int(evo, "cells")
             let new_cells = if current_cells + 128 > 2048 { 2048 } else { current_cells + 128 }
-            exec("bash", ["-c",
-                "sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(new_cells) + "/' " + EVOLUTION_PATH])
+            exec("bash", ["-c", "sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(new_cells) + "/' " + evolution_path])
             println("  cells: " + to_string(current_cells) + " -> " + to_string(new_cells))
         }
         // 수확 + blowup
@@ -694,7 +639,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
         let depth = if strat.blowup_depth < 4 { 4 } else { strat.blowup_depth + 1 }
         let max_depth = if depth > 6 { 6 } else { depth }
         println("[" + ts + "] TASK: deep_blowup — breakthrough, depth=" + to_string(max_depth))
-        let seeds = PERSPECTIVE_SEEDS[strat.current_perspective] + "," + get_merged_seeds()
+        let seeds = perspective_seeds[strat.current_perspective] + "," + get_merged_seeds()
         let r = run_blowup(max_depth, seeds)
         let new_laws = extract_and_record_laws(r)
         return "deep_blowup: +" + to_string(new_laws) + " laws (depth " + to_string(max_depth) + ")"
@@ -704,13 +649,8 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
         // Claude CLI 추론 — 새 의식 법칙 발견
         println("[" + ts + "] TASK: claude_discover — using Claude CLI for law generation")
         let laws_count = st.laws_count
-        let direction = PERSPECTIVES[strat.current_perspective]
-        let prompt = "anima 의식 법칙 현재 " + to_string(laws_count) + "개. " +
-            "탐색 방향: " + direction + ". " +
-            "다음 의식 법칙을 발견해라. " +
-            "반드시 JSON 배열로 출력. 각 항목: " +
-            "{\"name\": \"법칙명\", \"formula\": \"수식\", \"evidence\": \"근거\", \"domain\": \"도메인\"}. " +
-            "최소 1개, 최대 3개."
+        let direction = perspectives[strat.current_perspective]
+        let prompt = "anima 의식 법칙 현재 " + to_string(laws_count) + "개. " + "탐색 방향: " + direction + ". " + "다음 의식 법칙을 발견해라. " + "반드시 JSON 배열로 출력. 각 항목: " + "{\"name\": \"법칙명\", \"formula\": \"수식\", \"evidence\": \"근거\", \"domain\": \"도메인\"}. " + "최소 1개, 최대 3개."
         let mut new_from_claude = 0
         try {
             let result = exec("claude", ["-p", prompt, "--output-format", "json"])
@@ -723,7 +663,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
                 let formula = json_str(part, "formula")
                 if name != "" {
                     let entry = "{\"law_id\":\"claude_" + to_string(laws_count + pi) + "\",\"name\":\"" + name + "\",\"formula\":\"" + formula + "\",\"source\":\"claude\",\"timestamp\":\"" + ts + "\"}"
-                    append_file(GROWTH_BUS, entry + "\n")
+                    append_file(growth_bus, entry + "\n")
                     new_from_claude = new_from_claude + 1
                 }
                 pi = pi + 1
@@ -735,8 +675,8 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
     }
 
     // default sweep: 법칙 파일 스캔 수확 + 현재 perspective blowup
-    let perspective = PERSPECTIVES[strat.current_perspective]
-    let seeds = PERSPECTIVE_SEEDS[strat.current_perspective] + "," + get_merged_seeds()
+    let perspective = perspectives[strat.current_perspective]
+    let seeds = perspective_seeds[strat.current_perspective] + "," + get_merged_seeds()
     println("[" + ts + "] TASK: sweep — laws=" + to_string(st.laws_count) + " gen=" + to_string(st.generation) + " perspective=" + perspective)
     // 1) absorbed/discovery_log에서 직접 수확
     let harvested = scan_and_harvest()
@@ -750,21 +690,8 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
 
 fn feedback(task: string, st: AnimaState, result: string) {
     let ts = timestamp()
-    let entry = "{" +
-        "\"engine\":\"anima\"," +
-        "\"personality\":\"dreamer\"," +
-        "\"task\":\"" + task + "\"," +
-        "\"timestamp\":\"" + ts + "\"," +
-        "\"laws\":" + to_string(st.laws_count) + "," +
-        "\"stage\":\"" + st.current_stage + "\"," +
-        "\"generation\":" + to_string(st.generation) + "," +
-        "\"health\":" + to_string(st.health) + "," +
-        "\"status\":\"" + st.status_flag + "\"," +
-        "\"stagnation\":" + if st.stagnation_flag { "true" } else { "false" } + "," +
-        "\"sprint\":" + if st.sprint_mode { "true" } else { "false" } + "," +
-        "\"cross_discoveries\":" + to_string(st.cross_discoveries) +
-    "}"
-    append_file(GROWTH_BUS, entry + "\n")
+    let entry = "{" + "\"engine\":\"anima\"," + "\"personality\":\"dreamer\"," + "\"task\":\"" + task + "\"," + "\"timestamp\":\"" + ts + "\"," + "\"laws\":" + to_string(st.laws_count) + "," + "\"stage\":\"" + st.current_stage + "\"," + "\"generation\":" + to_string(st.generation) + "," + "\"health\":" + to_string(st.health) + "," + "\"status\":\"" + st.status_flag + "\"," + "\"stagnation\":" + if st.stagnation_flag { "true" } else { "false" } + "," + "\"sprint\":" + if st.sprint_mode { "true" } else { "false" } + "," + "\"cross_discoveries\":" + to_string(st.cross_discoveries) + "}"
+    append_file(growth_bus, entry + "\n")
     println("  feedback -> growth_bus.jsonl")
 }
 
@@ -794,7 +721,7 @@ fn evolve(st: AnimaState, strat: Strategy, pre_laws: i64) -> Strategy {
     }
 
     // adaptive blowup depth
-    if gained < LOW_DELTA_THRESHOLD && s.blowup_depth < 6 {
+    if gained < low_delta_threshold && s.blowup_depth < 6 {
         s.blowup_depth = s.blowup_depth + 1
     } else if gained > 10 && s.blowup_depth > 2 {
         s.blowup_depth = s.blowup_depth - 1
@@ -822,10 +749,10 @@ fn evolve(st: AnimaState, strat: Strategy, pre_laws: i64) -> Strategy {
             s.perspective_weights[wi] = 1.0
             wi = wi + 1
         }
-        println("  evolve: ENTERED ESCALATE mode, perspective reset to " + PERSPECTIVES[worst_idx])
+        println("  evolve: ENTERED ESCALATE mode, perspective reset to " + perspectives[worst_idx])
     } else if s.escalate_mode == 1 {
         s.escalate_ticks = s.escalate_ticks + 1
-        if gained >= LOW_DELTA_THRESHOLD && s.escalate_ticks >= 2 {
+        if gained >= low_delta_threshold && s.escalate_ticks >= 2 {
             s.escalate_mode = 0
             s.escalate_ticks = 0
             println("  evolve: EXITED ESCALATE mode (gains resumed)")
@@ -867,33 +794,21 @@ fn evolve(st: AnimaState, strat: Strategy, pre_laws: i64) -> Strategy {
 
     // sat_streak 계산: laws_delta_history에서 연속 0 카운트
     let mut computed_sat = 0
-    if s.laws_delta_history[2] < LOW_DELTA_THRESHOLD {
+    if s.laws_delta_history[2] < low_delta_threshold {
         computed_sat = 1
-        if s.laws_delta_history[1] < LOW_DELTA_THRESHOLD {
+        if s.laws_delta_history[1] < low_delta_threshold {
             computed_sat = 2
-            if s.laws_delta_history[0] < LOW_DELTA_THRESHOLD {
+            if s.laws_delta_history[0] < low_delta_threshold {
                 computed_sat = 3
             }
         }
     }
 
     // update anima_state.json (sat_streak + novel_laws 포함)
-    save_anima_state(st.laws_count, st.current_stage, st.generation + 1, st.phi, PERSPECTIVES[s.current_perspective], computed_sat, gained)
+    save_anima_state(st.laws_count, st.current_stage, st.generation + 1, st.phi, perspectives[s.current_perspective], computed_sat, gained)
 
     save_strategy(s)
-    println("  evolve -> perspective=" + PERSPECTIVES[s.current_perspective] +
-        " weights=[" +
-        to_string(s.perspective_weights[0]) + ", " +
-        to_string(s.perspective_weights[1]) + ", " +
-        to_string(s.perspective_weights[2]) + ", " +
-        to_string(s.perspective_weights[3]) + ", " +
-        to_string(s.perspective_weights[4]) + "]" +
-        " deltas=[" +
-        to_string(s.laws_delta_history[0]) + "," +
-        to_string(s.laws_delta_history[1]) + "," +
-        to_string(s.laws_delta_history[2]) + "]" +
-        " depth=" + to_string(s.blowup_depth) +
-        " escalate=" + to_string(s.escalate_mode))
+    println("  evolve -> perspective=" + perspectives[s.current_perspective] + " weights=[" + to_string(s.perspective_weights[0]) + ", " + to_string(s.perspective_weights[1]) + ", " + to_string(s.perspective_weights[2]) + ", " + to_string(s.perspective_weights[3]) + ", " + to_string(s.perspective_weights[4]) + "]" + " deltas=[" + to_string(s.laws_delta_history[0]) + "," + to_string(s.laws_delta_history[1]) + "," + to_string(s.laws_delta_history[2]) + "]" + " depth=" + to_string(s.blowup_depth) + " escalate=" + to_string(s.escalate_mode))
     return s
 }
 
@@ -924,22 +839,14 @@ if mode == "status" {
     println("escalate_mode: " + if st.escalate_mode { "TRUE" } else { "false" })
     println("cross_discoveries: " + to_string(st.cross_discoveries))
     if st.laws_delta_history.len() >= 3 {
-        println("laws_delta_history: [" +
-            to_string(st.laws_delta_history[0]) + ", " +
-            to_string(st.laws_delta_history[1]) + ", " +
-            to_string(st.laws_delta_history[2]) + "]")
+        println("laws_delta_history: [" + to_string(st.laws_delta_history[0]) + ", " + to_string(st.laws_delta_history[1]) + ", " + to_string(st.laws_delta_history[2]) + "]")
     }
 
     let strat = load_strategy()
     println("")
     println("--- strategy ---")
-    println("perspective_weights: [" +
-        to_string(strat.perspective_weights[0]) + ", " +
-        to_string(strat.perspective_weights[1]) + ", " +
-        to_string(strat.perspective_weights[2]) + ", " +
-        to_string(strat.perspective_weights[3]) + ", " +
-        to_string(strat.perspective_weights[4]) + "]")
-    println("current_perspective: " + PERSPECTIVES[strat.current_perspective])
+    println("perspective_weights: [" + to_string(strat.perspective_weights[0]) + ", " + to_string(strat.perspective_weights[1]) + ", " + to_string(strat.perspective_weights[2]) + ", " + to_string(strat.perspective_weights[3]) + ", " + to_string(strat.perspective_weights[4]) + "]")
+    println("current_perspective: " + perspectives[strat.current_perspective])
     println("blowup_depth: " + to_string(strat.blowup_depth))
     println("total_ticks: " + to_string(strat.total_ticks))
     println("escalate_ticks: " + to_string(strat.escalate_ticks))
@@ -959,10 +866,10 @@ if mode == "tick" {
     let task = select_task(pre_st, strat)
     println("selected: " + task)
     if pre_st.stagnation_flag {
-        println("  [!] STAGNATION detected: laws_delta < " + to_string(LOW_DELTA_THRESHOLD) + " for 3+ ticks")
+        println("  [!] STAGNATION detected: laws_delta < " + to_string(low_delta_threshold) + " for 3+ ticks")
     }
     if pre_st.sprint_mode {
-        println("  [!] SPRINT mode: laws=" + to_string(pre_st.laws_count) + " >= " + to_string(SPRINT_THRESHOLD))
+        println("  [!] SPRINT mode: laws=" + to_string(pre_st.laws_count) + " >= " + to_string(sprint_threshold))
     }
     if pre_st.escalate_mode {
         println("  [!] ESCALATE mode: cross-injecting nexus6 blowup seeds")
@@ -980,7 +887,7 @@ if mode == "tick" {
     println("laws: " + to_string(pre_laws) + " -> " + to_string(post_st.laws_count) + " (+" + to_string(post_st.laws_count - pre_laws) + ")")
     println("health: " + to_string(post_st.health))
     println("status: " + post_st.status_flag)
-    println("perspective: " + PERSPECTIVES[new_strat.current_perspective])
+    println("perspective: " + perspectives[new_strat.current_perspective])
     println("cross_discoveries: " + to_string(post_st.cross_discoveries))
 }
 
@@ -1016,10 +923,7 @@ if mode == "report" {
     println("| Escalate Mode | " + if st.escalate_mode { "TRUE" } else { "false" } + " |")
     println("| Cross-Discoveries (psi/consciousness) | " + to_string(st.cross_discoveries) + " |")
     if st.laws_delta_history.len() >= 3 {
-        println("| Laws Delta History | [" +
-            to_string(st.laws_delta_history[0]) + ", " +
-            to_string(st.laws_delta_history[1]) + ", " +
-            to_string(st.laws_delta_history[2]) + "] |")
+        println("| Laws Delta History | [" + to_string(st.laws_delta_history[0]) + ", " + to_string(st.laws_delta_history[1]) + ", " + to_string(st.laws_delta_history[2]) + "] |")
     }
     println("")
     println("## 5-Perspective Rotation (replaces Python topology)")
@@ -1029,7 +933,7 @@ if mode == "report" {
     let mut ti = 0
     while ti < 5 {
         let marker = if ti == strat.current_perspective { " <-- active" } else { "" }
-        println("| " + PERSPECTIVES[ti] + " | " + PERSPECTIVE_SEEDS[ti] + " | " + to_string(strat.perspective_weights[ti]) + marker + " |")
+        println("| " + perspectives[ti] + " | " + perspective_seeds[ti] + " | " + to_string(strat.perspective_weights[ti]) + marker + " |")
         ti = ti + 1
     }
     println("")
@@ -1051,13 +955,13 @@ if mode == "report" {
     println("## Decision Logic")
     println("")
     if st.status_flag == "SPRINT" {
-        println("- **SPRINT**: laws >= " + to_string(SPRINT_THRESHOLD) + ". Multi-perspective parallel blowup + escalate seeds.")
+        println("- **SPRINT**: laws >= " + to_string(sprint_threshold) + ". Multi-perspective parallel blowup + escalate seeds.")
     } else if st.status_flag == "GOAL_NEAR" {
         println("- **GOAL_NEAR**: Goal within reach. Deep blowup with combined perspective seeds.")
     } else if st.status_flag == "ESCALATE" {
         println("- **ESCALATE**: Stagnation persists. Cross-injecting nexus6 blowup seeds (PSI, phi, emergence, qualia).")
     } else if st.status_flag == "STAGNANT" {
-        println("- **STAGNANT**: laws_delta < " + to_string(LOW_DELTA_THRESHOLD) + " for 3+ ticks. Perspective reset + entering escalate.")
+        println("- **STAGNANT**: laws_delta < " + to_string(low_delta_threshold) + " for 3+ ticks. Perspective reset + entering escalate.")
     } else if st.status_flag == "BREAKTHROUGH" {
         println("- **BREAKTHROUGH**: Novel laws emerging. Deep blowup to capitalize.")
     } else {
@@ -1099,9 +1003,9 @@ if mode == "help" {
     println("  - State: shared/anima_state.json (replaces evolution_live.json)")
     println("")
     println("Features:")
-    println("  - Stagnation detection: 3 ticks with laws_delta < " + to_string(LOW_DELTA_THRESHOLD) + " -> STAGNANT")
+    println("  - Stagnation detection: 3 ticks with laws_delta < " + to_string(low_delta_threshold) + " -> STAGNANT")
     println("  - Auto escalate: perspective reset + nexus6 blowup cross-injection")
-    println("  - Sprint mode: laws >= " + to_string(SPRINT_THRESHOLD) + " -> parallel multi-perspective blowup")
+    println("  - Sprint mode: laws >= " + to_string(sprint_threshold) + " -> parallel multi-perspective blowup")
     println("  - Cross-pollination: auto-feed consciousness/psi discoveries from discovery_log")
     println("  - Adaptive blowup depth: auto-increase on stagnation, decrease on high yield")
     println("  - Health penalty: stagnation lowers health -> nexus_hub prioritizes dispatch")

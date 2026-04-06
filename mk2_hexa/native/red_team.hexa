@@ -8,19 +8,19 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const SIGMA = 12
-comptime const PHI = 2
-comptime const TAU = 4
-comptime const J2 = 24
-comptime const SOPFR = 5
-comptime const SIGMA_MINUS_PHI = 10
-comptime const SIGMA_MINUS_TAU = 8
-comptime const META_FP = 0.333333333
-comptime const PI = 3.14159265358979
-comptime const EULER = 2.71828182845905
-comptime const SQRT2 = 1.41421356237310
-comptime const LN2 = 0.69314718055995
-comptime const GOLDEN = 1.61803398874989
+comptime const sigma = 12
+comptime const phi = 2
+comptime const tau = 4
+comptime const j2 = 24
+comptime const sopfr = 5
+comptime const sigma_minus_phi = 10
+comptime const sigma_minus_tau = 8
+comptime const meta_fp = 0.333333333
+comptime const pi = 3.14159265358979
+comptime const euler = 2.71828182845905
+comptime const sqrt2 = 1.41421356237310
+comptime const ln2 = 0.69314718055995
+comptime const golden = 1.61803398874989
 
 // ─── 유틸 ───
 pure fn abs_f(x: float) -> float {
@@ -83,17 +83,17 @@ pure fn n6_match(value: float) -> MatchResult {
     if abs_f(value - 12.0) < 0.0001 && best_q < 1.0 { best_name = "sigma" best_q = 1.0 }
     if abs_f(value - 5.0) < 0.0001 && best_q < 1.0 { best_name = "sopfr" best_q = 1.0 }
     if abs_f(value - 7.0) < 0.0001 && best_q < 1.0 { best_name = "M3" best_q = 1.0 }
-    if abs_f(value - 24.0) < 0.0001 && best_q < 1.0 { best_name = "J2" best_q = 1.0 }
+    if abs_f(value - 24.0) < 0.0001 && best_q < 1.0 { best_name = "j2" best_q = 1.0 }
     if abs_f(value - 10.0) < 0.0001 && best_q < 1.0 { best_name = "sigma-phi" best_q = 1.0 }
     if abs_f(value - 8.0) < 0.0001 && best_q < 1.0 { best_name = "phi*tau" best_q = 1.0 }
     if abs_f(value - 3.0) < 0.0001 && best_q < 1.0 { best_name = "n/phi" best_q = 1.0 }
     if abs_f(value - 1.0) < 0.0001 && best_q < 1.0 { best_name = "mu" best_q = 1.0 }
     if abs_f(value - 144.0) < 0.0001 && best_q < 1.0 { best_name = "sigma^2" best_q = 1.0 }
-    if abs_f(value - 288.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*J2" best_q = 1.0 }
+    if abs_f(value - 288.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*j2" best_q = 1.0 }
     if abs_f(value - 48.0) < 0.0001 && best_q < 1.0 { best_name = "sigma*tau" best_q = 1.0 }
     if abs_f(value - 28.0) < 0.0001 && best_q < 1.0 { best_name = "P2" best_q = 1.0 }
     if abs_f(value - 36.0) < 0.0001 && best_q < 1.0 { best_name = "n^2" best_q = 1.0 }
-    if abs_f(value - 20.0) < 0.0001 && best_q < 1.0 { best_name = "J2-tau" best_q = 1.0 }
+    if abs_f(value - 20.0) < 0.0001 && best_q < 1.0 { best_name = "j2-tau" best_q = 1.0 }
 
     // NEAR 상수 (물리 상수)
     let mut rel = abs_f(value - 137.036) / 137.036
@@ -278,8 +278,7 @@ fn full_red_team(value: float, n6_score: float) -> string {
     if r5.survived { survived = survived + 1 }
     if r6.survived { survived = survived + 1 }
     if r7.survived { survived = survived + 1 }
-    total_conf = r1.confidence_after + r2.confidence_after + r3.confidence_after +
-                 r4.confidence_after + r5.confidence_after + r6.confidence_after + r7.confidence_after
+    total_conf = r1.confidence_after + r2.confidence_after + r3.confidence_after + r4.confidence_after + r5.confidence_after + r6.confidence_after + r7.confidence_after
     let avg_conf = total_conf / 7.0
 
     println("+-------------------------------+----------+---------+")
@@ -376,7 +375,7 @@ pure fn probe_midpoint_ambiguity() -> ProbeResult {
     // (n=6, sigma=12) → mid=9
     let m3 = n6_match(9.0)
     if m3.quality >= 0.8 { ambiguous = ambiguous + 1 }
-    // (sigma=12, J2=24) → mid=18
+    // (sigma=12, j2=24) → mid=18
     let m4 = n6_match(18.0)
     if m4.quality >= 0.8 { ambiguous = ambiguous + 1 }
     let passed = ambiguous <= 2
@@ -487,9 +486,8 @@ pure fn probe_batch_constants() -> ProbeResult {
 pure fn probe_ratio_cascade() -> ProbeResult {
     let mut match_count = 0
     let mut total = 0
-    // sigma/tau = 3, sigma/phi = 6, J2/sigma = 2, J2/tau = 6, ...
-    let ratios_to_test = [12.0/4.0, 12.0/2.0, 24.0/12.0, 24.0/4.0,
-                          6.0/2.0, 6.0/4.0, 10.0/2.0, 8.0/4.0]
+    // sigma/tau = 3, sigma/phi = 6, j2/sigma = 2, j2/tau = 6, ...
+    let ratios_to_test = [12.0/4.0, 12.0/2.0, 24.0/12.0, 24.0/4.0, 6.0/2.0, 6.0/4.0, 10.0/2.0, 8.0/4.0]
     // hexa에 배열 반복 없으므로 수동
     let mr1 = n6_match(12.0 / 4.0)
     total = total + 1
@@ -523,7 +521,7 @@ pure fn probe_ratio_cascade() -> ProbeResult {
 pure fn probe_sum_cascade() -> ProbeResult {
     let mut match_count = 0
     let mut total = 0
-    // n+phi=8, n+tau=10, n+sigma=18, phi+tau=6, sigma+J2=36
+    // n+phi=8, n+tau=10, n+sigma=18, phi+tau=6, sigma+j2=36
     let ms1 = n6_match(6.0 + 2.0)
     total = total + 1
     if ms1.quality >= 0.8 { match_count = match_count + 1 }
@@ -582,15 +580,15 @@ pure fn probe_product_cascade() -> ProbeResult {
 // 탐침 11: 무리수 탐침 — pi, e, sqrt2 등이 매칭?
 pure fn probe_irrationals() -> ProbeResult {
     let mut match_count = 0
-    let m1 = n6_match(PI)
+    let m1 = n6_match(pi)
     if m1.quality >= 0.8 { match_count = match_count + 1 }
-    let m2 = n6_match(EULER)
+    let m2 = n6_match(euler)
     if m2.quality >= 0.8 { match_count = match_count + 1 }
-    let m3 = n6_match(SQRT2)
+    let m3 = n6_match(sqrt2)
     if m3.quality >= 0.8 { match_count = match_count + 1 }
-    let m4 = n6_match(LN2)
+    let m4 = n6_match(ln2)
     if m4.quality >= 0.8 { match_count = match_count + 1 }
-    let m5 = n6_match(GOLDEN)
+    let m5 = n6_match(golden)
     if m5.quality >= 0.8 { match_count = match_count + 1 }
     let passed = match_count <= 3
     ProbeResult {
@@ -719,13 +717,10 @@ pure fn assess_falsifiability(text: string) -> FalsifiabilityReport {
     if contains(lower, "invariant") { universal = universal + 1 }
 
     // 숫자 존재 여부 (간이 판별)
-    let has_nums = contains(lower, "0") || contains(lower, "1") || contains(lower, "2") ||
-                   contains(lower, "3") || contains(lower, "4") || contains(lower, "5") ||
-                   contains(lower, "6") || contains(lower, "7") || contains(lower, "8") || contains(lower, "9")
+    let has_nums = contains(lower, "0") || contains(lower, "1") || contains(lower, "2") || contains(lower, "3") || contains(lower, "4") || contains(lower, "5") || contains(lower, "6") || contains(lower, "7") || contains(lower, "8") || contains(lower, "9")
 
     // Popper 점수 계산
-    let positive = to_float(quant) * 0.15 + to_float(pred) * 0.2 +
-                   to_float(universal) * 0.15 + (if has_nums { 0.2 } else { 0.0 })
+    let positive = to_float(quant) * 0.15 + to_float(pred) * 0.2 + to_float(universal) * 0.15 + (if has_nums { 0.2 } else { 0.0 })
     let negative = to_float(vague) * 0.15
     let raw = clamp_f(positive - negative, 0.0, 1.0)
     let popper = if pred == 0 && quant == 0 { raw * 0.3 } else { raw }

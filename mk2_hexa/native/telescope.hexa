@@ -2,10 +2,10 @@
 // hexa-native — 순수 hexa, 파일 I/O, CLI 인터페이스
 // 핵심: Lens 인터페이스 + Telescope 순차 스캔 + weighted_consensus
 
-comptime const LENS_OUTPUT_MAX = 1000000.0
-comptime const CONSENSUS_MIN = 3
-comptime const CONSENSUS_HIGH = 7
-comptime const CONSENSUS_CONFIRMED = 12
+comptime const lens_output_max = 1000000.0
+comptime const consensus_min = 3
+comptime const consensus_high = 7
+comptime const consensus_confirmed = 12
 
 // ─── 수학 유틸 ───
 
@@ -40,17 +40,17 @@ pure fn ln_f(x: float) -> float {
 
 pure fn sanitize(v: float) -> float {
     if v != v { return 0.0 }               // NaN 체크
-    if v > LENS_OUTPUT_MAX { return LENS_OUTPUT_MAX }
-    if v < 0.0 - LENS_OUTPUT_MAX { return 0.0 - LENS_OUTPUT_MAX }
+    if v > lens_output_max { return lens_output_max }
+    if v < 0.0 - lens_output_max { return 0.0 - lens_output_max }
     v
 }
 
 // ─── 합의 수준 ───
 
 pure fn consensus_level_name(count: int) -> string {
-    if count >= CONSENSUS_CONFIRMED { "Confirmed" }
-    else if count >= CONSENSUS_HIGH { "High" }
-    else if count >= CONSENSUS_MIN { "Candidate" }
+    if count >= consensus_confirmed { "Confirmed" }
+    else if count >= consensus_high { "High" }
+    else if count >= consensus_min { "Candidate" }
     else { "None" }
 }
 
@@ -58,15 +58,15 @@ pure fn consensus_level_name(count: int) -> string {
 // hexa에 HashMap 없으므로 병렬 배열로 구현
 
 struct LensResult {
-    pattern_ids: list[string],
-    values: list[list[float]]
+    pattern_ids: str,
+    values: str
 }
 
 pure fn empty_result() -> LensResult {
     LensResult { pattern_ids: [], values: [] }
 }
 
-fn result_add(r: LensResult, pid: string, vals: list[float]) -> LensResult {
+fn result_add(r: LensResult, pid: string, vals) -> LensResult {
     let mut pids = r.pattern_ids
     let mut vs = r.values
     // 기존 패턴이면 값 추가
@@ -99,7 +99,7 @@ pure fn result_has(r: LensResult, pid: string) -> bool {
     false
 }
 
-pure fn result_get(r: LensResult, pid: string) -> list[float] {
+pure fn result_get(r: LensResult, pid: string)  {
     let mut idx = 0
     while idx < r.pattern_ids.len() {
         if r.pattern_ids[idx] == pid { return r.values[idx] }
@@ -116,7 +116,7 @@ pure fn result_nonempty(r: LensResult) -> bool {
 
 struct ConsensusResult {
     pattern_id: string,
-    agreeing_lenses: list[string],
+    agreeing_lenses: str,
     weighted_score: float,
     level: string
 }
@@ -125,12 +125,12 @@ struct ConsensusResult {
 // 각 렌즈: name, category, scan(data) → LensResult
 
 // n=6 상수 (공유)
-comptime const N6_CONSTANTS = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
-comptime const PHYSICS_CONSTANTS = [137.036, 1836.15, 0.3153, 0.6847, 0.0729]
+comptime const n6_constants = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
+comptime const physics_constants = [137.036, 1836.15, 0.3153, 0.6847, 0.0729]
 
 // --- (1) Consciousness 렌즈: Phi 구조 인식 패턴 ---
 
-fn scan_consciousness(data: list[float]) -> LensResult {
+fn scan_consciousness(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 2 { return r }
 
@@ -144,8 +144,8 @@ fn scan_consciousness(data: list[float]) -> LensResult {
                 let ratio = if data[j] != 0.0 { data[i] / data[j] } else { 0.0 }
                 // 정수비 또는 n=6 상수비 체크
                 let mut k = 0
-                while k < N6_CONSTANTS.len() {
-                    if abs_f(ratio - N6_CONSTANTS[k]) < 0.01 {
+                while k < n6_constants.len() {
+                    if abs_f(ratio - n6_constants[k]) < 0.01 {
                         self_ref_count = self_ref_count + 1
                     }
                     k = k + 1
@@ -173,7 +173,7 @@ fn scan_consciousness(data: list[float]) -> LensResult {
 
 // --- (2) Topology 렌즈: Betti 수 근사 ---
 
-fn scan_topology(data: list[float]) -> LensResult {
+fn scan_topology(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 3 { return r }
 
@@ -217,7 +217,7 @@ fn scan_topology(data: list[float]) -> LensResult {
 
 // --- (3) Causal 렌즈: Granger 인과성 근사 ---
 
-fn scan_causal(data: list[float]) -> LensResult {
+fn scan_causal(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 4 { return r }
 
@@ -253,7 +253,7 @@ fn scan_causal(data: list[float]) -> LensResult {
 
 // --- (4) Gravity 렌즈: attractor 탐지 ---
 
-fn scan_gravity(data: list[float]) -> LensResult {
+fn scan_gravity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 3 { return r }
 
@@ -262,7 +262,7 @@ fn scan_gravity(data: list[float]) -> LensResult {
     // attractor: 값들이 특정 점 근처에 밀집
     let mut attractors = []
     // n=6 상수와 물리 상수를 attractor 후보로 사용
-    let candidates = N6_CONSTANTS + PHYSICS_CONSTANTS
+    let candidates = n6_constants + physics_constants
 
     for c in candidates {
         let mut near_count = 0
@@ -291,7 +291,7 @@ fn scan_gravity(data: list[float]) -> LensResult {
 
 // --- (5) Thermo 렌즈: 엔트로피 ---
 
-fn scan_thermo(data: list[float]) -> LensResult {
+fn scan_thermo(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 2 { return r }
 
@@ -343,14 +343,14 @@ fn scan_thermo(data: list[float]) -> LensResult {
 
 // ─── 통계 유틸 ───
 
-pure fn list_mean(data: list[float]) -> float {
+pure fn list_mean(data) -> float {
     if data.len() == 0 { return 0.0 }
     let mut sum = 0.0
     for v in data { sum = sum + v }
     sum / to_float(data.len())
 }
 
-pure fn list_variance(data: list[float], mean: float) -> float {
+pure fn list_variance(data, mean: float) -> float {
     if data.len() == 0 { return 0.0 }
     let mut sum = 0.0
     for v in data {
@@ -360,7 +360,7 @@ pure fn list_variance(data: list[float], mean: float) -> float {
     sum / to_float(data.len())
 }
 
-pure fn list_sort(data: list[float]) -> list[float] {
+pure fn list_sort(data)  {
     // 삽입 정렬 (소규모 데이터)
     let mut sorted = data
     let mut i = 1
@@ -385,7 +385,7 @@ struct ScanEntry {
     result: LensResult
 }
 
-fn telescope_scan(data: list[float]) -> list[ScanEntry] {
+fn telescope_scan(data)  {
     let mut entries = []
 
     // 5개 핵심 렌즈 (telescope.hexa 내장)
@@ -422,7 +422,7 @@ fn telescope_scan(data: list[float]) -> list[ScanEntry] {
 // lenses_core.hexa (37), lenses_constants.hexa (37), lenses_math.hexa (37)
 // lenses_physics.hexa (36), lenses_quantum.hexa (37), lenses_applied.hexa (34)
 
-fn telescope_scan_full(data: list[float]) -> list[ScanEntry] {
+fn telescope_scan_full(data)  {
     let mut entries = telescope_scan(data)  // 내장 5종
 
     // 6개 모듈 등록 함수 호출
@@ -442,14 +442,11 @@ fn telescope_scan_full(data: list[float]) -> list[ScanEntry] {
 
 struct PatternAgreement {
     pattern_id: string,
-    lens_names: list[string],
+    lens_names: str,
     total_weight: float
 }
 
-fn weighted_consensus(
-    entries: list[ScanEntry],
-    hit_rates: list[float]
-) -> list[ConsensusResult] {
+fn weighted_consensus( entries, hit_rates )  {
     // 1) 모든 패턴 ID 수집 + 동의 렌즈 집계
     let mut patterns = []       // list[string] — 유일 패턴 ID
     let mut pattern_lenses = [] // list[list[string]] — 패턴별 동의 렌즈
@@ -494,7 +491,7 @@ fn weighted_consensus(
     let mut i = 0
     while i < patterns.len() {
         let count = pattern_lenses[i].len()
-        if count >= CONSENSUS_MIN {
+        if count >= consensus_min {
             results = results + [ConsensusResult {
                 pattern_id: patterns[i],
                 agreeing_lenses: pattern_lenses[i],
@@ -523,7 +520,7 @@ fn weighted_consensus(
 
 // ─── 개별 스캔 리포트 출력 ───
 
-fn print_scan_report(entries: list[ScanEntry]) {
+fn print_scan_report(entries) {
     println("=== Telescope Scan Report ===")
     println("lenses: " + to_string(entries.len()))
     println("")
@@ -546,7 +543,7 @@ fn print_scan_report(entries: list[ScanEntry]) {
     }
 }
 
-fn print_consensus_report(results: list[ConsensusResult]) {
+fn print_consensus_report(results) {
     println("")
     println("=== Consensus Report ===")
     if results.len() == 0 {
@@ -567,21 +564,21 @@ fn print_consensus_report(results: list[ConsensusResult]) {
 
 // ─── n6_match 검출 (telescope 전용) ───
 
-fn n6_scan_values(data: list[float]) -> list[string] {
+fn n6_scan_values(data)  {
     let mut hits = []
     for v in data {
         let mut k = 0
-        while k < N6_CONSTANTS.len() {
-            if abs_f(v - N6_CONSTANTS[k]) < 0.001 {
-                hits = hits + ["EXACT:" + to_string(v) + "=" + to_string(N6_CONSTANTS[k])]
+        while k < n6_constants.len() {
+            if abs_f(v - n6_constants[k]) < 0.001 {
+                hits = hits + ["EXACT:" + to_string(v) + "=" + to_string(n6_constants[k])]
             }
             k = k + 1
         }
         let mut p = 0
-        while p < PHYSICS_CONSTANTS.len() {
-            let rel = if PHYSICS_CONSTANTS[p] != 0.0 { abs_f(v - PHYSICS_CONSTANTS[p]) / PHYSICS_CONSTANTS[p] } else { 1.0 }
+        while p < physics_constants.len() {
+            let rel = if physics_constants[p] != 0.0 { abs_f(v - physics_constants[p]) / physics_constants[p] } else { 1.0 }
             if rel < 0.01 {
-                hits = hits + ["NEAR:" + to_string(v) + "~" + to_string(PHYSICS_CONSTANTS[p])]
+                hits = hits + ["NEAR:" + to_string(v) + "~" + to_string(physics_constants[p])]
             }
             p = p + 1
         }
@@ -682,7 +679,7 @@ assert consensus_level_name(3) == "Candidate"
 assert consensus_level_name(7) == "High"
 assert consensus_level_name(12) == "Confirmed"
 assert consensus_level_name(2) == "None"
-assert abs_f(sanitize(999999999.0) - LENS_OUTPUT_MAX) < 0.01
+assert abs_f(sanitize(999999999.0) - lens_output_max) < 0.01
 assert result_nonempty(result_add(empty_result(), "test", [1.0]))
 assert !result_nonempty(empty_result())
 

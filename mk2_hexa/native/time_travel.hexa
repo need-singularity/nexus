@@ -8,9 +8,9 @@
 //       hexa time_travel.hexa branches
 
 // ─── 설정 ───
-comptime const SNAPSHOT_DIR = "shared/snapshots"
-comptime const SNAPSHOT_INDEX = "shared/snapshots/index.jsonl"
-comptime const BRANCH_INDEX = "shared/snapshots/branches.jsonl"
+comptime const snapshot_dir = "shared/snapshots"
+comptime const snapshot_index = "shared/snapshots/index.jsonl"
+comptime const branch_index = "shared/snapshots/branches.jsonl"
 
 // ─── 스냅샷 구조체 ───
 
@@ -33,12 +33,12 @@ struct Branch {
 // ─── 스냅샷 ID 생성 ───
 
 fn next_snapshot_id() -> string {
-    let raw = read_file(SNAPSHOT_INDEX)
+    let raw = read_file(snapshot_index)
     if raw == "" { return "snap-0001" }
     let lines = raw.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         if lines[i].trim() != "" { count = count + 1 }
         i = i + 1
     }
@@ -55,7 +55,7 @@ fn next_snapshot_id() -> string {
 
 fn save_snapshot(description: string) -> string {
     let id = next_snapshot_id()
-    let graph_file = SNAPSHOT_DIR + "/" + id + ".json"
+    let graph_file = snapshot_dir + "/" + id + ".json"
 
     // 그래프 상태 캡처 (discovery_graph.json 복사)
     let graph_data = read_file("shared/discovery_graph.json")
@@ -67,11 +67,11 @@ fn save_snapshot(description: string) -> string {
 
     // 인덱스에 기록
     let entry = "{\"id\":\"" + id + "\",\"description\":\"" + description + "\",\"graph_file\":\"" + graph_file + "\"}"
-    let raw = read_file(SNAPSHOT_INDEX)
+    let raw = read_file(snapshot_index)
     if raw == "" {
-        write_file(SNAPSHOT_INDEX, entry + "\n")
+        write_file(snapshot_index, entry + "\n")
     } else {
-        write_file(SNAPSHOT_INDEX, raw + entry + "\n")
+        write_file(snapshot_index, raw + entry + "\n")
     }
 
     id
@@ -80,12 +80,12 @@ fn save_snapshot(description: string) -> string {
 // ─── 스냅샷 목록 (최신순) ───
 
 fn list_snapshots() -> string {
-    let raw = read_file(SNAPSHOT_INDEX)
+    let raw = read_file(snapshot_index)
     if raw == "" { return "(no snapshots)" }
     let lines = raw.split("\n")
     let mut result = ""
     // 역순 출력
-    let mut i = lines.length() - 1
+    let mut i = len(lines) - 1
     while i >= 0 {
         let line = lines[i].trim()
         if line != "" {
@@ -94,13 +94,13 @@ fn list_snapshots() -> string {
             let id_n = "\"id\":\""
             if line.contains(id_n) {
                 let ip = line.split(id_n)
-                if ip.length() > 1 { id = ip[1].split("\"")[0] }
+                if len(ip) > 1 { id = ip[1].split("\"")[0] }
             }
             let mut desc = ""
             let dn = "\"description\":\""
             if line.contains(dn) {
                 let dp = line.split(dn)
-                if dp.length() > 1 { desc = dp[1].split("\"")[0] }
+                if len(dp) > 1 { desc = dp[1].split("\"")[0] }
             }
             if result != "" { result = result + "\n" }
             result = result + "  " + id + "  " + desc
@@ -113,11 +113,11 @@ fn list_snapshots() -> string {
 // ─── 스냅샷 조회 ───
 
 fn get_snapshot(snap_id: string) -> string {
-    let raw = read_file(SNAPSHOT_INDEX)
+    let raw = read_file(snapshot_index)
     if raw == "" { return "" }
     let lines = raw.split("\n")
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line.contains("\"id\":\"" + snap_id + "\"") {
             return line
@@ -137,7 +137,7 @@ fn rollback_snapshot(snap_id: string) -> string {
     let gn = "\"graph_file\":\""
     if !entry.contains(gn) { return "no graph_file in snapshot" }
     let gp = entry.split(gn)
-    if gp.length() < 2 { return "parse error" }
+    if len(gp) < 2 { return "parse error" }
     let graph_file = gp[1].split("\"")[0]
 
     // 그래프 복원
@@ -158,11 +158,11 @@ fn create_branch(snap_id: string, branch_name: string, reason: string) -> string
     let gn = "\"graph_file\":\""
     if !entry.contains(gn) { return "no graph_file in snapshot" }
     let gp = entry.split(gn)
-    if gp.length() < 2 { return "parse error" }
+    if len(gp) < 2 { return "parse error" }
     let src_graph = gp[1].split("\"")[0]
 
     let new_id = snap_id + "-branch-" + branch_name
-    let new_graph_file = SNAPSHOT_DIR + "/" + new_id + ".json"
+    let new_graph_file = snapshot_dir + "/" + new_id + ".json"
 
     // 그래프 복사
     let graph_data = read_file(src_graph)
@@ -172,16 +172,16 @@ fn create_branch(snap_id: string, branch_name: string, reason: string) -> string
 
     // 스냅샷 인덱스에 추가
     let snap_entry = "{\"id\":\"" + new_id + "\",\"description\":\"Branch '" + branch_name + "' from " + snap_id + "\",\"graph_file\":\"" + new_graph_file + "\"}"
-    let raw = read_file(SNAPSHOT_INDEX)
-    write_file(SNAPSHOT_INDEX, raw + snap_entry + "\n")
+    let raw = read_file(snapshot_index)
+    write_file(snapshot_index, raw + snap_entry + "\n")
 
     // 브랜치 인덱스에 추가
     let branch_entry = "{\"name\":\"" + branch_name + "\",\"parent\":\"" + snap_id + "\",\"head\":\"" + new_id + "\",\"reason\":\"" + reason + "\"}"
-    let braw = read_file(BRANCH_INDEX)
+    let braw = read_file(branch_index)
     if braw == "" {
-        write_file(BRANCH_INDEX, branch_entry + "\n")
+        write_file(branch_index, branch_entry + "\n")
     } else {
-        write_file(BRANCH_INDEX, braw + branch_entry + "\n")
+        write_file(branch_index, braw + branch_entry + "\n")
     }
 
     new_id
@@ -190,32 +190,35 @@ fn create_branch(snap_id: string, branch_name: string, reason: string) -> string
 // ─── 브랜치 목록 ───
 
 fn list_branches() -> string {
-    let raw = read_file(BRANCH_INDEX)
+    let raw = read_file(branch_index)
     if raw == "" { return "(no branches)" }
     let lines = raw.split("\n")
     let mut result = ""
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
-        if line == "" { i = i + 1; continue }
+        if line == "" {
+            i = i + 1
+            continue
+        }
 
         let mut name = ""
         let nn = "\"name\":\""
         if line.contains(nn) {
             let np = line.split(nn)
-            if np.length() > 1 { name = np[1].split("\"")[0] }
+            if len(np) > 1 { name = np[1].split("\"")[0] }
         }
         let mut parent = ""
         let pn = "\"parent\":\""
         if line.contains(pn) {
             let pp = line.split(pn)
-            if pp.length() > 1 { parent = pp[1].split("\"")[0] }
+            if len(pp) > 1 { parent = pp[1].split("\"")[0] }
         }
         let mut reason = ""
         let rn = "\"reason\":\""
         if line.contains(rn) {
             let rp = line.split(rn)
-            if rp.length() > 1 { reason = rp[1].split("\"")[0] }
+            if len(rp) > 1 { reason = rp[1].split("\"")[0] }
         }
 
         if result != "" { result = result + "\n" }
@@ -229,7 +232,7 @@ fn list_branches() -> string {
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("time_travel.hexa — 스냅샷/롤백/브랜치")
         print("Usage:")
         print("  save <description>                   스냅샷 저장")
@@ -245,10 +248,10 @@ fn main() {
 
     if cmd == "save" {
         let mut desc = "manual snapshot"
-        if a.length() > 2 {
+        if len(a) > 2 {
             desc = ""
             let mut di = 2
-            while di < a.length() {
+            while di < len(a) {
                 if desc != "" { desc = desc + " " }
                 desc = desc + a[di]
                 di = di + 1
@@ -265,7 +268,7 @@ fn main() {
     }
 
     if cmd == "get" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: get <snap_id>")
             return
         }
@@ -278,7 +281,7 @@ fn main() {
     }
 
     if cmd == "rollback" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: rollback <snap_id>")
             return
         }
@@ -287,13 +290,13 @@ fn main() {
     }
 
     if cmd == "branch" {
-        if a.length() < 5 {
+        if len(a) < 5 {
             print("Usage: branch <snap_id> <name> <reason>")
             return
         }
         let mut reason = ""
         let mut ri = 4
-        while ri < a.length() {
+        while ri < len(a) {
             if reason != "" { reason = reason + " " }
             reason = reason + a[ri]
             ri = ri + 1

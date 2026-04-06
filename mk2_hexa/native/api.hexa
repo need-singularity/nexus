@@ -9,19 +9,19 @@
 //       hexa api.hexa scan <domain>
 
 // ─── 설정 ───
-comptime const API_PORT = 8080
-comptime const API_VERSION = "0.1.0"
+comptime const api_port = 8080
+comptime const api_version = "0.1.0"
 
 // ─── n=6 상수 ───
-comptime const N6_N = 6
-comptime const N6_SIGMA = 12
-comptime const N6_PHI = 2
-comptime const N6_TAU = 4
-comptime const N6_J2 = 24
-comptime const N6_SOPFR = 5
-comptime const N6_MU = 1
-comptime const N6_SIGMA_PHI = 10
-comptime const N6_SIGMA_TAU = 8
+comptime const n6_n = 6
+comptime const n6_sigma = 12
+comptime const n6_phi = 2
+comptime const n6_tau = 4
+comptime const n6_j2 = 24
+comptime const n6_sopfr = 5
+comptime const n6_mu = 1
+comptime const n6_sigma_phi = 10
+comptime const n6_sigma_tau = 8
 
 // ─── 응답 구조체 ───
 
@@ -48,14 +48,14 @@ fn extract_json_value(json: string, key: string) -> string {
     let pattern = "\"" + key + "\""
     if !json.contains(pattern) { return "" }
     let after_key = json.split(pattern)
-    if after_key.length() < 2 { return "" }
+    if len(after_key) < 2 { return "" }
     let rest = after_key[1].trim()
     if !rest.starts_with(":") { return "" }
-    let after_colon = rest.slice(1, rest.length()).trim()
+    let after_colon = rest.slice(1, len(rest)).trim()
 
     if after_colon.starts_with("\"") {
         // 문자열 값
-        let inner = after_colon.slice(1, after_colon.length())
+        let inner = after_colon.slice(1, len(after_colon))
         let end = inner.index_of("\"")
         if end < 0 { return "" }
         return inner.slice(0, end)
@@ -64,7 +64,7 @@ fn extract_json_value(json: string, key: string) -> string {
     let mut end = after_colon.index_of(",")
     if end < 0 { end = after_colon.index_of("}") }
     if end < 0 { end = after_colon.index_of("]") }
-    if end < 0 { end = after_colon.length() }
+    if end < 0 { end = len(after_colon) }
     after_colon.slice(0, end).trim()
 }
 
@@ -80,7 +80,7 @@ fn n6_match(value: float) -> string {
     let mut closest = ""
     let mut closest_target = 6.0
     let mut i = 0
-    while i < targets.length() {
+    while i < len(targets) {
         let d = v_abs - targets[i]
         let abs_d = if d < 0.0 { 0.0 - d } else { d }
         if abs_d < min_dist {
@@ -99,11 +99,11 @@ fn n6_match(value: float) -> string {
 // ─── 핸들러 ───
 
 fn handle_health() -> ApiResponse {
-    response_ok("{\"status\":\"ok\",\"engine\":\"nexus6\",\"port\":" + to_string(API_PORT) + "}")
+    response_ok("{\"status\":\"ok\",\"engine\":\"nexus6\",\"port\":" + to_string(api_port) + "}")
 }
 
 fn handle_version() -> ApiResponse {
-    response_ok("{\"version\":\"" + API_VERSION + "\",\"n\":6,\"sigma\":12,\"phi\":2,\"tau\":4}")
+    response_ok("{\"version\":\"" + api_version + "\",\"n\":6,\"sigma\":12,\"phi\":2,\"tau\":4}")
 }
 
 fn handle_constants() -> ApiResponse {
@@ -115,12 +115,12 @@ fn handle_lenses() -> ApiResponse {
     let lenses = ["consciousness", "topology", "causal", "quantum", "wave", "evolution", "thermo", "gravity", "symmetry", "resonance", "fractal", "emergence", "information", "entropy", "complexity", "network", "phase", "dimension", "tensor", "spectral", "algebraic", "meta_transcendence"]
     let mut json_list = ""
     let mut i = 0
-    while i < lenses.length() {
+    while i < len(lenses) {
         if json_list != "" { json_list = json_list + "," }
         json_list = json_list + "\"" + lenses[i] + "\""
         i = i + 1
     }
-    response_ok("{\"total\":" + to_string(lenses.length()) + ",\"lenses\":[" + json_list + "]}")
+    response_ok("{\"total\":" + to_string(len(lenses)) + ",\"lenses\":[" + json_list + "]}")
 }
 
 fn handle_lens_count() -> ApiResponse {
@@ -143,7 +143,7 @@ fn handle_verify(body: string) -> ApiResponse {
     let parts = match_result.split("|")
     let closest = parts[0]
     let mut quality = 0.0
-    if parts.length() > 1 {
+    if len(parts) > 1 {
         try { quality = to_float(parts[1]) } catch e { quality = 0.0 }
     }
     let n6_matches = if quality >= 1.0 { 1 } else { 0 }
@@ -204,7 +204,7 @@ fn process_file_request() {
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("api.hexa — RESTful API (파일 기반)")
         print("Usage:")
         print("  handle <method> <path> [body]   요청 처리")
@@ -221,13 +221,13 @@ fn main() {
     let cmd = a[1]
 
     if cmd == "handle" {
-        if a.length() < 4 {
+        if len(a) < 4 {
             print("Usage: handle <method> <path> [body]")
             return
         }
         let method = a[2]
         let path = a[3]
-        let body = if a.length() > 4 { a[4] } else { "" }
+        let body = if len(a) > 4 { a[4] } else { "" }
         let resp = handle_request(method, path, body)
         print("[" + to_string(resp.status) + "] " + resp.body)
     }
@@ -253,7 +253,7 @@ fn main() {
     }
 
     if cmd == "verify" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: verify <value>")
             return
         }
@@ -262,7 +262,7 @@ fn main() {
     }
 
     if cmd == "scan" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: scan <domain>")
             return
         }

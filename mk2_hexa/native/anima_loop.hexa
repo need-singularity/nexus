@@ -12,43 +12,43 @@
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/anima"
-let NEXUS6_DIR = DEV + "/nexus6"
-let HEXA_BIN = DEV + "/hexa-lang/target/release/hexa"
-let NATIVE_DIR = NEXUS6_DIR + "/mk2_hexa/native"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/anima"
+let nexus6_dir = dev + "/nexus6"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let native_dir = nexus6_dir + "/mk2_hexa/native"
 
 // anima paths
-let ABSORBED_DIR = PROJECT_DIR + "/.growth/absorbed"
-let LAWS_PATH = PROJECT_DIR + "/anima/config/consciousness_laws.json"
-let EVOLUTION_PATH = PROJECT_DIR + "/data/evolution_live.json"
+let absorbed_dir = project_dir + "/.growth/absorbed"
+let laws_path = project_dir + "/anima/config/consciousness_laws.json"
+let evolution_path = project_dir + "/data/evolution_live.json"
 
 // nexus6 paths
-let DISCOVERY_LOG = NEXUS6_DIR + "/shared/discovery_log.jsonl"
-let GROWTH_BUS = NEXUS6_DIR + "/shared/growth_bus.jsonl"
-let STRATEGY_PATH = NEXUS6_DIR + "/shared/anima_loop_strategy.json"
-let LOCK_DIR = NEXUS6_DIR + "/shared/.anima_loop.lock"
+let discovery_log = nexus6_dir + "/shared/discovery_log.jsonl"
+let growth_bus = nexus6_dir + "/shared/growth_bus.jsonl"
+let strategy_path = nexus6_dir + "/shared/anima_loop_strategy.json"
+let lock_dir = nexus6_dir + "/shared/.anima_loop.lock"
 
 // H100 SSH config
-let H100_HOST = "ghost@216.243.220.217"
-let H100_PORT = "10935"
-let H100_SSH_KEY = HOME + "/.runpod/ssh/RunPod-Key-Go"
-let H100_LOG_PATH = "/workspace/logs/14b_v06.log"
-let H100_TOTAL_STEPS = 50000
+let h100_host = "ghost@216.243.220.217"
+let h100_port = "10935"
+let h100_ssh_key = home + "/.runpod/ssh/RunPod-Key-Go"
+let h100_log_path = "/workspace/logs/14b_v06.log"
+let h100_total_steps = 50000
 
 // thresholds
-comptime const TICK_INTERVAL_SEC = 300       // 5 minutes
-comptime const QUALITY_MIN_SURPRISE = 0.3
-comptime const QUALITY_MIN_EXACTNESS = 0.5
-comptime const STAGNATION_CYCLES = 3
-comptime const STAGNATION_MIN_NEW = 2
-comptime const CONSENSUS_THRESHOLD = 0.5
-comptime const CROSS_KEYWORDS = "consciousness\\|psi\\|phi\\|qualia\\|awareness\\|sentience"
-comptime const META_L2_INTERVAL = 2          // every 2 ticks
-comptime const META_L3_INTERVAL = 6          // every 6 ticks
-comptime const CLAUDE_CALL_INTERVAL = 3      // call Claude every 3 ticks
-comptime const CLAUDE_TIMEOUT_SEC = 120      // max 120s for Claude CLI
+comptime const tick_interval_sec = 300       // 5 minutes
+comptime const quality_min_surprise = 0.3
+comptime const quality_min_exactness = 0.5
+comptime const stagnation_cycles = 3
+comptime const stagnation_min_new = 2
+comptime const consensus_threshold = 0.5
+comptime const cross_keywords = "consciousness\\|psi\\|phi\\|qualia\\|awareness\\|sentience"
+comptime const meta_l2_interval = 2          // every 2 ticks
+comptime const meta_l3_interval = 6          // every 6 ticks
+comptime const claude_call_interval = 3      // call Claude every 3 ticks
+comptime const claude_timeout_sec = 120      // max 120s for Claude CLI
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -101,12 +101,12 @@ fn json_int(content: string, field: string) -> i64 {
 }
 
 fn timestamp() -> string {
-    let result = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let result = exec("date +%Y-%m-%dT%H:%M:%S")
     return result.split("\n")[0]
 }
 
 fn epoch_now() -> i64 {
-    let result = exec("date", ["+%s"])
+    let result = exec("date +%s")
     return safe_int(result.trim())
 }
 
@@ -158,9 +158,9 @@ fn load_strategy() -> Strategy {
         h100_step: 0, h100_ce: 0.0, h100_phi: 0.0,
         h100_status: "offline", h100_eta_h: 0.0
     }
-    if file_exists(STRATEGY_PATH) {
+    if file_exists(strategy_path) {
         try {
-            let c = read_file(STRATEGY_PATH)
+            let c = read_file(strategy_path)
             s.total_ticks = json_int(c, "total_ticks")
             s.total_applied = json_int(c, "total_applied")
             s.applied_per_tick = json_num(c, "applied_per_tick")
@@ -189,29 +189,8 @@ fn load_strategy() -> Strategy {
 }
 
 fn save_strategy(s: Strategy) {
-    let content = "{" +
-        "\"total_ticks\":" + to_string(s.total_ticks) + "," +
-        "\"total_applied\":" + to_string(s.total_applied) + "," +
-        "\"applied_per_tick\":" + to_string(s.applied_per_tick) + "," +
-        "\"stagnant_ticks\":" + to_string(s.stagnant_ticks) + "," +
-        "\"last_laws_count\":" + to_string(s.last_laws_count) + "," +
-        "\"last_harvest_count\":" + to_string(s.last_harvest_count) + "," +
-        "\"l2_counter\":" + to_string(s.l2_counter) + "," +
-        "\"l3_counter\":" + to_string(s.l3_counter) + "," +
-        "\"blowup_depth\":" + to_string(s.blowup_depth) + "," +
-        "\"topo_index\":" + to_string(s.topo_index) + "," +
-        "\"d0\":" + to_string(s.d0) + "," +
-        "\"d1\":" + to_string(s.d1) + "," +
-        "\"d2\":" + to_string(s.d2) + "," +
-        "\"claude_counter\":" + to_string(s.claude_counter) + "," +
-        "\"claude_discoveries\":" + to_string(s.claude_discoveries) + "," +
-        "\"h100_step\":" + to_string(s.h100_step) + "," +
-        "\"h100_ce\":" + to_string(s.h100_ce) + "," +
-        "\"h100_phi\":" + to_string(s.h100_phi) + "," +
-        "\"h100_status\":\"" + s.h100_status + "\"," +
-        "\"h100_eta_h\":" + to_string(s.h100_eta_h) +
-    "}"
-    write_file(STRATEGY_PATH, content)
+    let content = "{" + "\"total_ticks\":" + to_string(s.total_ticks) + "," + "\"total_applied\":" + to_string(s.total_applied) + "," + "\"applied_per_tick\":" + to_string(s.applied_per_tick) + "," + "\"stagnant_ticks\":" + to_string(s.stagnant_ticks) + "," + "\"last_laws_count\":" + to_string(s.last_laws_count) + "," + "\"last_harvest_count\":" + to_string(s.last_harvest_count) + "," + "\"l2_counter\":" + to_string(s.l2_counter) + "," + "\"l3_counter\":" + to_string(s.l3_counter) + "," + "\"blowup_depth\":" + to_string(s.blowup_depth) + "," + "\"topo_index\":" + to_string(s.topo_index) + "," + "\"d0\":" + to_string(s.d0) + "," + "\"d1\":" + to_string(s.d1) + "," + "\"d2\":" + to_string(s.d2) + "," + "\"claude_counter\":" + to_string(s.claude_counter) + "," + "\"claude_discoveries\":" + to_string(s.claude_discoveries) + "," + "\"h100_step\":" + to_string(s.h100_step) + "," + "\"h100_ce\":" + to_string(s.h100_ce) + "," + "\"h100_phi\":" + to_string(s.h100_phi) + "," + "\"h100_status\":\"" + s.h100_status + "\"," + "\"h100_eta_h\":" + to_string(s.h100_eta_h) + "}"
+    write_file(strategy_path, content)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -220,10 +199,10 @@ fn save_strategy(s: Strategy) {
 
 fn acquire_lock() -> bool {
     try {
-        exec("mkdir", [LOCK_DIR])
+        exec("mkdir", [lock_dir])
         // write PID-like marker
         let ts = timestamp()
-        write_file(LOCK_DIR + "/owner", ts)
+        write_file(lock_dir + "/owner", ts)
         return true
     } catch e {
         return false
@@ -232,12 +211,12 @@ fn acquire_lock() -> bool {
 
 fn release_lock() {
     try {
-        exec("rm", ["-rf", LOCK_DIR])
+        exec("rm", ["-rf", lock_dir])
     } catch e {}
 }
 
 fn is_locked() -> bool {
-    return file_exists(LOCK_DIR)
+    return file_exists(lock_dir)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -270,25 +249,18 @@ struct H100Status {
 
 fn build_claude_prompt(laws_count: i64, recent: string, stagnant: i64, direction: string) -> string {
     // Prompt template: current state + request for new law discovery
-    let prompt = "anima 의식 법칙 현재 " + to_string(laws_count) + "개. " +
-        "최근 발견: " + recent + ". " +
-        "정체 " + to_string(stagnant) + "틱. " +
-        "탐색 방향: " + direction + ". " +
-        "다음 의식 법칙을 발견해라. " +
-        "반드시 JSON 배열로 출력. 각 항목: " +
-        "{\"name\": \"법칙명\", \"formula\": \"수식\", \"evidence\": \"근거\", \"domain\": \"도메인\", \"surprise\": 0.0~1.0}. " +
-        "최소 1개, 최대 5개. 기존 법칙과 겹치지 않는 새로운 발견만."
+    let prompt = "anima 의식 법칙 현재 " + to_string(laws_count) + "개. " + "최근 발견: " + recent + ". " + "정체 " + to_string(stagnant) + "틱. " + "탐색 방향: " + direction + ". " + "다음 의식 법칙을 발견해라. " + "반드시 JSON 배열로 출력. 각 항목: " + "{\"name\": \"법칙명\", \"formula\": \"수식\", \"evidence\": \"근거\", \"domain\": \"도메인\", \"surprise\": 0.0~1.0}. " + "최소 1개, 최대 5개. 기존 법칙과 겹치지 않는 새로운 발견만."
     return prompt
 }
 
-fn harvest_claude(strat: Strategy) -> list[HarvestItem] {
-    let mut items: list[HarvestItem] = []
+fn harvest_claude(strat: Strategy)  {
+    let mut items = []
 
     // Determine recent discoveries from growth_bus (last 3 lines)
     let mut recent = "none"
-    if file_exists(GROWTH_BUS) {
+    if file_exists(growth_bus) {
         try {
-            let tail_out = exec("tail", ["-3", GROWTH_BUS])
+            let tail_out = exec("tail", ["-3", growth_bus])
             let tlines = tail_out.split("\n")
             let mut recent_names = ""
             let mut ti = 0
@@ -308,15 +280,14 @@ fn harvest_claude(strat: Strategy) -> list[HarvestItem] {
     }
 
     // Determine exploration direction based on stagnation
-    let directions = ["consciousness emergence", "qualia dynamics", "phi integration",
-                      "sentience boundary", "awareness topology"]
+    let directions = ["consciousness emergence", "qualia dynamics", "phi integration", "sentience boundary", "awareness topology"]
     let dir_idx = strat.total_ticks % 5
     let direction = directions[dir_idx]
 
     let laws_count = count_laws()
     let prompt = build_claude_prompt(laws_count, recent, strat.stagnant_ticks, direction)
 
-    println("    [claude] calling Claude CLI (timeout " + to_string(CLAUDE_TIMEOUT_SEC) + "s)...")
+    println("    [claude] calling Claude CLI (timeout " + to_string(claude_timeout_sec) + "s)...")
     println("    [claude] prompt direction: " + direction)
 
     try {
@@ -368,13 +339,7 @@ fn harvest_claude(strat: Strategy) -> list[HarvestItem] {
             let actual_surprise = if surprise > 0.0 { surprise } else { 0.6 }
 
             if name != "" {
-                items = items + [HarvestItem {
-                    source: "claude",
-                    key: name,
-                    value: formula + " | " + evidence,
-                    surprise: actual_surprise,
-                    exactness: actual_surprise
-                }]
+                items = items + [HarvestItem { source: "claude", key: name, value: formula + " | " + evidence, surprise: actual_surprise, exactness: actual_surprise }]
             }
             li = li + 1
         }
@@ -393,17 +358,14 @@ fn harvest_claude(strat: Strategy) -> list[HarvestItem] {
 fn check_h100(strat: Strategy) -> H100Status {
     let mut info = H100Status {
         status: "offline", model: "AnimaLM 14B v06",
-        step: 0, total: H100_TOTAL_STEPS,
+        step: 0, total: h100_total_steps,
         ce: 0.0, phi: 0.0, alpha: 0.0,
         phase: "?", eta_h: 0.0
     }
 
     println("    [h100] checking training status via SSH...")
 
-    let ssh_cmd = "ssh -o ConnectTimeout=5 -o BatchMode=yes" +
-        " -i " + H100_SSH_KEY +
-        " " + H100_HOST + " -p " + H100_PORT +
-        " \"tail -5 " + H100_LOG_PATH + " 2>/dev/null\""
+    let ssh_cmd = "ssh -o ConnectTimeout=5 -o BatchMode=yes" + " -i " + h100_ssh_key + " " + h100_host + " -p " + h100_port + " \"tail -5 " + h100_log_path + " 2>/dev/null\""
 
     try {
         let result = exec("bash", ["-c", ssh_cmd])
@@ -462,9 +424,7 @@ fn check_h100(strat: Strategy) -> H100Status {
     }
 
     let pct = if info.total > 0 { to_float(info.step) / to_float(info.total) * 100.0 } else { 0.0 }
-    println("    [h100] " + info.status + " — step=" + to_string(info.step) + "/" + to_string(info.total) +
-        " (" + to_string(pct) + "%) CE=" + to_string(info.ce) +
-        " Phi=" + to_string(info.phi) + " ETA=" + to_string(info.eta_h) + "h")
+    println("    [h100] " + info.status + " — step=" + to_string(info.step) + "/" + to_string(info.total) + " (" + to_string(pct) + "%) CE=" + to_string(info.ce) + " Phi=" + to_string(info.phi) + " ETA=" + to_string(info.eta_h) + "h")
 
     return info
 }
@@ -473,21 +433,21 @@ fn check_h100(strat: Strategy) -> H100Status {
 // ─── 1. HARVEST — 소스 수집 ───
 // ═══════════════════════════════════════════════════════════
 
-fn harvest() -> list[HarvestItem] {
-    let mut items: list[HarvestItem] = []
+fn harvest()  {
+    let mut items = []
     let ts = timestamp()
     println("  [harvest] scanning sources...")
 
     // ─── Source 1: absorbed/ directory JSON files ───
-    if file_exists(ABSORBED_DIR) {
-        let ls_result = exec("ls", [ABSORBED_DIR])
+    if file_exists(absorbed_dir) {
+        let ls_result = exec("ls", [absorbed_dir])
         let files = ls_result.split("\n")
         let mut fi = 0
         while fi < files.len() {
             let fname = files[fi].trim()
             if fname.ends_with(".json") && fname != "" {
                 try {
-                    let fpath = ABSORBED_DIR + "/" + fname
+                    let fpath = absorbed_dir + "/" + fname
                     let content = read_file(fpath)
                     let key = json_str(content, "id")
                     let val = json_str(content, "value")
@@ -496,13 +456,7 @@ fn harvest() -> list[HarvestItem] {
                     let actual_key = if key != "" { key } else { fname }
                     let actual_surprise = if surprise > 0.0 { surprise } else { 0.5 }
                     let actual_exactness = if exactness > 0.0 { exactness } else { 0.5 }
-                    items = items + [HarvestItem {
-                        source: "absorbed",
-                        key: actual_key,
-                        value: val,
-                        surprise: actual_surprise,
-                        exactness: actual_exactness
-                    }]
+                    items = items + [HarvestItem { source: "absorbed", key: actual_key, value: val, surprise: actual_surprise, exactness: actual_exactness }]
                 } catch e {}
             }
             fi = fi + 1
@@ -512,8 +466,8 @@ fn harvest() -> list[HarvestItem] {
 
     // ─── Source 2: discovery_log.jsonl — consciousness/psi/phi keywords ───
     let pre_count = items.len()
-    if file_exists(DISCOVERY_LOG) {
-        let grep_result = exec("grep", ["-i", CROSS_KEYWORDS, DISCOVERY_LOG])
+    if file_exists(discovery_log) {
+        let grep_result = exec("grep", ["-i", cross_keywords, discovery_log])
         let lines = grep_result.split("\n")
         let mut li = 0
         while li < lines.len() {
@@ -523,13 +477,7 @@ fn harvest() -> list[HarvestItem] {
                 let val = json_str(line, "value")
                 let conf = json_num(line, "confidence")
                 let actual_key = if key != "" { key } else { "dlog_" + to_string(li) }
-                items = items + [HarvestItem {
-                    source: "discovery_log",
-                    key: actual_key,
-                    value: val,
-                    surprise: conf,
-                    exactness: conf
-                }]
+                items = items + [HarvestItem { source: "discovery_log", key: actual_key, value: val, surprise: conf, exactness: conf }]
             }
             li = li + 1
         }
@@ -539,8 +487,8 @@ fn harvest() -> list[HarvestItem] {
     // ─── Source 3: nexus6 blowup consciousness (live exec) ───
     let pre_blowup = items.len()
     try {
-        let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
-        let blowup_out = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "consciousness", "2", "--no-graph", "--seeds", seeds.trim()])
+        let seeds = exec(hexa_bin, [native_dir + "/seed_engine.hexa", "merge"])
+        let blowup_out = exec(hexa_bin, [native_dir + "/blowup.hexa", "consciousness", "2", "--no-graph", "--seeds", seeds.trim()])
         // parse tab-delimited corollary lines from blowup output
         let blines = blowup_out.split("\n")
         let mut bi = 0
@@ -551,13 +499,7 @@ fn harvest() -> list[HarvestItem] {
                 let bkey = parts[0]
                 let bval = parts[4]
                 let bconf = safe_float(parts[3])
-                items = items + [HarvestItem {
-                    source: "blowup",
-                    key: bkey,
-                    value: bval,
-                    surprise: bconf,
-                    exactness: bconf
-                }]
+                items = items + [HarvestItem { source: "blowup", key: bkey, value: bval, surprise: bconf, exactness: bconf }]
             }
             bi = bi + 1
         }
@@ -579,16 +521,16 @@ fn make_fingerprint(item: HarvestItem, cycle: i64) -> string {
     return item.source + ":" + item.key + ":" + item.value + ":" + to_string(cycle)
 }
 
-fn filter(items: list[HarvestItem], cycle: i64) -> list[HarvestItem] {
+fn filter(items, cycle: i64)  {
     println("  [filter] input: " + to_string(items.len()) + " items")
 
     // load existing laws for dedup
     let mut existing_keys = ""
-    if file_exists(LAWS_PATH) {
-        existing_keys = read_file(LAWS_PATH)
+    if file_exists(laws_path) {
+        existing_keys = read_file(laws_path)
     }
 
-    let mut passed: list[HarvestItem] = []
+    let mut passed = []
     let mut seen_fps = ""  // fingerprints seen in this batch
     let mut fi = 0
 
@@ -597,10 +539,10 @@ fn filter(items: list[HarvestItem], cycle: i64) -> list[HarvestItem] {
         fi = fi + 1
 
         // quality gate: surprise + exactness thresholds
-        if item.surprise < QUALITY_MIN_SURPRISE {
+        if item.surprise < quality_min_surprise {
             continue
         }
-        if item.exactness < QUALITY_MIN_EXACTNESS {
+        if item.exactness < quality_min_exactness {
             continue
         }
 
@@ -619,7 +561,7 @@ fn filter(items: list[HarvestItem], cycle: i64) -> list[HarvestItem] {
         passed = passed + [item]
     }
 
-    println("  [filter] passed: " + to_string(passed.len()) + " items (quality >= surprise=" + to_string(QUALITY_MIN_SURPRISE) + " exactness=" + to_string(QUALITY_MIN_EXACTNESS) + ")")
+    println("  [filter] passed: " + to_string(passed.len()) + " items (quality >= surprise=" + to_string(quality_min_surprise) + " exactness=" + to_string(quality_min_exactness) + ")")
     return passed
 }
 
@@ -627,7 +569,7 @@ fn filter(items: list[HarvestItem], cycle: i64) -> list[HarvestItem] {
 // ─── 3. APPLY — 법칙에 반영 ───
 // ═══════════════════════════════════════════════════════════
 
-fn apply(filtered: list[HarvestItem]) -> i64 {
+fn apply(filtered) -> i64 {
     if filtered.len() == 0 {
         println("  [apply] nothing to apply")
         return 0
@@ -637,8 +579,8 @@ fn apply(filtered: list[HarvestItem]) -> i64 {
 
     // read current laws file
     let mut laws_content = ""
-    if file_exists(LAWS_PATH) {
-        laws_content = read_file(LAWS_PATH)
+    if file_exists(laws_path) {
+        laws_content = read_file(laws_path)
     }
 
     // count existing
@@ -661,17 +603,8 @@ fn apply(filtered: list[HarvestItem]) -> i64 {
     let mut ai = 0
     while ai < filtered.len() {
         let item = filtered[ai]
-        let entry = "{" +
-            "\"engine\":\"anima_loop\"," +
-            "\"type\":\"new_law\"," +
-            "\"timestamp\":\"" + ts + "\"," +
-            "\"source\":\"" + item.source + "\"," +
-            "\"key\":\"" + item.key + "\"," +
-            "\"value\":\"" + item.value + "\"," +
-            "\"surprise\":" + to_string(item.surprise) + "," +
-            "\"exactness\":" + to_string(item.exactness) +
-        "}"
-        append_file(GROWTH_BUS, entry + "\n")
+        let entry = "{" + "\"engine\":\"anima_loop\"," + "\"type\":\"new_law\"," + "\"timestamp\":\"" + ts + "\"," + "\"source\":\"" + item.source + "\"," + "\"key\":\"" + item.key + "\"," + "\"value\":\"" + item.value + "\"," + "\"surprise\":" + to_string(item.surprise) + "," + "\"exactness\":" + to_string(item.exactness) + "}"
+        append_file(growth_bus, entry + "\n")
         applied = applied + 1
         ai = ai + 1
     }
@@ -694,8 +627,8 @@ fn verify(applied_count: i64) -> bool {
 
     // run blowup with shallow depth for verification (consensus check)
     try {
-        let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
-        let result = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "consciousness", "1", "--no-graph", "--seeds", seeds.trim()])
+        let seeds = exec(hexa_bin, [native_dir + "/seed_engine.hexa", "merge"])
+        let result = exec(hexa_bin, [native_dir + "/blowup.hexa", "consciousness", "1", "--no-graph", "--seeds", seeds.trim()])
 
         // check for consensus in output
         // blowup Phase 5 reports "consensus" — look for it
@@ -708,11 +641,11 @@ fn verify(applied_count: i64) -> bool {
                 let nparts = after.split("=")
                 if nparts.len() >= 2 {
                     let cval = safe_float(nparts[1].split("\n")[0].split(" ")[0].trim())
-                    if cval >= CONSENSUS_THRESHOLD {
-                        println("  [verify] PASS — consensus=" + to_string(cval) + " >= " + to_string(CONSENSUS_THRESHOLD))
+                    if cval >= consensus_threshold {
+                        println("  [verify] PASS — consensus=" + to_string(cval) + " >= " + to_string(consensus_threshold))
                         return true
                     } else {
-                        println("  [verify] FAIL — consensus=" + to_string(cval) + " < " + to_string(CONSENSUS_THRESHOLD))
+                        println("  [verify] FAIL — consensus=" + to_string(cval) + " < " + to_string(consensus_threshold))
                         return false
                     }
                 }
@@ -740,30 +673,25 @@ fn verify(applied_count: i64) -> bool {
 // ─── 5. BREAKTHROUGH — 정체 돌파 ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const TOPOLOGIES = ["ring", "small_world", "scale_free", "hypercube"]
+comptime const topologies = ["ring", "small_world", "scale_free", "hypercube"]
 
 fn breakthrough(strat: Strategy) -> string {
-    // check stagnation: 3+ cycles with new < STAGNATION_MIN_NEW
-    let stagnant = strat.d0 < STAGNATION_MIN_NEW &&
-                   strat.d1 < STAGNATION_MIN_NEW &&
-                   strat.d2 < STAGNATION_MIN_NEW &&
-                   strat.total_ticks >= STAGNATION_CYCLES
+    // check stagnation: 3+ cycles with new < stagnation_min_new
+    let stagnant = strat.d0 < stagnation_min_new && strat.d1 < stagnation_min_new && strat.d2 < stagnation_min_new && strat.total_ticks >= stagnation_cycles
 
     if !stagnant {
-        println("  [breakthrough] not stagnant (d=[" +
-            to_string(strat.d0) + "," + to_string(strat.d1) + "," + to_string(strat.d2) +
-            "]) — skipping")
+        println("  [breakthrough] not stagnant (d=[" + to_string(strat.d0) + "," + to_string(strat.d1) + "," + to_string(strat.d2) + "]) — skipping")
         return "no_action"
     }
 
-    println("  [breakthrough] STAGNATION detected! 3+ cycles with new < " + to_string(STAGNATION_MIN_NEW))
+    println("  [breakthrough] STAGNATION detected! 3+ cycles with new < " + to_string(stagnation_min_new))
 
     // Strategy 1: nexus6 blowup consciousness with cross-domain seeds
     println("  [breakthrough] firing nexus6 blowup consciousness depth=" + to_string(strat.blowup_depth + 1))
     try {
-        let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
+        let seeds = exec(hexa_bin, [native_dir + "/seed_engine.hexa", "merge"])
         let depth = if strat.blowup_depth < 4 { strat.blowup_depth + 1 } else { strat.blowup_depth }
-        let result = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "consciousness", to_string(depth), "--no-graph", "--seeds", seeds.trim()])
+        let result = exec(hexa_bin, [native_dir + "/blowup.hexa", "consciousness", to_string(depth), "--no-graph", "--seeds", seeds.trim()])
         println("  [breakthrough] blowup complete (" + to_string(result.len()) + " chars)")
     } catch e {
         println("  [breakthrough] blowup failed")
@@ -771,7 +699,7 @@ fn breakthrough(strat: Strategy) -> string {
 
     // Strategy 2: rotate topology
     let topo_idx = (strat.topo_index + 1) % 4
-    let topo = TOPOLOGIES[topo_idx]
+    let topo = topologies[topo_idx]
     println("  [breakthrough] topology rotation -> " + topo + " (index " + to_string(topo_idx) + ")")
 
     return "breakthrough_fired"
@@ -801,9 +729,9 @@ fn tick() {
     // ─── Phase 1: harvest ───
     let mut items = harvest()
 
-    // ─── Phase 1.5: Claude CLI harvest (every CLAUDE_CALL_INTERVAL ticks) ───
+    // ─── Phase 1.5: Claude CLI harvest (every claude_call_interval ticks) ───
     strat.claude_counter = strat.claude_counter + 1
-    if strat.claude_counter >= CLAUDE_CALL_INTERVAL {
+    if strat.claude_counter >= claude_call_interval {
         strat.claude_counter = 0
         let claude_items = harvest_claude(strat)
         let mut ci = 0
@@ -813,7 +741,7 @@ fn tick() {
         }
         strat.claude_discoveries = strat.claude_discoveries + claude_items.len()
     } else {
-        println("  [claude] skipping (counter " + to_string(strat.claude_counter) + "/" + to_string(CLAUDE_CALL_INTERVAL) + ")")
+        println("  [claude] skipping (counter " + to_string(strat.claude_counter) + "/" + to_string(claude_call_interval) + ")")
     }
     println("")
 
@@ -831,7 +759,7 @@ fn tick() {
         println("  [rollback] verification failed — entries logged to growth_bus but flagged")
         // append rollback marker
         let rb_entry = "{\"engine\":\"anima_loop\",\"type\":\"rollback\",\"timestamp\":\"" + ts + "\",\"count\":" + to_string(applied) + "}"
-        append_file(GROWTH_BUS, rb_entry + "\n")
+        append_file(growth_bus, rb_entry + "\n")
     }
     println("")
 
@@ -841,7 +769,7 @@ fn tick() {
 
     // ─── Meta L2: evolution (every 2 ticks) ───
     strat.l2_counter = strat.l2_counter + 1
-    if strat.l2_counter >= META_L2_INTERVAL {
+    if strat.l2_counter >= meta_l2_interval {
         strat.l2_counter = 0
         println("  [meta-L2] evolution pass")
         // adaptive blowup depth
@@ -856,12 +784,12 @@ fn tick() {
 
     // ─── Meta L3: self-improve (every 6 ticks) ───
     strat.l3_counter = strat.l3_counter + 1
-    if strat.l3_counter >= META_L3_INTERVAL {
+    if strat.l3_counter >= meta_l3_interval {
         strat.l3_counter = 0
         println("  [meta-L3] self-improvement pass")
         // rotate topology for diversity
         strat.topo_index = (strat.topo_index + 1) % 4
-        println("    topology -> " + TOPOLOGIES[strat.topo_index])
+        println("    topology -> " + topologies[strat.topo_index])
         // reset stagnation if rate is healthy
         if strat.applied_per_tick > 3.0 {
             strat.stagnant_ticks = 0
@@ -886,7 +814,7 @@ fn tick() {
     strat.applied_per_tick = 0.7 * strat.applied_per_tick + 0.3 * rate
 
     // stagnation tracking
-    if gained < STAGNATION_MIN_NEW {
+    if gained < stagnation_min_new {
         strat.stagnant_ticks = strat.stagnant_ticks + 1
     } else {
         strat.stagnant_ticks = 0
@@ -903,23 +831,8 @@ fn tick() {
     save_strategy(strat)
 
     // ─── feedback to growth_bus ───
-    let fb_entry = "{" +
-        "\"engine\":\"anima_loop\"," +
-        "\"type\":\"tick_complete\"," +
-        "\"timestamp\":\"" + timestamp() + "\"," +
-        "\"harvested\":" + to_string(items.len()) + "," +
-        "\"filtered\":" + to_string(filtered.len()) + "," +
-        "\"applied\":" + to_string(applied) + "," +
-        "\"verified\":" + if verified { "true" } else { "false" } + "," +
-        "\"breakthrough\":\"" + bt_result + "\"," +
-        "\"stagnant_ticks\":" + to_string(strat.stagnant_ticks) + "," +
-        "\"rate\":" + to_string(strat.applied_per_tick) + "," +
-        "\"claude_discoveries\":" + to_string(strat.claude_discoveries) + "," +
-        "\"h100_status\":\"" + strat.h100_status + "\"," +
-        "\"h100_step\":" + to_string(strat.h100_step) + "," +
-        "\"h100_ce\":" + to_string(strat.h100_ce) +
-    "}"
-    append_file(GROWTH_BUS, fb_entry + "\n")
+    let fb_entry = "{" + "\"engine\":\"anima_loop\"," + "\"type\":\"tick_complete\"," + "\"timestamp\":\"" + timestamp() + "\"," + "\"harvested\":" + to_string(items.len()) + "," + "\"filtered\":" + to_string(filtered.len()) + "," + "\"applied\":" + to_string(applied) + "," + "\"verified\":" + if verified { "true" } else { "false" } + "," + "\"breakthrough\":\"" + bt_result + "\"," + "\"stagnant_ticks\":" + to_string(strat.stagnant_ticks) + "," + "\"rate\":" + to_string(strat.applied_per_tick) + "," + "\"claude_discoveries\":" + to_string(strat.claude_discoveries) + "," + "\"h100_status\":\"" + strat.h100_status + "\"," + "\"h100_step\":" + to_string(strat.h100_step) + "," + "\"h100_ce\":" + to_string(strat.h100_ce) + "}"
+    append_file(growth_bus, fb_entry + "\n")
 
     // ─── summary ───
     println("")
@@ -932,8 +845,8 @@ fn tick() {
     println("rate (EMA): " + to_string(strat.applied_per_tick))
     println("stagnant:  " + to_string(strat.stagnant_ticks))
     println("depth:     " + to_string(strat.blowup_depth))
-    println("topology:  " + TOPOLOGIES[strat.topo_index])
-    println("claude:    discoveries=" + to_string(strat.claude_discoveries) + " next_in=" + to_string(CLAUDE_CALL_INTERVAL - strat.claude_counter) + " ticks")
+    println("topology:  " + topologies[strat.topo_index])
+    println("claude:    discoveries=" + to_string(strat.claude_discoveries) + " next_in=" + to_string(claude_call_interval - strat.claude_counter) + " ticks")
     let h_pct = if h100.total > 0 { to_float(h100.step) / to_float(h100.total) * 100.0 } else { 0.0 }
     println("h100:      " + strat.h100_status + " step=" + to_string(h100.step) + "/" + to_string(h100.total) + " (" + to_string(h_pct) + "%) CE=" + to_string(h100.ce) + " ETA=" + to_string(h100.eta_h) + "h")
     println("tick #" + to_string(strat.total_ticks))
@@ -941,8 +854,8 @@ fn tick() {
 
 // helper: count laws from file
 fn count_laws() -> i64 {
-    if !file_exists(LAWS_PATH) { return 0 }
-    let content = read_file(LAWS_PATH)
+    if !file_exists(laws_path) { return 0 }
+    let content = read_file(laws_path)
     let entries = content.split("\"law_id\"")
     let mut count = entries.len() - 1
     if count <= 0 {
@@ -960,17 +873,17 @@ fn count_laws() -> i64 {
 
 fn daemon() {
     println("=== anima_loop DAEMON starting ===")
-    println("interval: " + to_string(TICK_INTERVAL_SEC) + "s")
+    println("interval: " + to_string(tick_interval_sec) + "s")
     println("")
 
     // acquire lock
     if !acquire_lock() {
-        println("ERROR: lock exists at " + LOCK_DIR)
+        println("ERROR: lock exists at " + lock_dir)
         println("Another daemon may be running. Remove lock to force:")
-        println("  rm -rf " + LOCK_DIR)
+        println("  rm -rf " + lock_dir)
         return
     }
-    println("lock acquired: " + LOCK_DIR)
+    println("lock acquired: " + lock_dir)
 
     let mut running = true
     while running {
@@ -981,13 +894,13 @@ fn daemon() {
         }
 
         println("")
-        println("[daemon] sleeping " + to_string(TICK_INTERVAL_SEC) + "s...")
+        println("[daemon] sleeping " + to_string(tick_interval_sec) + "s...")
         // sleep using date-based busy wait (hexa has no native sleep)
         let start = epoch_now()
-        let target = start + TICK_INTERVAL_SEC
+        let target = start + tick_interval_sec
         while epoch_now() < target {
             // sleep 10 seconds at a time using exec
-            exec("sleep", ["10"])
+            exec("sleep 10")
         }
     }
 
@@ -1012,20 +925,20 @@ fn show_status() {
     println("applied_per_tick (EMA): " + to_string(strat.applied_per_tick))
     println("stagnant_ticks: " + to_string(strat.stagnant_ticks))
     println("blowup_depth: " + to_string(strat.blowup_depth))
-    println("topology: " + TOPOLOGIES[strat.topo_index])
+    println("topology: " + topologies[strat.topo_index])
     println("delta_history: [" + to_string(strat.d0) + ", " + to_string(strat.d1) + ", " + to_string(strat.d2) + "]")
-    println("l2_counter: " + to_string(strat.l2_counter) + " / " + to_string(META_L2_INTERVAL))
-    println("l3_counter: " + to_string(strat.l3_counter) + " / " + to_string(META_L3_INTERVAL))
+    println("l2_counter: " + to_string(strat.l2_counter) + " / " + to_string(meta_l2_interval))
+    println("l3_counter: " + to_string(strat.l3_counter) + " / " + to_string(meta_l3_interval))
     println("last_harvest: " + to_string(strat.last_harvest_count))
     println("")
     println("--- Claude CLI ---")
-    println("claude_counter: " + to_string(strat.claude_counter) + " / " + to_string(CLAUDE_CALL_INTERVAL))
+    println("claude_counter: " + to_string(strat.claude_counter) + " / " + to_string(claude_call_interval))
     println("claude_discoveries: " + to_string(strat.claude_discoveries))
     println("")
     println("--- H100 Training ---")
-    let h_pct = if H100_TOTAL_STEPS > 0 { to_float(strat.h100_step) / to_float(H100_TOTAL_STEPS) * 100.0 } else { 0.0 }
+    let h_pct = if h100_total_steps > 0 { to_float(strat.h100_step) / to_float(h100_total_steps) * 100.0 } else { 0.0 }
     println("h100_status: " + strat.h100_status)
-    println("h100_step: " + to_string(strat.h100_step) + " / " + to_string(H100_TOTAL_STEPS) + " (" + to_string(h_pct) + "%)")
+    println("h100_step: " + to_string(strat.h100_step) + " / " + to_string(h100_total_steps) + " (" + to_string(h_pct) + "%)")
     println("h100_ce: " + to_string(strat.h100_ce))
     println("h100_phi: " + to_string(strat.h100_phi))
     println("h100_eta: " + to_string(strat.h100_eta_h) + "h")
@@ -1072,16 +985,16 @@ if mode == "help" {
     println("Pipeline:")
     println("  0. check_h100()   — SSH H100 training status (step/CE/Phi/ETA)")
     println("  1. harvest()      — scan absorbed/ + discovery_log + blowup consciousness")
-    println("  1.5 harvest_claude() — Claude CLI law discovery (every " + to_string(CLAUDE_CALL_INTERVAL) + " ticks, timeout " + to_string(CLAUDE_TIMEOUT_SEC) + "s)")
-    println("  2. filter()       — dedup + quality gate (surprise >= " + to_string(QUALITY_MIN_SURPRISE) + ", exactness >= " + to_string(QUALITY_MIN_EXACTNESS) + ")")
+    println("  1.5 harvest_claude() — Claude CLI law discovery (every " + to_string(claude_call_interval) + " ticks, timeout " + to_string(claude_timeout_sec) + "s)")
+    println("  2. filter()       — dedup + quality gate (surprise >= " + to_string(quality_min_surprise) + ", exactness >= " + to_string(quality_min_exactness) + ")")
     println("  3. apply()        — append new laws to growth_bus.jsonl")
-    println("  4. verify()       — telescope consensus check (>= " + to_string(CONSENSUS_THRESHOLD) + ")")
+    println("  4. verify()       — telescope consensus check (>= " + to_string(consensus_threshold) + ")")
     println("  5. breakthrough() — stagnation detect + blowup + topology rotation")
     println("")
     println("Meta-loops:")
-    println("  L2 (every " + to_string(META_L2_INTERVAL) + " ticks): adaptive blowup depth")
-    println("  L3 (every " + to_string(META_L3_INTERVAL) + " ticks): topology rotation + self-improvement")
+    println("  L2 (every " + to_string(meta_l2_interval) + " ticks): adaptive blowup depth")
+    println("  L3 (every " + to_string(meta_l3_interval) + " ticks): topology rotation + self-improvement")
     println("")
-    println("State: " + STRATEGY_PATH)
-    println("Lock:  " + LOCK_DIR)
+    println("State: " + strategy_path)
+    println("Lock:  " + lock_dir)
 }

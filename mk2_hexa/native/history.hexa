@@ -51,7 +51,7 @@ fn list_contains(lst: list, item: string) -> bool {
 fn timestamp_now() -> string {
     let mut ts = "0"
     try {
-        ts = exec("date", ["+%s"])
+        ts = exec("date +%s")
         ts = ts.trim()
     } catch e {}
     return ts
@@ -61,11 +61,11 @@ fn timestamp_now() -> string {
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-let HISTORY_DIR = "shared/history"
+let history_dir = "shared/history"
 let MIN_LENSES: i64 = 4
 let MAX_LENSES: i64 = 40
 
-let COLD_START_LENSES = ["consciousness", "topology", "void", "thermo", "evolution", "network", "boundary", "triangle"]
+let cold_start_lenses = ["consciousness", "topology", "void", "thermo", "evolution", "network", "boundary", "triangle"]
 
 // ═══════════════════════════════════════════════════════════
 // ─── RECORDER ───
@@ -96,8 +96,8 @@ fn format_record(domain: string, lenses: list, discoveries: list) -> string {
 }
 
 fn append_record(domain: string, lenses: list, discoveries: list) {
-    try { exec("mkdir", ["-p", HISTORY_DIR]) } catch e {}
-    let fpath = HISTORY_DIR + "/" + domain + ".log"
+    try { exec("mkdir", ["-p", history_dir]) } catch e {}
+    let fpath = history_dir + "/" + domain + ".log"
     let line = format_record(domain, lenses, discoveries)
     let mut existing = ""
     try { existing = read_file(fpath) } catch e {}
@@ -105,7 +105,7 @@ fn append_record(domain: string, lenses: list, discoveries: list) {
 }
 
 fn load_records(domain: string) -> list {
-    let fpath = HISTORY_DIR + "/" + domain + ".log"
+    let fpath = history_dir + "/" + domain + ".log"
     if file_exists(fpath) == false { return [] }
     let content = read_file(fpath)
     if content.trim().len() == 0 { return [] }
@@ -300,10 +300,10 @@ fn add_serendipity(sel: list, domain: string, ratio: f64) -> list {
     let count = to_int(to_float(sel.len()) * ratio + 1.0)
     let mut added: i64 = 0
     let mut sdi: i64 = 0
-    while sdi < COLD_START_LENSES.len() {
+    while sdi < cold_start_lenses.len() {
         if added < count {
-            let idx = (seed + sdi) % COLD_START_LENSES.len()
-            let lens = to_string(COLD_START_LENSES[idx])
+            let idx = (seed + sdi) % cold_start_lenses.len()
+            let lens = to_string(cold_start_lenses[idx])
             if list_contains(result, lens) == false {
                 result = result + [lens]
                 added = added + 1
@@ -319,12 +319,12 @@ fn enforce_bounds(sel: list) -> list {
     // Min: pad from cold start
     let mut p: i64 = 0
     while result.len() < 4 {
-        let c = to_string(COLD_START_LENSES[p])
+        let c = to_string(cold_start_lenses[p])
         if list_contains(result, c) == false {
             result = result + [c]
         }
         p = p + 1
-        if p >= COLD_START_LENSES.len() { return result }
+        if p >= cold_start_lenses.len() { return result }
     }
     // Max: truncate
     if result.len() > 40 {
@@ -365,8 +365,8 @@ fn recommend_lenses(domain: string, serendipity_ratio: f64) -> list {
         reason = "domain '" + domain + "': " + to_string(selected.len()) + " lenses with hit_rate>0.05"
     } else {
         let mut ci3: i64 = 0
-        while ci3 < COLD_START_LENSES.len() {
-            selected = selected + [to_string(COLD_START_LENSES[ci3])]
+        while ci3 < cold_start_lenses.len() {
+            selected = selected + [to_string(cold_start_lenses[ci3])]
             ci3 = ci3 + 1
         }
         reason = "cold start for '" + domain + "': using default 8 lenses"
@@ -393,7 +393,7 @@ fn show_help() {
     println("  hexa history.hexa recommend <domain> [serendipity_ratio]")
     println("  hexa history.hexa help")
     println("")
-    println("Records stored in: " + HISTORY_DIR + "/<domain>.log")
+    println("Records stored in: " + history_dir + "/<domain>.log")
 }
 
 let cli_args = args()

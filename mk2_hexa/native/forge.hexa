@@ -7,30 +7,30 @@
 // 설정 상수
 // ──────────────────────────────────────
 
-comptime const DEFAULT_ROUNDS = 5
-comptime const CONVERGENCE_THRESHOLD = 0.01
-comptime const QA_TOTAL = 5
-comptime const QA_PASS_THRESHOLD = 0.05
-comptime const SECTION_MIN_CHARS = 20
-comptime const DENSITY_HIGH = 0.35
-comptime const DENSITY_MED = 0.20
-comptime const DENSITY_LOW = 0.10
+comptime const default_rounds = 5
+comptime const convergence_threshold = 0.01
+comptime const qa_total = 5
+comptime const qa_pass_threshold = 0.05
+comptime const section_min_chars = 20
+comptime const density_high = 0.35
+comptime const density_med = 0.20
+comptime const density_low = 0.10
 
 // ──────────────────────────────────────
 // 압축 프롬프트
 // ──────────────────────────────────────
 
-comptime const COMPRESS_PROMPT = "You are a compression engine. Compress the following document into the MINIMUM number of tokens that YOU (Claude) can later decode back to the full original meaning.\n\nRules:\n- The compressed output is ONLY for LLM consumption, not humans\n- Use any symbols, abbreviations, shorthand, unicode, or encoding you want\n- Preserve ALL semantic content\n- Structure markers can be replaced with minimal delimiters\n- Repeated patterns should use the shortest possible reference\n- Output ONLY the compressed text, nothing else\n\nDocument:\n---\n"
+comptime const compress_prompt = "You are a compression engine. Compress the following document into the MINIMUM number of tokens that YOU (Claude) can later decode back to the full original meaning.\n\nRules:\n- The compressed output is ONLY for LLM consumption, not humans\n- Use any symbols, abbreviations, shorthand, unicode, or encoding you want\n- Preserve ALL semantic content\n- Structure markers can be replaced with minimal delimiters\n- Repeated patterns should use the shortest possible reference\n- Output ONLY the compressed text, nothing else\n\nDocument:\n---\n"
 
-comptime const RECOMPRESS_PROMPT = "You previously compressed a document into this form:\n\n---\n"
+comptime const recompress_prompt = "You previously compressed a document into this form:\n\n---\n"
 
-comptime const RECOMPRESS_SUFFIX = "\n---\n\nCompress it FURTHER. Find any remaining redundancy and eliminate it.\nSame rules: minimum tokens, preserve all meaning, LLM-only consumption.\nOutput ONLY the re-compressed text, nothing else."
+comptime const recompress_suffix = "\n---\n\nCompress it FURTHER. Find any remaining redundancy and eliminate it.\nSame rules: minimum tokens, preserve all meaning, LLM-only consumption.\nOutput ONLY the re-compressed text, nothing else."
 
-comptime const QA_PROMPT_PREFIX = "You will test whether a compressed document preserves the meaning of the original.\n\nORIGINAL DOCUMENT:\n---\n"
-comptime const QA_PROMPT_MID = "\n---\n\nCOMPRESSED DOCUMENT:\n---\n"
-comptime const QA_PROMPT_SUFFIX = "\n---\n\nGenerate exactly 5 factual questions about the original document. For each question, answer it using ONLY the compressed document. Then judge if the compressed-based answer matches the original meaning.\n\nOutput format (exactly 5 lines, no other text):\nQ1: [question] | A: [answer from compressed] | PASS or FAIL\nQ2: [question] | A: [answer from compressed] | PASS or FAIL\nQ3: [question] | A: [answer from compressed] | PASS or FAIL\nQ4: [question] | A: [answer from compressed] | PASS or FAIL\nQ5: [question] | A: [answer from compressed] | PASS or FAIL"
+comptime const qa_prompt_prefix = "You will test whether a compressed document preserves the meaning of the original.\n\nORIGINAL DOCUMENT:\n---\n"
+comptime const qa_prompt_mid = "\n---\n\nCOMPRESSED DOCUMENT:\n---\n"
+comptime const qa_prompt_suffix = "\n---\n\nGenerate exactly 5 factual questions about the original document. For each question, answer it using ONLY the compressed document. Then judge if the compressed-based answer matches the original meaning.\n\nOutput format (exactly 5 lines, no other text):\nQ1 | A: [answer from compressed] | PASS or FAIL\nQ2 | A: [answer from compressed] | PASS or FAIL\nQ3 | A: [answer from compressed] | PASS or FAIL\nQ4 | A: [answer from compressed] | PASS or FAIL\nQ5 | A: [answer from compressed] | PASS or FAIL"
 
-comptime const SECTION_COMPRESS_PROMPT = "Compress this to minimum tokens only you can decode. Preserve ALL meaning. Output ONLY compressed text:\n\n---\n"
+comptime const section_compress_prompt = "Compress this to minimum tokens only you can decode. Preserve ALL meaning. Output ONLY compressed text:\n\n---\n"
 
 // ──────────────────────────────────────
 // 데이터 구조체
@@ -99,7 +99,7 @@ pure fn abs_f(x: float) -> float {
 
 // 문자열 길이 (chars)
 pure fn str_len(s: string) -> int {
-    length(s)
+    len(s)
 }
 
 // ──────────────────────────────────────
@@ -108,22 +108,18 @@ pure fn str_len(s: string) -> int {
 
 fn llm_call(prompt: string) -> string {
     // claude CLI를 통한 LLM 호출
-    let result = shell("claude -p '" + prompt + "'")
+    let result = exec("claude -p '" + prompt + "'")
     return result
 }
 
 fn find_claude_cli() -> string {
-    let which_result = shell("which claude 2>/dev/null")
+    let which_result = exec("which claude 2>/dev/null")
     if str_len(which_result) > 0 {
         return which_result
     }
     // 알려진 경로 탐색
-    let home = env("HOME")
-    let paths = [
-        home + "/.local/bin/claude",
-        "/usr/local/bin/claude",
-        "/opt/homebrew/bin/claude"
-    ]
+    let home = exec("printenv HOME")
+    let paths = [ home + "/.local/bin/claude", "/usr/local/bin/claude", "/opt/homebrew/bin/claude" ]
     let mut i = 0
     while i < 3 {
         if file_exists(paths[i]) {
@@ -152,9 +148,9 @@ fn forge_compress(text: string, rounds: int, threshold: float) -> ForgeReport {
     while i < rounds {
         // 프롬프트 구성
         let prompt = if i == 0 {
-            COMPRESS_PROMPT + current + "\n---"
+            compress_prompt + current + "\n---"
         } else {
-            RECOMPRESS_PROMPT + current + RECOMPRESS_SUFFIX
+            recompress_prompt + current + recompress_suffix
         }
 
         println("  Round " + to_string(i + 1) + "/" + to_string(rounds) + ": 압축 중...")
@@ -198,7 +194,7 @@ fn forge_compress(text: string, rounds: int, threshold: float) -> ForgeReport {
 
 // 기본 설정으로 압축
 fn forge_compress_default(text: string) -> ForgeReport {
-    forge_compress(text, DEFAULT_ROUNDS, CONVERGENCE_THRESHOLD)
+    forge_compress(text, default_rounds, convergence_threshold)
 }
 
 // ──────────────────────────────────────
@@ -222,24 +218,24 @@ fn anvil_verify(compressed: string, original: string) -> VerifyResult {
     println("  헤더 커버리지: " + to_string(header_score))
 
     // 2. Q&A 테스트 (LLM 기반)
-    let prompt = QA_PROMPT_PREFIX + original + QA_PROMPT_MID + compressed + QA_PROMPT_SUFFIX
+    let prompt = qa_prompt_prefix + original + qa_prompt_mid + compressed + qa_prompt_suffix
     let qa_result = llm_call(prompt)
     println(qa_result)
 
     // PASS 횟수 카운트
     let pass_count = count_occurrences(qa_result, "PASS")
-    let qa_score = round4(to_float(pass_count) / to_float(QA_TOTAL))
+    let qa_score = round4(to_float(pass_count) / to_float(qa_total))
     let loss = round4(1.0 - qa_score)
-    let passed = loss <= QA_PASS_THRESHOLD
+    let passed = loss <= qa_pass_threshold
 
     println("")
     println("=== 결과 ===")
-    println("Q&A 정답률:    " + to_string(pass_count) + "/" + to_string(QA_TOTAL) + " = " + to_string(qa_score))
+    println("Q&A 정답률:    " + to_string(pass_count) + "/" + to_string(qa_total) + " = " + to_string(qa_score))
     println("의미 손실도 L: " + to_string(loss))
     if passed {
-        println("판정: PASS (L <= " + to_string(QA_PASS_THRESHOLD) + ")")
+        println("판정: PASS (L <= " + to_string(qa_pass_threshold) + ")")
     } else {
-        println("판정: FAIL (L > " + to_string(QA_PASS_THRESHOLD) + ")")
+        println("판정: FAIL (L > " + to_string(qa_pass_threshold) + ")")
     }
 
     VerifyResult {
@@ -256,9 +252,9 @@ fn anvil_verify(compressed: string, original: string) -> VerifyResult {
 
 // 정보 밀도 등급 판정
 pure fn density_grade(r: float) -> string {
-    if r > DENSITY_HIGH { "HIGH" }
-    else if r > DENSITY_MED { "MED" }
-    else if r > DENSITY_LOW { "LOW" }
+    if r > density_high { "HIGH" }
+    else if r > density_med { "MED" }
+    else if r > density_low { "LOW" }
     else { "SKIP" }
 }
 
@@ -276,7 +272,7 @@ pure fn density_bar(r: float) -> string {
 
 fn profile_section(name: string, body: string, original_total: int) -> SectionResult {
     let orig_chars = str_len(body)
-    if orig_chars < SECTION_MIN_CHARS {
+    if orig_chars < section_min_chars {
         return SectionResult {
             name: name,
             original_chars: orig_chars,
@@ -286,7 +282,7 @@ fn profile_section(name: string, body: string, original_total: int) -> SectionRe
         }
     }
 
-    let prompt = SECTION_COMPRESS_PROMPT + body + "\n---"
+    let prompt = section_compress_prompt + body + "\n---"
     let compressed = llm_call(prompt)
     let comp_chars = str_len(compressed)
     let r = round4(to_float(comp_chars) / to_float(orig_chars))
@@ -305,8 +301,8 @@ fn profile_section(name: string, body: string, original_total: int) -> SectionRe
 }
 
 // 전체 프로파일 실행 (섹션 리스트를 외부에서 분할하여 전달)
-fn profile_text(section_names: [string], section_bodies: [string]) -> ProfileReport {
-    let count = length(section_names)
+fn profile_text(section_names, section_bodies) -> ProfileReport {
+    let count = len(section_names)
     let mut total_orig = 0
     let mut total_comp = 0
     let mut skip_count = 0
@@ -349,8 +345,8 @@ fn profile_text(section_names: [string], section_bodies: [string]) -> ProfileRep
 // 검증
 // ──────────────────────────────────────
 
-assert DEFAULT_ROUNDS == 5
-assert QA_TOTAL == 5
+assert default_rounds == 5
+assert qa_total == 5
 assert density_grade(0.40) == "HIGH"
 assert density_grade(0.25) == "MED"
 assert density_grade(0.15) == "LOW"

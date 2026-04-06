@@ -19,8 +19,8 @@
 
 // ─── local math helpers (not in telescope.hexa) ───
 
-comptime const PI = 3.14159265358979323846
-comptime const TWO_PI = 6.28318530717958647692
+comptime const pi = 3.14159265358979323846
+comptime const two_pi = 6.28318530717958647692
 
 pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
 pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
@@ -42,8 +42,8 @@ pure fn exp_f(x: float) -> float {
 pure fn sin_f(x: float) -> float {
     // reduce to [-pi, pi]
     let mut v = x
-    while v > PI { v = v - TWO_PI }
-    while v < 0.0 - PI { v = v + TWO_PI }
+    while v > pi { v = v - two_pi }
+    while v < 0.0 - pi { v = v + two_pi }
     let mut sum = 0.0
     let mut term = v
     let mut k = 1
@@ -55,12 +55,12 @@ pure fn sin_f(x: float) -> float {
     sum
 }
 
-pure fn cos_f(x: float) -> float { sin_f(x + PI / 2.0) }
+pure fn cos_f(x: float) -> float { sin_f(x + pi / 2.0) }
 
 pure fn atan_f(x: float) -> float {
     if abs_f(x) > 1.0 {
         let s = if x > 0.0 { 1.0 } else { 0.0 - 1.0 }
-        return s * PI / 2.0 - atan_f(1.0 / x)
+        return s * pi / 2.0 - atan_f(1.0 / x)
     }
     let mut sum = 0.0
     let mut term = x
@@ -86,7 +86,7 @@ pure fn floor_f(x: float) -> int {
 }
 
 // linear regression on two lists, returns (slope, r_squared)
-pure fn linreg(xs: list[float], ys: list[float]) -> list[float] {
+pure fn linreg(xs, ys)  {
     let n = min_f(to_float(xs.len()), to_float(ys.len()))
     let ni = to_int(n)
     if ni < 2 { return [0.0, 0.0] }
@@ -127,13 +127,13 @@ pure fn is_prime(val: int) -> bool {
 }
 
 // n=6 constants for matching
-comptime const N6_VALS = [6.0, 12.0, 4.0, 2.0, 5.0, 24.0, 8.0, 48.0, 7.0, 1.0, 0.5]
-comptime const N6_NAMES = ["n", "sigma", "tau", "phi", "sopfr", "J2", "sigma-tau", "sigma*tau", "n+1", "unity", "phi/tau"]
+comptime const n6_vals = [6.0, 12.0, 4.0, 2.0, 5.0, 24.0, 8.0, 48.0, 7.0, 1.0, 0.5]
+comptime const n6_names = ["n", "sigma", "tau", "phi", "sopfr", "J2", "sigma-tau", "sigma*tau", "n+1", "unity", "phi/tau"]
 
 // ─────────────────────────────────────────────────────
 // 1. parallel_complexity: 6-processor load balancing
 // ─────────────────────────────────────────────────────
-fn scan_parallel_complexity(data: list[float]) -> LensResult {
+fn scan_parallel_complexity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let p = 6
@@ -157,7 +157,10 @@ fn scan_parallel_complexity(data: list[float]) -> LensResult {
         let mut min_load = loads[0]
         let mut pi = 1
         while pi < 6 {
-            if loads[pi] < min_load { min_load = loads[pi]; min_idx = pi }
+            if loads[pi] < min_load {
+                min_load = loads[pi]
+                min_idx = pi
+            }
             pi = pi + 1
         }
         loads[min_idx] = loads[min_idx] + sorted_w[wi]
@@ -165,14 +168,21 @@ fn scan_parallel_complexity(data: list[float]) -> LensResult {
     }
     let mut span = 0.0
     let mut li = 0
-    while li < 6 { if loads[li] > span { span = loads[li] }; li = li + 1 }
+    while li < 6 {
+        if loads[li] > span { span = loads[li] }
+        li = li + 1
+    }
     let ideal = total_work / 6.0
     let parallelism = if span > 0.000001 { total_work / span } else { 0.0 }
     let efficiency = if span > 0.000001 { ideal / span } else { 0.0 }
     let mean_load = total_work / 6.0
     let mut load_var = 0.0
     li = 0
-    while li < 6 { let d = loads[li] - mean_load; load_var = load_var + d * d; li = li + 1 }
+    while li < 6 {
+        let d = loads[li] - mean_load
+        load_var = load_var + d * d
+        li = li + 1
+    }
     load_var = load_var / 6.0
     let load_cv = if mean_load > 0.000001 { sqrt_f(load_var) / mean_load } else { 0.0 }
     r = result_add(r, "parallelism", [parallelism])
@@ -184,14 +194,18 @@ fn scan_parallel_complexity(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 2. periodicity: autocorrelation peak detection
 // ─────────────────────────────────────────────────────
-fn scan_periodicity(data: list[float]) -> LensResult {
+fn scan_periodicity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 8 { return r }
     let n = data.len()
     let mean = list_mean(data)
     let mut total_var = 0.0
     let mut i = 0
-    while i < n { let d = data[i] - mean; total_var = total_var + d * d; i = i + 1 }
+    while i < n {
+        let d = data[i] - mean
+        total_var = total_var + d * d
+        i = i + 1
+    }
     total_var = total_var / to_float(n)
     if total_var < 0.000000000000001 { return r }
     let max_lag = n / 2
@@ -207,7 +221,10 @@ fn scan_periodicity(data: list[float]) -> LensResult {
             j = j + 1
         }
         let ac = sum / (to_float(count) * total_var)
-        if ac > best_ac { best_ac = ac; best_lag = lag }
+        if ac > best_ac {
+            best_ac = ac
+            best_lag = lag
+        }
         lag = lag + 1
     }
     if best_ac > 0.3 {
@@ -220,7 +237,7 @@ fn scan_periodicity(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 3. phase_locking: Kuramoto order parameter
 // ─────────────────────────────────────────────────────
-fn scan_phase_locking(data: list[float]) -> LensResult {
+fn scan_phase_locking(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -228,20 +245,28 @@ fn scan_phase_locking(data: list[float]) -> LensResult {
     let mut lo = data[0]
     let mut hi = data[0]
     let mut i = 1
-    while i < n { if data[i] < lo { lo = data[i] }; if data[i] > hi { hi = data[i] }; i = i + 1 }
+    while i < n {
+        if data[i] < lo { lo = data[i] }
+        if data[i] > hi { hi = data[i] }
+        i = i + 1
+    }
     let range = hi - lo
     if range < 0.000001 { return r }
     let mut phases = []
     i = 0
     while i < n {
-        phases = phases + [TWO_PI * (data[i] - lo) / range]
+        phases = phases + [two_pi * (data[i] - lo) / range]
         i = i + 1
     }
     // Kuramoto order parameter R = |mean(exp(i*theta))|
     let mut re = 0.0
     let mut im = 0.0
     i = 0
-    while i < n { re = re + cos_f(phases[i]); im = im + sin_f(phases[i]); i = i + 1 }
+    while i < n {
+        re = re + cos_f(phases[i])
+        im = im + sin_f(phases[i])
+        i = i + 1
+    }
     re = re / to_float(n)
     im = im / to_float(n)
     let order_r = sqrt_f(re * re + im * im)
@@ -269,7 +294,7 @@ fn scan_phase_locking(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 4. phase_transition: abrupt change + variance spike
 // ─────────────────────────────────────────────────────
-fn scan_phase_transition(data: list[float]) -> LensResult {
+fn scan_phase_transition(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 8 { return r }
     let n = data.len()
@@ -281,7 +306,10 @@ fn scan_phase_transition(data: list[float]) -> LensResult {
     while s + w <= n {
         let mut sum = 0.0
         let mut j = s
-        while j < s + w { sum = sum + data[j]; j = j + 1 }
+        while j < s + w {
+            sum = sum + data[j]
+            j = j + 1
+        }
         wmeans = wmeans + [sum / to_float(w)]
         s = s + 1
     }
@@ -299,11 +327,18 @@ fn scan_phase_transition(data: list[float]) -> LensResult {
     while s + w <= n {
         let mut sum = 0.0
         let mut j = s
-        while j < s + w { sum = sum + data[j]; j = j + 1 }
+        while j < s + w {
+            sum = sum + data[j]
+            j = j + 1
+        }
         let wm = sum / to_float(w)
         let mut vv = 0.0
         j = s
-        while j < s + w { let d = data[j] - wm; vv = vv + d * d; j = j + 1 }
+        while j < s + w {
+            let d = data[j] - wm
+            vv = vv + d * d
+            j = j + 1
+        }
         wvars = wvars + [vv / to_float(w)]
         s = s + 1
     }
@@ -321,7 +356,11 @@ fn scan_phase_transition(data: list[float]) -> LensResult {
     let mut dlo = data[0]
     let mut dhi = data[0]
     i = 1
-    while i < n { if data[i] < dlo { dlo = data[i] }; if data[i] > dhi { dhi = data[i] }; i = i + 1 }
+    while i < n {
+        if data[i] < dlo { dlo = data[i] }
+        if data[i] > dhi { dhi = data[i] }
+        i = i + 1
+    }
     let overall_range = max_f(dhi - dlo, 0.000000000001)
     let norm_jump = max_jump / overall_range
     let has_transition = norm_jump > 0.2
@@ -336,7 +375,7 @@ fn scan_phase_transition(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 5. pi: circularity + pi-ratio detection
 // ─────────────────────────────────────────────────────
-fn scan_pi(data: list[float]) -> LensResult {
+fn scan_pi(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -359,7 +398,7 @@ fn scan_pi(data: list[float]) -> LensResult {
     while i < n - 1 {
         if abs_f(data[i]) > 0.000001 {
             let ratio = abs_f(data[i + 1] / data[i])
-            if abs_f(ratio - PI) / PI < 0.05 || abs_f(1.0 / max_f(ratio, 0.000001) - PI) / PI < 0.05 {
+            if abs_f(ratio - pi) / pi < 0.05 || abs_f(1.0 / max_f(ratio, 0.000001) - pi) / pi < 0.05 {
                 pi_hits = pi_hits + 1
             }
             ratio_count = ratio_count + 1
@@ -374,7 +413,7 @@ fn scan_pi(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 6. plasma_dispersion: 6-mode plasma frequencies + Landau damping
 // ─────────────────────────────────────────────────────
-fn scan_plasma_dispersion(data: list[float]) -> LensResult {
+fn scan_plasma_dispersion(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -415,8 +454,8 @@ fn scan_plasma_dispersion(data: list[float]) -> LensResult {
         let wp = sqrt_f(mode_vars[m])
         freqs = freqs + [wp]
         let std = max_f(wp, 0.000001)
-        let df_dv = 1.0 / (std * sqrt_f(TWO_PI))
-        let damp = PI * wp * wp / (2.0 * std * std) * df_dv
+        let df_dv = 1.0 / (std * sqrt_f(two_pi))
+        let damp = pi * wp * wp / (2.0 * std * std) * df_dv
         damping = damping + [damp]
         m = m + 1
     }
@@ -433,14 +472,17 @@ fn scan_plasma_dispersion(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 7. polyhedron_face: convex hull vertex/edge estimation
 // ─────────────────────────────────────────────────────
-fn scan_polyhedron_face(data: list[float]) -> LensResult {
+fn scan_polyhedron_face(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
     // find extremal points in positive and negative directions
     let mut is_hull = []
     let mut i = 0
-    while i < n { is_hull = is_hull + [false]; i = i + 1 }
+    while i < n {
+        is_hull = is_hull + [false]
+        i = i + 1
+    }
     // positive max, negative max
     let mut max_i = 0
     let mut min_i = 0
@@ -460,7 +502,10 @@ fn scan_polyhedron_face(data: list[float]) -> LensResult {
         i = 0
         while i < n {
             let proj = data[i] * sin_f(to_float(dir * 7 + i % 3))
-            if proj > best_proj { best_proj = proj; best_i = i }
+            if proj > best_proj {
+                best_proj = proj
+                best_i = i
+            }
             i = i + 1
         }
         is_hull[best_i] = true
@@ -468,7 +513,10 @@ fn scan_polyhedron_face(data: list[float]) -> LensResult {
     }
     let mut f0 = 0
     i = 0
-    while i < n { if is_hull[i] { f0 = f0 + 1 }; i = i + 1 }
+    while i < n {
+        if is_hull[i] { f0 = f0 + 1 }
+        i = i + 1
+    }
     // Euler characteristic for polytope: V - E + F = 2
     let f1_est = f0 * 3  // rough edge estimate
     let f2_est = f1_est - f0 + 2
@@ -480,7 +528,7 @@ fn scan_polyhedron_face(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 8. population_vector: cosine tuning + decoding accuracy
 // ─────────────────────────────────────────────────────
-fn scan_population_vector(data: list[float]) -> LensResult {
+fn scan_population_vector(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -515,7 +563,7 @@ fn scan_population_vector(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 9. power_law: log-log CDF fit
 // ─────────────────────────────────────────────────────
-fn scan_power_law(data: list[float]) -> LensResult {
+fn scan_power_law(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let sorted = list_sort(data)
@@ -560,7 +608,7 @@ fn scan_power_law(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 10. prime: prime density + gap analysis
 // ─────────────────────────────────────────────────────
-fn scan_prime(data: list[float]) -> LensResult {
+fn scan_prime(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let sorted = list_sort(data)
@@ -606,7 +654,7 @@ fn scan_prime(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 11. protein_folding: HP model + contact order
 // ─────────────────────────────────────────────────────
-fn scan_protein_folding(data: list[float]) -> LensResult {
+fn scan_protein_folding(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -645,7 +693,7 @@ fn scan_protein_folding(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 12. providence_eye: purpose + optimization trajectory
 // ─────────────────────────────────────────────────────
-fn scan_providence_eye(data: list[float]) -> LensResult {
+fn scan_providence_eye(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -685,7 +733,7 @@ fn scan_providence_eye(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 13. quantization_gap: energy level spacing analysis
 // ─────────────────────────────────────────────────────
-fn scan_quantization_gap(data: list[float]) -> LensResult {
+fn scan_quantization_gap(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let sorted = list_sort(data)
@@ -720,7 +768,7 @@ fn scan_quantization_gap(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 14. quantum_jump: discrete state transitions
 // ─────────────────────────────────────────────────────
-fn scan_quantum_jump(data: list[float]) -> LensResult {
+fn scan_quantum_jump(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 10 { return r }
     let n = data.len()
@@ -760,7 +808,7 @@ fn scan_quantum_jump(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 15. quantum_impl: mutual information entanglement
 // ─────────────────────────────────────────────────────
-fn scan_quantum_impl(data: list[float]) -> LensResult {
+fn scan_quantum_impl(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 8 { return r }
     let n = data.len()
@@ -782,7 +830,10 @@ fn scan_quantum_impl(data: list[float]) -> LensResult {
     // build joint histogram nb x nb
     let mut joint = []
     let mut bi = 0
-    while bi < nb * nb { joint = joint + [0]; bi = bi + 1 }
+    while bi < nb * nb {
+        joint = joint + [0]
+        bi = bi + 1
+    }
     let mut i = 0
     while i < m {
         let ba = to_int(min_f(to_float(nb - 1), to_float(floor_f((col_a[i] - min_a) / range_a * to_float(nb)))))
@@ -795,7 +846,11 @@ fn scan_quantum_impl(data: list[float]) -> LensResult {
     let mut marg_a = []
     let mut marg_b = []
     bi = 0
-    while bi < nb { marg_a = marg_a + [0]; marg_b = marg_b + [0]; bi = bi + 1 }
+    while bi < nb {
+        marg_a = marg_a + [0]
+        marg_b = marg_b + [0]
+        bi = bi + 1
+    }
     let mut ai = 0
     while ai < nb {
         let mut bj = 0
@@ -831,7 +886,7 @@ fn scan_quantum_impl(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 16. quantum_micro: density matrix + von Neumann entropy
 // ─────────────────────────────────────────────────────
-fn scan_quantum_micro(data: list[float]) -> LensResult {
+fn scan_quantum_micro(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 3 { return r }
     let n = if data.len() < 50 { data.len() } else { 50 }
@@ -891,7 +946,7 @@ fn scan_quantum_micro(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 17. query_complexity: decision tree depth
 // ─────────────────────────────────────────────────────
-fn scan_query_complexity(data: list[float]) -> LensResult {
+fn scan_query_complexity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 4 { return r }
     let n = data.len()
@@ -912,7 +967,7 @@ fn scan_query_complexity(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 18. rademacher_complexity: empirical Rademacher + generalization
 // ─────────────────────────────────────────────────────
-fn scan_rademacher_complexity(data: list[float]) -> LensResult {
+fn scan_rademacher_complexity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -942,7 +997,7 @@ fn scan_rademacher_complexity(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 19. rate_code: neural rate coding + Fisher information
 // ─────────────────────────────────────────────────────
-fn scan_rate_code(data: list[float]) -> LensResult {
+fn scan_rate_code(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -976,7 +1031,7 @@ fn scan_rate_code(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 20. ratio: n=6 constant ratio matching
 // ─────────────────────────────────────────────────────
-fn scan_ratio(data: list[float]) -> LensResult {
+fn scan_ratio(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 4 { return r }
     let n = data.len()
@@ -990,9 +1045,9 @@ fn scan_ratio(data: list[float]) -> LensResult {
                 let ratio = abs_f(data[i] / data[j])
                 total_ratios = total_ratios + 1
                 let mut k = 0
-                while k < N6_VALS.len() {
-                    if N6_VALS[k] > 0.000001 {
-                        let q = 1.0 - min_f(abs_f(ln_f(ratio / N6_VALS[k])), 1.0)
+                while k < n6_vals.len() {
+                    if n6_vals[k] > 0.000001 {
+                        let q = 1.0 - min_f(abs_f(ln_f(ratio / n6_vals[k])), 1.0)
                         if q >= 0.8 { n6_hits = n6_hits + 1 }
                     }
                     k = k + 1
@@ -1011,7 +1066,7 @@ fn scan_ratio(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 21. reconnection: magnetic null points + reconnection rate
 // ─────────────────────────────────────────────────────
-fn scan_reconnection(data: list[float]) -> LensResult {
+fn scan_reconnection(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1062,7 +1117,7 @@ fn scan_reconnection(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 22. recursion: self-similarity via sub-sample comparison
 // ─────────────────────────────────────────────────────
-fn scan_recursion(data: list[float]) -> LensResult {
+fn scan_recursion(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 8 { return r }
     let n = data.len()
@@ -1074,7 +1129,10 @@ fn scan_recursion(data: list[float]) -> LensResult {
     let range = max_f(hi - lo, 0.000001)
     let mut full_hist = []
     let mut bi = 0
-    while bi < nb { full_hist = full_hist + [0]; bi = bi + 1 }
+    while bi < nb {
+        full_hist = full_hist + [0]
+        bi = bi + 1
+    }
     let mut i = 0
     while i < n {
         let b = to_int(min_f(to_float(nb - 1), to_float(floor_f((sorted[i] - lo) / range * to_float(nb)))))
@@ -1090,11 +1148,20 @@ fn scan_recursion(data: list[float]) -> LensResult {
         let scale = scales[si]
         let mut sub = []
         let mut j = 0
-        while j < n { sub = sub + [sorted[j]]; j = j + scale }
-        if sub.len() < 4 { si = si + 1; continue }
+        while j < n {
+            sub = sub + [sorted[j]]
+            j = j + scale
+        }
+        if sub.len() < 4 {
+            si = si + 1
+            continue
+        }
         let mut sub_hist = []
         bi = 0
-        while bi < nb { sub_hist = sub_hist + [0]; bi = bi + 1 }
+        while bi < nb {
+            sub_hist = sub_hist + [0]
+            bi = bi + 1
+        }
         j = 0
         while j < sub.len() {
             let b = to_int(min_f(to_float(nb - 1), to_float(floor_f((sub[j] - lo) / range * to_float(nb)))))
@@ -1126,7 +1193,7 @@ fn scan_recursion(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 23. recursive_loop: fixed point + limit cycle detection
 // ─────────────────────────────────────────────────────
-fn scan_recursive_loop(data: list[float]) -> LensResult {
+fn scan_recursive_loop(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1172,7 +1239,7 @@ fn scan_recursive_loop(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 24. refraction: speed ratio + Snell's law
 // ─────────────────────────────────────────────────────
-fn scan_refraction(data: list[float]) -> LensResult {
+fn scan_refraction(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1180,11 +1247,17 @@ fn scan_refraction(data: list[float]) -> LensResult {
     // speed in each medium: avg abs first derivative
     let mut speed1 = 0.0
     let mut i = 1
-    while i < mid { speed1 = speed1 + abs_f(data[i] - data[i - 1]); i = i + 1 }
+    while i < mid {
+        speed1 = speed1 + abs_f(data[i] - data[i - 1])
+        i = i + 1
+    }
     speed1 = max_f(speed1 / to_float(max_f(to_float(mid - 1), 1.0)), 0.000001)
     let mut speed2 = 0.0
     i = mid + 1
-    while i < n { speed2 = speed2 + abs_f(data[i] - data[i - 1]); i = i + 1 }
+    while i < n {
+        speed2 = speed2 + abs_f(data[i] - data[i - 1])
+        i = i + 1
+    }
     speed2 = max_f(speed2 / to_float(max_f(to_float(n - mid - 1), 1.0)), 0.000001)
     let refraction_index = speed1 / speed2
     r = result_add(r, "refraction_index", [refraction_index])
@@ -1205,25 +1278,35 @@ fn scan_refraction(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 25. relativistic_barrier: asymptotic divergence detection
 // ─────────────────────────────────────────────────────
-fn scan_relativistic_barrier(data: list[float]) -> LensResult {
+fn scan_relativistic_barrier(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
     let mut lo = data[0]
     let mut hi = data[0]
     let mut i = 1
-    while i < n { if data[i] < lo { lo = data[i] }; if data[i] > hi { hi = data[i] }; i = i + 1 }
+    while i < n {
+        if data[i] < lo { lo = data[i] }
+        if data[i] > hi { hi = data[i] }
+        i = i + 1
+    }
     let range = max_f(hi - lo, 0.000001)
     let barrier_zone = range * 0.05
     // count points near barrier (top 5%)
     let mut div_count = 0
     i = 0
-    while i < n { if data[i] > hi - barrier_zone { div_count = div_count + 1 }; i = i + 1 }
+    while i < n {
+        if data[i] > hi - barrier_zone { div_count = div_count + 1 }
+        i = i + 1
+    }
     let div_frac = to_float(div_count) / to_float(n)
     // max gradient / median gradient = Lorentz-like factor
     let mut grads = []
     i = 1
-    while i < n { grads = grads + [abs_f(data[i] - data[i - 1])]; i = i + 1 }
+    while i < n {
+        grads = grads + [abs_f(data[i] - data[i - 1])]
+        i = i + 1
+    }
     let sorted_g = list_sort(grads)
     let median_g = max_f(sorted_g[sorted_g.len() / 2], 0.000001)
     let max_g = sorted_g[sorted_g.len() - 1]
@@ -1248,7 +1331,7 @@ fn scan_relativistic_barrier(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 26. renormalization: RG flow + critical exponent
 // ─────────────────────────────────────────────────────
-fn scan_renormalization(data: list[float]) -> LensResult {
+fn scan_renormalization(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 4 { return r }
     // iterative coarse-graining: merge adjacent pairs, track variance
@@ -1298,7 +1381,7 @@ fn scan_renormalization(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 27. resolution_tree: singularity resolution steps
 // ─────────────────────────────────────────────────────
-fn scan_resolution_tree(data: list[float]) -> LensResult {
+fn scan_resolution_tree(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1356,7 +1439,7 @@ fn scan_resolution_tree(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 28. resource_competition: R* theory + niche overlap
 // ─────────────────────────────────────────────────────
-fn scan_resource_competition(data: list[float]) -> LensResult {
+fn scan_resource_competition(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1398,7 +1481,7 @@ fn scan_resource_competition(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 29. robotics: DOF + smoothness + SE(3) alignment
 // ─────────────────────────────────────────────────────
-fn scan_robotics(data: list[float]) -> LensResult {
+fn scan_robotics(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1407,13 +1490,22 @@ fn scan_robotics(data: list[float]) -> LensResult {
     // effective DOF via variance ratio (simplified: use first differences)
     let mut vel = []
     let mut i = 1
-    while i < n { vel = vel + [data[i] - data[i - 1]]; i = i + 1 }
+    while i < n {
+        vel = vel + [data[i] - data[i - 1]]
+        i = i + 1
+    }
     let mut acc = []
     i = 1
-    while i < vel.len() { acc = acc + [vel[i] - vel[i - 1]]; i = i + 1 }
+    while i < vel.len() {
+        acc = acc + [vel[i] - vel[i - 1]]
+        i = i + 1
+    }
     let mut jerk = []
     i = 1
-    while i < acc.len() { jerk = jerk + [acc[i] - acc[i - 1]]; i = i + 1 }
+    while i < acc.len() {
+        jerk = jerk + [acc[i] - acc[i - 1]]
+        i = i + 1
+    }
     // smoothness: low jerk/vel ratio
     let vel_rms = max_f(sqrt_f(list_variance(vel, list_mean(vel))), 0.000001)
     let jerk_rms = if jerk.len() > 0 { sqrt_f(list_variance(jerk, list_mean(jerk))) } else { 0.0 }
@@ -1425,7 +1517,10 @@ fn scan_robotics(data: list[float]) -> LensResult {
     // trajectory optimality: path_length vs displacement
     let mut path = 0.0
     i = 0
-    while i < vel.len() { path = path + abs_f(vel[i]); i = i + 1 }
+    while i < vel.len() {
+        path = path + abs_f(vel[i])
+        i = i + 1
+    }
     let disp = abs_f(data[n - 1] - data[0])
     let optimality = if path > 0.000001 { disp / path } else { 0.0 }
     r = result_add(r, "trajectory_optimality", [optimality])
@@ -1435,7 +1530,7 @@ fn scan_robotics(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 30. ruler: SVD effective rank via covariance eigenvalues
 // ─────────────────────────────────────────────────────
-fn scan_ruler(data: list[float]) -> LensResult {
+fn scan_ruler(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1451,7 +1546,10 @@ fn scan_ruler(data: list[float]) -> LensResult {
     let range = max_f(hi - lo, 0.000001)
     let mut bins = []
     let mut bi = 0
-    while bi < nb { bins = bins + [0]; bi = bi + 1 }
+    while bi < nb {
+        bins = bins + [0]
+        bi = bi + 1
+    }
     let mut i = 0
     while i < n {
         let b = to_int(min_f(to_float(nb - 1), to_float(floor_f((sorted[i] - lo) / range * to_float(nb)))))
@@ -1475,7 +1573,7 @@ fn scan_ruler(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 31. running_coupling: 6-scale coupling + beta function
 // ─────────────────────────────────────────────────────
-fn scan_running_coupling(data: list[float]) -> LensResult {
+fn scan_running_coupling(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 12 { return r }
     let n = data.len()
@@ -1515,7 +1613,7 @@ fn scan_running_coupling(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 32. scalar_curvature: Ricci scalar via neighborhood geometry
 // ─────────────────────────────────────────────────────
-fn scan_scalar_curvature(data: list[float]) -> LensResult {
+fn scan_scalar_curvature(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1547,7 +1645,7 @@ fn scan_scalar_curvature(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 33. scale: power-law fitting + Hurst exponent
 // ─────────────────────────────────────────────────────
-fn scan_scale(data: list[float]) -> LensResult {
+fn scan_scale(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1603,10 +1701,10 @@ fn scan_scale(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 34. schur_functor: partitions + hook dimensions
 // ─────────────────────────────────────────────────────
-fn scan_schur_functor(data: list[float]) -> LensResult {
+fn scan_schur_functor(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
-    // partitions of 6: [6], [5,1], [4,2], [4,1,1], [3,3], [3,2,1], [3,1,1,1],
+    // partitions of 6, [5,1], [4,2], [4,1,1], [3,3], [3,2,1], [3,1,1,1],
     //                   [2,2,2], [2,2,1,1], [2,1,1,1,1], [1,1,1,1,1,1]
     // hook dimensions for S_6:
     let hook_dims = [1.0, 5.0, 9.0, 10.0, 5.0, 16.0, 10.0, 5.0, 9.0, 5.0, 1.0]
@@ -1635,7 +1733,10 @@ fn scan_schur_functor(data: list[float]) -> LensResult {
     i = 0
     while i < hook_dims.len() {
         let score = exp_f(0.0 - abs_f(to_float(n) - hook_dims[i]) * 0.5)
-        if score > best_match { best_match = score; best_idx = i }
+        if score > best_match {
+            best_match = score
+            best_idx = i
+        }
         i = i + 1
     }
     r = result_add(r, "hook_dimension_match", [best_match])
@@ -1645,7 +1746,7 @@ fn scan_schur_functor(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 35. simulation: forward/backward prediction
 // ─────────────────────────────────────────────────────
-fn scan_simulation(data: list[float]) -> LensResult {
+fn scan_simulation(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1659,7 +1760,10 @@ fn scan_simulation(data: list[float]) -> LensResult {
     let mut i = 0
     while i < half {
         let x = to_float(i)
-        sx = sx + x; sy = sy + data[i]; sxx = sxx + x * x; sxy = sxy + x * data[i]
+        sx = sx + x
+        sy = sy + data[i]
+        sxx = sxx + x * x
+        sxy = sxy + x * data[i]
         i = i + 1
     }
     let hn = to_float(half)
@@ -1689,7 +1793,7 @@ fn scan_simulation(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // 36. singularity_cycle: 5-phase n=6 constant matching
 // ─────────────────────────────────────────────────────
-fn scan_singularity_cycle(data: list[float]) -> LensResult {
+fn scan_singularity_cycle(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 2 { return r }
     let n = data.len()
@@ -1701,11 +1805,19 @@ fn scan_singularity_cycle(data: list[float]) -> LensResult {
     let mut i = 0
     while i < n {
         let mut k = 0
-        while k < N6_VALS.len() {
-            if N6_VALS[k] > 0.000001 {
-                let q = 1.0 - min_f(abs_f(ln_f(max_f(abs_f(data[i]) / N6_VALS[k], 0.000001))), 1.0)
-                if q >= 0.95 { exact_count = exact_count + 1; const_hits[k] = const_hits[k] + 1; blowup_count = blowup_count + 1 }
-                else if q >= 0.80 { close_count = close_count + 1; const_hits[k] = const_hits[k] + 1; blowup_count = blowup_count + 1 }
+        while k < n6_vals.len() {
+            if n6_vals[k] > 0.000001 {
+                let q = 1.0 - min_f(abs_f(ln_f(max_f(abs_f(data[i]) / n6_vals[k], 0.000001))), 1.0)
+                if q >= 0.95 {
+                    exact_count = exact_count + 1
+                    const_hits[k] = const_hits[k] + 1
+                    blowup_count = blowup_count + 1
+                }
+                else if q >= 0.80 {
+                    close_count = close_count + 1
+                    const_hits[k] = const_hits[k] + 1
+                    blowup_count = blowup_count + 1
+                }
             }
             k = k + 1
         }
@@ -1713,10 +1825,13 @@ fn scan_singularity_cycle(data: list[float]) -> LensResult {
         if i + 1 < n && abs_f(data[i + 1]) > 0.000001 {
             let ratio = abs_f(data[i] / data[i + 1])
             k = 0
-            while k < N6_VALS.len() {
-                if N6_VALS[k] > 0.000001 {
-                    let q = 1.0 - min_f(abs_f(ln_f(max_f(ratio / N6_VALS[k], 0.000001))), 1.0)
-                    if q >= 0.80 { blowup_count = blowup_count + 1; const_hits[k] = const_hits[k] + 1 }
+            while k < n6_vals.len() {
+                if n6_vals[k] > 0.000001 {
+                    let q = 1.0 - min_f(abs_f(ln_f(max_f(ratio / n6_vals[k], 0.000001))), 1.0)
+                    if q >= 0.80 {
+                        blowup_count = blowup_count + 1
+                        const_hits[k] = const_hits[k] + 1
+                    }
                 }
                 k = k + 1
             }
@@ -1730,9 +1845,12 @@ fn scan_singularity_cycle(data: list[float]) -> LensResult {
     let mut dominant_idx = 0
     let mut dominant_hits = 0
     let mut ci = 0
-    while ci < N6_VALS.len() {
+    while ci < n6_vals.len() {
         if const_hits[ci] >= 3 { patterns_found = patterns_found + 1 }
-        if const_hits[ci] > dominant_hits { dominant_hits = const_hits[ci]; dominant_idx = ci }
+        if const_hits[ci] > dominant_hits {
+            dominant_hits = const_hits[ci]
+            dominant_idx = ci
+        }
         ci = ci + 1
     }
     // Phase 4: Singularity
@@ -1741,14 +1859,14 @@ fn scan_singularity_cycle(data: list[float]) -> LensResult {
     r = result_add(r, "exact_ratio", [exact_ratio])
     r = result_add(r, "exact_count", [to_float(exact_count)])
     r = result_add(r, "patterns_found", [to_float(patterns_found)])
-    r = result_add(r, "dominant_constant", [N6_VALS[dominant_idx]])
+    r = result_add(r, "dominant_constant", [n6_vals[dominant_idx]])
     r
 }
 
 // ─────────────────────────────────────────────────────
 // 37. singularity: density spike + curvature divergence
 // ─────────────────────────────────────────────────────
-fn scan_singularity(data: list[float]) -> LensResult {
+fn scan_singularity(data) -> LensResult {
     let mut r = empty_result()
     if data.len() < 6 { return r }
     let n = data.len()
@@ -1774,7 +1892,10 @@ fn scan_singularity(data: list[float]) -> LensResult {
     let spike_thresh = median_dens * 5.0
     let mut spike_count = 0
     i = 0
-    while i < n { if densities[i] > spike_thresh { spike_count = spike_count + 1 }; i = i + 1 }
+    while i < n {
+        if densities[i] > spike_thresh { spike_count = spike_count + 1 }
+        i = i + 1
+    }
     let strength = if median_dens > 0.000001 { min_f(peak_dens / median_dens, 1000000.0) } else { peak_dens }
     r = result_add(r, "singularity_count", [to_float(spike_count)])
     r = result_add(r, "singularity_strength", [strength])
@@ -1805,7 +1926,7 @@ fn scan_singularity(data: list[float]) -> LensResult {
 // ─────────────────────────────────────────────────────
 // Registration: all 37 lenses
 // ─────────────────────────────────────────────────────
-fn register_quantum_lenses(data: list[float]) -> list[ScanEntry] {
+fn register_quantum_lenses(data)  {
     let mut entries = []
 
     entries = entries + [ScanEntry { lens_name: "parallel_complexity", lens_category: "quantum", result: scan_parallel_complexity(data) }]

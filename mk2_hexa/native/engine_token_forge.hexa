@@ -3,30 +3,30 @@
 // 사용: hexa engine_token_forge.hexa status|tick|report
 //
 // State:
-//   $HOME/Dev/token-forge/bench/runs/ — latest report.json (r, L)
-//   $HOME/Dev/token-forge/dictionary/ — symbol dictionary entries
+//   $home/Dev/token-forge/bench/runs/ — latest report.json (r, L)
+//   $home/Dev/token-forge/dictionary/ — symbol dictionary entries
 // Growth bus:
-//   $HOME/Dev/nexus6/shared/growth_bus.jsonl
+//   $home/Dev/nexus6/shared/growth_bus.jsonl
 
 // ═══════════════════════════════════════════════════════════
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const VERSION = "1.0.0"
-comptime const NAME = "token_forge"
-comptime const PERSONALITY = "Sculptor"
+comptime const version = "1.0.0"
+comptime const name = "token_forge"
+comptime const personality = "Sculptor"
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let PROJECT_DIR = DEV + "/token-forge"
-let BENCH_DIR = PROJECT_DIR + "/bench/runs"
-let DICT_DIR = PROJECT_DIR + "/dictionary"
-let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
-let HISTORY_FILE = DEV + "/nexus6/shared/token_forge_history.jsonl"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/token-forge"
+let bench_dir = project_dir + "/bench/runs"
+let dict_dir = project_dir + "/dictionary"
+let bus_file = dev + "/nexus6/shared/growth_bus.jsonl"
+let history_file = dev + "/nexus6/shared/token_forge_history.jsonl"
 
-comptime const GOAL_R = 0.4
-comptime const GOAL_L = 0.05
-comptime const AGGRESSIVE_R = 0.5
+comptime const goal_r = 0.4
+comptime const goal_l = 0.05
+comptime const aggressive_r = 0.5
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -50,7 +50,7 @@ fn clamp01(x: f64) -> f64 {
 }
 
 fn timestamp() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     r.trim()
 }
 
@@ -63,20 +63,22 @@ fn read_file_safe(path: string) -> string {
 }
 
 fn dir_exists(path: string) -> bool {
-    let r = try { exec("test", ["-d", path, "&&", "echo", "1"]) } catch e { "" }
+    let mut r = ""
+    try { r = exec("test", ["-d", path, "&&", "echo", "1"]) } catch e {}
     r.trim() == "1"
 }
 
 fn file_exists(path: string) -> bool {
-    let r = try { exec("test", ["-f", path, "&&", "echo", "1"]) } catch e { "" }
+    let mut r = ""
+    try { r = exec("test", ["-f", path, "&&", "echo", "1"]) } catch e {}
     r.trim() == "1"
 }
 
 fn append_bus(phase: string, status: string, detail: string) {
     let ts = timestamp()
-    let line = "{\"source\":\"" + NAME + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    let line = "{\"source\":\"" + name + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
     try {
-        append_file(BUS_FILE, line + "\n")
+        append_file(bus_file, line + "\n")
     } catch e {}
 }
 
@@ -84,7 +86,7 @@ fn append_history(r: f64, l: f64, dict_count: int, label: string) {
     let ts = timestamp()
     let line = "{\"ts\":\"" + ts + "\",\"r\":" + to_string(r) + ",\"L\":" + to_string(l) + ",\"dict\":" + to_string(dict_count) + ",\"label\":\"" + label + "\"}"
     try {
-        append_file(HISTORY_FILE, line + "\n")
+        append_file(history_file, line + "\n")
     } catch e {}
 }
 
@@ -128,14 +130,15 @@ struct BenchReport {
 
 fn find_latest_report() -> BenchReport {
     // bench/runs/ 하위에서 가장 최근 report.json 찾기
-    let result = try {
-        exec("bash", ["-c", "ls -t " + BENCH_DIR + "/*/report.json 2>/dev/null | head -1"])
-    } catch e { "" }
+    let mut result = ""
+    try {
+        result = exec("bash -c ls -t " + bench_dir + "/*/report.json 2>/dev/null | head -1")
+    } catch e {}
 
     let path = result.trim()
     if path == "" {
         // 단일 report.json 시도
-        let fallback = BENCH_DIR + "/report.json"
+        let fallback = bench_dir + "/report.json"
         if file_exists(fallback) {
             let content = read_file_safe(fallback)
             let r = extract_json_float(content, "r")
@@ -157,19 +160,22 @@ fn find_latest_report() -> BenchReport {
 }
 
 fn count_dictionary_entries() -> int {
-    if !dir_exists(DICT_DIR) { return 0 }
-    let result = try {
-        exec("bash", ["-c", "find " + DICT_DIR + " -type f | wc -l"])
-    } catch e { "0" }
-    let count = try { to_int(result.trim()) } catch e { 0 }
+    if !dir_exists(dict_dir) { return 0 }
+    let mut result = "0"
+    try {
+        result = exec("bash -c find " + dict_dir + " -type f | wc -l")
+    } catch e {}
+    let mut count = 0
+    try { count = to_int(result.trim()) } catch e {}
     return count
 }
 
 fn dict_changed_recently() -> bool {
     // 최근 1시간 이내 dictionary 변경 여부
-    let result = try {
-        exec("bash", ["-c", "find " + DICT_DIR + " -type f -mmin -60 | head -1"])
-    } catch e { "" }
+    let mut result = ""
+    try {
+        result = exec("bash -c find " + dict_dir + " -type f -mmin -60 | head -1")
+    } catch e {}
     return result.trim() != ""
 }
 
@@ -196,7 +202,7 @@ fn compute_health(report: BenchReport, dict_count: int) -> HealthResult {
     let l = report.l
 
     // 목표 달성 판정
-    if r >= 0.0 && r <= GOAL_R && l >= 0.0 && l <= GOAL_L {
+    if r >= 0.0 && r <= goal_r && l >= 0.0 && l <= goal_l {
         return HealthResult {
             score: 0.99,
             label: "GOAL_NEAR",
@@ -230,7 +236,7 @@ fn compute_health(report: BenchReport, dict_count: int) -> HealthResult {
     score = score + dict_score * 0.2
 
     // 정체 판정: dict 변화 없고 r > 0.5
-    let stagnant = r > AGGRESSIVE_R && !dict_changed_recently()
+    let stagnant = r > aggressive_r && !dict_changed_recently()
     if stagnant {
         return HealthResult {
             score: score,
@@ -252,7 +258,7 @@ fn compute_health(report: BenchReport, dict_count: int) -> HealthResult {
 
 fn predict_rounds_to_goal(report: BenchReport) -> string {
     // 히스토리에서 r 수렴 곡선 읽기 → 단순 선형 외삽
-    let hist = read_file_safe(HISTORY_FILE)
+    let hist = read_file_safe(history_file)
     if hist == "" { return "데이터 부족 — 예측 불가" }
 
     let lines = hist.split("\n")
@@ -288,11 +294,11 @@ fn predict_rounds_to_goal(report: BenchReport) -> string {
     }
 
     let current_r = r_values[r_values.len() - 1]
-    let gap = current_r - GOAL_R
+    let gap = current_r - goal_r
     if gap <= 0.0 { return "이미 목표 달성!" }
 
     let rounds = gap / abs_f(avg_delta)
-    return "예상 " + to_string(to_int(rounds) + 1) + "라운드 후 r<=" + to_string(GOAL_R) + " 도달 (avg_delta=" + to_string(avg_delta) + ")"
+    return "예상 " + to_string(to_int(rounds) + 1) + "라운드 후 r<=" + to_string(goal_r) + " 도달 (avg_delta=" + to_string(avg_delta) + ")"
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -300,13 +306,13 @@ fn predict_rounds_to_goal(report: BenchReport) -> string {
 // ═══════════════════════════════════════════════════════════
 
 fn mode_status() {
-    println("═══ " + NAME + " [" + PERSONALITY + "] v" + VERSION + " ═══")
+    println("═══ " + name + " [" + personality + "] v" + version + " ═══")
 
     let report = find_latest_report()
     let dict_count = count_dictionary_entries()
     let h = compute_health(report, dict_count)
 
-    println("project: " + PROJECT_DIR)
+    println("project: " + project_dir)
     if report.found {
         println("bench: " + report.path)
         println("r: " + to_string(report.r))
@@ -325,11 +331,11 @@ fn mode_status() {
 }
 
 fn mode_tick() {
-    println("═══ " + NAME + " tick ═══")
+    println("═══ " + name + " tick ═══")
     append_bus("tick", "start", "sculptor tick begin")
 
-    if !dir_exists(PROJECT_DIR) {
-        println("ERROR: project dir not found: " + PROJECT_DIR)
+    if !dir_exists(project_dir) {
+        println("ERROR: project dir not found: " + project_dir)
         append_bus("tick", "error", "project dir missing")
         return
     }
@@ -343,7 +349,7 @@ fn mode_tick() {
     // ─── 틱 로직 ───
     if h.label == "GOAL_NEAR" {
         // 고정점 달성 — 축하 + 기록만
-        println("GOAL_NEAR: 고정점 r<=" + to_string(GOAL_R) + " L<=" + to_string(GOAL_L) + " 달성!")
+        println("GOAL_NEAR: 고정점 r<=" + to_string(goal_r) + " L<=" + to_string(goal_l) + " 달성!")
         println("  유지 모드 — 추가 압축 불필요")
         append_bus("tick", "goal_near", "fixed point achieved r=" + to_string(report.r) + " L=" + to_string(report.l))
         append_history(report.r, report.l, dict_count, "goal_near")
@@ -353,12 +359,13 @@ fn mode_tick() {
     if h.label == "BREAKTHROUGH" {
         // 돌파 근접 — 신중한 1라운드
         println("BREAKTHROUGH: 돌파 근접 — 정밀 압축 1라운드")
-        let result = try {
-            exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py --careful 2>&1 | tail -5"])
+        let mut result = "compress failed: " + to_string(e2)
+        try {
+            result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py --careful 2>&1 | tail -5")
         } catch e {
             try {
-                exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py 2>&1 | tail -5"])
-            } catch e2 { "compress failed: " + to_string(e2) }
+                result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py 2>&1 | tail -5")
+        } catch e2 {}
         }
         println("  result: " + result.trim())
         append_bus("tick", "breakthrough", "careful compress")
@@ -366,15 +373,16 @@ fn mode_tick() {
         return
     }
 
-    if report.found && report.r > AGGRESSIVE_R {
+    if report.found && report.r > aggressive_r {
         // r > 0.5: 공격적 압축 (2라운드)
-        println("AGGRESSIVE: r=" + to_string(report.r) + " > " + to_string(AGGRESSIVE_R) + " — 공격적 압축 2라운드")
+        println("AGGRESSIVE: r=" + to_string(report.r) + " > " + to_string(aggressive_r) + " — 공격적 압축 2라운드")
         let mut round = 1
         while round <= 2 {
             println("  round " + to_string(round) + "/2...")
-            let result = try {
-                exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py 2>&1 | tail -3"])
-            } catch e { "round " + to_string(round) + " failed" }
+            let mut result = "round " + to_string(round) + " failed"
+            try {
+                result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py 2>&1 | tail -3")
+            } catch e {}
             println("    " + result.trim())
             round = round + 1
         }
@@ -386,12 +394,13 @@ fn mode_tick() {
     if !dict_changed_recently() && dict_count > 0 {
         // dictionary 정체 → 새 심볼 패턴 탐색
         println("DICT_STAGNANT: dictionary 정체 — 새 심볼 패턴 탐색")
-        let result = try {
-            exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py --explore 2>&1 | tail -5"])
+        let mut result = "explore failed"
+        try {
+            result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py --explore 2>&1 | tail -5")
         } catch e {
             try {
-                exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py 2>&1 | tail -5"])
-            } catch e2 { "explore failed" }
+                result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py 2>&1 | tail -5")
+        } catch e2 {}
         }
         println("  result: " + result.trim())
         append_bus("tick", "explore", "dict stagnant, exploring new symbols")
@@ -401,9 +410,10 @@ fn mode_tick() {
 
     // DEFAULT: 1라운드 압축
     println("DEFAULT: 표준 압축 1라운드")
-    let result = try {
-        exec("bash", ["-c", "cd " + PROJECT_DIR + " && python3 forge/compress.py 2>&1 | tail -5"])
-    } catch e { "compress failed: " + to_string(e) }
+    let mut result = "compress failed: " + to_string(e)
+    try {
+        result = exec("bash -c cd " + project_dir + " && python3 forge/compress.py 2>&1 | tail -5")
+    } catch e {}
     println("  result: " + result.trim())
 
     // 후처리: 새 벤치 결과 기록
@@ -428,14 +438,14 @@ fn mode_report() {
     if report.found {
         println("  compression ratio (r): " + to_string(report.r))
         println("  loss (L):              " + to_string(report.l))
-        println("  goal r:                <= " + to_string(GOAL_R))
-        println("  goal L:                <= " + to_string(GOAL_L))
+        println("  goal r:                <= " + to_string(goal_r))
+        println("  goal L:                <= " + to_string(goal_l))
         if report.r >= 0.0 {
-            let r_gap = report.r - GOAL_R
+            let r_gap = report.r - goal_r
             println("  r gap:                 " + to_string(r_gap))
         }
         if report.l >= 0.0 {
-            let l_gap = report.l - GOAL_L
+            let l_gap = report.l - goal_l
             println("  L gap:                 " + to_string(l_gap))
         }
     } else {
@@ -459,7 +469,7 @@ fn mode_report() {
     println("  " + pred)
 
     // 히스토리 최근 5개 출력
-    let hist = read_file_safe(HISTORY_FILE)
+    let hist = read_file_safe(history_file)
     if hist != "" {
         println("")
         println("── Recent History (last 5) ──")
@@ -495,7 +505,7 @@ fn main() {
     } else if mode == "report" {
         mode_report()
     } else {
-        println("engine_token_forge.hexa v" + VERSION + " — Sculptor")
+        println("engine_token_forge.hexa v" + version + " — Sculptor")
         println("usage: hexa engine_token_forge.hexa status|tick|report")
     }
 }

@@ -7,9 +7,9 @@
 // n=6 상수
 // ──────────────────────────────────────
 
-comptime const DEFAULT_POP_SIZE = 144     // sigma^2 = 12^2
-comptime const MUTATION_RATE = 0.0833333  // 1/sigma = 1/12
-comptime const TOURNAMENT_K = 3           // n/phi ~= 3
+comptime const default_pop_size = 144     // sigma^2 = 12^2
+comptime const mutation_rate = 0.0833333  // 1/sigma = 1/12
+comptime const tournament_k = 3           // n/phi ~= 3
 
 // ──────────────────────────────────────
 // Gene: 단일 렌즈 설정
@@ -32,17 +32,17 @@ fn make_gene(lid: string, w: float, t: float) -> Gene {
 // ──────────────────────────────────────
 
 struct Chromosome {
-    genes: [Gene]
+    genes: str
 }
 
-fn make_chromosome(genes: [Gene]) -> Chromosome {
+fn make_chromosome(genes) -> Chromosome {
     Chromosome { genes: genes }
 }
 
 fn total_weight(c: Chromosome) -> float {
     let mut sum = 0.0
     let mut i = 0
-    while i < length(c.genes) {
+    while i < len(c.genes) {
         sum = sum + c.genes[i].weight
         i = i + 1
     }
@@ -91,15 +91,15 @@ fn rng_int(rng: Rng, n: int) -> int {
 // ──────────────────────────────────────
 
 struct Population {
-    chromosomes: [Chromosome],
+    chromosomes: str,
     rng: Rng,
     mutation_rate: float
 }
 
-fn random_population(lens_ids: [string], gene_count: int, pop_size: int, seed: int) -> Population {
+fn random_population(lens_ids, gene_count: int, pop_size: int, seed: int) -> Population {
     let mut rng = rng_new(seed)
     let mut chromosomes = []
-    let n_lenses = length(lens_ids)
+    let n_lenses = len(lens_ids)
 
     let mut p = 0
     while p < pop_size {
@@ -121,7 +121,7 @@ fn random_population(lens_ids: [string], gene_count: int, pop_size: int, seed: i
     Population {
         chromosomes: chromosomes,
         rng: rng,
-        mutation_rate: MUTATION_RATE
+        mutation_rate: mutation_rate
     }
 }
 
@@ -129,8 +129,8 @@ fn random_population(lens_ids: [string], gene_count: int, pop_size: int, seed: i
 // 토너먼트 선택
 // ──────────────────────────────────────
 
-fn tournament_select(pop: Population, fitnesses: [float], k: int) -> int {
-    let n = length(pop.chromosomes)
+fn tournament_select(pop: Population, fitnesses, k: int) -> int {
+    let n = len(pop.chromosomes)
     let mut rng = pop.rng
     rng = rng_next(rng)
     let mut best_idx = rng_int(rng, n)
@@ -154,8 +154,8 @@ fn tournament_select(pop: Population, fitnesses: [float], k: int) -> int {
 // ──────────────────────────────────────
 
 fn crossover(a: Chromosome, b: Chromosome) -> Chromosome {
-    let len_a = length(a.genes)
-    let len_b = length(b.genes)
+    let len_a = len(a.genes)
+    let len_b = len(b.genes)
     let len = if len_a < len_b { len_a } else { len_b }
     if len == 0 { return a }
 
@@ -190,7 +190,7 @@ fn mutate(c: Chromosome, rng: Rng, rate: float) -> Chromosome {
     let mut genes = []
     let mut r = rng
     let mut i = 0
-    while i < length(c.genes) {
+    while i < len(c.genes) {
         let g = c.genes[i]
         r = rng_next(r)
         if rng_float(r) < rate {
@@ -211,10 +211,10 @@ fn mutate(c: Chromosome, rng: Rng, rate: float) -> Chromosome {
 // 적합도 함수
 // ──────────────────────────────────────
 
-fn fitness(c: Chromosome, data: [float], known_patterns: [bool]) -> float {
-    let n = length(data)
+fn fitness(c: Chromosome, data, known_patterns) -> float {
+    let n = len(data)
     if n == 0 { return 0.0 }
-    if n != length(known_patterns) { return 0.0 }
+    if n != len(known_patterns) { return 0.0 }
 
     let tw = total_weight(c)
     if tw < 0.000000000001 { return 0.0 }
@@ -228,7 +228,7 @@ fn fitness(c: Chromosome, data: [float], known_patterns: [bool]) -> float {
         // 각 유전자가 투표
         let mut detection = 0.0
         let mut gi = 0
-        while gi < length(c.genes) {
+        while gi < len(c.genes) {
             if val > c.genes[gi].threshold {
                 detection = detection + c.genes[gi].weight
             }
@@ -253,8 +253,8 @@ fn fitness(c: Chromosome, data: [float], known_patterns: [bool]) -> float {
 // 1세대 진화
 // ──────────────────────────────────────
 
-fn evolve_one(pop: Population, data: [float], known_patterns: [bool]) -> Population {
-    let pop_size = length(pop.chromosomes)
+fn evolve_one(pop: Population, data, known_patterns) -> Population {
+    let pop_size = len(pop.chromosomes)
     if pop_size == 0 { return pop }
 
     // 적합도 계산
@@ -283,7 +283,7 @@ fn evolve_one(pop: Population, data: [float], known_patterns: [bool]) -> Populat
     let next_gen = next_gen.push(elite)
     let mut rng = pop.rng
 
-    while length(next_gen) < pop_size {
+    while len(next_gen) < pop_size {
         // 토너먼트 선택
         rng = rng_next(rng)
         let pa_idx = rng_int(rng, pop_size)
@@ -307,7 +307,7 @@ fn evolve_one(pop: Population, data: [float], known_patterns: [bool]) -> Populat
 // N세대 진화 + 최적 개체 반환
 // ──────────────────────────────────────
 
-fn evolve(pop: Population, generations: int, data: [float], known_patterns: [bool]) -> Chromosome {
+fn evolve(pop: Population, generations: int, data, known_patterns) -> Chromosome {
     let mut current = pop
     let mut gen = 0
     while gen < generations {
@@ -316,7 +316,7 @@ fn evolve(pop: Population, generations: int, data: [float], known_patterns: [boo
     }
 
     // 최적 개체 반환
-    let pop_size = length(current.chromosomes)
+    let pop_size = len(current.chromosomes)
     let mut best_idx = 0
     let mut best_fit = fitness(current.chromosomes[0], data, known_patterns)
     let mut i = 1
@@ -336,9 +336,9 @@ fn evolve(pop: Population, generations: int, data: [float], known_patterns: [boo
 // ──────────────────────────────────────
 
 fn print_chromosome(c: Chromosome) {
-    println("  Chromosome (" + to_string(length(c.genes)) + " genes, total_weight=" + to_string(total_weight(c)) + ")")
+    println("  Chromosome (" + to_string(len(c.genes)) + " genes, total_weight=" + to_string(total_weight(c)) + ")")
     let mut i = 0
-    while i < length(c.genes) {
+    while i < len(c.genes) {
         let g = c.genes[i]
         println("    [" + to_string(i) + "] " + g.lens_id + " w=" + to_string(g.weight) + " t=" + to_string(g.threshold))
         i = i + 1
@@ -347,13 +347,13 @@ fn print_chromosome(c: Chromosome) {
 
 fn main() {
     let argv = args()
-    let cmd = if length(argv) > 1 { argv[1] } else { "evolve" }
+    let cmd = if len(argv) > 1 { argv[1] } else { "evolve" }
 
     match cmd {
         "evolve" -> {
-            let domain = if length(argv) > 2 { argv[2] } else { "general" }
+            let domain = if len(argv) > 2 { argv[2] } else { "general" }
             let mut gens = 12  // sigma = 12
-            if length(argv) > 3 {
+            if len(argv) > 3 {
                 try {
                     gens = to_int(argv[3])
                 } catch e {
@@ -369,7 +369,7 @@ fn main() {
 
             println("=== Genetic Programming: " + domain + " ===")
             println("  Population: " + to_string(pop_size) + ", Generations: " + to_string(gens))
-            println("  Mutation rate: " + to_string(MUTATION_RATE) + " (1/sigma)")
+            println("  Mutation rate: " + to_string(mutation_rate) + " (1/sigma)")
             println("  Crossover: Egyptian fraction 1/2 + 1/3 + 1/6 = 1")
 
             let pop = random_population(lens_ids, gene_count, pop_size, seed)
@@ -395,9 +395,9 @@ fn main() {
 // ──────────────────────────────────────
 
 // n=6 상수
-assert DEFAULT_POP_SIZE == 144
-assert MUTATION_RATE > 0.083
-assert MUTATION_RATE < 0.084
+assert default_pop_size == 144
+assert mutation_rate > 0.083
+assert mutation_rate < 0.084
 
 // Gene clamp
 let g1 = make_gene("test", -0.5, 1.5)
@@ -415,7 +415,7 @@ assert total_weight(c1) == 1.0
 let parent_a = make_chromosome([make_gene("a0",0.1,0.1), make_gene("a1",0.2,0.2), make_gene("a2",0.3,0.3), make_gene("a3",0.4,0.4), make_gene("a4",0.5,0.5), make_gene("a5",0.6,0.6)])
 let parent_b = make_chromosome([make_gene("b0",0.9,0.9), make_gene("b1",0.8,0.8), make_gene("b2",0.7,0.7), make_gene("b3",0.6,0.6), make_gene("b4",0.5,0.5), make_gene("b5",0.4,0.4)])
 let child = crossover(parent_a, parent_b)
-assert length(child.genes) == 6
+assert len(child.genes) == 6
 // 처음 3개 (1/2) = parent_a
 assert child.genes[0].lens_id == "a0"
 assert child.genes[1].lens_id == "a1"
@@ -446,8 +446,8 @@ assert r1b.state == r2b.state
 let lids = ["a", "b"]
 let p1 = random_population(lids, 2, 4, 42)
 let p2 = random_population(lids, 2, 4, 42)
-assert length(p1.chromosomes) == 4
-assert length(p2.chromosomes) == 4
+assert len(p1.chromosomes) == 4
+assert len(p2.chromosomes) == 4
 assert p1.chromosomes[0].genes[0].weight == p2.chromosomes[0].genes[0].weight
 
 println("=== genetic_prog verified ===")

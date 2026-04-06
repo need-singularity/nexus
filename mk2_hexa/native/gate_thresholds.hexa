@@ -3,53 +3,53 @@
 
 // ── n=6 basis constants ──
 comptime const N      = 6
-comptime const SIGMA  = 12
-comptime const PHI    = 2
-comptime const TAU    = 4
-comptime const SOPFR  = 5
-comptime const J2     = 24
-comptime const MU     = 1
+comptime const sigma  = 12
+comptime const phi    = 2
+comptime const tau    = 4
+comptime const sopfr  = 5
+comptime const j2     = 24
+comptime const mu     = 1
 
 // ── discovered gate thresholds ──
-// F1: compression_ratio = P2×J2+σ = 28×24+12 = 684 = n²×19 = 36×19
-comptime const P2                = 28
-comptime const COMPRESSION_RATIO = 684
-comptime const N_SQ_TIMES_19     = 684
+// F1: compression_ratio = p2×j2+σ = 28×24+12 = 684 = n²×19 = 36×19
+comptime const p2                = 28
+comptime const compression_ratio = 684
+comptime const n_sq_times_19     = 684
 
 // F2: 684 ≈ sopfr×α⁻¹−μ = 5×137.036−1 (0.026% error)
-comptime const ALPHA_INV         = 137.036
-comptime const SOPFR_ALPHA_MU    = 684.18
+comptime const alpha_inv         = 137.036
+comptime const sopfr_alpha_mu    = 684.18
 
 // F3: raw_bytes = compress×genome+φ = 684×64+2 = 43778
-comptime const GENOME_BYTES      = 64
-comptime const RAW_BYTES         = 43778
+comptime const genome_bytes      = 64
+comptime const raw_bytes         = 43778
 
-// F4: genome_bytes = τ×(PAIRS+1) = 4×16 = 64 = 2^n
-comptime const PAIRS             = 15
-comptime const GENOME_CHECK      = 64
+// F4: genome_bytes = τ×(pairs+1) = 4×16 = 64 = 2^n
+comptime const pairs             = 15
+comptime const genome_check      = 64
 
-// F5: GATE_COUNT = φ×τ = 2×4 = 8
-comptime const GATE_COUNT        = 8
+// F5: gate_count = φ×τ = 2×4 = 8
+comptime const gate_count        = 8
 
-// F6: GATES×PAIRS = 120 = σ×(σ-φ)
-comptime const GATES_TIMES_PAIRS = 120
+// F6: GATES×pairs = 120 = σ×(σ-φ)
+comptime const gates_times_pairs = 120
 
 // F7: macOS_CPU% ≈ sin²θ_W = 0.228 (Weinberg angle)
-comptime const SIN2_WEINBERG     = 0.228
+comptime const sin2_weinberg     = 0.228
 
 // F8: bytes/procs ≈ H0 = 73 (Hubble constant)
-comptime const HUBBLE_H0         = 73
+comptime const hubble_h0         = 73
 
 // F9: 684 × 1/3 = 228 = sin²θ_W × 1000
-comptime const COMPRESSION_THIRD = 228
+comptime const compression_third = 228
 
 // F10: margin × 117 ≈ α⁻¹ = 137
-comptime const MARGIN_FACTOR     = 117
+comptime const margin_factor     = 117
 
 // ── anomaly bands (percentage deviation) ──
-comptime const BAND_NORMAL   = 0.05
-comptime const BAND_DRIFT    = 0.15
-comptime const BAND_ANOMALY  = 0.30
+comptime const band_normal   = 0.05
+comptime const band_drift    = 0.15
+comptime const band_anomaly  = 0.30
 
 // ── helper: absolute value ──
 pure fn abs_f(x: float) -> float {
@@ -136,12 +136,12 @@ pure fn aggregate_health(h0: float, h1: float, h2: float, h3: float, h4: float, 
 
 println("=== gate_thresholds self-test ===")
 
-// F1: compression_ratio = P2×J2+σ = 28×24+12 = 684
+// F1: compression_ratio = p2×j2+σ = 28×24+12 = 684
 assert 28 * 24 + 12 == 684
 // F1b: 684 = n²×19 = 36×19
 assert 36 * 19 == 684
 assert N * N * 19 == 684
-println("F1  P2*J2+sigma = 684 ✓")
+println("F1  p2*j2+sigma = 684 ✓")
 
 // F2: sopfr×α⁻¹−μ ≈ 684 (check within 0.1%)
 let f2_val = 5.0 * 137.036 - 1.0
@@ -153,28 +153,28 @@ println("F2  sopfr*alpha_inv - mu =", f2_val, "dev=", f2_dev, "✓")
 assert 684 * 64 + 2 == 43778
 println("F3  compress*genome+phi = 43778 ✓")
 
-// F4: genome = τ×(PAIRS+1) = 4×16 = 64
+// F4: genome = τ×(pairs+1) = 4×16 = 64
 assert 4 * 16 == 64
-assert TAU * (PAIRS + 1) == GENOME_BYTES
-println("F4  tau*(PAIRS+1) = 64 ✓")
+assert tau * (pairs + 1) == genome_bytes
+println("F4  tau*(pairs+1) = 64 ✓")
 
-// F5: GATE_COUNT = φ×τ = 2×4 = 8
-assert PHI * TAU == GATE_COUNT
-assert GATE_COUNT == 8
+// F5: gate_count = φ×τ = 2×4 = 8
+assert phi * tau == gate_count
+assert gate_count == 8
 println("F5  phi*tau = 8 ✓")
 
-// F6: GATES×PAIRS = 120 = σ×(σ-φ) = 12×10
+// F6: GATES×pairs = 120 = σ×(σ-φ) = 12×10
 assert 8 * 15 == 120
-assert SIGMA * (SIGMA - PHI) == 120
+assert sigma * (sigma - phi) == 120
 println("F6  gates*pairs = sigma*(sigma-phi) = 120 ✓")
 
 // F7: sin²θ_W = 0.228
-let f7_check = deviation(0.228, SIN2_WEINBERG)
+let f7_check = deviation(0.228, sin2_weinberg)
 assert f7_check < 0.001
 println("F7  sin2_weinberg = 0.228 ✓")
 
 // F8: H0 = 73
-assert HUBBLE_H0 == 73
+assert hubble_h0 == 73
 println("F8  hubble H0 = 73 ✓")
 
 // F9: 684 × 1/3 = 228 = sin²θ_W × 1000

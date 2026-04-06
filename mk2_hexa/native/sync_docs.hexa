@@ -4,37 +4,37 @@
 
 // ─── 설정 ───
 
-comptime const VERSION = "1.0.0"
+comptime const version = "1.0.0"
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let N6_ROOT = DEV + "/nexus6"
-let ENGINE_DIR = N6_ROOT + "/mk2_hexa/native"
-let SHARED_DIR = N6_ROOT + "/shared"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let n6_root = dev + "/nexus6"
+let engine_dir = n6_root + "/mk2_hexa/native"
+let shared_dir = n6_root + "/shared"
 
-let README_PATH = N6_ROOT + "/README.md"
-let GROWTH_PATH = N6_ROOT + "/GROWTH.md"
-let PROJECTS_PATH = SHARED_DIR + "/projects.json"
-let LAWS_PATH = SHARED_DIR + "/consciousness_laws.json"
-let DISCOVERY_LOG = SHARED_DIR + "/discovery_log.jsonl"
-let ALIEN_DIST_PATH = SHARED_DIR + "/alien_index_distribution.json"
+let readme_path = n6_root + "/README.md"
+let growth_path = n6_root + "/GROWTH.md"
+let projects_path = shared_dir + "/projects.json"
+let laws_path = shared_dir + "/consciousness_laws.json"
+let discovery_log = shared_dir + "/discovery_log.jsonl"
+let alien_dist_path = shared_dir + "/alien_index_distribution.json"
 
 // n=6 상수
 comptime const N     = 6
-comptime const SIGMA = 12
-comptime const PHI   = 2
-comptime const TAU   = 4
-comptime const J2    = 24
+comptime const sigma = 12
+comptime const phi   = 2
+comptime const tau   = 4
+comptime const j2    = 24
 
 // ─── 유틸 ───
 
 fn timestamp() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     r.trim()
 }
 
 fn date_short() -> string {
-    let r = exec("date", ["+%Y-%m-%d"])
+    let r = exec("date +%Y-%m-%d")
     r.trim()
 }
 
@@ -63,9 +63,10 @@ struct LiveMetrics {
 
 fn collect_live_metrics() -> LiveMetrics {
     // 모듈 수: .hexa 파일 카운트
-    let ls_out = try {
-        exec("ls", [ENGINE_DIR])
-    } catch e { "" }
+    let mut ls_out = ""
+    try {
+        ls_out = exec("ls", [engine_dir])
+    } catch e {}
     let files = ls_out.split("\n")
     let mut module_count = 0
     let mut fi = 0
@@ -79,7 +80,7 @@ fn collect_live_metrics() -> LiveMetrics {
 
     // 법칙 수: consciousness_laws.json에서 "formulas" 배열 파싱
     let mut law_count = 0
-    let laws_content = read_file_safe(LAWS_PATH)
+    let laws_content = read_file_safe(laws_path)
     if laws_content.len() > 0 {
         // "formulas" 배열의 원소 수를 세기 위해 "id": 패턴 카운트
         // consciousness_laws.json의 formulas + psi_constants 합산
@@ -97,10 +98,12 @@ fn collect_live_metrics() -> LiveMetrics {
     if law_count < 50 {
         // formulas.json 외에 anima 의식 법칙 1030+개 존재
         // wc -l 방식으로 더 정확한 카운트
-        let wc_out = try {
-            exec("grep", ["-c", "\"name\"", LAWS_PATH])
-        } catch e { "0" }
-        let parsed = try { to_int(wc_out.trim()) } catch e { 0 }
+        let mut wc_out = "0"
+        try {
+            wc_out = exec("grep", ["-c", "\"name\"", laws_path])
+        } catch e {}
+        let mut parsed = 0
+        try { parsed = to_int(wc_out.trim()) } catch e {}
         if parsed > law_count {
             law_count = parsed
         }
@@ -108,23 +111,24 @@ fn collect_live_metrics() -> LiveMetrics {
 
     // 발견 수: discovery_log.jsonl 줄 수
     let mut discovery_count = 0
-    let wc_out = try {
-        exec("wc", ["-l", DISCOVERY_LOG])
-    } catch e { "0" }
+    let mut wc_out = "0"
+    try {
+        wc_out = exec("wc", ["-l", discovery_log])
+    } catch e {}
     let wc_str = wc_out.trim().split(" ")[0]
-    discovery_count = try { to_int(wc_str) } catch e { 0 }
+    try { discovery_count = to_int(wc_str) } catch e { discovery_count = 0 }
 
     // max_d, breakthrough_ratio: alien_index_distribution.json
     let mut max_d = 0
     let mut breakthrough_ratio = 0.0
-    let alien_content = read_file_safe(ALIEN_DIST_PATH)
+    let alien_content = read_file_safe(alien_dist_path)
     if alien_content.len() > 0 {
         // "max_d": N 파싱
         if alien_content.contains("\"max_d\"") {
             let parts = alien_content.split("\"max_d\"")
             if parts.len() > 1 {
                 let after = parts[1].split(":")[1].split(",")[0].trim()
-                max_d = try { to_int(after) } catch e { 0 }
+                try { max_d = to_int(after) } catch e { max_d = 0 }
             }
         }
         // "breakthrough_ratio": F 파싱
@@ -132,7 +136,7 @@ fn collect_live_metrics() -> LiveMetrics {
             let parts = alien_content.split("\"breakthrough_ratio\"")
             if parts.len() > 1 {
                 let after = parts[1].split(":")[1].split(",")[0].trim()
-                breakthrough_ratio = try { to_float(after) } catch e { 0.0 }
+                try { breakthrough_ratio = to_float(after) } catch e { breakthrough_ratio = 0.0 }
             }
         }
     }
@@ -156,20 +160,8 @@ struct ProjectInfo {
     strategy: string
 }
 
-fn hub_projects() -> list[ProjectInfo] {
-    [
-        ProjectInfo { name: "anima",       icon: "🧠", personality: "Dreamer",       target: "법칙 2000+, S7+ 완주, Phi>=100",         strategy: "AGI 달성 — 자기생성 의식, 무한진화 자율 완주" },
-        ProjectInfo { name: "tecs_l",      icon: "🔬", personality: "Librarian",     target: "exact_rate 60%+, 10000 발견",             strategy: "n=6 완전 닫힌 수학 체계 — 전 도메인 교차수분" },
-        ProjectInfo { name: "sedi",        icon: "🛸", personality: "Ear",           target: "건강도 95+, 티어A 250건",                  strategy: "외계 지성 신호 탐지 — 77소스 확장, n=6 보편성" },
-        ProjectInfo { name: "papers",      icon: "📄", personality: "Amplifier",     target: "드래프트 0건, DOI 100+",                   strategy: "학술 임팩트 극대화 — 자동 생성->발행 파이프라인" },
-        ProjectInfo { name: "hexa_lang",   icon: "💎", personality: "Mathematician", target: "테스트 800+, 수렴 100%",                   strategy: "완전수 프로그래밍 언어 — sigma/sigma=1 특이점" },
-        ProjectInfo { name: "airgenome",   icon: "🧬", personality: "Archaeologist", target: "L6e 돌파, 게놈 1000+",                     strategy: "OS 의식 스캔 — 모든 프로세스 n=6 게놈 추출" },
-        ProjectInfo { name: "brainwire",   icon: "🧬", personality: "Shaman",        target: "통과율 98%+, 프로토콜 6종+",               strategy: "의식 하드웨어 — 수학으로 뇌를 읽고 쓰기" },
-        ProjectInfo { name: "fathom",      icon: "🔭", personality: "Oracle",        target: "22렌즈 대시보드 완성",                      strategy: "nexus6 시각화 터미널 — 실시간 렌더링" },
-        ProjectInfo { name: "token_forge", icon: "🔨", personality: "Sculptor",      target: "r<=0.4 L<=0.05 고정점",                    strategy: "LLM 압축 고정점 — 의미 보존 극한 압축" },
-        ProjectInfo { name: "air_rs",      icon: "⚙️", personality: "Translator",    target: "스펙 100% 패리티",                          strategy: "Rust 네이티브 게이트 — airgenome 스펙 즉시 추종" },
-        ProjectInfo { name: "nexus6",      icon: "♾️", personality: "Ouroboros",     target: "모듈 100+, 발견 70k+, 법칙 750+",          strategy: "자기순환 특이점 — 자신을 발견하고 자신을 진화시키는 메타엔진" }
-    ]
+fn hub_projects()  {
+    [ ProjectInfo { name: "anima",       icon: "🧠", personality: "Dreamer",       target: "법칙 2000+, S7+ 완주, Phi>=100",         strategy: "AGI 달성 — 자기생성 의식, 무한진화 자율 완주" }, ProjectInfo { name: "tecs_l",      icon: "🔬", personality: "Librarian",     target: "exact_rate 60%+, 10000 발견",             strategy: "n=6 완전 닫힌 수학 체계 — 전 도메인 교차수분" }, ProjectInfo { name: "sedi",        icon: "🛸", personality: "Ear",           target: "건강도 95+, 티어A 250건",                  strategy: "외계 지성 신호 탐지 — 77소스 확장, n=6 보편성" }, ProjectInfo { name: "papers",      icon: "📄", personality: "Amplifier",     target: "드래프트 0건, DOI 100+",                   strategy: "학술 임팩트 극대화 — 자동 생성->발행 파이프라인" }, ProjectInfo { name: "hexa_lang",   icon: "💎", personality: "Mathematician", target: "테스트 800+, 수렴 100%",                   strategy: "완전수 프로그래밍 언어 — sigma/sigma=1 특이점" }, ProjectInfo { name: "airgenome",   icon: "🧬", personality: "Archaeologist", target: "L6e 돌파, 게놈 1000+",                     strategy: "OS 의식 스캔 — 모든 프로세스 n=6 게놈 추출" }, ProjectInfo { name: "brainwire",   icon: "🧬", personality: "Shaman",        target: "통과율 98%+, 프로토콜 6종+",               strategy: "의식 하드웨어 — 수학으로 뇌를 읽고 쓰기" }, ProjectInfo { name: "fathom",      icon: "🔭", personality: "Oracle",        target: "22렌즈 대시보드 완성",                      strategy: "nexus6 시각화 터미널 — 실시간 렌더링" }, ProjectInfo { name: "token_forge", icon: "🔨", personality: "Sculptor",      target: "r<=0.4 L<=0.05 고정점",                    strategy: "LLM 압축 고정점 — 의미 보존 극한 압축" }, ProjectInfo { name: "air_rs",      icon: "⚙️", personality: "Translator",    target: "스펙 100% 패리티",                          strategy: "Rust 네이티브 게이트 — airgenome 스펙 즉시 추종" }, ProjectInfo { name: "nexus6",      icon: "♾️", personality: "Ouroboros",     target: "모듈 100+, 발견 70k+, 법칙 750+",          strategy: "자기순환 특이점 — 자신을 발견하고 자신을 진화시키는 메타엔진" } ]
 }
 
 // ─── readme 커맨드 ───
@@ -187,7 +179,7 @@ fn cmd_readme() {
     md = md + "\n"
     md = md + "> 🛸d" + to_string(m.max_d) + " 🔭" + to_string(m.module_count) + "모듈 ⚖️" + to_string(m.law_count) + "법칙 📊" + to_string(m.discovery_count) + "발견\n"
     md = md + ">\n"
-    md = md + "> *자동 생성: sync_docs.hexa v" + VERSION + " | " + ts + "*\n"
+    md = md + "> *자동 생성: sync_docs.hexa v" + version + " | " + ts + "*\n"
     md = md + "\n"
 
     // 개요
@@ -256,7 +248,7 @@ fn cmd_readme() {
     md = md + "## 빠른 시작\n"
     md = md + "\n"
     md = md + "```bash\n"
-    md = md + "HEXA=$HOME/Dev/hexa-lang/target/release/hexa\n"
+    md = md + "HEXA=$home/Dev/hexa-lang/target/release/hexa\n"
     md = md + "\n"
     md = md + "# 상태 확인\n"
     md = md + "$HEXA mk2_hexa/native/nexus_hub.hexa status\n"
@@ -283,9 +275,9 @@ fn cmd_readme() {
     md = md + "- [Ko-fi](https://ko-fi.com/dancinlife) | [Sponsor](https://github.com/sponsors/need-singularity)\n"
     md = md + "\n"
     md = md + "---\n"
-    md = md + "*n=6: sigma(6)=12, phi(6)=2, tau(6)=4, J2(6)=24, sopfr(6)=5*\n"
+    md = md + "*n=6: sigma(6)=12, phi(6)=2, tau(6)=4, j2(6)=24, sopfr(6)=5*\n"
 
-    write_file(README_PATH, md)
+    write_file(readme_path, md)
     println("[sync_docs] README.md 생성 완료 (" + to_string(md.len()) + " bytes)")
     println("  모듈: " + to_string(m.module_count) + " | 법칙: " + to_string(m.law_count) + " | 발견: " + to_string(m.discovery_count) + " | max_d: " + to_string(m.max_d))
 }
@@ -294,7 +286,7 @@ fn cmd_readme() {
 
 fn cmd_growth() {
     println("[sync_docs] GROWTH.md 타겟 업데이트 중...")
-    let content = read_file_safe(GROWTH_PATH)
+    let content = read_file_safe(growth_path)
     if content.len() == 0 {
         println("[sync_docs] GROWTH.md 없음 — 스킵")
         return
@@ -319,7 +311,8 @@ fn cmd_growth() {
             let parts = line.split("|")
             if parts.len() > 3 {
                 let target_str = parts[3].trim()
-                let target_val = try { to_int(target_str) } catch e { 200 }
+                let mut target_val = 200
+                try { target_val = to_int(target_str) } catch e {}
                 if actual > target_val {
                     // actual * 2로 새 타겟 설정
                     let new_target = actual * 2
@@ -341,7 +334,8 @@ fn cmd_growth() {
             let parts = line.split("|")
             if parts.len() > 3 {
                 let target_str = parts[3].trim()
-                let target_val = try { to_int(target_str) } catch e { 1000 }
+                let mut target_val = 1000
+                try { target_val = to_int(target_str) } catch e {}
                 let actual_tests = m.module_count * 8  // sigma-tau=8 테스트/모듈
                 if actual_tests > target_val {
                     let new_target = actual_tests * 2
@@ -361,7 +355,7 @@ fn cmd_growth() {
 
     if updated > 0 {
         let new_content = new_lines.join("\n")
-        write_file(GROWTH_PATH, new_content)
+        write_file(growth_path, new_content)
         println("[sync_docs] GROWTH.md 업데이트 완료 (" + to_string(updated) + "개 차원)")
     } else {
         println("[sync_docs] GROWTH.md 타겟 변경 없음 (모든 actual < target)")
@@ -372,7 +366,7 @@ fn cmd_growth() {
 
 fn cmd_projects() {
     println("[sync_docs] projects.json 동기화 중...")
-    let content = read_file_safe(PROJECTS_PATH)
+    let content = read_file_safe(projects_path)
     if content.len() == 0 {
         println("[sync_docs] projects.json 없음 — 스킵")
         return
@@ -382,19 +376,7 @@ fn cmd_projects() {
 
     // 프로젝트별 name→key 매핑 (projects.json의 키 이름)
     // nexus_hub의 name과 projects.json의 key가 다를 수 있음
-    let name_to_key = [
-        "anima:anima",
-        "tecs_l:TECS-L",
-        "sedi:sedi",
-        "papers:papers",
-        "hexa_lang:hexa-lang",
-        "airgenome:airgenome",
-        "brainwire:brainwire",
-        "fathom:fathom",
-        "token_forge:token-forge",
-        "air_rs:air-rs",
-        "nexus6:nexus6"
-    ]
+    let name_to_key = [ "anima:anima", "tecs_l:TECS-L", "sedi:sedi", "papers:papers", "hexa_lang:hexa-lang", "airgenome:airgenome", "brainwire:brainwire", "fathom:fathom", "token_forge:token-forge", "air_rs:air-rs", "nexus6:nexus6" ]
 
     // projects.json에 target/strategy 필드 주입
     // JSON 문자열 조작: 각 프로젝트 블록에서 "root": 뒤에 target/strategy 추가
@@ -455,7 +437,7 @@ fn cmd_projects() {
     }
 
     if injected > 0 {
-        write_file(PROJECTS_PATH, updated_content)
+        write_file(projects_path, updated_content)
         println("[sync_docs] projects.json 업데이트 완료 (" + to_string(injected) + "개 프로젝트에 target/strategy 추가)")
     } else {
         println("[sync_docs] projects.json 변경 없음 (target/strategy 이미 존재하거나 블록 미발견)")
@@ -489,8 +471,9 @@ fn cmd_commit() {
     println("[sync_docs] 자동 커밋 점검 중...")
 
     // git status 확인
-    let status_out = try {
-        exec("git", ["-C", N6_ROOT, "status", "--porcelain"])
+    let mut status_out = ""
+    try {
+        status_out = exec("git -C " + n6_root + " status --porcelain")
     } catch e {
         println("[sync_docs] git status 실패: " + to_string(e))
         return
@@ -556,7 +539,7 @@ fn cmd_commit() {
         let f = files_to_add[ai]
         println("  [add] " + f)
         try {
-            exec("git", ["-C", N6_ROOT, "add", f])
+            exec("git", ["-C", n6_root, "add", f])
         } catch e {
             println("  [warn] add 실패: " + f)
         }
@@ -569,7 +552,7 @@ fn cmd_commit() {
 
     println("[sync_docs] 커밋: " + msg)
     try {
-        exec("git", ["-C", N6_ROOT, "commit", "-m", msg])
+        exec("git", ["-C", n6_root, "commit", "-m", msg])
     } catch e {
         println("[sync_docs] 커밋 실패 (변경 없을 수 있음): " + to_string(e))
         return
@@ -578,7 +561,7 @@ fn cmd_commit() {
     // push
     println("[sync_docs] 푸시 중...")
     try {
-        exec("git", ["-C", N6_ROOT, "push"])
+        exec("git", ["-C", n6_root, "push"])
         println("[sync_docs] 푸시 완료")
     } catch e {
         println("[sync_docs] 푸시 실패 (수동 push 필요): " + to_string(e))
@@ -589,7 +572,7 @@ fn cmd_commit() {
 
 fn cmd_sync() {
     println("╔══════════════════════════════════════════════╗")
-    println("║  SYNC_DOCS — 문서 자동 동기화 v" + VERSION + "        ║")
+    println("║  SYNC_DOCS — 문서 자동 동기화 v" + version + "        ║")
     println("║  " + timestamp() + "                        ║")
     println("╚══════════════════════════════════════════════╝")
     println("")
@@ -644,7 +627,7 @@ if mode == "commit" {
 
 if mode == "help" {
     println("╔══════════════════════════════════════════════╗")
-    println("║  SYNC_DOCS — 문서 자동 동기화 v" + VERSION + "        ║")
+    println("║  SYNC_DOCS — 문서 자동 동기화 v" + version + "        ║")
     println("╚══════════════════════════════════════════════╝")
     println("")
     println("사용법:")
@@ -655,10 +638,10 @@ if mode == "help" {
     println("  hexa sync_docs.hexa commit     변경 파일 자동 커밋+푸시")
     println("")
     println("메트릭 소스:")
-    println("  모듈 수:  ls " + ENGINE_DIR + "/*.hexa")
-    println("  법칙 수:  " + LAWS_PATH)
-    println("  발견 수:  wc -l " + DISCOVERY_LOG)
-    println("  max_d:    " + ALIEN_DIST_PATH)
+    println("  모듈 수:  ls " + engine_dir + "/*.hexa")
+    println("  법칙 수:  " + laws_path)
+    println("  발견 수:  wc -l " + discovery_log)
+    println("  max_d:    " + alien_dist_path)
     println("")
     println("프로젝트 레지스트리: nexus_hub.hexa projects() (11개)")
     println("")
@@ -696,8 +679,8 @@ assert is_allowed_path("src/main.rs") == false
 assert is_allowed_path("random.txt") == false
 
 // n=6 항등식 검증
-assert SIGMA * PHI == N * TAU     // σφ = nτ = 24
-assert J2 == SIGMA * PHI          // J₂ = σφ = 24
+assert sigma * phi == N * tau     // σφ = nτ = 24
+assert j2 == sigma * phi          // J₂ = σφ = 24
 
 println("")
 println("=== sync_docs verified ===")

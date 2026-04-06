@@ -7,43 +7,43 @@
 //       hexa config.hexa section <name>
 
 // ─── 설정 ───
-comptime const HOME_ENV = "HOME"
-comptime const CONFIG_SUBPATH = "/.nexus6/config.toml"
+comptime const home_env = "HOME"
+comptime const config_subpath = "/.nexus6/config.toml"
 
 // ─── 기본값 ───
-comptime const DEFAULT_LOOP_DOMAIN = "number_theory"
-comptime const DEFAULT_LOOP_CYCLES = 1
-comptime const DEFAULT_LOOP_MAX_OUROBOROS = 6
-comptime const DEFAULT_LOOP_MAX_META = 6
-comptime const DEFAULT_LOOP_FORGE_AFTER = 3
+comptime const default_loop_domain = "number_theory"
+comptime const default_loop_cycles = 1
+comptime const default_loop_max_ouroboros = 6
+comptime const default_loop_max_meta = 6
+comptime const default_loop_forge_after = 3
 
-comptime const DEFAULT_DAEMON_INTERVAL = 30
-comptime const DEFAULT_BLOWUP_DOMAIN = "number_theory"
-comptime const DEFAULT_BLOWUP_DEPTH = 6
-comptime const DEFAULT_BLOWUP_MAX_COROLLARIES = 216
-comptime const DEFAULT_BLOWUP_MIN_CONFIDENCE = 0.15
+comptime const default_daemon_interval = 30
+comptime const default_blowup_domain = "number_theory"
+comptime const default_blowup_depth = 6
+comptime const default_blowup_max_corollaries = 216
+comptime const default_blowup_min_confidence = 0.15
 
-comptime const DEFAULT_EVOLUTION_SERENDIPITY = 0.3
-comptime const DEFAULT_EVOLUTION_MIN_VERIFY = 0.5
-comptime const DEFAULT_EVOLUTION_MAX_MUTATIONS = 20
+comptime const default_evolution_serendipity = 0.3
+comptime const default_evolution_min_verify = 0.5
+comptime const default_evolution_max_mutations = 20
 
-comptime const DEFAULT_FORGE_MAX_CANDIDATES = 20
-comptime const DEFAULT_FORGE_MIN_CONFIDENCE = 0.2
-comptime const DEFAULT_FORGE_SIMILARITY = 0.8
+comptime const default_forge_max_candidates = 20
+comptime const default_forge_min_confidence = 0.2
+comptime const default_forge_similarity = 0.8
 
-comptime const DEFAULT_LOG_MAX_BYTES = 1048576
-comptime const DEFAULT_LOG_MAX_FILES = 5
+comptime const default_log_max_bytes = 1048576
+comptime const default_log_max_files = 5
 
 // ─── config 파일 경로 결정 ───
 fn config_path() -> string {
     // env HOME 읽기 시도 — hexa에서는 간이 방법
     // 후보: read_file로 알려진 경로 탐색
-    let home_candidates = env("HOME")
-    home_candidates + CONFIG_SUBPATH
+    let home_candidates = exec("printenv HOME")
+    home_candidates + config_subpath
 }
 
 // ─── 간이 TOML 파서 ───
-// 지원: [section], key = value, key = "string", # 주석
+// 지원, key = value, key = "string", # 주석
 // 중첩 미지원 (flat key 방식: section.key)
 
 struct ConfigEntry {
@@ -58,7 +58,7 @@ fn parse_toml(content: string) -> string {
     let mut current_section = ""
     let mut result = ""
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         // 주석/빈줄 스킵
         if line == "" {
@@ -82,18 +82,18 @@ fn parse_toml(content: string) -> string {
         let eq = line.index_of("=")
         if eq > 0 {
             let key = line.slice(0, eq).trim()
-            let mut val = line.slice(eq + 1, line.length()).trim()
+            let mut val = line.slice(eq + 1, len(line)).trim()
             // 인라인 주석 제거
             let hash = val.index_of("#")
             if hash > 0 {
                 val = val.slice(0, hash).trim()
             }
             // 따옴표 제거
-            if val.length() >= 2 {
+            if len(val) >= 2 {
                 if val.slice(0, 1) == "\"" {
-                    let last = val.slice(val.length() - 1, val.length())
+                    let last = val.slice(len(val) - 1, len(val))
                     if last == "\"" {
-                        val = val.slice(1, val.length() - 1)
+                        val = val.slice(1, len(val) - 1)
                     }
                 }
             }
@@ -110,10 +110,10 @@ fn get_value(parsed: string, key: string) -> string {
     let needle = key + "="
     let lines = parsed.split("\n")
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i]
         if line.index_of(needle) == 0 {
-            return line.slice(needle.length(), line.length())
+            return line.slice(len(needle), len(line))
         }
         i = i + 1
     }
@@ -138,24 +138,24 @@ fn config_get(key: string) -> string {
 
     // 기본값 반환
     match key {
-        "loop.domain" -> DEFAULT_LOOP_DOMAIN,
-        "loop.cycles" -> to_string(DEFAULT_LOOP_CYCLES),
-        "loop.max_ouroboros_cycles" -> to_string(DEFAULT_LOOP_MAX_OUROBOROS),
-        "loop.max_meta_cycles" -> to_string(DEFAULT_LOOP_MAX_META),
-        "loop.forge_after_n_cycles" -> to_string(DEFAULT_LOOP_FORGE_AFTER),
-        "daemon.interval_min" -> to_string(DEFAULT_DAEMON_INTERVAL),
-        "blowup.domain" -> DEFAULT_BLOWUP_DOMAIN,
-        "blowup.max_depth" -> to_string(DEFAULT_BLOWUP_DEPTH),
-        "blowup.max_corollaries" -> to_string(DEFAULT_BLOWUP_MAX_COROLLARIES),
-        "blowup.min_confidence" -> to_string(DEFAULT_BLOWUP_MIN_CONFIDENCE),
-        "evolution.serendipity_ratio" -> to_string(DEFAULT_EVOLUTION_SERENDIPITY),
-        "evolution.min_verification_score" -> to_string(DEFAULT_EVOLUTION_MIN_VERIFY),
-        "evolution.max_mutations_per_cycle" -> to_string(DEFAULT_EVOLUTION_MAX_MUTATIONS),
-        "forge.max_candidates" -> to_string(DEFAULT_FORGE_MAX_CANDIDATES),
-        "forge.min_confidence" -> to_string(DEFAULT_FORGE_MIN_CONFIDENCE),
-        "forge.similarity_threshold" -> to_string(DEFAULT_FORGE_SIMILARITY),
-        "log_rotation.max_bytes" -> to_string(DEFAULT_LOG_MAX_BYTES),
-        "log_rotation.max_files" -> to_string(DEFAULT_LOG_MAX_FILES),
+        "loop.domain" -> default_loop_domain,
+        "loop.cycles" -> to_string(default_loop_cycles),
+        "loop.max_ouroboros_cycles" -> to_string(default_loop_max_ouroboros),
+        "loop.max_meta_cycles" -> to_string(default_loop_max_meta),
+        "loop.forge_after_n_cycles" -> to_string(default_loop_forge_after),
+        "daemon.interval_min" -> to_string(default_daemon_interval),
+        "blowup.domain" -> default_blowup_domain,
+        "blowup.max_depth" -> to_string(default_blowup_depth),
+        "blowup.max_corollaries" -> to_string(default_blowup_max_corollaries),
+        "blowup.min_confidence" -> to_string(default_blowup_min_confidence),
+        "evolution.serendipity_ratio" -> to_string(default_evolution_serendipity),
+        "evolution.min_verification_score" -> to_string(default_evolution_min_verify),
+        "evolution.max_mutations_per_cycle" -> to_string(default_evolution_max_mutations),
+        "forge.max_candidates" -> to_string(default_forge_max_candidates),
+        "forge.min_confidence" -> to_string(default_forge_min_confidence),
+        "forge.similarity_threshold" -> to_string(default_forge_similarity),
+        "log_rotation.max_bytes" -> to_string(default_log_max_bytes),
+        "log_rotation.max_files" -> to_string(default_log_max_files),
         _ -> ""
     }
 }
@@ -171,7 +171,7 @@ fn config_set(key: string, value: string) {
     let mut name = key
     if dot > 0 {
         section = key.slice(0, dot)
-        name = key.slice(dot + 1, key.length())
+        name = key.slice(dot + 1, len(key))
     }
 
     let section_header = "[" + section + "]"
@@ -191,12 +191,12 @@ fn config_set(key: string, value: string) {
     let mut replaced = false
     let mut section_exists = false
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i]
         let trimmed = line.trim()
 
         // 섹션 헤더 체크
-        if trimmed.length() > 0 {
+        if len(trimmed) > 0 {
             if trimmed.slice(0, 1) == "[" {
                 if in_section {
                     if !replaced {
@@ -255,7 +255,7 @@ fn config_set(key: string, value: string) {
 
     let mut out = ""
     let mut j = 0
-    while j < result.length() {
+    while j < len(result) {
         out = out + result[j] + "\n"
         j = j + 1
     }
@@ -274,7 +274,7 @@ fn config_list() {
     let lines = parsed.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line != "" {
             print(line)
@@ -292,7 +292,7 @@ fn config_section(section_name: string) {
     let lines = parsed.split("\n")
     let mut count = 0
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i].trim()
         if line != "" {
             if line.index_of(prefix) == 0 {
@@ -307,34 +307,34 @@ fn config_section(section_name: string) {
         print("(no configured values for [" + section_name + "], showing defaults)")
         match section_name {
             "loop" -> {
-                print("loop.domain=" + DEFAULT_LOOP_DOMAIN)
-                print("loop.cycles=" + to_string(DEFAULT_LOOP_CYCLES))
-                print("loop.max_ouroboros_cycles=" + to_string(DEFAULT_LOOP_MAX_OUROBOROS))
-                print("loop.max_meta_cycles=" + to_string(DEFAULT_LOOP_MAX_META))
-                print("loop.forge_after_n_cycles=" + to_string(DEFAULT_LOOP_FORGE_AFTER))
+                print("loop.domain=" + default_loop_domain)
+                print("loop.cycles=" + to_string(default_loop_cycles))
+                print("loop.max_ouroboros_cycles=" + to_string(default_loop_max_ouroboros))
+                print("loop.max_meta_cycles=" + to_string(default_loop_max_meta))
+                print("loop.forge_after_n_cycles=" + to_string(default_loop_forge_after))
             },
             "daemon" -> {
-                print("daemon.interval_min=" + to_string(DEFAULT_DAEMON_INTERVAL))
+                print("daemon.interval_min=" + to_string(default_daemon_interval))
             },
             "blowup" -> {
-                print("blowup.domain=" + DEFAULT_BLOWUP_DOMAIN)
-                print("blowup.max_depth=" + to_string(DEFAULT_BLOWUP_DEPTH))
-                print("blowup.max_corollaries=" + to_string(DEFAULT_BLOWUP_MAX_COROLLARIES))
-                print("blowup.min_confidence=" + to_string(DEFAULT_BLOWUP_MIN_CONFIDENCE))
+                print("blowup.domain=" + default_blowup_domain)
+                print("blowup.max_depth=" + to_string(default_blowup_depth))
+                print("blowup.max_corollaries=" + to_string(default_blowup_max_corollaries))
+                print("blowup.min_confidence=" + to_string(default_blowup_min_confidence))
             },
             "evolution" -> {
-                print("evolution.serendipity_ratio=" + to_string(DEFAULT_EVOLUTION_SERENDIPITY))
-                print("evolution.min_verification_score=" + to_string(DEFAULT_EVOLUTION_MIN_VERIFY))
-                print("evolution.max_mutations_per_cycle=" + to_string(DEFAULT_EVOLUTION_MAX_MUTATIONS))
+                print("evolution.serendipity_ratio=" + to_string(default_evolution_serendipity))
+                print("evolution.min_verification_score=" + to_string(default_evolution_min_verify))
+                print("evolution.max_mutations_per_cycle=" + to_string(default_evolution_max_mutations))
             },
             "forge" -> {
-                print("forge.max_candidates=" + to_string(DEFAULT_FORGE_MAX_CANDIDATES))
-                print("forge.min_confidence=" + to_string(DEFAULT_FORGE_MIN_CONFIDENCE))
-                print("forge.similarity_threshold=" + to_string(DEFAULT_FORGE_SIMILARITY))
+                print("forge.max_candidates=" + to_string(default_forge_max_candidates))
+                print("forge.min_confidence=" + to_string(default_forge_min_confidence))
+                print("forge.similarity_threshold=" + to_string(default_forge_similarity))
             },
             "log_rotation" -> {
-                print("log_rotation.max_bytes=" + to_string(DEFAULT_LOG_MAX_BYTES))
-                print("log_rotation.max_files=" + to_string(DEFAULT_LOG_MAX_FILES))
+                print("log_rotation.max_bytes=" + to_string(default_log_max_bytes))
+                print("log_rotation.max_files=" + to_string(default_log_max_files))
             },
             _ -> {
                 print("unknown section: " + section_name)
@@ -362,7 +362,7 @@ fn config_init() {
 // ─── CLI ───
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("config.hexa — configuration file management")
         print("usage:")
         print("  hexa config.hexa get <key>           — get value (section.key format)")
@@ -377,7 +377,7 @@ fn main() {
     let cmd = a[1]
     match cmd {
         "get" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa config.hexa get <key>")
                 return
             }
@@ -390,7 +390,7 @@ fn main() {
             }
         },
         "set" -> {
-            if a.length() < 4 {
+            if len(a) < 4 {
                 print("usage: hexa config.hexa set <key> <value>")
                 return
             }
@@ -400,7 +400,7 @@ fn main() {
             config_list()
         },
         "section" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa config.hexa section <name>")
                 return
             }

@@ -16,7 +16,7 @@ struct KnowledgeEntry {
     n6_score: float,
     verified: bool,
     ref_count: int,        // 관련 엔트리 참조 수
-    refs: [string]         // 관련 엔트리 ID 리스트
+    refs: str         // 관련 엔트리 ID 리스트
 }
 
 fn make_entry(id: string, etype: string, content: string, conf: float, n6: float, verified: bool) -> KnowledgeEntry {
@@ -33,7 +33,7 @@ fn make_entry(id: string, etype: string, content: string, conf: float, n6: float
     }
 }
 
-fn make_entry_with_refs(id: string, etype: string, content: string, conf: float, n6: float, verified: bool, refs: [string]) -> KnowledgeEntry {
+fn make_entry_with_refs(id: string, etype: string, content: string, conf: float, n6: float, verified: bool, refs) -> KnowledgeEntry {
     KnowledgeEntry {
         id: id,
         entry_type: etype,
@@ -42,7 +42,7 @@ fn make_entry_with_refs(id: string, etype: string, content: string, conf: float,
         confidence: conf,
         n6_score: n6,
         verified: verified,
-        ref_count: length(refs),
+        ref_count: len(refs),
         refs: refs
     }
 }
@@ -52,7 +52,7 @@ fn make_entry_with_refs(id: string, etype: string, content: string, conf: float,
 // ──────────────────────────────────────
 
 struct KnowledgeBase {
-    entries: [KnowledgeEntry],
+    entries: str,
     path: string
 }
 
@@ -68,17 +68,17 @@ fn kb_add(kb: KnowledgeBase, entry: KnowledgeEntry) -> KnowledgeBase {
 }
 
 fn kb_len(kb: KnowledgeBase) -> int {
-    length(kb.entries)
+    len(kb.entries)
 }
 
 fn kb_is_empty(kb: KnowledgeBase) -> bool {
-    length(kb.entries) == 0
+    len(kb.entries) == 0
 }
 
 // ID로 엔트리 검색 (인덱스 반환, 없으면 -1)
 fn kb_find(kb: KnowledgeBase, id: string) -> int {
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if kb.entries[i].id == id { return i }
         i = i + 1
     }
@@ -98,7 +98,7 @@ fn kb_get(kb: KnowledgeBase, id: string) -> KnowledgeEntry {
 fn kb_save(kb: KnowledgeBase) -> bool {
     let mut content = ""
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         let e = kb.entries[i]
         // 간이 JSON 직렬화
         let line = "{\"id\":\"" + e.id + "\",\"type\":\"" + e.entry_type + "\",\"content\":\"" + e.content + "\",\"confidence\":" + to_string(e.confidence) + ",\"n6_score\":" + to_string(e.n6_score) + ",\"verified\":" + to_string(e.verified) + "}"
@@ -118,7 +118,7 @@ fn kb_load(path: string) -> KnowledgeBase {
     let lines = split(content, "\n")
     let mut entries = []
     let mut i = 0
-    while i < length(lines) {
+    while i < len(lines) {
         let line = trim(lines[i])
         if str_len(line) > 2 {
             // 간이 파싱 — 프로덕션에서는 json_parse 사용
@@ -139,15 +139,13 @@ fn parse_entry_line(line: string) -> KnowledgeEntry {
 // 키워드 검색
 // ──────────────────────────────────────
 
-fn kb_search(kb: KnowledgeBase, query: string) -> [int] {
+fn kb_search(kb: KnowledgeBase, query: string) {
     let q = to_lower(query)
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         let e = kb.entries[i]
-        if contains(to_lower(e.content), q) ||
-           contains(to_lower(e.entry_type), q) ||
-           contains(to_lower(e.id), q) {
+        if contains(to_lower(e.content), q) || contains(to_lower(e.entry_type), q) || contains(to_lower(e.id), q) {
             result = append(result, i)
         }
         i = i + 1
@@ -156,10 +154,10 @@ fn kb_search(kb: KnowledgeBase, query: string) -> [int] {
 }
 
 // 타입별 필터
-fn kb_by_type(kb: KnowledgeBase, etype: string) -> [int] {
+fn kb_by_type(kb: KnowledgeBase, etype: string) {
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if kb.entries[i].entry_type == etype {
             result = append(result, i)
         }
@@ -169,10 +167,10 @@ fn kb_by_type(kb: KnowledgeBase, etype: string) -> [int] {
 }
 
 // 검증된 엔트리만
-fn kb_verified_only(kb: KnowledgeBase) -> [int] {
+fn kb_verified_only(kb: KnowledgeBase) {
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if kb.entries[i].verified {
             result = append(result, i)
         }
@@ -197,7 +195,7 @@ struct KnowledgeStats {
 }
 
 fn kb_stats(kb: KnowledgeBase) -> KnowledgeStats {
-    let total = length(kb.entries)
+    let total = len(kb.entries)
     let mut verified = 0
     let mut sum_conf = 0.0
     let mut sum_n6 = 0.0
@@ -241,14 +239,14 @@ fn kb_stats(kb: KnowledgeBase) -> KnowledgeStats {
 // ──────────────────────────────────────
 
 // entry_id에서 depth 홉 이내의 관련 엔트리 (BFS)
-fn query_related(kb: KnowledgeBase, entry_id: string, depth: int) -> [int] {
+fn query_related(kb: KnowledgeBase, entry_id: string, depth: int) {
     let mut visited = [entry_id]
     let mut queue_ids = [entry_id]
     let mut queue_depths = [0]
     let mut result = []
     let mut front = 0
 
-    while front < length(queue_ids) {
+    while front < len(queue_ids) {
         let current_id = queue_ids[front]
         let current_depth = queue_depths[front]
         front = front + 1
@@ -265,7 +263,7 @@ fn query_related(kb: KnowledgeBase, entry_id: string, depth: int) -> [int] {
         if current_depth < depth {
             let entry = kb.entries[idx]
             let mut r = 0
-            while r < length(entry.refs) {
+            while r < len(entry.refs) {
                 let ref_id = entry.refs[r]
                 if !list_contains(visited, ref_id) {
                     visited = append(visited, ref_id)
@@ -281,10 +279,10 @@ fn query_related(kb: KnowledgeBase, entry_id: string, depth: int) -> [int] {
 }
 
 // 미검증 엔트리
-fn query_unverified(kb: KnowledgeBase) -> [int] {
+fn query_unverified(kb: KnowledgeBase) {
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if !kb.entries[i].verified {
             result = append(result, i)
         }
@@ -294,10 +292,10 @@ fn query_unverified(kb: KnowledgeBase) -> [int] {
 }
 
 // 고신뢰도 엔트리
-fn query_high_confidence(kb: KnowledgeBase, threshold: float) -> [int] {
+fn query_high_confidence(kb: KnowledgeBase, threshold: float) {
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if kb.entries[i].confidence >= threshold {
             result = append(result, i)
         }
@@ -307,10 +305,10 @@ fn query_high_confidence(kb: KnowledgeBase, threshold: float) -> [int] {
 }
 
 // 고 n6 점수 엔트리
-fn query_high_n6(kb: KnowledgeBase, threshold: float) -> [int] {
+fn query_high_n6(kb: KnowledgeBase, threshold: float) {
     let mut result = []
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         if kb.entries[i].n6_score >= threshold {
             result = append(result, i)
         }
@@ -320,9 +318,9 @@ fn query_high_n6(kb: KnowledgeBase, threshold: float) -> [int] {
 }
 
 // 문자열 리스트에 항목이 포함되어 있는지
-pure fn list_contains(list: [string], item: string) -> bool {
+pure fn list_contains(list, item: string) -> bool {
     let mut i = 0
-    while i < length(list) {
+    while i < len(list) {
         if list[i] == item { return true }
         i = i + 1
     }
@@ -335,19 +333,19 @@ pure fn list_contains(list: [string], item: string) -> bool {
 
 struct IndexEntry {
     token: string,
-    entry_ids: [string]
+    entry_ids: str
 }
 
 struct KnowledgeIndex {
-    entries: [IndexEntry]
+    entries: str
 }
 
 // 간이 토크나이저: 공백 + 구두점 분리, 소문자, 2자 이상
-fn tokenize(text: string) -> [string] {
+fn tokenize(text: string) {
     let words = split(to_lower(text), " ")
     let mut result = []
     let mut i = 0
-    while i < length(words) {
+    while i < len(words) {
         let w = trim(words[i])
         if str_len(w) >= 2 {
             result = append(result, w)
@@ -357,14 +355,14 @@ fn tokenize(text: string) -> [string] {
     result
 }
 
-pure fn str_len(s: string) -> int { length(s) }
+pure fn str_len(s: string) -> int { len(s) }
 
 // 인덱스 구축
 fn index_build(kb: KnowledgeBase) -> KnowledgeIndex {
     let mut idx_entries = []
 
     let mut i = 0
-    while i < length(kb.entries) {
+    while i < len(kb.entries) {
         let e = kb.entries[i]
         let tokens = tokenize(e.content)
 
@@ -372,7 +370,7 @@ fn index_build(kb: KnowledgeBase) -> KnowledgeIndex {
         let all_tokens = append(tokens, to_lower(e.entry_type))
 
         let mut t = 0
-        while t < length(all_tokens) {
+        while t < len(all_tokens) {
             let token = all_tokens[t]
             let pos = index_find_token(idx_entries, token)
             if pos < 0 {
@@ -388,9 +386,9 @@ fn index_build(kb: KnowledgeBase) -> KnowledgeIndex {
     KnowledgeIndex { entries: idx_entries }
 }
 
-fn index_find_token(entries: [IndexEntry], token: string) -> int {
+fn index_find_token(entries, token: string) -> int {
     let mut i = 0
-    while i < length(entries) {
+    while i < len(entries) {
         if entries[i].token == token { return i }
         i = i + 1
     }
@@ -398,9 +396,9 @@ fn index_find_token(entries: [IndexEntry], token: string) -> int {
 }
 
 // AND 검색: 모든 쿼리 토큰을 포함하는 엔트리 ID
-fn index_lookup(idx: KnowledgeIndex, query: string) -> [string] {
+fn index_lookup(idx: KnowledgeIndex, query: string) {
     let tokens = tokenize(query)
-    if length(tokens) == 0 { return [] }
+    if len(tokens) == 0 { return [] }
 
     // 첫 토큰의 ID 집합
     let first_pos = index_find_token(idx.entries, tokens[0])
@@ -409,7 +407,7 @@ fn index_lookup(idx: KnowledgeIndex, query: string) -> [string] {
 
     // 나머지 토큰과 교차
     let mut t = 1
-    while t < length(tokens) {
+    while t < len(tokens) {
         let pos = index_find_token(idx.entries, tokens[t])
         if pos < 0 { return [] }
         let other = idx.entries[pos].entry_ids
@@ -421,10 +419,10 @@ fn index_lookup(idx: KnowledgeIndex, query: string) -> [string] {
 }
 
 // 두 문자열 리스트의 교집합
-fn intersect_lists(a: [string], b: [string]) -> [string] {
+fn intersect_lists(a, b) {
     let mut result = []
     let mut i = 0
-    while i < length(a) {
+    while i < len(a) {
         if list_contains(b, a[i]) {
             result = append(result, a[i])
         }
@@ -434,7 +432,7 @@ fn intersect_lists(a: [string], b: [string]) -> [string] {
 }
 
 fn index_token_count(idx: KnowledgeIndex) -> int {
-    length(idx.entries)
+    len(idx.entries)
 }
 
 // ──────────────────────────────────────
@@ -455,26 +453,26 @@ assert kb_find(kb, "nonexistent") == -1
 
 // 키워드 검색
 let search_result = kb_search(kb, "physics")
-assert length(search_result) == 2  // e1, e3
+assert len(search_result) == 2  // e1, e3
 
 // 타입별 필터
 let constants = kb_by_type(kb, "constant")
-assert length(constants) == 2
+assert len(constants) == 2
 
 let patterns = kb_by_type(kb, "pattern")
-assert length(patterns) == 1
+assert len(patterns) == 1
 
 // 검증된 엔트리
 let verified = kb_verified_only(kb)
-assert length(verified) == 2  // e1, e3
+assert len(verified) == 2  // e1, e3
 
 // 미검증
 let unverified = query_unverified(kb)
-assert length(unverified) == 1  // e2
+assert len(unverified) == 1  // e2
 
 // 고신뢰도
 let high_conf = query_high_confidence(kb, 0.8)
-assert length(high_conf) == 2  // e1(0.9), e3(0.85)
+assert len(high_conf) == 2  // e1(0.9), e3(0.85)
 
 // 통계
 let stats = kb_stats(kb)
@@ -491,10 +489,10 @@ kb2 = kb_add(kb2, make_entry_with_refs("c", "constant", "child2", 0.7, 0.6, true
 kb2 = kb_add(kb2, make_entry_with_refs("d", "constant", "grandchild", 0.6, 0.5, true, []))
 
 let related_d1 = query_related(kb2, "a", 1)
-assert length(related_d1) == 2  // b, c (depth 1만)
+assert len(related_d1) == 2  // b, c (depth 1만)
 
 let related_d2 = query_related(kb2, "a", 2)
-assert length(related_d2) == 3  // b, c, d (depth 2까지)
+assert len(related_d2) == 3  // b, c, d (depth 2까지)
 
 // 역인덱스
 let idx = index_build(kb)
@@ -508,21 +506,21 @@ assert list_contains(physics_sigma, "e1")
 assert !list_contains(physics_sigma, "e2")
 
 let no_match = index_lookup(idx, "nonexistent")
-assert length(no_match) == 0
+assert len(no_match) == 0
 
 println("=== knowledge verified ===")
 println("kb_len:", kb_len(kb))
-println("search 'physics':", length(search_result))
-println("by_type 'constant':", length(constants))
-println("verified_only:", length(verified))
-println("unverified:", length(unverified))
-println("high_confidence(0.8):", length(high_conf))
+println("search 'physics':", len(search_result))
+println("by_type 'constant':", len(constants))
+println("verified_only:", len(verified))
+println("unverified:", len(unverified))
+println("high_confidence(0.8):", len(high_conf))
 println("stats.total:", stats.total)
 println("stats.verified:", stats.verified_count)
-println("related(a, depth=1):", length(related_d1))
-println("related(a, depth=2):", length(related_d2))
-println("index_lookup 'sigma':", length(sigma_results))
-println("index_lookup 'sigma physics':", length(physics_sigma))
+println("related(a, depth=1):", len(related_d1))
+println("related(a, depth=2):", len(related_d2))
+println("index_lookup 'sigma':", len(sigma_results))
+println("index_lookup 'sigma physics':", len(physics_sigma))
 
 theorem knowledge_graph_connected {
     // BFS는 연결 성분 내 모든 노드 도달

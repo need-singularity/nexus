@@ -13,19 +13,19 @@
 // 상수
 // ════════════════════════════════════════════════════════════════
 
-comptime const BASE_DIR = "shared/cycle"
-comptime const TOPOLOGY_FILE = "shared/cycle/topology.jsonl"
-comptime const EDGES_FILE = "shared/cycle/edges.jsonl"
-comptime const BUDGET_FILE = "shared/cycle/budget.json"
-comptime const WAL_FILE = "shared/cycle/wal.jsonl"
-comptime const HALT_FILE = "shared/cycle/halt"
-comptime const LOCK_FILE = "shared/cycle/state.lock"
+comptime const base_dir = "shared/cycle"
+comptime const topology_file = "shared/cycle/topology.jsonl"
+comptime const edges_file = "shared/cycle/edges.jsonl"
+comptime const budget_file = "shared/cycle/budget.json"
+comptime const wal_file = "shared/cycle/wal.jsonl"
+comptime const halt_file = "shared/cycle/halt"
+comptime const lock_file = "shared/cycle/state.lock"
 
-comptime const DEFAULT_EPS = 0.35
-comptime const DEFAULT_MAX_POINTS = 50000
-comptime const DEFAULT_CPU_BUDGET = 86400
-comptime const BOUNDARY_TOP_K = 5
-comptime const META_FIXED_POINT = 0.333333333
+comptime const default_eps = 0.35
+comptime const default_max_points = 50000
+comptime const default_cpu_budget = 86400
+comptime const boundary_top_k = 5
+comptime const meta_fixed_point = 0.333333333
 
 // ════════════════════════════════════════════════════════════════
 // djb2 해시 (blake3 simhash 대체)
@@ -36,11 +36,11 @@ pure fn djb2_hash(text: string) -> int {
     let mut h = 5381
     let chars = text.split("")
     let mut i = 0
-    while i < chars.length() {
+    while i < len(chars) {
         let c = chars[i]
         // djb2: h = h * 33 + char_code
         // hexa에서 char→int 근사: 문자열 길이 + 위치 기반
-        h = h * 33 + c.length() + i
+        h = h * 33 + len(c) + i
         i = i + 1
     }
     if h < 0 { h = 0 - h }
@@ -51,13 +51,13 @@ pure fn djb2_hash(text: string) -> int {
 // 토큰 단위 해시를 비트 투표로 합산
 pure fn simhash(text: string) -> int {
     let tokens = text.split(" ")
-    if tokens.length() == 0 { return 0 }
+    if len(tokens) == 0 { return 0 }
 
     let mut hash_acc = 0
 
     // 1-gram
     let mut i = 0
-    while i < tokens.length() {
+    while i < len(tokens) {
         let h = djb2_hash(tokens[i])
         hash_acc = hash_acc + h
         i = i + 1
@@ -65,7 +65,7 @@ pure fn simhash(text: string) -> int {
 
     // 2-gram
     let mut j = 0
-    while j < tokens.length() - 1 {
+    while j < len(tokens) - 1 {
         let bigram = tokens[j] + " " + tokens[j + 1]
         let h = djb2_hash(bigram)
         hash_acc = hash_acc + h
@@ -74,7 +74,7 @@ pure fn simhash(text: string) -> int {
 
     // 3-gram
     let mut k = 0
-    while k < tokens.length() - 2 {
+    while k < len(tokens) - 2 {
         let trigram = tokens[k] + " " + tokens[k + 1] + " " + tokens[k + 2]
         let h = djb2_hash(trigram)
         hash_acc = hash_acc + h
@@ -99,7 +99,7 @@ pure fn hash_distance(a: int, b: int) -> float {
 // ════════════════════════════════════════════════════════════════
 
 struct Singularity {
-    invariant: string,
+    invariant_str: string,
     confidence: float,
     novelty: float,
     depth_reached: int
@@ -139,8 +139,8 @@ fn budget_default() -> Budget {
         tick_count: 0,
         cpu_sec_used: 0,
         total_points: 0,
-        max_total_points: DEFAULT_MAX_POINTS,
-        global_cpu_sec_budget: DEFAULT_CPU_BUDGET
+        max_total_points: default_max_points,
+        global_cpu_sec_budget: default_cpu_budget
     }
 }
 
@@ -163,11 +163,7 @@ fn budget_commit(b: Budget, elapsed_sec: int) -> Budget {
 
 // Budget ↔ JSON 직렬화
 fn budget_to_json(b: Budget) -> string {
-    "{\"tick_count\":" + to_string(b.tick_count) +
-    ",\"cpu_sec_used\":" + to_string(b.cpu_sec_used) +
-    ",\"total_points\":" + to_string(b.total_points) +
-    ",\"max_total_points\":" + to_string(b.max_total_points) +
-    ",\"global_cpu_sec_budget\":" + to_string(b.global_cpu_sec_budget) + "}"
+    "{\"tick_count\":" + to_string(b.tick_count) + ",\"cpu_sec_used\":" + to_string(b.cpu_sec_used) + ",\"total_points\":" + to_string(b.total_points) + ",\"max_total_points\":" + to_string(b.max_total_points) + ",\"global_cpu_sec_budget\":" + to_string(b.global_cpu_sec_budget) + "}"
 }
 
 fn budget_from_json(json: string) -> Budget {
@@ -181,8 +177,8 @@ fn budget_from_json(json: string) -> Budget {
         tick_count: tc,
         cpu_sec_used: cs,
         total_points: tp,
-        max_total_points: if mp > 0 { mp } else { DEFAULT_MAX_POINTS },
-        global_cpu_sec_budget: if gb > 0 { gb } else { DEFAULT_CPU_BUDGET }
+        max_total_points: if mp > 0 { mp } else { default_max_points },
+        global_cpu_sec_budget: if gb > 0 { gb } else { default_cpu_budget }
     }
 }
 
@@ -194,14 +190,14 @@ fn budget_from_json(json: string) -> Budget {
 fn extract_int_field(json: string, key: string) -> int {
     let needle = "\"" + key + "\":"
     let parts = json.split(needle)
-    if parts.length() < 2 { return 0 }
+    if len(parts) < 2 { return 0 }
     let after = parts[1]
     // 숫자 부분만 추출 (콤마/}까지)
     let mut num_str = ""
     let chars = after.split("")
     let mut i = 0
     let mut done = false
-    while i < chars.length() && !done {
+    while i < len(chars) && !done {
         let c = chars[i]
         if c == "," || c == "}" || c == " " || c == "\n" {
             done = true
@@ -210,7 +206,7 @@ fn extract_int_field(json: string, key: string) -> int {
         }
         i = i + 1
     }
-    if num_str.length() == 0 { return 0 }
+    if len(num_str) == 0 { return 0 }
     to_int(num_str)
 }
 
@@ -218,10 +214,10 @@ fn extract_int_field(json: string, key: string) -> int {
 fn extract_str_field(json: string, key: string) -> string {
     let needle = "\"" + key + "\":\""
     let parts = json.split(needle)
-    if parts.length() < 2 { return "" }
+    if len(parts) < 2 { return "" }
     let after = parts[1]
     let end_parts = after.split("\"")
-    if end_parts.length() == 0 { return "" }
+    if len(end_parts) == 0 { return "" }
     end_parts[0]
 }
 
@@ -229,13 +225,13 @@ fn extract_str_field(json: string, key: string) -> string {
 fn extract_float_field(json: string, key: string) -> float {
     let needle = "\"" + key + "\":"
     let parts = json.split(needle)
-    if parts.length() < 2 { return 0.0 }
+    if len(parts) < 2 { return 0.0 }
     let after = parts[1]
     let mut num_str = ""
     let chars = after.split("")
     let mut i = 0
     let mut done = false
-    while i < chars.length() && !done {
+    while i < len(chars) && !done {
         let c = chars[i]
         if c == "," || c == "}" || c == " " || c == "\n" {
             done = true
@@ -244,7 +240,7 @@ fn extract_float_field(json: string, key: string) -> float {
         }
         i = i + 1
     }
-    if num_str.length() == 0 { return 0.0 }
+    if len(num_str) == 0 { return 0.0 }
     to_float(num_str)
 }
 
@@ -253,16 +249,7 @@ fn extract_float_field(json: string, key: string) -> float {
 // ════════════════════════════════════════════════════════════════
 
 fn point_to_json(p: Point) -> string {
-    "{\"id\":\"" + p.id +
-    "\",\"domain\":\"" + p.domain +
-    "\",\"seed_from\":\"" + p.seed_from +
-    "\",\"simhash\":" + to_string(p.simhash) +
-    ",\"invariant\":\"" + p.singularity.invariant +
-    "\",\"confidence\":" + to_string(p.singularity.confidence) +
-    ",\"novelty\":" + to_string(p.singularity.novelty) +
-    ",\"depth_reached\":" + to_string(p.singularity.depth_reached) +
-    ",\"discovered_at_tick\":" + to_string(p.discovered_at_tick) +
-    ",\"ts\":\"" + p.ts + "\"}"
+    "{\"id\":\"" + p.id + "\",\"domain\":\"" + p.domain + "\",\"seed_from\":\"" + p.seed_from + "\",\"simhash\":" + to_string(p.simhash) + ",\"invariant\":\"" + p.singularity.invariant_str + "\",\"confidence\":" + to_string(p.singularity.confidence) + ",\"novelty\":" + to_string(p.singularity.novelty) + ",\"depth_reached\":" + to_string(p.singularity.depth_reached) + ",\"discovered_at_tick\":" + to_string(p.discovered_at_tick) + ",\"ts\":\"" + p.ts + "\"}"
 }
 
 fn point_from_json(json: string) -> Point {
@@ -282,7 +269,7 @@ fn point_from_json(json: string) -> Point {
         seed_from: seed_from,
         simhash: sh,
         singularity: Singularity {
-            invariant: inv,
+            invariant_str: inv,
             confidence: conf,
             novelty: nov,
             depth_reached: depth
@@ -293,10 +280,7 @@ fn point_from_json(json: string) -> Point {
 }
 
 fn edge_to_json(e: Edge) -> string {
-    "{\"from\":\"" + e.from_id +
-    "\",\"to\":\"" + e.to_id +
-    "\",\"distance\":" + to_string(e.distance) +
-    ",\"ts\":\"" + e.ts + "\"}"
+    "{\"from\":\"" + e.from_id + "\",\"to\":\"" + e.to_id + "\",\"distance\":" + to_string(e.distance) + ",\"ts\":\"" + e.ts + "\"}"
 }
 
 fn edge_from_json(json: string) -> Edge {
@@ -313,16 +297,16 @@ fn edge_from_json(json: string) -> Edge {
 
 // 토폴로지 로드 — JSONL 파일에서 포인트/엣지 읽기
 fn load_points() -> list {
-    let content = read_file(TOPOLOGY_FILE)
-    if content.length() == 0 { return [] }
+    let content = read_file(topology_file)
+    if len(content) == 0 { return [] }
     let lines = content.split("\n")
     let mut points = []
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i]
-        if line.length() > 2 && line.contains("\"id\"") {
+        if len(line) > 2 && line.contains("\"id\"") {
             let p = point_from_json(line)
-            if p.id.length() > 0 {
+            if p.len(id) > 0 {
                 points = points + [p]
             }
         }
@@ -332,16 +316,16 @@ fn load_points() -> list {
 }
 
 fn load_edges() -> list {
-    let content = read_file(EDGES_FILE)
-    if content.length() == 0 { return [] }
+    let content = read_file(edges_file)
+    if len(content) == 0 { return [] }
     let lines = content.split("\n")
     let mut edges = []
     let mut i = 0
-    while i < lines.length() {
+    while i < len(lines) {
         let line = lines[i]
-        if line.length() > 2 && line.contains("\"from\"") {
+        if len(line) > 2 && line.contains("\"from\"") {
             let e = edge_from_json(line)
-            if e.from_id.length() > 0 {
+            if e.len(from_id) > 0 {
                 edges = edges + [e]
             }
         }
@@ -352,11 +336,11 @@ fn load_edges() -> list {
 
 // 새 포인트 ID 생성
 fn next_point_id(points: list) -> string {
-    let n = points.length()
+    let n = len(points)
     let padded = to_string(n)
     // 0-패딩 6자리
     let mut id = "p_"
-    let pad_len = 6 - padded.length()
+    let pad_len = 6 - len(padded)
     let mut p = 0
     while p < pad_len {
         id = id + "0"
@@ -367,7 +351,7 @@ fn next_point_id(points: list) -> string {
 
 // 포인트 생성 + simhash 계산
 fn make_point(points: list, domain: string, seed_from: string, sing: Singularity, tick: int, ts: string) -> Point {
-    let h = simhash(sing.invariant)
+    let h = simhash(sing.invariant_str)
     Point {
         id: next_point_id(points),
         domain: domain,
@@ -383,7 +367,7 @@ fn make_point(points: list, domain: string, seed_from: string, sing: Singularity
 fn compute_new_edges(points: list, new_point: Point, eps: float, ts: string) -> list {
     let mut new_edges = []
     let mut i = 0
-    while i < points.length() {
+    while i < len(points) {
         let existing = points[i]
         let d = hash_distance(new_point.simhash, existing.simhash)
         if d <= eps {
@@ -404,7 +388,7 @@ fn compute_new_edges(points: list, new_point: Point, eps: float, ts: string) -> 
 fn neighbors(edges: list, point_id: string) -> list {
     let mut result = []
     let mut i = 0
-    while i < edges.length() {
+    while i < len(edges) {
         let e = edges[i]
         if e.from_id == point_id {
             result = result + [e.to_id]
@@ -423,17 +407,17 @@ fn neighbors(edges: list, point_id: string) -> list {
 
 fn wal_tick_start(tick_id: int, ts: string) {
     let entry = "{\"kind\":\"tick_start\",\"tick_id\":" + to_string(tick_id) + ",\"ts\":\"" + ts + "\"}"
-    append_file(WAL_FILE, entry + "\n")
+    append_file(wal_file, entry + "\n")
 }
 
 fn wal_tick_complete(tick_id: int, point_id: string, ts: string) {
     let entry = "{\"kind\":\"tick_complete\",\"tick_id\":" + to_string(tick_id) + ",\"point_id\":\"" + point_id + "\",\"ts\":\"" + ts + "\"}"
-    append_file(WAL_FILE, entry + "\n")
+    append_file(wal_file, entry + "\n")
 }
 
 fn wal_tick_skipped(tick_id: int, reason: string, ts: string) {
     let entry = "{\"kind\":\"tick_skipped\",\"tick_id\":" + to_string(tick_id) + ",\"reason\":\"" + reason + "\",\"ts\":\"" + ts + "\"}"
-    append_file(WAL_FILE, entry + "\n")
+    append_file(wal_file, entry + "\n")
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -441,11 +425,11 @@ fn wal_tick_skipped(tick_id: int, reason: string, ts: string) {
 // ════════════════════════════════════════════════════════════════
 
 fn check_halt() -> bool {
-    let content = read_file(HALT_FILE)
+    let content = read_file(halt_file)
     // halt 파일이 존재하면(빈 내용이라도) true
     // read_file은 파일 없으면 빈 문자열 반환 —
     // 실제로는 파일 존재 여부를 length로 판단 불가하므로 마커 사용
-    content.length() >= 0 && file_exists(HALT_FILE)
+    len(content) >= 0 && file_exists(halt_file)
 }
 
 // 파일 존재 확인 (read_file 시도 후 내용 검사)
@@ -470,27 +454,27 @@ struct BoundaryCandidate {
 
 // 경계 후보 계산: 이웃 수가 적을수록 높은 점수
 fn compute_boundary_candidates(points: list, edges: list) -> list {
-    if points.length() == 0 { return [] }
+    if len(points) == 0 { return [] }
 
     // 각 포인트의 이웃 수 계산
     let mut counts = []
     let mut total_count = 0
     let mut i = 0
-    while i < points.length() {
+    while i < len(points) {
         let n = neighbors(edges, points[i].id)
-        let nc = n.length()
+        let nc = len(n)
         counts = counts + [nc]
         total_count = total_count + nc
         i = i + 1
     }
 
     // 기대 밀도 (평균 이웃 수)
-    let expected = if total_count == 0 { 1.0 } else { to_float(total_count) / to_float(points.length()) }
+    let expected = if total_count == 0 { 1.0 } else { to_float(total_count) / to_float(len(points)) }
 
     // 경계 점수 = 1 - (이웃/기대), [0, 1] 클램프
     let mut candidates = []
     let mut j = 0
-    while j < points.length() {
+    while j < len(points) {
         let nc = counts[j]
         let interior = to_float(nc) / expected
         let mut score = 1.0 - interior
@@ -512,10 +496,10 @@ fn boundary_top_k(candidates: list, k: int) -> list {
     // 간단한 선택 정렬 (내림차순)
     let mut sorted = candidates
     let mut i = 0
-    while i < sorted.length() {
+    while i < len(sorted) {
         let mut max_idx = i
         let mut j = i + 1
-        while j < sorted.length() {
+        while j < len(sorted) {
             if sorted[j].score > sorted[max_idx].score {
                 max_idx = j
             }
@@ -531,7 +515,7 @@ fn boundary_top_k(candidates: list, k: int) -> list {
     // k개만 반환
     let mut result = []
     let mut m = 0
-    let limit = if k < sorted.length() { k } else { sorted.length() }
+    let limit = if k < len(sorted) { k } else { len(sorted) }
     while m < limit {
         result = result + [sorted[m]]
         m = m + 1
@@ -541,11 +525,11 @@ fn boundary_top_k(candidates: list, k: int) -> list {
 
 // 가중 샘플링 (결정적 난수)
 fn sample_weighted(candidates: list, rng_seed: int) -> string {
-    if candidates.length() == 0 { return "" }
+    if len(candidates) == 0 { return "" }
 
     let mut total = 0.0
     let mut i = 0
-    while i < candidates.length() {
+    while i < len(candidates) {
         let mut s = candidates[i].score
         if s < 0.000001 { s = 0.000001 }
         total = total + s
@@ -558,14 +542,14 @@ fn sample_weighted(candidates: list, rng_seed: int) -> string {
 
     let mut acc = 0.0
     let mut j = 0
-    while j < candidates.length() {
+    while j < len(candidates) {
         let mut s = candidates[j].score
         if s < 0.000001 { s = 0.000001 }
         acc = acc + s
         if r <= acc { return candidates[j].point_id }
         j = j + 1
     }
-    candidates[candidates.length() - 1].point_id
+    candidates[len(candidates) - 1].point_id
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -605,7 +589,7 @@ fn uf_union(parent: list, a: int, b: int) -> list {
     // parent[ra] = rb
     let mut new_parent = []
     let mut i = 0
-    while i < parent.length() {
+    while i < len(parent) {
         if i == ra {
             new_parent = new_parent + [rb]
         } else {
@@ -626,7 +610,7 @@ struct ConvergenceCluster {
 }
 
 fn find_convergence(points: list, eps: float, min_domains: int) -> list {
-    let n = points.length()
+    let n = len(points)
     if n == 0 { return [] }
 
     // simhash 배열
@@ -664,7 +648,7 @@ fn find_convergence(points: list, eps: float, min_domains: int) -> list {
         // root가 이미 등록됐는지 검색
         let mut found_idx = -1
         let mut si = 0
-        while si < cluster_roots.length() {
+        while si < len(cluster_roots) {
             if cluster_roots[si] == root {
                 found_idx = si
             }
@@ -682,21 +666,21 @@ fn find_convergence(points: list, eps: float, min_domains: int) -> list {
     // 도메인 다양성 필터
     let mut clusters = []
     let mut ri = 0
-    while ri < cluster_roots.length() {
+    while ri < len(cluster_roots) {
         let members = cluster_members[ri]
-        if members.length() < 2 {
+        if len(members) < 2 {
             ri = ri + 1
             // while 계속
         } else {
             // 도메인 수집 (중복 제거)
             let mut domains = []
             let mut mi = 0
-            while mi < members.length() {
+            while mi < len(members) {
                 let dom = points[members[mi]].domain
                 // 중복 체크
                 let mut dup = false
                 let mut di = 0
-                while di < domains.length() {
+                while di < len(domains) {
                     if domains[di] == dom { dup = true }
                     di = di + 1
                 }
@@ -706,20 +690,20 @@ fn find_convergence(points: list, eps: float, min_domains: int) -> list {
                 mi = mi + 1
             }
 
-            if domains.length() >= min_domains {
+            if len(domains) >= min_domains {
                 let rep = points[members[0]]
                 let mut member_ids = []
                 let mut xi = 0
-                while xi < members.length() {
+                while xi < len(members) {
                     member_ids = member_ids + [points[members[xi]].id]
                     xi = xi + 1
                 }
                 let cluster = ConvergenceCluster {
                     rep_id: rep.id,
-                    rep_invariant: rep.singularity.invariant,
+                    rep_invariant: rep.singularity.invariant_str,
                     domains: domains,
                     member_ids: member_ids,
-                    size: members.length()
+                    size: len(members)
                 }
                 clusters = clusters + [cluster]
             }
@@ -731,7 +715,7 @@ fn find_convergence(points: list, eps: float, min_domains: int) -> list {
 
 // 프론티어 (저밀도) 포인트 — k개
 fn find_frontier(points: list, eps: float, k: int) -> list {
-    let n = points.length()
+    let n = len(points)
     if n == 0 { return [] }
 
     let mut hashes = []
@@ -768,10 +752,10 @@ fn find_frontier(points: list, eps: float, k: int) -> list {
 
     // 선택 정렬 (오름차순 by density)
     let mut si = 0
-    while si < indices.length() {
+    while si < len(indices) {
         let mut min_idx = si
         let mut sj = si + 1
-        while sj < indices.length() {
+        while sj < len(indices) {
             if densities[indices[sj]] < densities[indices[min_idx]] {
                 min_idx = sj
             }
@@ -799,7 +783,7 @@ fn find_frontier(points: list, eps: float, k: int) -> list {
 
 // 코어 (고밀도) 포인트 — k개
 fn find_core(points: list, eps: float, k: int) -> list {
-    let n = points.length()
+    let n = len(points)
     if n == 0 { return [] }
 
     let mut hashes = []
@@ -834,10 +818,10 @@ fn find_core(points: list, eps: float, k: int) -> list {
 
     // 선택 정렬 (내림차순 by density)
     let mut si = 0
-    while si < indices.length() {
+    while si < len(indices) {
         let mut max_idx = si
         let mut sj = si + 1
-        while sj < indices.length() {
+        while sj < len(indices) {
             if densities[indices[sj]] > densities[indices[max_idx]] {
                 max_idx = sj
             }
@@ -864,7 +848,7 @@ fn find_core(points: list, eps: float, k: int) -> list {
 
 // 브릿지 탐지: 두 도메인을 잇는 포인트
 fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) -> list {
-    let n = points.length()
+    let n = len(points)
     if n == 0 { return [] }
 
     let mut hashes = []
@@ -884,7 +868,7 @@ fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) 
         ii = ii + 1
     }
 
-    if idx_a.length() == 0 || idx_b.length() == 0 { return [] }
+    if len(idx_a) == 0 || len(idx_b) == 0 { return [] }
 
     let mut scored = []
     let mut si = 0
@@ -892,13 +876,13 @@ fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) 
         let h = hashes[si]
         let mut na = 0
         let mut ai = 0
-        while ai < idx_a.length() {
+        while ai < len(idx_a) {
             if hash_distance(h, hashes[idx_a[ai]]) <= eps { na = na + 1 }
             ai = ai + 1
         }
         let mut nb = 0
         let mut bi = 0
-        while bi < idx_b.length() {
+        while bi < len(idx_b) {
             if hash_distance(h, hashes[idx_b[bi]]) <= eps { nb = nb + 1 }
             bi = bi + 1
         }
@@ -912,10 +896,10 @@ fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) 
 
     // 브릿지 점수 내림차순
     let mut ssi = 0
-    while ssi < scored.length() {
+    while ssi < len(scored) {
         let mut max_idx = ssi
         let mut ssj = ssi + 1
-        while ssj < scored.length() {
+        while ssj < len(scored) {
             if scored[ssj].bridge_score > scored[max_idx].bridge_score {
                 max_idx = ssj
             }
@@ -931,7 +915,7 @@ fn find_bridges(points: list, dom_a: string, dom_b: string, eps: float, k: int) 
 
     let mut result = []
     let mut ri = 0
-    let limit = if k < scored.length() { k } else { scored.length() }
+    let limit = if k < len(scored) { k } else { len(scored) }
     while ri < limit {
         result = result + [scored[ri]]
         ri = ri + 1
@@ -971,16 +955,16 @@ fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
     let mut gaps = []
 
     let mut i = 0
-    while i < nodes.length() {
+    while i < len(nodes) {
         let mut j = i + 1
-        while j < nodes.length() {
+        while j < len(nodes) {
             let na = nodes[i]
             let nb = nodes[j]
 
             // 엣지 존재 여부 확인
             let mut has_edge = false
             let mut ei = 0
-            while ei < edge_pairs.length() {
+            while ei < len(edge_pairs) {
                 let ep = edge_pairs[ei]
                 if (ep[0] == na.id && ep[1] == nb.id) || (ep[0] == nb.id && ep[1] == na.id) {
                     has_edge = true
@@ -998,10 +982,10 @@ fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
                 let mut best_target = 0.0
 
                 let mut oi = 0
-                while oi < ops.length() {
+                while oi < len(ops) {
                     let result = ops[oi]
                     let mut ti = 0
-                    while ti < targets.length() {
+                    while ti < len(targets) {
                         let mut dist = result - targets[ti]
                         if dist < 0.0 { dist = 0.0 - dist }
                         if dist < best_hit {
@@ -1017,7 +1001,7 @@ fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
                 if vb != 0.0 {
                     let div_result = va / vb
                     let mut ti = 0
-                    while ti < targets.length() {
+                    while ti < len(targets) {
                         let mut dist = div_result - targets[ti]
                         if dist < 0.0 { dist = 0.0 - dist }
                         if dist < best_hit {
@@ -1057,10 +1041,10 @@ fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
 
     // 점수 내림차순 정렬
     let mut si = 0
-    while si < gaps.length() {
+    while si < len(gaps) {
         let mut max_idx = si
         let mut sj = si + 1
-        while sj < gaps.length() {
+        while sj < len(gaps) {
             if gaps[sj].score > gaps[max_idx].score {
                 max_idx = sj
             }
@@ -1077,7 +1061,7 @@ fn find_binary_gaps(nodes: list, edge_pairs: list, max_gaps: int) -> list {
     // max_gaps 제한
     let mut result = []
     let mut ri = 0
-    let limit = if max_gaps < gaps.length() { max_gaps } else { gaps.length() }
+    let limit = if max_gaps < len(gaps) { max_gaps } else { len(gaps) }
     while ri < limit {
         result = result + [gaps[ri]]
         ri = ri + 1
@@ -1096,13 +1080,13 @@ pure fn euler_characteristic(num_nodes: int, num_edges: int, num_triangles: int)
 
 // 가짜 CycleRunner — 시드 포인트에서 새 불변량 생성
 fn generate_invariant(seed_invariant: string, tick_id: int) -> Singularity {
-    let inv = if seed_invariant.length() > 0 {
+    let inv = if len(seed_invariant) > 0 {
         "derived_" + to_string(tick_id) + "_from_[" + seed_invariant + "]"
     } else {
         "cold_start_invariant_" + to_string(tick_id)
     }
     Singularity {
-        invariant: inv,
+        invariant_str: inv,
         confidence: 0.5 + to_float(tick_id) * 0.01,
         novelty: 0.9,
         depth_reached: 3
@@ -1118,15 +1102,15 @@ fn now_ts() -> string {
 // tick 1회 실행 — 전체 오케스트레이션
 fn run_tick(domain: string) -> string {
     // 1. halt 체크
-    let halt_content = read_file(HALT_FILE)
-    if halt_content.length() > 0 {
+    let halt_content = read_file(halt_file)
+    if len(halt_content) > 0 {
         println("[tick] HALTED — halt 파일 존재")
         return "halted"
     }
 
     // 2. Budget 로드
-    let budget_json = read_file(BUDGET_FILE)
-    let mut budget = if budget_json.length() > 2 {
+    let budget_json = read_file(budget_file)
+    let mut budget = if len(budget_json) > 2 {
         budget_from_json(budget_json)
     } else {
         budget_default()
@@ -1151,15 +1135,15 @@ fn run_tick(domain: string) -> string {
     // 6. 시드 선택 (경계 후보 → 가중 샘플링)
     let mut seed_invariant = ""
     let mut seed_id = ""
-    if points.length() > 0 {
+    if len(points) > 0 {
         let candidates = compute_boundary_candidates(points, edges)
-        let topk = boundary_top_k(candidates, BOUNDARY_TOP_K)
+        let topk = boundary_top_k(candidates, boundary_top_k)
         let selected_id = sample_weighted(topk, tick_id)
         // 선택된 포인트의 invariant 찾기
         let mut fi = 0
-        while fi < points.length() {
+        while fi < len(points) {
             if points[fi].id == selected_id {
-                seed_invariant = points[fi].singularity.invariant
+                seed_invariant = points[fi].singularity.invariant_str
                 seed_id = selected_id
             }
             fi = fi + 1
@@ -1171,24 +1155,24 @@ fn run_tick(domain: string) -> string {
 
     // 8. 포인트 생성 + 엣지 계산
     let new_point = make_point(points, domain, seed_id, sing, tick_id, ts)
-    let new_edges = compute_new_edges(points, new_point, DEFAULT_EPS, ts)
+    let new_edges = compute_new_edges(points, new_point, default_eps, ts)
 
     // 9. 영속화 (append)
-    append_file(TOPOLOGY_FILE, point_to_json(new_point) + "\n")
+    append_file(topology_file, point_to_json(new_point) + "\n")
     let mut ei = 0
-    while ei < new_edges.length() {
-        append_file(EDGES_FILE, edge_to_json(new_edges[ei]) + "\n")
+    while ei < len(new_edges) {
+        append_file(edges_file, edge_to_json(new_edges[ei]) + "\n")
         ei = ei + 1
     }
 
     // 10. Budget 커밋
     budget = budget_commit(budget, 1)
-    write_file(BUDGET_FILE, budget_to_json(budget))
+    write_file(budget_file, budget_to_json(budget))
 
     // 11. WAL: tick_complete
     wal_tick_complete(tick_id, new_point.id, ts)
 
-    println("[tick] OK — " + new_point.id + " edges=" + to_string(new_edges.length()) + " tick=" + to_string(tick_id))
+    println("[tick] OK — " + new_point.id + " edges=" + to_string(len(new_edges)) + " tick=" + to_string(tick_id))
     new_point.id
 }
 
@@ -1200,17 +1184,17 @@ fn cmd_status() {
     let points = load_points()
     let edges = load_edges()
 
-    let budget_json = read_file(BUDGET_FILE)
-    let budget = if budget_json.length() > 2 { budget_from_json(budget_json) } else { budget_default() }
+    let budget_json = read_file(budget_file)
+    let budget = if len(budget_json) > 2 { budget_from_json(budget_json) } else { budget_default() }
 
     // 도메인 수 집계
     let mut domains = []
     let mut i = 0
-    while i < points.length() {
+    while i < len(points) {
         let dom = points[i].domain
         let mut dup = false
         let mut j = 0
-        while j < domains.length() {
+        while j < len(domains) {
             if domains[j] == dom { dup = true }
             j = j + 1
         }
@@ -1219,8 +1203,8 @@ fn cmd_status() {
     }
 
     // 그래프 밀도
-    let v = points.length()
-    let e = edges.length()
+    let v = len(points)
+    let e = len(edges)
     let density = if v > 1 { to_float(2 * e) / to_float(v * (v - 1)) } else { 0.0 }
 
     println("╔══════════════════════════════════════╗")
@@ -1228,7 +1212,7 @@ fn cmd_status() {
     println("╠══════════════════════════════════════╣")
     println("║ points:  " + to_string(v))
     println("║ edges:   " + to_string(e))
-    println("║ domains: " + to_string(domains.length()))
+    println("║ domains: " + to_string(len(domains)))
     println("║ density: " + to_string(density))
     println("║ ticks:   " + to_string(budget.tick_count))
     println("║ cpu_sec: " + to_string(budget.cpu_sec_used))
@@ -1248,30 +1232,30 @@ fn cmd_analyze() {
     println("")
 
     // 오일러 특성수 (삼각형은 엣지 기반 추정)
-    let v = points.length()
-    let e = edges.length()
+    let v = len(points)
+    let e = len(edges)
     // 삼각형 근사: 완전 연결 서브그래프 탐색은 비용이 크므로 0으로 보고
     let chi = euler_characteristic(v, e, 0)
     println("V=" + to_string(v) + " E=" + to_string(e) + " T=0 χ=" + to_string(chi))
     println("")
 
     // 수렴 클러스터
-    let clusters = find_convergence(points, DEFAULT_EPS, 2)
-    println("수렴 클러스터 (" + to_string(clusters.length()) + "개):")
+    let clusters = find_convergence(points, default_eps, 2)
+    println("수렴 클러스터 (" + to_string(len(clusters)) + "개):")
     let mut ci = 0
-    while ci < clusters.length() {
+    while ci < len(clusters) {
         let c = clusters[ci]
-        println("  [" + to_string(ci) + "] rep=" + c.rep_id + " size=" + to_string(c.size) + " domains=" + to_string(c.domains.length()))
-        println("      invariant: " + c.rep_invariant)
+        println("  [" + to_string(ci) + "] rep=" + c.rep_id + " size=" + to_string(c.size) + " domains=" + to_string(c.len(domains)))
+        println("      invariant_str: " + c.rep_invariant)
         ci = ci + 1
     }
 
     // 코어 포인트
     println("")
-    let core = find_core(points, DEFAULT_EPS, 5)
+    let core = find_core(points, default_eps, 5)
     println("코어 (고밀도, 상위 5):")
     let mut ki = 0
-    while ki < core.length() {
+    while ki < len(core) {
         let entry = core[ki]
         println("  " + entry.point.id + " density=" + to_string(entry.density) + " domain=" + entry.point.domain)
         ki = ki + 1
@@ -1291,15 +1275,15 @@ fn cmd_frontier() {
     println("=== singularity recursion — frontier ===")
     println("")
 
-    let frontier = find_frontier(points, DEFAULT_EPS, 10)
+    let frontier = find_frontier(points, default_eps, 10)
     println("프론티어 (저밀도, 상위 10):")
 
     let mut i = 0
-    while i < frontier.length() {
+    while i < len(frontier) {
         let entry = frontier[i]
         let p = entry.point
         println("  " + p.id + " density=" + to_string(entry.density) + " domain=" + p.domain)
-        println("    invariant: " + p.singularity.invariant)
+        println("    invariant_str: " + p.singularity.invariant_str)
         i = i + 1
     }
 
@@ -1360,7 +1344,7 @@ assert euler_characteristic(1, 0, 0) == 1
 
 // 경계 후보 빈 토폴로지
 let empty_cands = compute_boundary_candidates([], [])
-assert empty_cands.length() == 0
+assert len(empty_cands) == 0
 
 // Union-Find 검증
 let uf = uf_make(5)
@@ -1376,7 +1360,7 @@ println("=== singularity.hexa verified ===")
 // ════════════════════════════════════════════════════════════════
 
 let args = arguments()
-if args.length() > 0 {
+if len(args) > 0 {
     let cmd = args[0]
     match cmd {
         "tick" -> {

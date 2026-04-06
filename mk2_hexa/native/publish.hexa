@@ -5,43 +5,43 @@
 //       hexa publish.hexa bt <number> <title>
 
 // ─── 설정 ───
-comptime const REPORT_DIR = "shared/reports"
-comptime const EXPERIMENT_LOG = "shared/discovery_log.jsonl"
-comptime const N6_FOUNDATION = "sigma(n) * phi(n) = n * tau(n)  <==>  n = 6"
+comptime const report_dir = "shared/reports"
+comptime const experiment_log = "shared/discovery_log.jsonl"
+comptime const n6_foundation = "sigma(n) * phi(n) = n * tau(n)  <==>  n = 6"
 
 // ─── n=6 매칭 (간이) ───
-comptime const N6_SIGMA = 12.0
-comptime const N6_TAU   = 4.0
-comptime const N6_PHI   = 2.0
-comptime const N6_J2    = 24.0
-comptime const N6_N     = 6.0
-comptime const N6_SOPFR = 5.0
+comptime const n6_sigma = 12.0
+comptime const n6_tau   = 4.0
+comptime const n6_phi   = 2.0
+comptime const n6_j2    = 24.0
+comptime const n6_n     = 6.0
+comptime const n6_sopfr = 5.0
 
 fn n6_match(value: float) -> string {
     // 주요 n=6 상수 매칭 검사
-    let diff_sigma = if value > N6_SIGMA { value - N6_SIGMA } else { N6_SIGMA - value }
+    let diff_sigma = if value > n6_sigma { value - n6_sigma } else { n6_sigma - value }
     if diff_sigma < 0.001 { return "sigma(6)=12 EXACT" }
 
-    let diff_tau = if value > N6_TAU { value - N6_TAU } else { N6_TAU - value }
+    let diff_tau = if value > n6_tau { value - n6_tau } else { n6_tau - value }
     if diff_tau < 0.001 { return "tau(6)=4 EXACT" }
 
-    let diff_phi = if value > N6_PHI { value - N6_PHI } else { N6_PHI - value }
+    let diff_phi = if value > n6_phi { value - n6_phi } else { n6_phi - value }
     if diff_phi < 0.001 { return "phi(6)=2 EXACT" }
 
-    let diff_j2 = if value > N6_J2 { value - N6_J2 } else { N6_J2 - value }
+    let diff_j2 = if value > n6_j2 { value - n6_j2 } else { n6_j2 - value }
     if diff_j2 < 0.001 { return "J2(6)=24 EXACT" }
 
-    let diff_n = if value > N6_N { value - N6_N } else { N6_N - value }
+    let diff_n = if value > n6_n { value - n6_n } else { n6_n - value }
     if diff_n < 0.001 { return "n=6 EXACT" }
 
-    let diff_sopfr = if value > N6_SOPFR { value - N6_SOPFR } else { N6_SOPFR - value }
+    let diff_sopfr = if value > n6_sopfr { value - n6_sopfr } else { n6_sopfr - value }
     if diff_sopfr < 0.001 { return "sopfr(6)=5 EXACT" }
 
     // CLOSE 체크 (10% 이내)
-    if diff_sigma < N6_SIGMA * 0.1 { return "~sigma CLOSE" }
-    if diff_tau < N6_TAU * 0.1 { return "~tau CLOSE" }
-    if diff_j2 < N6_J2 * 0.1 { return "~J2 CLOSE" }
-    if diff_n < N6_N * 0.1 { return "~n CLOSE" }
+    if diff_sigma < n6_sigma * 0.1 { return "~sigma CLOSE" }
+    if diff_tau < n6_tau * 0.1 { return "~tau CLOSE" }
+    if diff_j2 < n6_j2 * 0.1 { return "~J2 CLOSE" }
+    if diff_n < n6_n * 0.1 { return "~n CLOSE" }
 
     "--"
 }
@@ -99,19 +99,19 @@ fn jstr(json: string, key: string) -> string {
     let needle = "\"" + key + "\":\""
     let idx = json.index_of(needle)
     if idx < 0 { return "" }
-    let start = idx + needle.length()
-    let rest = json.slice(start, json.length())
+    let start = idx + len(needle)
+    let rest = json.slice(start, len(json))
     let end = rest.index_of("\"")
     if end < 0 { return "" }
     rest.slice(0, end)
 }
 
 fn load_experiment(exp_id: string) -> ExperimentData {
-    let raw = read_file(EXPERIMENT_LOG)
+    let raw = read_file(experiment_log)
     if raw != "" {
         let lines = raw.split("\n")
         let mut i = 0
-        while i < lines.length() {
+        while i < len(lines) {
             let line = lines[i].trim()
             if line != "" {
                 let id = jstr(line, "id")
@@ -146,26 +146,27 @@ fn generate_markdown(title: string, abstract_text: string, findings_text: string
     md = md + "## Abstract\n\n" + abstract_text + "\n\n"
 
     // Foundation
-    md = md + "## Foundation\n\n" + N6_FOUNDATION + "\n\n"
+    md = md + "## Foundation\n\n" + n6_foundation + "\n\n"
 
     // Findings
     if findings_text != "" {
         md = md + "## Findings\n\n"
         md = md + "| Metric | Value | n=6 Match | Grade |\n"
         md = md + "|--------|-------|-----------|-------|\n"
-        let items = findings_text.split(";")
+        let items = findings_text.split("
+        ")
         let mut i = 0
-        while i < items.length() {
+        while i < len(items) {
             let item = items[i].trim()
             if item != "" {
                 let eq = item.index_of("=")
                 if eq > 0 {
                     let name = item.slice(0, eq).trim()
-                    let val_str = item.slice(eq + 1, item.length()).trim()
+                    let val_str = item.slice(eq + 1, len(item)).trim()
                     let mut val = 0.0
                     try {
                         val = to_float(val_str)
-                    } catch {
+                    } catch e {
                         val = 0.0
                     }
                     let match_str = n6_match(val)
@@ -181,9 +182,10 @@ fn generate_markdown(title: string, abstract_text: string, findings_text: string
     // Connections
     if connections_text != "" {
         md = md + "## n=6 Connections\n\n"
-        let conns = connections_text.split(";")
+        let conns = connections_text.split("
+        ")
         let mut i = 0
-        while i < conns.length() {
+        while i < len(conns) {
             let c = conns[i].trim()
             if c != "" {
                 md = md + "- " + c + "\n"
@@ -196,9 +198,10 @@ fn generate_markdown(title: string, abstract_text: string, findings_text: string
     // Predictions
     if predictions_text != "" {
         md = md + "## Testable Predictions\n\n"
-        let preds = predictions_text.split(";")
+        let preds = predictions_text.split("
+        ")
         let mut i = 0
-        while i < preds.length() {
+        while i < len(preds) {
             let p = preds[i].trim()
             if p != "" {
                 md = md + to_string(i + 1) + ". " + p + "\n"
@@ -216,7 +219,7 @@ fn generate_markdown(title: string, abstract_text: string, findings_text: string
 fn generate_latex(title: string, abstract_text: string, findings_text: string, connections_text: string, predictions_text: string) -> string {
     let mut doc = "\\documentclass{article}\n"
     doc = doc + "\\usepackage[utf8]{inputenc}\n"
-    doc = doc + "\\usepackage{amsmath,amssymb}\n"
+    doc = doc + "\\usepackage{ amsmath: amsmath, amssymb}\n"
     doc = doc + "\\usepackage{booktabs}\n"
     doc = doc + "\\usepackage{hyperref}\n\n"
     doc = doc + "\\title{" + escape_latex(title) + "}\n"
@@ -243,17 +246,18 @@ fn generate_latex(title: string, abstract_text: string, findings_text: string, c
         doc = doc + "\\begin{table}[h]\n\\centering\n"
         doc = doc + "\\begin{tabular}{lrl}\n\\toprule\n"
         doc = doc + "Metric & Value & n=6 Match \\\\\n\\midrule\n"
-        let items = findings_text.split(";")
+        let items = findings_text.split("
+        ")
         let mut i = 0
-        while i < items.length() {
+        while i < len(items) {
             let item = items[i].trim()
             if item != "" {
                 let eq = item.index_of("=")
                 if eq > 0 {
                     let name = item.slice(0, eq).trim()
-                    let val_str = item.slice(eq + 1, item.length()).trim()
+                    let val_str = item.slice(eq + 1, len(item)).trim()
                     let mut val = 0.0
-                    try { val = to_float(val_str) } catch { val = 0.0 }
+                    try { val = to_float(val_str) } catch e { val = 0.0 }
                     let match_str = n6_match(val)
                     let grade = n6_grade(match_str)
                     doc = doc + escape_latex(name) + " & " + val_str + " & " + match_str + " (" + grade + ") \\\\\n"
@@ -269,9 +273,10 @@ fn generate_latex(title: string, abstract_text: string, findings_text: string, c
     // Connections
     if connections_text != "" {
         doc = doc + "\\section{n=6 Connections}\n\n\\begin{itemize}\n"
-        let conns = connections_text.split(";")
+        let conns = connections_text.split("
+        ")
         let mut i = 0
-        while i < conns.length() {
+        while i < len(conns) {
             let c = conns[i].trim()
             if c != "" {
                 doc = doc + "\\item " + escape_latex(c) + "\n"
@@ -284,9 +289,10 @@ fn generate_latex(title: string, abstract_text: string, findings_text: string, c
     // Predictions
     if predictions_text != "" {
         doc = doc + "\\section{Testable Predictions}\n\n\\begin{enumerate}\n"
-        let preds = predictions_text.split(";")
+        let preds = predictions_text.split("
+        ")
         let mut i = 0
-        while i < preds.length() {
+        while i < len(preds) {
             let p = preds[i].trim()
             if p != "" {
                 doc = doc + "\\item " + escape_latex(p) + "\n"
@@ -303,8 +309,9 @@ fn generate_latex(title: string, abstract_text: string, findings_text: string, c
 // ─── BT 포맷 ───
 fn format_bt(bt_number: int, title: string, domains_str: string, evidence_str: string, n6_formula: string, star_rating: int) -> string {
     let stars = star_string(star_rating)
-    let evidence_items = evidence_str.split(";")
-    let count = evidence_items.length()
+    let evidence_items = evidence_str.split("
+    ")
+    let count = len(evidence_items)
     let mut out = "BT-" + to_string(bt_number) + ": " + title + " (" + domains_str + ", " + to_string(count) + "/" + to_string(count) + " EXACT) " + stars + "\n"
 
     if n6_formula != "" {
@@ -314,7 +321,7 @@ fn format_bt(bt_number: int, title: string, domains_str: string, evidence_str: s
     if evidence_str != "" {
         out = out + "  Evidence:\n"
         let mut i = 0
-        while i < evidence_items.length() {
+        while i < len(evidence_items) {
             let ev = evidence_items[i].trim()
             if ev != "" {
                 out = out + "    " + to_string(i + 1) + ". " + ev + "\n"
@@ -339,7 +346,7 @@ fn format_bt_ref(bt_number: int, title: string) -> string {
 // ─── CLI ───
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("publish.hexa — experiment result documentation")
         print("usage:")
         print("  hexa publish.hexa report <experiment_id>")
@@ -351,7 +358,7 @@ fn main() {
     let cmd = a[1]
     match cmd {
         "report" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa publish.hexa report <experiment_id>")
                 return
             }
@@ -360,35 +367,35 @@ fn main() {
             let md = generate_markdown(exp.title, exp.abstract_text, exp.findings_raw, exp.connections_raw, exp.predictions_raw)
             print(md)
             // 파일로도 저장
-            let path = REPORT_DIR + "/" + exp_id + ".md"
+            let path = report_dir + "/" + exp_id + ".md"
             write_file(path, md)
             print("--- saved to " + path)
         },
         "export" -> {
-            if a.length() < 3 {
+            if len(a) < 3 {
                 print("usage: hexa publish.hexa export <format> [experiment_id]")
                 return
             }
             let format = a[2]
-            let exp_id = if a.length() >= 4 { a[3] } else { "latest" }
+            let exp_id = if len(a) >= 4 { a[3] } else { "latest" }
             let exp = load_experiment(exp_id)
             match format {
                 "markdown" -> {
                     let md = generate_markdown(exp.title, exp.abstract_text, exp.findings_raw, exp.connections_raw, exp.predictions_raw)
                     print(md)
-                    let path = REPORT_DIR + "/" + exp_id + ".md"
+                    let path = report_dir + "/" + exp_id + ".md"
                     write_file(path, md)
                     print("--- saved to " + path)
                 },
                 "latex" -> {
                     let tex = generate_latex(exp.title, exp.abstract_text, exp.findings_raw, exp.connections_raw, exp.predictions_raw)
                     print(tex)
-                    let path = REPORT_DIR + "/" + exp_id + ".tex"
+                    let path = report_dir + "/" + exp_id + ".tex"
                     write_file(path, tex)
                     print("--- saved to " + path)
                 },
                 "bt" -> {
-                    let bt_out = format_bt(0, exp.title, "n6", exp.findings_raw, N6_FOUNDATION, 2)
+                    let bt_out = format_bt(0, exp.title, "n6", exp.findings_raw, n6_foundation, 2)
                     print(bt_out)
                 },
                 _ -> {
@@ -397,38 +404,38 @@ fn main() {
             }
         },
         "bt" -> {
-            if a.length() < 5 {
+            if len(a) < 5 {
                 print("usage: hexa publish.hexa bt <number> <title> <domains> <formula> [stars]")
                 return
             }
             let mut bt_num = 0
             try {
                 bt_num = to_int(a[2])
-            } catch {
+            } catch e {
                 print("invalid BT number: " + a[2])
                 return
             }
             let title = a[3]
             let domains = a[4]
-            let formula = if a.length() >= 6 { a[5] } else { "" }
+            let formula = if len(a) >= 6 { a[5] } else { "" }
             let mut stars = 2
-            if a.length() >= 7 {
-                try { stars = to_int(a[6]) } catch { stars = 2 }
+            if len(a) >= 7 {
+                try { stars = to_int(a[6]) } catch e { stars = 2 }
             }
             let out = format_bt(bt_num, title, domains, "", formula, stars)
             print(out)
         },
         "bt-candidate" -> {
-            if a.length() < 6 {
+            if len(a) < 6 {
                 print("usage: hexa publish.hexa bt-candidate <title> <domains> <connections> <confidence>")
                 return
             }
             let title = a[2]
             let domains = a[3]
             let mut conns = 0
-            try { conns = to_int(a[4]) } catch { conns = 0 }
+            try { conns = to_int(a[4]) } catch e { conns = 0 }
             let mut conf = 0.0
-            try { conf = to_float(a[5]) } catch { conf = 0.0 }
+            try { conf = to_float(a[5]) } catch e { conf = 0.0 }
             let out = format_bt_candidate(title, domains, conns, conf)
             print(out)
         },

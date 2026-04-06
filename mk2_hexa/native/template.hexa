@@ -7,7 +7,7 @@
 //       hexa template.hexa instantiate <name> <key=value> ...
 
 // ─── 설정 ───
-comptime const TEMPLATE_FILE = "shared/experiment_templates.json"
+comptime const template_file = "shared/experiment_templates.json"
 
 // ─── 템플릿 구조체 ───
 
@@ -27,7 +27,9 @@ fn builtin_basic_scan() -> ExperimentTemplate {
         description: "Basic 3-lens scan on {{domain}}",
         steps: "Initialize telescope with lenses: {{lenses}};Run scan on domain: {{domain}};Collect n=6 resonance hits;Report consensus level",
         parameters: "domain=physics,lenses=consciousness,topology,causal",
-        expected_metrics: "n6_score;consensus;discovery_count"
+        expected_metrics: "n6_score
+        consensus
+        discovery_count"
     }
 }
 
@@ -37,7 +39,9 @@ fn builtin_full_scan() -> ExperimentTemplate {
         description: "Full 22-lens scan on {{domain}}",
         steps: "Load all 22 lenses from registry;Run parallel scan on {{domain}};Cross-validate with 3+ lens consensus;Grade: 3+=candidate, 7+=high-confidence, 12+=confirmed",
         parameters: "domain=all",
-        expected_metrics: "n6_score;consensus;lens_agreement"
+        expected_metrics: "n6_score
+        consensus
+        lens_agreement"
     }
 }
 
@@ -47,7 +51,9 @@ fn builtin_ouroboros() -> ExperimentTemplate {
         description: "OUROBOROS evolution on {{domain}} for {{cycles}} cycles",
         steps: "Seed initial hypotheses for {{domain}};Run {{cycles}} evolution cycles;Forge new lenses from discoveries;Report convergence and new BT candidates",
         parameters: "domain=discovery,cycles=6",
-        expected_metrics: "discoveries;convergence;lenses_forged"
+        expected_metrics: "discoveries
+        convergence
+        lenses_forged"
     }
 }
 
@@ -58,9 +64,9 @@ fn substitute(text: string, params: string) -> string {
     let pairs = params.split(",")
     let mut result = text
     let mut i = 0
-    while i < pairs.length() {
+    while i < len(pairs) {
         let p = pairs[i].split("=")
-        if p.length() >= 2 {
+        if len(p) >= 2 {
             let key = p[0].trim()
             let val = p[1].trim()
             let pattern = "{{" + key + "}}"
@@ -78,9 +84,9 @@ fn instantiate_template(tmpl: ExperimentTemplate, overrides: string) -> Experime
     let mut merged = tmpl.parameters
     let ov_pairs = overrides.split(",")
     let mut oi = 0
-    while oi < ov_pairs.length() {
+    while oi < len(ov_pairs) {
         let p = ov_pairs[oi].split("=")
-        if p.length() >= 2 {
+        if len(p) >= 2 {
             let key = p[0].trim()
             let val = p[1].trim()
             // 기존 키면 교체
@@ -88,9 +94,9 @@ fn instantiate_template(tmpl: ExperimentTemplate, overrides: string) -> Experime
                 let parts = merged.split(",")
                 let mut new_merged = ""
                 let mut pi = 0
-                while pi < parts.length() {
+                while pi < len(parts) {
                     let pp = parts[pi].split("=")
-                    if pp.length() >= 2 {
+                    if len(pp) >= 2 {
                         if pp[0].trim() == key {
                             if new_merged != "" { new_merged = new_merged + "," }
                             new_merged = new_merged + key + "=" + val
@@ -131,7 +137,7 @@ fn template_to_json(t: ExperimentTemplate) -> string {
 // ─── 저장/로드 ───
 
 fn save_template(t: ExperimentTemplate) {
-    let raw = read_file(TEMPLATE_FILE)
+    let raw = read_file(template_file)
     let entry = template_to_json(t)
 
     // 이름 중복 제거
@@ -143,7 +149,7 @@ fn save_template(t: ExperimentTemplate) {
             let mut new_json = "["
             let mut first = true
             let mut ei = 0
-            while ei < entries.length() {
+            while ei < len(entries) {
                 let e = entries[ei]
                 if !e.contains("\"name\":\"" + t.name + "\"") {
                     let clean = e.replace("[", "").replace("]", "")
@@ -157,56 +163,56 @@ fn save_template(t: ExperimentTemplate) {
             }
             if !first { new_json = new_json + "," }
             new_json = new_json + entry + "]"
-            write_file(TEMPLATE_FILE, new_json)
+            write_file(template_file, new_json)
             return
         }
         if trimmed == "[]" {
-            write_file(TEMPLATE_FILE, "[" + entry + "]")
+            write_file(template_file, "[" + entry + "]")
             return
         }
-        let without_bracket = trimmed.slice(0, trimmed.length() - 1)
-        write_file(TEMPLATE_FILE, without_bracket + "," + entry + "]")
+        let without_bracket = trimmed.slice(0, len(trimmed) - 1)
+        write_file(template_file, without_bracket + "," + entry + "]")
         return
     }
-    write_file(TEMPLATE_FILE, "[" + entry + "]")
+    write_file(template_file, "[" + entry + "]")
 }
 
 fn load_template_by_name(name: string) -> string {
-    let raw = read_file(TEMPLATE_FILE)
+    let raw = read_file(template_file)
     if raw == "" { return "" }
     let needle = "\"name\":\"" + name + "\""
     if !raw.contains(needle) { return "" }
 
     let after = raw.split(needle)
-    if after.length() < 2 { return "" }
+    if len(after) < 2 { return "" }
     let block = after[1].split("}")[0]
 
     let mut desc = ""
     let dn = "\"description\":\""
     if block.contains(dn) {
         let dp = block.split(dn)
-        if dp.length() > 1 { desc = dp[1].split("\"")[0] }
+        if len(dp) > 1 { desc = dp[1].split("\"")[0] }
     }
 
     let mut steps = ""
     let sn = "\"steps\":\""
     if block.contains(sn) {
         let sp = block.split(sn)
-        if sp.length() > 1 { steps = sp[1].split("\"")[0] }
+        if len(sp) > 1 { steps = sp[1].split("\"")[0] }
     }
 
     let mut params = ""
     let pn = "\"parameters\":\""
     if block.contains(pn) {
         let pp = block.split(pn)
-        if pp.length() > 1 { params = pp[1].split("\"")[0] }
+        if len(pp) > 1 { params = pp[1].split("\"")[0] }
     }
 
     let mut metrics = ""
     let mn = "\"expected_metrics\":\""
     if block.contains(mn) {
         let mp = block.split(mn)
-        if mp.length() > 1 { metrics = mp[1].split("\"")[0] }
+        if len(mp) > 1 { metrics = mp[1].split("\"")[0] }
     }
 
     name + "|" + desc + "|" + steps + "|" + params + "|" + metrics
@@ -217,14 +223,16 @@ fn load_template_by_name(name: string) -> string {
 fn display_template(name: string, desc: string, steps: string, metrics: string) {
     print("  name    : " + name)
     print("  desc    : " + desc)
-    let step_list = steps.split(";")
+    let step_list = steps.split("
+    ")
     let mut si = 0
-    while si < step_list.length() {
+    while si < len(step_list) {
         print("  step " + to_string(si + 1) + " : " + step_list[si].trim())
         si = si + 1
     }
     if metrics != "" {
-        print("  metrics : " + metrics.replace(";", ", "))
+        print("  metrics : " + metrics.replace("
+        ", ", "))
     }
 }
 
@@ -232,12 +240,14 @@ fn display_template(name: string, desc: string, steps: string, metrics: string) 
 
 fn main() {
     let a = args()
-    if a.length() < 2 {
+    if len(a) < 2 {
         print("template.hexa — 실험 템플릿")
         print("Usage:")
         print("  builtins                          빌트인 목록")
         print("  list                              저장된 목록")
-        print("  save <name> <desc> <steps;> <metrics;>")
+        print("  save <name> <desc> <steps
+        > <metrics
+        >")
         print("  load <name>                       로드")
         print("  instantiate <name> key=val ...     인스턴스화")
         return
@@ -258,7 +268,7 @@ fn main() {
     }
 
     if cmd == "save" {
-        if a.length() < 6 {
+        if len(a) < 6 {
             print("Usage: save <name> <description> <steps_semicolon> <metrics_semicolon>")
             return
         }
@@ -274,16 +284,16 @@ fn main() {
     }
 
     if cmd == "list" {
-        let raw = read_file(TEMPLATE_FILE)
+        let raw = read_file(template_file)
         if raw == "" {
             print("[template] no templates saved")
             return
         }
         let entries = raw.split("\"name\":\"")
-        let total = entries.length() - 1
+        let total = len(entries) - 1
         print("[template] " + to_string(total) + " templates:")
         let mut i = 1
-        while i < entries.length() {
+        while i < len(entries) {
             let name = entries[i].split("\"")[0]
             print("  - " + name)
             i = i + 1
@@ -291,7 +301,7 @@ fn main() {
     }
 
     if cmd == "load" {
-        if a.length() < 3 {
+        if len(a) < 3 {
             print("Usage: load <name>")
             return
         }
@@ -322,7 +332,7 @@ fn main() {
     }
 
     if cmd == "instantiate" {
-        if a.length() < 4 {
+        if len(a) < 4 {
             print("Usage: instantiate <name> key=val ...")
             return
         }
@@ -331,7 +341,7 @@ fn main() {
         // overrides 수집
         let mut overrides = ""
         let mut oi = 3
-        while oi < a.length() {
+        while oi < len(a) {
             if overrides != "" { overrides = overrides + "," }
             overrides = overrides + a[oi]
             oi = oi + 1

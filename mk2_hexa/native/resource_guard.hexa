@@ -2,18 +2,16 @@
 // A: OS 하드 제한 (rlimit + nice) — 기본 적용
 // B: 소프트 적응 (RSS 모니터링 → 배치 축소)
 
-comptime const MAX_RSS_MB = 512
-comptime const MAX_DATA_MB = 1024
-comptime const NICE_LEVEL = 10
-comptime const WARN_RSS_MB = 384
-comptime const CRITICAL_RSS_MB = 480
-comptime const THROTTLE_SLEEP_MS = 100
-comptime const BATCH_SCALE_WARN = 0.5
-comptime const BATCH_SCALE_CRITICAL = 0.25
+comptime const max_rss_mb = 512
+comptime const max_data_mb = 1024
+comptime const nice_level = 10
+comptime const warn_rss_mb = 384
+comptime const critical_rss_mb = 480
+comptime const throttle_sleep_ms = 100
+comptime const batch_scale_warn = 0.5
+comptime const batch_scale_critical = 0.25
 
-enum ThrottleLevel {
-    Normal,
-    Warn,
+enum ThrottleLevel { Normal: Normal, Warn,
     Critical
 }
 
@@ -41,19 +39,19 @@ struct ThrottleState {
 
 pure fn default_hard() -> HardLimits {
     HardLimits {
-        max_rss_mb: MAX_RSS_MB,
-        max_data_mb: MAX_DATA_MB,
-        nice_level: NICE_LEVEL
+        max_rss_mb: max_rss_mb,
+        max_data_mb: max_data_mb,
+        nice_level: nice_level
     }
 }
 
 pure fn default_soft() -> SoftLimits {
     SoftLimits {
-        warn_rss_mb: WARN_RSS_MB,
-        critical_rss_mb: CRITICAL_RSS_MB,
-        throttle_sleep_ms: THROTTLE_SLEEP_MS,
-        batch_scale_warn: BATCH_SCALE_WARN,
-        batch_scale_critical: BATCH_SCALE_CRITICAL
+        warn_rss_mb: warn_rss_mb,
+        critical_rss_mb: critical_rss_mb,
+        throttle_sleep_ms: throttle_sleep_ms,
+        batch_scale_warn: batch_scale_warn,
+        batch_scale_critical: batch_scale_critical
     }
 }
 
@@ -69,7 +67,7 @@ fn apply_hard_limits(h: HardLimits) -> bool {
     let r2 = shell(cmd_data)
 
     // renice
-    let pid = shell("echo $$")
+    let pid = exec("echo $$")
     let cmd_nice = "renice -n " + to_string(h.nice_level) + " -p " + pid
     let r3 = shell(cmd_nice)
 
@@ -80,7 +78,7 @@ fn apply_hard_limits(h: HardLimits) -> bool {
 // ── B. Soft Adaptive Throttle ──
 
 fn get_rss_mb() -> int {
-    let raw = shell("ps -o rss= -p $PPID 2>/dev/null || echo 0")
+    let raw = exec("ps -o rss= -p $PPID 2>/dev/null || echo 0")
     let kb = to_int(raw)
     kb / 1024
 }
@@ -119,7 +117,7 @@ fn check_and_adapt(s: SoftLimits, state: ThrottleState) -> ThrottleState {
 
 fn throttle_sleep(ms: int) {
     if ms > 0 {
-        shell("sleep " + to_string(ms / 1000) + "." + to_string(ms % 1000))
+        exec("sleep " + to_string(ms / 1000) + "." + to_string(ms % 1000))
     }
 }
 
@@ -141,7 +139,7 @@ fn guard_status(state: ThrottleState) -> string {
 
 fn init_guard() -> ThrottleState {
     apply_hard_limits(default_hard())
-    println("[resource_guard] soft limits: warn=" + to_string(WARN_RSS_MB) + "MB critical=" + to_string(CRITICAL_RSS_MB) + "MB")
+    println("[resource_guard] soft limits: warn=" + to_string(warn_rss_mb) + "MB critical=" + to_string(critical_rss_mb) + "MB")
     ThrottleState {
         level: 0,
         checks: 0,
@@ -153,14 +151,14 @@ fn init_guard() -> ThrottleState {
 
 // ── 검증 ──
 
-assert MAX_RSS_MB > 0
-assert WARN_RSS_MB < MAX_RSS_MB
-assert CRITICAL_RSS_MB < MAX_RSS_MB
-assert CRITICAL_RSS_MB > WARN_RSS_MB
-assert BATCH_SCALE_WARN > 0.0
-assert BATCH_SCALE_WARN <= 1.0
-assert BATCH_SCALE_CRITICAL > 0.0
-assert BATCH_SCALE_CRITICAL < BATCH_SCALE_WARN
+assert max_rss_mb > 0
+assert warn_rss_mb < max_rss_mb
+assert critical_rss_mb < max_rss_mb
+assert critical_rss_mb > warn_rss_mb
+assert batch_scale_warn > 0.0
+assert batch_scale_warn <= 1.0
+assert batch_scale_critical > 0.0
+assert batch_scale_critical < batch_scale_warn
 
 let test_state = ThrottleState { level: 0, checks: 0, throttled: 0, batch_scale: 1.0, sleep_ms: 0 }
 let soft = default_soft()
@@ -170,5 +168,5 @@ assert after.batch_scale > 0.0
 assert after.batch_scale <= 1.0
 
 println("=== resource_guard verified ===")
-println("hard: RSS=" + to_string(MAX_RSS_MB) + "MB DATA=" + to_string(MAX_DATA_MB) + "MB nice=" + to_string(NICE_LEVEL))
-println("soft: warn=" + to_string(WARN_RSS_MB) + "MB critical=" + to_string(CRITICAL_RSS_MB) + "MB")
+println("hard: RSS=" + to_string(max_rss_mb) + "MB DATA=" + to_string(max_data_mb) + "MB nice=" + to_string(nice_level))
+println("soft: warn=" + to_string(warn_rss_mb) + "MB critical=" + to_string(critical_rss_mb) + "MB")

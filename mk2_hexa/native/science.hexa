@@ -11,9 +11,9 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const SIGMA = 12
-comptime const J2 = 24
-comptime const META_FP = 0.333333333
+comptime const sigma = 12
+comptime const j2 = 24
+comptime const meta_fp = 0.333333333
 
 // ─── math helpers ───
 
@@ -63,16 +63,19 @@ fn floor(x: float) -> float {
 // ─── Statistics helpers ───
 
 fn mean(data) -> float {
-    let n = length(data)
+    let n = len(data)
     if n == 0 { return 0.0 }
     let mut sum = 0.0
     let mut i = 0
-    while i < n { sum = sum + data[i]; i = i + 1 }
+    while i < n {
+        sum = sum + data[i]
+        i = i + 1
+    }
     sum / to_float(n)
 }
 
 fn variance(data, mean_val: float) -> float {
-    let n = length(data)
+    let n = len(data)
     if n < 2 { return 0.0 }
     let mut ss = 0.0
     let mut i = 0
@@ -122,7 +125,7 @@ fn compute_n6_affinity(phi_delta: float, entropy_delta: float) -> float {
     if phi_abs > 0.000000000001 {
         best_phi = 999999.0
         let mut i = 0
-        while i < length(n6_consts) {
+        while i < len(n6_consts) {
             let d = abs((phi_abs - n6_consts[i]) / n6_consts[i])
             if d < best_phi { best_phi = d }
             i = i + 1
@@ -133,7 +136,7 @@ fn compute_n6_affinity(phi_delta: float, entropy_delta: float) -> float {
     if ent_abs > 0.000000000001 {
         best_ent = 999999.0
         let mut j = 0
-        while j < length(n6_consts) {
+        while j < len(n6_consts) {
             let d = abs((ent_abs - n6_consts[j]) / n6_consts[j])
             if d < best_ent { best_ent = d }
             j = j + 1
@@ -169,7 +172,7 @@ fn predict_experiment(exp_type: string, target: string, history) -> Prediction {
     let mut similar_phi = []
     let mut similar_ent = []
     let mut i = 0
-    while i < length(history) {
+    while i < len(history) {
         let entry = history[i]
         if entry[0] == exp_type {
             let similar_phi = similar_phi.push(entry[1])
@@ -178,7 +181,7 @@ fn predict_experiment(exp_type: string, target: string, history) -> Prediction {
         i = i + 1
     }
 
-    if length(similar_phi) == 0 {
+    if len(similar_phi) == 0 {
         return Prediction {
             experiment_type: exp_type,
             target: target,
@@ -190,7 +193,7 @@ fn predict_experiment(exp_type: string, target: string, history) -> Prediction {
         }
     }
 
-    let n = to_float(length(similar_phi))
+    let n = to_float(len(similar_phi))
     let mean_phi = mean(similar_phi)
     let mean_ent = mean(similar_ent)
     let var_phi = variance(similar_phi, mean_phi)
@@ -282,7 +285,7 @@ fn simulate(config: SimConfig) -> SimResult {
 
     let mut phi_results = []
     let mut ent_results = []
-    let mut rng = 42.0 + to_float(length(config.target))
+    let mut rng = 42.0 + to_float(len(config.target))
 
     let mut i = 0
     while i < n {
@@ -373,7 +376,7 @@ fn simulate(config: SimConfig) -> SimResult {
 
 struct ReproResult {
     n_repeats: int,
-    results: [float],
+    results: str,
     mean: float,
     std: float,
     cv: float,
@@ -386,7 +389,7 @@ fn reproduce(exp_type: string, target: string, n_repeats: int, variation: float)
     let base = baseline_phi(exp_type)
 
     let mut results = []
-    let mut rng = 123.0 + to_float(length(target))
+    let mut rng = 123.0 + to_float(len(target))
 
     let mut i = 0
     while i < n {
@@ -442,9 +445,9 @@ struct CompareResult {
 fn compare(a_name: string, a_score: float, b_name: string, b_score: float) -> CompareResult {
     let diff = a_score - b_score
     let avg = (abs(a_score) + abs(b_score)) / 2.0
-    let effect = if avg > 0.000000000001 { diff / avg } else { 0.0 }
+    let effect_val = if avg > 0.000000000001 { diff / avg } else { 0.0 }
 
-    let winner = if abs(effect) > 0.5 {
+    let winner = if abs(effect_val) > 0.5 {
         if diff > 0.0 { a_name } else { b_name }
     } else {
         "Tie"
@@ -456,7 +459,7 @@ fn compare(a_name: string, a_score: float, b_name: string, b_score: float) -> Co
         a_score: a_score,
         b_score: b_score,
         winner: winner,
-        effect_size: effect
+        effect_size: effect_val
     }
 }
 
@@ -514,7 +517,7 @@ fn publish_markdown(exp_type: string, target: string, pred: Prediction, sim: Sim
 
 fn main() {
     let a = args()
-    let argc = length(a)
+    let argc = len(a)
 
     if argc < 2 {
         println("Usage:")
@@ -550,11 +553,7 @@ fn main() {
         // also try with synthetic history from baseline
         let bp = baseline_phi(exp_type)
         let be = baseline_entropy(exp_type)
-        let synth_history = [
-            [exp_type, bp, be],
-            [exp_type, bp * 1.01, be * 0.99],
-            [exp_type, bp * 0.99, be * 1.01]
-        ]
+        let synth_history = [ [exp_type, bp, be], [exp_type, bp * 1.01, be * 0.99], [exp_type, bp * 0.99, be * 1.01] ]
         let pred2 = predict_experiment(exp_type, target, synth_history)
         println("")
         println("  (with synthetic history)")
@@ -617,10 +616,7 @@ fn main() {
         // Step 1: Predict
         let bp = baseline_phi(exp_type)
         let be = baseline_entropy(exp_type)
-        let history = [
-            [exp_type, bp, be],
-            [exp_type, bp * 1.02, be * 0.98]
-        ]
+        let history = [ [exp_type, bp, be], [exp_type, bp * 1.02, be * 0.98] ]
         let pred = predict_experiment(exp_type, target, history)
         println("[1/4] PREDICT")
         println("  phi_delta: " + to_string(pred.predicted_phi_delta))
@@ -681,10 +677,16 @@ fn main() {
         }
         let a_name = a[2]
         let mut a_score = 0.0
-        try { a_score = to_float(a[3]) } catch e { println("ERROR: invalid score: " + a[3]); return 1 }
+        try { a_score = to_float(a[3]) } catch e {
+            println("ERROR: invalid score: " + a[3])
+            return 1
+        }
         let b_name = a[4]
         let mut b_score = 0.0
-        try { b_score = to_float(a[5]) } catch e { println("ERROR: invalid score: " + a[5]); return 1 }
+        try { b_score = to_float(a[5]) } catch e {
+            println("ERROR: invalid score: " + a[5])
+            return 1
+        }
 
         let result = compare(a_name, a_score, b_name, b_score)
         println("=== Comparison: " + a_name + " vs " + b_name + " ===")

@@ -2,11 +2,11 @@
 // gap 분석 → 후보 생성(4전략) → Jaccard 검증 → 새 렌즈 출력
 // Rust/Python 의존 0 — 순수 hexa 파일 I/O
 
-comptime const REGISTRY_PATH = "shared/lens_registry.json"
-comptime const FORGE_OUT_PATH = "shared/forge_result.json"
-comptime const SIMILARITY_THRESHOLD = 0.8
-comptime const MAX_CANDIDATES = 20
-comptime const LENS_WEAK_THRESHOLD = 8
+comptime const registry_path = "shared/lens_registry.json"
+comptime const forge_out_path = "shared/forge_result.json"
+comptime const similarity_threshold = 0.8
+comptime const max_candidates = 20
+comptime const lens_weak_threshold = 8
 
 // ─── 알려진 도메인 (24 = J_2) ───
 
@@ -22,7 +22,7 @@ pure fn known_domain(idx: int) -> string {
     }
 }
 
-comptime const DOMAIN_COUNT = 24
+comptime const domain_count = 24
 
 // ─── 도메인 시프트 쌍 (mutation 전략용) ───
 
@@ -42,7 +42,7 @@ pure fn shift_to(idx: int) -> string {
     }
 }
 
-comptime const SHIFT_COUNT = 6
+comptime const shift_count = 6
 
 // ─── JSON 간이 파서 ───
 
@@ -147,7 +147,7 @@ fn analyze_gaps(registry_lines: string) -> GapReport {
     let mut suggested_csv = ""
 
     let mut di = 0
-    while di < DOMAIN_COUNT {
+    while di < domain_count {
         let domain = known_domain(di)
         let mut lens_count = 0
 
@@ -174,7 +174,7 @@ fn analyze_gaps(registry_lines: string) -> GapReport {
             } else {
                 suggested_csv = suggested_csv + "," + cat
             }
-        } else if lens_count < LENS_WEAK_THRESHOLD {
+        } else if lens_count < lens_weak_threshold {
             // 약한 커버리지 도메인
             if weak_csv == "" {
                 weak_csv = domain
@@ -218,14 +218,14 @@ fn generate_combination(registry_lines: string, gap: GapReport) -> string {
     let limit = min_i(lines.len(), 100)
 
     let mut i = 0
-    while i < limit && count < MAX_CANDIDATES {
+    while i < limit && count < max_candidates {
         let line_i = lines[i]
         if line_i != "" {
             let name_i = extract_field(line_i, "name")
             let aff_i = extract_field(line_i, "affinity")
 
             let mut j = i + 1
-            while j < limit && count < MAX_CANDIDATES {
+            while j < limit && count < max_candidates {
                 let line_j = lines[j]
                 if line_j != "" {
                     let name_j = extract_field(line_j, "name")
@@ -234,7 +234,7 @@ fn generate_combination(registry_lines: string, gap: GapReport) -> string {
 
                     // 미커버 도메인 하나라도 포함?
                     for uc in uncovered {
-                        if merged.contains(uc) && count < MAX_CANDIDATES {
+                        if merged.contains(uc) && count < max_candidates {
                             let cname = name_i + "_" + name_j + "_combo"
                             let entry = "{\"name\":\"" + cname + "\",\"source\":\"combination\",\"affinity\":\"" + merged + "\",\"confidence\":0.6,\"desc\":\"Combination of " + name_i + " and " + name_j + " to cover " + uc + "\"}"
                             if result == "" {
@@ -266,7 +266,7 @@ fn generate_analogy(registry_lines: string, gap: GapReport) -> string {
 
     for wd in weak_domains {
         for line in lines {
-            if line != "" && count < MAX_CANDIDATES {
+            if line != "" && count < max_candidates {
                 let name = extract_field(line, "name")
                 let aff = extract_field(line, "affinity")
                 // affinity 2개 이상인 렌즈만 (강한 렌즈)
@@ -296,12 +296,12 @@ fn generate_mutation(registry_lines: string) -> string {
     let mut count = 0
 
     for line in lines {
-        if line != "" && count < MAX_CANDIDATES {
+        if line != "" && count < max_candidates {
             let name = extract_field(line, "name")
             let aff = extract_field(line, "affinity")
 
             let mut si = 0
-            while si < SHIFT_COUNT && count < MAX_CANDIDATES {
+            while si < shift_count && count < max_candidates {
                 let sfrom = shift_from(si)
                 let sto = shift_to(si)
                 if aff.contains(sfrom) && !aff.contains(sto) {
@@ -334,7 +334,7 @@ fn generate_discovery(scan_log: string) -> string {
 
     // 간이 구현: 각 도메인에 대해 발견 횟수 세기
     let mut di = 0
-    while di < DOMAIN_COUNT && count < MAX_CANDIDATES {
+    while di < domain_count && count < max_candidates {
         let domain = known_domain(di)
         let mut disc_count = 0
         for line in lines {
@@ -377,7 +377,7 @@ pure fn validate_candidate(cand_affinity: string, registry_lines: string, gap: G
         }
     }
 
-    let is_unique = max_sim < SIMILARITY_THRESHOLD
+    let is_unique = max_sim < similarity_threshold
 
     // gap 커버 확인
     let mut covers_gap = false
@@ -464,12 +464,12 @@ let mode = if a.len() >= 3 { a[2] } else { "analyze" }
 if mode == "analyze" {
     // gap 분석만 수행
     println("=== lens_forge: gap analyze ===")
-    if !file_exists(REGISTRY_PATH) {
-        println("  registry not found: " + REGISTRY_PATH)
+    if !file_exists(registry_path) {
+        println("  registry not found: " + registry_path)
         println("  creating empty registry")
-        write_file(REGISTRY_PATH, "")
+        write_file(registry_path, "")
     }
-    let reg = read_file(REGISTRY_PATH)
+    let reg = read_file(registry_path)
     let gap = analyze_gaps(reg)
     println("  uncovered (" + to_string(gap.uncovered_count) + "): " + gap.uncovered_csv)
     println("  weak      (" + to_string(gap.weak_count) + "): " + gap.weak_csv)
@@ -479,11 +479,11 @@ if mode == "analyze" {
 if mode == "forge" {
     // 전체 forge cycle 실행
     println("=== lens_forge: forge cycle ===")
-    if !file_exists(REGISTRY_PATH) {
-        println("  registry not found: " + REGISTRY_PATH)
-        write_file(REGISTRY_PATH, "")
+    if !file_exists(registry_path) {
+        println("  registry not found: " + registry_path)
+        write_file(registry_path, "")
     }
-    let reg = read_file(REGISTRY_PATH)
+    let reg = read_file(registry_path)
     let scan_log = if file_exists("shared/discovery_log.jsonl") {
         read_file("shared/discovery_log.jsonl")
     } else {
@@ -491,8 +491,8 @@ if mode == "forge" {
     }
     let result = forge_cycle(reg, scan_log)
     println("  result: " + result)
-    write_file(FORGE_OUT_PATH, result)
-    println("  written: " + FORGE_OUT_PATH)
+    write_file(forge_out_path, result)
+    println("  written: " + forge_out_path)
 }
 
 if mode == "jaccard" {
@@ -509,13 +509,13 @@ assert jaccard_similarity("ai,chip", "ai,chip") == 1.0
 assert jaccard_similarity("ai,chip", "energy,fusion") == 0.0
 
 let gap_test = analyze_gaps("")
-assert gap_test.uncovered_count == DOMAIN_COUNT
+assert gap_test.uncovered_count == domain_count
 
 println("=== lens_forge verified ===")
 
 theorem forge_gap_completeness {
     // 빈 레지스트리 → 24개 도메인 전부 미커버
-    assert DOMAIN_COUNT == 24
+    assert domain_count == 24
 }
 
 proof forge_invariants {

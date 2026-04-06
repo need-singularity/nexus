@@ -3,31 +3,31 @@
 // 사용: hexa engine_air_rs.hexa status|tick|report
 //
 // State:
-//   $HOME/Dev/air_rs/src/lib.rs — version tag, last commit
-//   $HOME/Dev/airgenome/docs/gates.hexa — spec authority
+//   $home/Dev/air_rs/src/lib.rs — version tag, last commit
+//   $home/Dev/airgenome/docs/gates.hexa — spec authority
 //   cargo test from air_rs dir — test results
 // Growth bus:
-//   $HOME/Dev/nexus6/shared/growth_bus.jsonl
+//   $home/Dev/nexus6/shared/growth_bus.jsonl
 
 // ═══════════════════════════════════════════════════════════
 // ─── CONSTANTS ───
 // ═══════════════════════════════════════════════════════════
 
-comptime const VERSION = "1.0.0"
-comptime const NAME = "air_rs"
-comptime const PERSONALITY = "Translator"
+comptime const version = "1.0.0"
+comptime const name = "air_rs"
+comptime const personality = "Translator"
 
-let HOME = env("HOME")
-let DEV = HOME + "/Dev"
-let AIR_RS_DIR = DEV + "/air_rs"
-let AIR_RS_SRC = AIR_RS_DIR + "/src/lib.rs"
-let AIRGENOME_SPEC = DEV + "/airgenome/docs/gates.hexa"
-let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
-let HISTORY_FILE = DEV + "/nexus6/shared/air_rs_history.jsonl"
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let air_rs_dir = dev + "/air_rs"
+let air_rs_src = air_rs_dir + "/src/lib.rs"
+let airgenome_spec = dev + "/airgenome/docs/gates.hexa"
+let bus_file = dev + "/nexus6/shared/growth_bus.jsonl"
+let history_file = dev + "/nexus6/shared/air_rs_history.jsonl"
 
 // 허용 스펙-싱크 지연 (시간)
-comptime const MAX_SYNC_DELAY_HOURS = 24.0
-comptime const WARN_SYNC_DELAY_HOURS = 6.0
+comptime const max_sync_delay_hours = 24.0
+comptime const warn_sync_delay_hours = 6.0
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -57,7 +57,7 @@ fn clamp01(x: f64) -> f64 {
 }
 
 fn timestamp() -> string {
-    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
     r.trim()
 }
 
@@ -70,20 +70,22 @@ fn read_file_safe(path: string) -> string {
 }
 
 fn dir_exists(path: string) -> bool {
-    let r = try { exec("bash", ["-c", "test -d '" + path + "' && echo 1"]) } catch e { "" }
+    let mut r = ""
+    try { r = exec("bash -c test -d '" + path + "' && echo 1") } catch e {}
     r.trim() == "1"
 }
 
 fn file_exists(path: string) -> bool {
-    let r = try { exec("bash", ["-c", "test -f '" + path + "' && echo 1"]) } catch e { "" }
+    let mut r = ""
+    try { r = exec("bash -c test -f '" + path + "' && echo 1") } catch e {}
     r.trim() == "1"
 }
 
 fn append_bus(phase: string, status: string, detail: string) {
     let ts = timestamp()
-    let line = "{\"source\":\"" + NAME + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    let line = "{\"source\":\"" + name + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
     try {
-        append_file(BUS_FILE, line + "\n")
+        append_file(bus_file, line + "\n")
     } catch e {}
 }
 
@@ -91,7 +93,7 @@ fn append_history(passed: int, failed: int, sync_delay_h: f64, label: string) {
     let ts = timestamp()
     let line = "{\"ts\":\"" + ts + "\",\"passed\":" + to_string(passed) + ",\"failed\":" + to_string(failed) + ",\"sync_delay_h\":" + to_string(sync_delay_h) + ",\"label\":\"" + label + "\"}"
     try {
-        append_file(HISTORY_FILE, line + "\n")
+        append_file(history_file, line + "\n")
     } catch e {}
 }
 
@@ -123,22 +125,24 @@ struct SpecSyncState {
 }
 
 fn get_file_mtime_epoch(path: string) -> int {
-    let result = try {
-        exec("bash", ["-c", "stat -f '%m' '" + path + "' 2>/dev/null || stat -c '%Y' '" + path + "' 2>/dev/null"])
-    } catch e { "0" }
+    let mut result = "0"
+    try {
+        result = exec("bash -c stat -f '%m' '" + path + "' 2>/dev/null || stat -c '%Y' '" + path + "' 2>/dev/null")
+    } catch e {}
     return safe_int(result.trim())
 }
 
 fn get_git_last_commit_epoch(dir: string) -> int {
-    let result = try {
-        exec("bash", ["-c", "cd '" + dir + "' && git log -1 --format='%ct' 2>/dev/null"])
-    } catch e { "0" }
+    let mut result = "0"
+    try {
+        result = exec("bash -c cd '" + dir + "' && git log -1 --format='%ct' 2>/dev/null")
+    } catch e {}
     return safe_int(result.trim())
 }
 
 fn check_spec_sync() -> SpecSyncState {
-    let spec_exists = file_exists(AIRGENOME_SPEC)
-    let air_rs_exists = dir_exists(AIR_RS_DIR)
+    let spec_exists = file_exists(airgenome_spec)
+    let air_rs_exists = dir_exists(air_rs_dir)
 
     let mut spec_mtime = 0
     let mut air_rs_mtime = 0
@@ -146,14 +150,14 @@ fn check_spec_sync() -> SpecSyncState {
     let mut spec_newer = false
 
     if spec_exists {
-        spec_mtime = get_file_mtime_epoch(AIRGENOME_SPEC)
+        spec_mtime = get_file_mtime_epoch(airgenome_spec)
     }
 
     if air_rs_exists {
-        air_rs_mtime = get_git_last_commit_epoch(AIR_RS_DIR)
+        air_rs_mtime = get_git_last_commit_epoch(air_rs_dir)
         // fallback: lib.rs mtime
-        if air_rs_mtime == 0 && file_exists(AIR_RS_SRC) {
-            air_rs_mtime = get_file_mtime_epoch(AIR_RS_SRC)
+        if air_rs_mtime == 0 && file_exists(air_rs_src) {
+            air_rs_mtime = get_file_mtime_epoch(air_rs_src)
         }
     }
 
@@ -184,13 +188,14 @@ struct TestResult {
 }
 
 fn run_cargo_test() -> TestResult {
-    if !dir_exists(AIR_RS_DIR) {
+    if !dir_exists(air_rs_dir) {
         return TestResult { passed: 0, failed: 0, total: 0, all_pass: false, output: "dir not found", ran: false }
     }
 
-    let result = try {
-        exec("bash", ["-c", "cd '" + AIR_RS_DIR + "' && cargo test 2>&1 | tail -20"])
-    } catch e { "cargo test error: " + to_string(e) }
+    let mut result = "cargo test error: " + to_string(e)
+    try {
+        result = exec("bash -c cd '" + air_rs_dir + "' && cargo test 2>&1 | tail -20")
+    } catch e {}
 
     // 파싱: "test result: ok. X passed; Y failed; Z ignored"
     let mut passed = 0
@@ -220,7 +225,8 @@ fn run_cargo_test() -> TestResult {
             let f = last.split("failed")[0]
             // "passed; N failed" 패턴
             if f.contains(";") {
-                let after_semi = f.split(";")
+                let after_semi = f.split("
+                ")
                 let last_seg = after_semi[after_semi.len() - 1].trim()
                 let words = last_seg.split(" ")
                 let mut wi = words.len() - 1
@@ -248,12 +254,12 @@ fn run_cargo_test() -> TestResult {
 }
 
 fn get_air_rs_version() -> string {
-    let content = read_file_safe(AIR_RS_SRC)
+    let content = read_file_safe(air_rs_src)
     if content == "" { return "unknown" }
 
-    // "version" 또는 "VERSION" 패턴
-    if content.contains("VERSION") {
-        let parts = content.split("VERSION")
+    // "version" 또는 "version" 패턴
+    if content.contains("version") {
+        let parts = content.split("version")
         if parts.len() >= 2 {
             let after = parts[1]
             if after.contains("\"") {
@@ -290,7 +296,7 @@ fn compute_health(sync: SpecSyncState, test: TestResult) -> HealthResult {
     let mut sync_score = 1.0
     if sync.spec_newer {
         // 지연이 클수록 점수 하락
-        sync_score = clamp01(1.0 - sync.delay_hours / MAX_SYNC_DELAY_HOURS)
+        sync_score = clamp01(1.0 - sync.delay_hours / max_sync_delay_hours)
     }
 
     // 테스트 점수 (50%)
@@ -302,13 +308,13 @@ fn compute_health(sync: SpecSyncState, test: TestResult) -> HealthResult {
     }
 
     // 존재 점수 (10%): lib.rs 존재
-    let exist_score = if file_exists(AIR_RS_SRC) { 1.0 } else { 0.0 }
+    let exist_score = if file_exists(air_rs_src) { 1.0 } else { 0.0 }
 
     let score = sync_score * 0.4 + test_score * 0.5 + exist_score * 0.1
 
     // 라벨 판정
     // 1. spec이 더 새롭고 지연 > WARN → STAGNANT
-    if sync.spec_newer && sync.delay_hours > WARN_SYNC_DELAY_HOURS {
+    if sync.spec_newer && sync.delay_hours > warn_sync_delay_hours {
         return HealthResult {
             score: score,
             label: "STAGNANT",
@@ -362,7 +368,7 @@ fn compute_health(sync: SpecSyncState, test: TestResult) -> HealthResult {
 // ═══════════════════════════════════════════════════════════
 
 fn analyze_sync_trend() -> string {
-    let hist = read_file_safe(HISTORY_FILE)
+    let hist = read_file_safe(history_file)
     if hist == "" { return "히스토리 없음 — 추적 시작 필요" }
 
     let lines = hist.split("\n")
@@ -416,14 +422,14 @@ fn analyze_sync_trend() -> string {
 // ═══════════════════════════════════════════════════════════
 
 fn mode_status() {
-    println("═══ " + NAME + " [" + PERSONALITY + "] v" + VERSION + " ═══")
+    println("═══ " + name + " [" + personality + "] v" + version + " ═══")
 
     let sync = check_spec_sync()
     let ver = get_air_rs_version()
 
-    println("project: " + AIR_RS_DIR)
+    println("project: " + air_rs_dir)
     println("version: " + ver)
-    println("spec: " + AIRGENOME_SPEC + " " + if sync.spec_exists { "(exists)" } else { "(missing)" })
+    println("spec: " + airgenome_spec + " " + if sync.spec_exists { "(exists)" } else { "(missing)" })
     println("spec_newer: " + to_string(sync.spec_newer))
     if sync.spec_newer {
         println("sync_delay: " + to_string(to_int(sync.delay_hours)) + " hours")
@@ -443,11 +449,11 @@ fn mode_status() {
 }
 
 fn mode_tick() {
-    println("═══ " + NAME + " tick ═══")
+    println("═══ " + name + " tick ═══")
     append_bus("tick", "start", "translator tick begin")
 
-    if !dir_exists(AIR_RS_DIR) {
-        println("ERROR: air_rs dir not found: " + AIR_RS_DIR)
+    if !dir_exists(air_rs_dir) {
+        println("ERROR: air_rs dir not found: " + air_rs_dir)
         append_bus("tick", "error", "air_rs dir missing")
         return
     }
@@ -460,12 +466,13 @@ fn mode_tick() {
     // ─── 틱 로직 ───
 
     // 1. spec이 더 새로움 → sync 필요 (최우선)
-    if sync.spec_newer && sync.delay_hours > WARN_SYNC_DELAY_HOURS {
+    if sync.spec_newer && sync.delay_hours > warn_sync_delay_hours {
         println("STAGNANT: spec " + to_string(to_int(sync.delay_hours)) + "h 뒤처짐 — 빌드+테스트로 확인")
         // 빌드부터 시도
-        let build_result = try {
-            exec("bash", ["-c", "cd '" + AIR_RS_DIR + "' && cargo build 2>&1 | tail -10"])
-        } catch e { "build error: " + to_string(e) }
+        let mut build_result = "build error: " + to_string(e)
+        try {
+            build_result = exec("bash -c cd '" + air_rs_dir + "' && cargo build 2>&1 | tail -10")
+        } catch e {}
         println("  build: " + build_result.trim())
 
         if build_result.contains("error") {
@@ -498,9 +505,10 @@ fn mode_tick() {
         println("PRIORITY FIX: " + to_string(test.failed) + " 테스트 실패")
 
         // 실패 테스트 상세 출력
-        let fail_detail = try {
-            exec("bash", ["-c", "cd '" + AIR_RS_DIR + "' && cargo test 2>&1 | grep -A 3 'FAILED\\|failures' | tail -15"])
-        } catch e { "no detail" }
+        let mut fail_detail = "no detail"
+        try {
+            fail_detail = exec("bash -c cd '" + air_rs_dir + "' && cargo test 2>&1 | grep -A 3 'FAILED\\|failures' | tail -15")
+        } catch e {}
         println("  failures:")
         let fail_lines = fail_detail.split("\n")
         for fl in fail_lines {
@@ -517,9 +525,10 @@ fn mode_tick() {
     if test.ran && test.all_pass && !sync.spec_newer {
         println("HEALTHY: 전 테스트 통과 + spec 동기 완료")
         println("  유지 모드 — cargo build 확인")
-        let build_result = try {
-            exec("bash", ["-c", "cd '" + AIR_RS_DIR + "' && cargo build 2>&1 | tail -3"])
-        } catch e { "build ok" }
+        let mut build_result = "build ok"
+        try {
+            build_result = exec("bash -c cd '" + air_rs_dir + "' && cargo build 2>&1 | tail -3")
+        } catch e {}
         println("  build: " + build_result.trim())
         append_bus("tick", "healthy", "all pass, spec synced")
         append_history(test.passed, test.failed, 0.0, "healthy")
@@ -528,9 +537,10 @@ fn mode_tick() {
 
     // 4. DEFAULT → cargo build + cargo test
     println("DEFAULT: build + test cycle")
-    let build_result = try {
-        exec("bash", ["-c", "cd '" + AIR_RS_DIR + "' && cargo build 2>&1 | tail -5"])
-    } catch e { "build error" }
+    let mut build_result = "build error"
+    try {
+        build_result = exec("bash -c cd '" + air_rs_dir + "' && cargo build 2>&1 | tail -5")
+    } catch e {}
     println("  build: " + build_result.trim())
 
     if !build_result.contains("error") {
@@ -587,7 +597,7 @@ fn mode_report() {
     println("  " + trend)
 
     // 히스토리 최근 5개 출력
-    let hist = read_file_safe(HISTORY_FILE)
+    let hist = read_file_safe(history_file)
     if hist != "" {
         println("")
         println("── Recent History (last 5) ──")
@@ -639,7 +649,7 @@ fn main() {
     } else if mode == "report" {
         mode_report()
     } else {
-        println("engine_air_rs.hexa v" + VERSION + " — Translator")
+        println("engine_air_rs.hexa v" + version + " — Translator")
         println("usage: hexa engine_air_rs.hexa status|tick|report")
     }
 }

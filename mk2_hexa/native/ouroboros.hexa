@@ -2,11 +2,11 @@
 // hexa-native — 순수 hexa, 파일 I/O, CLI 인터페이스
 // 핵심: EvolutionEngine + MutationStrategy + ConvergenceChecker + Absorber + MetaLoop
 
-comptime const MAX_MUTATIONS_PER_CYCLE = 6
-comptime const META_FIXED_POINT = 0.333333333
-comptime const ABSORBER_MAX_DEPTH = 6
-comptime const ABSORBER_EPSILON = 0.001
-comptime const DIVERGENCE_LIMIT = 100000
+comptime const max_mutations_per_cycle = 6
+comptime const meta_fixed_point = 0.333333333
+comptime const absorber_max_depth = 6
+comptime const absorber_epsilon = 0.001
+comptime const divergence_limit = 100000
 
 // ─── 수학 유틸 ───
 
@@ -27,10 +27,10 @@ pure fn sqrt_f(x: float) -> float {
 
 // ─── 변이 전략 (MutationStrategy) ───
 
-comptime const STRATEGY_PARAMETER_SHIFT = 0
-comptime const STRATEGY_DOMAIN_TRANSFER = 1
-comptime const STRATEGY_COMBINATION = 2
-comptime const STRATEGY_INVERSION = 3
+comptime const strategy_parameter_shift = 0
+comptime const strategy_domain_transfer = 1
+comptime const strategy_combination = 2
+comptime const strategy_inversion = 3
 
 pure fn strategy_name(s: int) -> string {
     match s {
@@ -43,16 +43,11 @@ pure fn strategy_name(s: int) -> string {
 }
 
 // n=6 상수 시프트 테이블
-comptime const N6_SHIFT_NAMES = ["sigma", "phi", "tau", "J2", "sopfr", "sigma-phi", "sigma-tau", "n", "ln(4/3)", "tau^2/sigma"]
-comptime const N6_SHIFT_VALUES = [12.0, 2.0, 4.0, 24.0, 5.0, 10.0, 8.0, 6.0, 0.287682072, 1.333333333]
+comptime const n6_shift_names = ["sigma", "phi", "tau", "J2", "sopfr", "sigma-phi", "sigma-tau", "n", "ln(4/3)", "tau^2/sigma"]
+comptime const n6_shift_values = [12.0, 2.0, 4.0, 24.0, 5.0, 10.0, 8.0, 6.0, 0.287682072, 1.333333333]
 
 // 도메인 전이 대상
-comptime const TRANSFER_DOMAINS = [
-    "ai-efficiency", "chip-architecture", "energy-architecture",
-    "battery-architecture", "quantum-computing", "fusion",
-    "superconductor", "biology", "cosmology-particle",
-    "robotics", "material-synthesis", "software-design"
-]
+comptime const transfer_domains = [ "ai-efficiency", "chip-architecture", "energy-architecture", "battery-architecture", "quantum-computing", "fusion", "superconductor", "biology", "cosmology-particle", "robotics", "material-synthesis", "software-design" ]
 
 fn truncate(s: string, max_len: int) -> string {
     if s.len() <= max_len { s }
@@ -61,15 +56,13 @@ fn truncate(s: string, max_len: int) -> string {
 
 // --- ParameterShift: n=6 상수로 스케일링 ---
 
-fn mutate_parameter_shift(base: string) -> list[string] {
+fn mutate_parameter_shift(base: string)  {
     let mut results = []
     let mut i = 0
-    while i < N6_SHIFT_NAMES.len() {
-        let name = N6_SHIFT_NAMES[i]
-        let val = N6_SHIFT_VALUES[i]
-        results = results + [
-            "[ParameterShift] " + base + " -> scaled by " + name + "=" + to_string(val) + ": key parameter x" + name + " may reveal hidden n=6 alignment"
-        ]
+    while i < n6_shift_names.len() {
+        let name = n6_shift_names[i]
+        let val = n6_shift_values[i]
+        results = results + [ "[ParameterShift] " + base + " -> scaled by " + name + "=" + to_string(val) + ": key parameter x" + name + " may reveal hidden n=6 alignment" ]
         i = i + 1
     }
     results
@@ -77,19 +70,17 @@ fn mutate_parameter_shift(base: string) -> list[string] {
 
 // --- DomainTransfer: 다른 도메인으로 전이 ---
 
-fn mutate_domain_transfer(base: string) -> list[string] {
+fn mutate_domain_transfer(base: string)  {
     let mut results = []
-    for domain in TRANSFER_DOMAINS {
-        results = results + [
-            "[DomainTransfer->" + domain + "] If '" + truncate(base, 80) + "' holds, then analogous pattern may exist in " + domain + " domain"
-        ]
+    for domain in transfer_domains {
+        results = results + [ "[DomainTransfer->" + domain + "] If '" + truncate(base, 80) + "' holds, then analogous pattern may exist in " + domain + " domain" ]
     }
     results
 }
 
 // --- Combination: 가설 절반을 n=6 브릿지로 연결 ---
 
-fn mutate_combination(base: string) -> list[string] {
+fn mutate_combination(base: string)  {
     let words = base.split(" ")
     if words.len() < 4 {
         return ["[Combination] " + base + " && sigma*phi=n*tau bridge -> unified hypothesis"]
@@ -108,24 +99,18 @@ fn mutate_combination(base: string) -> list[string] {
         second_half = second_half + words[i]
         i = i + 1
     }
-    [
-        "[Combination:sigma*phi=n*tau] '" + first_half + "' BRIDGED-BY n=6 identity WITH '" + second_half + "'",
-        "[Combination:J2=24] '" + second_half + "' scaled-to J2=24 dimension WITH '" + first_half + "'"
-    ]
+    [ "[Combination:sigma*phi=n*tau] '" + first_half + "' BRIDGED-BY n=6 identity WITH '" + second_half + "'", "[Combination:J2=24] '" + second_half + "' scaled-to J2=24 dimension WITH '" + first_half + "'" ]
 }
 
 // --- Inversion: 가설 부정 ---
 
-fn mutate_inversion(base: string) -> list[string] {
-    [
-        "[Inversion] NOT(" + base + "): what if the opposite holds?",
-        "[Inversion:reciprocal] Instead of X, consider 1/X where: " + base
-    ]
+fn mutate_inversion(base: string)  {
+    [ "[Inversion] NOT(" + base + "): what if the opposite holds?", "[Inversion:reciprocal] Instead of X, consider 1/X where: " + base ]
 }
 
 // --- 전체 변이 (4종 전략 적용) ---
 
-fn mutate_hypothesis(base: string) -> list[string] {
+fn mutate_hypothesis(base: string)  {
     let mut results = []
     results = results + mutate_parameter_shift(base)
     results = results + mutate_domain_transfer(base)
@@ -134,7 +119,7 @@ fn mutate_hypothesis(base: string) -> list[string] {
     results
 }
 
-fn mutate_with_strategy(base: string, strategy: int) -> list[string] {
+fn mutate_with_strategy(base: string, strategy: int)  {
     match strategy {
         0 -> mutate_parameter_shift(base),
         1 -> mutate_domain_transfer(base),
@@ -146,10 +131,10 @@ fn mutate_with_strategy(base: string, strategy: int) -> list[string] {
 
 // ─── 수렴 검사 (ConvergenceChecker) ───
 
-comptime const STATUS_EXPLORING = 0
-comptime const STATUS_CONVERGING = 1
-comptime const STATUS_SATURATED = 2
-comptime const STATUS_DIVERGENT = 3
+comptime const status_exploring = 0
+comptime const status_converging = 1
+comptime const status_saturated = 2
+comptime const status_divergent = 3
 
 pure fn status_name(s: int) -> string {
     match s {
@@ -176,9 +161,9 @@ pure fn default_convergence_config() -> ConvergenceConfig {
 }
 
 // history: 각 사이클의 신규 발견 수 배열
-pure fn check_convergence(config: ConvergenceConfig, history: list[int]) -> int {
+pure fn check_convergence(config: ConvergenceConfig, history) -> int {
     if history.len() < config.min_cycles {
-        return STATUS_EXPLORING
+        return status_exploring
     }
 
     // 포화 검사: 최근 N 사이클 모두 발견 0
@@ -190,9 +175,9 @@ pure fn check_convergence(config: ConvergenceConfig, history: list[int]) -> int 
         if history[i] > 0 { all_zero = false }
         i = i + 1
     }
-    if all_zero { return STATUS_SATURATED }
+    if all_zero { return status_saturated }
 
-    if history.len() < 2 { return STATUS_EXPLORING }
+    if history.len() < 2 { return status_exploring }
 
     // 전반부 vs 후반부 비교
     let mid = history.len() / 2
@@ -213,17 +198,17 @@ pure fn check_convergence(config: ConvergenceConfig, history: list[int]) -> int 
     let recent_len = history.len() - mid
     let recent_avg = to_float(recent_sum) / to_float(recent_len)
 
-    if early_avg == 0.0 && recent_avg == 0.0 { return STATUS_SATURATED }
+    if early_avg == 0.0 && recent_avg == 0.0 { return status_saturated }
 
     if early_avg > 0.0 {
         let ratio = recent_avg / early_avg
-        if ratio < (1.0 - config.convergence_threshold) { return STATUS_CONVERGING }
-        if ratio > (1.0 + config.convergence_threshold) { return STATUS_DIVERGENT }
+        if ratio < (1.0 - config.convergence_threshold) { return status_converging }
+        if ratio > (1.0 + config.convergence_threshold) { return status_divergent }
     } else if recent_avg > 0.0 {
-        return STATUS_DIVERGENT
+        return status_divergent
     }
 
-    STATUS_EXPLORING
+    status_exploring
 }
 
 // ─── CycleResult ───
@@ -242,13 +227,13 @@ struct CycleResult {
 struct EvolutionState {
     domain: string,
     cycle_count: int,
-    discovery_history: list[int],
+    discovery_history: str,
     node_count: int,
     edge_count: int,
-    seed_hypotheses: list[string]
+    seed_hypotheses: str
 }
 
-fn new_evolution_state(domain: string, seeds: list[string]) -> EvolutionState {
+fn new_evolution_state(domain: string, seeds) -> EvolutionState {
     EvolutionState {
         domain: domain,
         cycle_count: 0,
@@ -260,7 +245,7 @@ fn new_evolution_state(domain: string, seeds: list[string]) -> EvolutionState {
 }
 
 // 가설 → 스캔 데이터 (결정론적 해시)
-fn hypotheses_to_data(hypotheses: list[string]) -> list[float] {
+fn hypotheses_to_data(hypotheses)  {
     let mut data = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0]  // n=6 기본 상수
     for h in hypotheses {
         let mut hash = 0
@@ -276,7 +261,7 @@ fn hypotheses_to_data(hypotheses: list[string]) -> list[float] {
 }
 
 // 가설 생성 (시드 + 이전 발견의 변이)
-fn generate_hypotheses(state: EvolutionState, prev_discoveries: list[string]) -> list[string] {
+fn generate_hypotheses(state: EvolutionState, prev_discoveries)  {
     let mut hypotheses = []
 
     // 첫 사이클: 시드 사용
@@ -287,7 +272,7 @@ fn generate_hypotheses(state: EvolutionState, prev_discoveries: list[string]) ->
     // 이전 발견에서 변이 (최대 2개/발견)
     let mut count = 0
     for disc in prev_discoveries {
-        if count >= MAX_MUTATIONS_PER_CYCLE { break }
+        if count >= max_mutations_per_cycle { break }
         let mutations = mutate_hypothesis(disc)
         let take = if mutations.len() > 2 { 2 } else { mutations.len() }
         let mut i = 0
@@ -304,7 +289,7 @@ fn generate_hypotheses(state: EvolutionState, prev_discoveries: list[string]) ->
     }
 
     // 총량 제한
-    let limit = MAX_MUTATIONS_PER_CYCLE * 6
+    let limit = max_mutations_per_cycle * 6
     if hypotheses.len() > limit {
         hypotheses = hypotheses[0..limit]
     }
@@ -313,7 +298,7 @@ fn generate_hypotheses(state: EvolutionState, prev_discoveries: list[string]) ->
 }
 
 // 간이 검증 점수 (0.0 ~ 1.0)
-pure fn verify_score(data: list[float], cycle: int) -> float {
+pure fn verify_score(data, cycle: int) -> float {
     // n=6 정렬도
     let mut n6_count = 0
     let n6_constants = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0]
@@ -333,7 +318,7 @@ pure fn verify_score(data: list[float], cycle: int) -> float {
 }
 
 // 진화 1단계 실행
-fn evolve_step(state: EvolutionState, prev_discoveries: list[string]) -> CycleResult {
+fn evolve_step(state: EvolutionState, prev_discoveries) -> CycleResult {
     let cycle = state.cycle_count + 1
     let hypotheses = generate_hypotheses(state, prev_discoveries)
     let data = hypotheses_to_data(hypotheses)
@@ -353,7 +338,7 @@ fn evolve_step(state: EvolutionState, prev_discoveries: list[string]) -> CycleRe
 }
 
 // 진화 루프 실행
-fn run_evolution(domain: string, seeds: list[string], max_cycles: int) -> list[CycleResult] {
+fn run_evolution(domain: string, seeds, max_cycles: int)  {
     let mut state = new_evolution_state(domain, seeds)
     let conv_config = default_convergence_config()
     let mut results = []
@@ -376,7 +361,7 @@ fn run_evolution(domain: string, seeds: list[string], max_cycles: int) -> list[C
         let status = check_convergence(conv_config, state.discovery_history)
         println("  cycle " + to_string(result.cycle) + ": discoveries=" + to_string(result.new_discoveries) + " score=" + to_string(result.verification_score) + " status=" + status_name(status))
 
-        if status == STATUS_SATURATED {
+        if status == status_saturated {
             println("  -> SATURATED at cycle " + to_string(result.cycle))
             return results
         }
@@ -402,7 +387,7 @@ struct AbsorptionResult {
 }
 
 struct AbsorptionChain {
-    layers: list[AbsorptionResult],
+    layers: str,
     converged: bool,
     final_depth: int,
     total_yield: int
@@ -417,8 +402,8 @@ struct GrowthEvent {
 
 // 성장 흡수기 상태
 struct GrowthState {
-    weights: list[float],
-    absorbed_patterns: list[string],
+    weights: str,
+    absorbed_patterns: str,
     state_counter: int
 }
 
@@ -431,7 +416,7 @@ fn new_growth_state() -> GrowthState {
 }
 
 // apply: 가중 필터링 + 공명 탐지
-fn growth_apply(state: GrowthState, input: list[GrowthEvent]) -> list[GrowthEvent] {
+fn growth_apply(state: GrowthState, input)  {
     let mut output = []
     let mut i = 0
     while i < input.len() {
@@ -465,7 +450,7 @@ fn growth_apply(state: GrowthState, input: list[GrowthEvent]) -> list[GrowthEven
 }
 
 // absorb_self: 산출물이 가중치를 변형
-fn growth_absorb(state: GrowthState, output: list[GrowthEvent]) -> GrowthState {
+fn growth_absorb(state: GrowthState, output) -> GrowthState {
     if output.len() == 0 { return state }
 
     let mut sum = 0.0
@@ -495,7 +480,7 @@ fn growth_absorb(state: GrowthState, output: list[GrowthEvent]) -> GrowthState {
 }
 
 // measure: 스칼라 요약 (수렴 판정)
-pure fn growth_measure(output: list[GrowthEvent]) -> float {
+pure fn growth_measure(output) -> float {
     if output.len() == 0 { return 0.0 }
     let mut sum = 0.0
     for e in output { sum = sum + e.value }
@@ -513,7 +498,7 @@ pure fn depth_label(d: int) -> string {
 }
 
 // Absorber 실행: f(f(f(...))) 수렴 루프
-fn run_absorber(initial_input: list[GrowthEvent]) -> AbsorptionChain {
+fn run_absorber(initial_input) -> AbsorptionChain {
     let mut state = new_growth_state()
     let mut layers = []
     let mut current_input = initial_input
@@ -521,7 +506,7 @@ fn run_absorber(initial_input: list[GrowthEvent]) -> AbsorptionChain {
     let mut total_yield = 0
 
     let mut depth = 0
-    while depth < ABSORBER_MAX_DEPTH {
+    while depth < absorber_max_depth {
         let output = growth_apply(state, current_input)
         let yield_count = output.len()
         total_yield = total_yield + yield_count
@@ -537,7 +522,7 @@ fn run_absorber(initial_input: list[GrowthEvent]) -> AbsorptionChain {
         }]
 
         // 수렴 체크
-        if depth > 0 && delta < ABSORBER_EPSILON {
+        if depth > 0 && delta < absorber_epsilon {
             return AbsorptionChain {
                 layers: layers,
                 converged: true,
@@ -547,7 +532,7 @@ fn run_absorber(initial_input: list[GrowthEvent]) -> AbsorptionChain {
         }
 
         // 발산 체크
-        if total_yield > DIVERGENCE_LIMIT {
+        if total_yield > divergence_limit {
             return AbsorptionChain {
                 layers: layers,
                 converged: false,
@@ -567,7 +552,7 @@ fn run_absorber(initial_input: list[GrowthEvent]) -> AbsorptionChain {
     AbsorptionChain {
         layers: layers,
         converged: false,
-        final_depth: ABSORBER_MAX_DEPTH,
+        final_depth: absorber_max_depth,
         total_yield: total_yield
     }
 }
@@ -581,11 +566,11 @@ struct MetaLoopResult {
     final_status: int
 }
 
-fn run_meta_loop(domain: string, seeds: list[string], max_meta: int, max_evo: int) -> MetaLoopResult {
+fn run_meta_loop(domain: string, seeds, max_meta: int, max_evo: int) -> MetaLoopResult {
     let mut total_disc = 0
     let mut total_evo = 0
     let mut current_seeds = seeds
-    let mut final_status = STATUS_EXPLORING
+    let mut final_status = status_exploring
 
     let mut mc = 0
     while mc < max_meta {
@@ -609,7 +594,7 @@ fn run_meta_loop(domain: string, seeds: list[string], max_meta: int, max_evo: in
         final_status = check_convergence(default_convergence_config(), disc_history)
 
         // 포화 시 시드 재생성 (forge 시뮬레이션)
-        if final_status == STATUS_SATURATED && mc + 1 < max_meta {
+        if final_status == status_saturated && mc + 1 < max_meta {
             println("  forge: regenerating seeds for next meta-cycle")
             let mut new_seeds = []
             for s in current_seeds {
@@ -622,7 +607,7 @@ fn run_meta_loop(domain: string, seeds: list[string], max_meta: int, max_evo: in
                     meta_cycles: mc + 1,
                     total_discoveries: total_disc,
                     total_evolutions: total_evo,
-                    final_status: STATUS_SATURATED
+                    final_status: status_saturated
                 }
             }
             current_seeds = new_seeds
@@ -654,10 +639,7 @@ if mode == "evolve" {
     println("max_cycles: " + to_string(max_cycles))
     println("")
 
-    let seeds = [
-        "n=6 pattern in " + domain + ": sigma*phi=n*tau",
-        domain + " domain key parameters constrained by n=6 algebra"
-    ]
+    let seeds = [ "n=6 pattern in " + domain + ": sigma*phi=n*tau", domain + " domain key parameters constrained by n=6 algebra" ]
 
     let results = run_evolution(domain, seeds, max_cycles)
     println("")
@@ -676,18 +658,11 @@ if mode == "evolve" {
 if mode == "absorb" {
     // hexa ouroboros.hexa absorb
     println("=== OUROBOROS Absorber (f(f(f(...)))) ===")
-    println("max_depth: " + to_string(ABSORBER_MAX_DEPTH))
-    println("epsilon: " + to_string(ABSORBER_EPSILON))
+    println("max_depth: " + to_string(absorber_max_depth))
+    println("epsilon: " + to_string(absorber_epsilon))
     println("")
 
-    let input = [
-        GrowthEvent { source: "lens_grower", kind: "discovery", value: 2.0 },
-        GrowthEvent { source: "mirror", kind: "resonance", value: 2.1 },
-        GrowthEvent { source: "ouroboros", kind: "mutation", value: 3.0 },
-        GrowthEvent { source: "dream", kind: "hypothesis", value: 1.5 },
-        GrowthEvent { source: "forge", kind: "lens_created", value: 4.0 },
-        GrowthEvent { source: "bus", kind: "feedback", value: 1.8 }
-    ]
+    let input = [ GrowthEvent { source: "lens_grower", kind: "discovery", value: 2.0 }, GrowthEvent { source: "mirror", kind: "resonance", value: 2.1 }, GrowthEvent { source: "ouroboros", kind: "mutation", value: 3.0 }, GrowthEvent { source: "dream", kind: "hypothesis", value: 1.5 }, GrowthEvent { source: "forge", kind: "lens_created", value: 4.0 }, GrowthEvent { source: "bus", kind: "feedback", value: 1.8 } ]
 
     let chain = run_absorber(input)
 
@@ -770,10 +745,10 @@ if mode == "help" {
 
 assert strategy_name(0) == "ParameterShift"
 assert strategy_name(3) == "Inversion"
-assert status_name(STATUS_EXPLORING) == "Exploring"
-assert status_name(STATUS_SATURATED) == "Saturated"
-assert check_convergence(default_convergence_config(), [5, 3]) == STATUS_EXPLORING
-assert check_convergence(default_convergence_config(), [5, 3, 0, 0, 0]) == STATUS_SATURATED
+assert status_name(status_exploring) == "Exploring"
+assert status_name(status_saturated) == "Saturated"
+assert check_convergence(default_convergence_config(), [5, 3]) == status_exploring
+assert check_convergence(default_convergence_config(), [5, 3, 0, 0, 0]) == status_saturated
 assert depth_label(0) == "growth"
 assert depth_label(1) == "growth(growth)"
 assert depth_label(2) == "growth(growth(growth))"
@@ -786,7 +761,7 @@ println("=== ouroboros verified ===")
 
 theorem ouroboros_convergence {
     // 포화 윈도우 내 모든 발견 = 0 → Saturated
-    assert check_convergence(default_convergence_config(), [5, 3, 0, 0, 0]) == STATUS_SATURATED
+    assert check_convergence(default_convergence_config(), [5, 3, 0, 0, 0]) == status_saturated
 }
 
 theorem absorber_identity_converges {

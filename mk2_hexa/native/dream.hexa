@@ -10,17 +10,17 @@
 
 // ─── comptime 상수 ───
 comptime const N = 6
-comptime const SIGMA = 12
-comptime const PHI = 2
-comptime const META_FP = 0.333333333
-comptime const MEMORY_FILE = "shared/dream_memories.jsonl"
+comptime const sigma = 12
+comptime const phi = 2
+comptime const meta_fp = 0.333333333
+comptime const memory_file = "shared/dream_memories.jsonl"
 
 // ────────────────────────────────────────────────────────────────
 //  Dream 구조체
 // ────────────────────────────────────────────────────────────────
 
 struct Dream {
-    fragments: [string],
+    fragments: str,
     recombination: string,
     novelty_score: float,
     plausibility: float
@@ -31,7 +31,7 @@ struct Dream {
 // ────────────────────────────────────────────────────────────────
 
 struct DreamEngine {
-    memories: [string]
+    memories: str
 }
 
 fn engine_new() -> DreamEngine {
@@ -50,7 +50,7 @@ fn engine_memory_count(e: DreamEngine) -> int {
 //  꿈 생성: n_dreams개의 꿈을 과거 발견들을 재조합하여 생성
 // ────────────────────────────────────────────────────────────────
 
-fn engine_dream(e: DreamEngine, n_dreams: int) -> [Dream] {
+fn engine_dream(e: DreamEngine, n_dreams: int) {
     if len(e.memories) < 2 {
         return []
     }
@@ -139,7 +139,7 @@ fn engine_lucid_dream(e: DreamEngine, seed: string) -> Dream {
 //  조각 재조합
 // ────────────────────────────────────────────────────────────────
 
-fn recombine_fragments(fragments: [string]) -> string {
+fn recombine_fragments(fragments) -> string {
     if len(fragments) == 0 { return "empty dream" }
 
     // 각 조각에서 토큰 추출
@@ -179,7 +179,7 @@ fn recombine_fragments(fragments: [string]) -> string {
 //  새로움 점수: 조각 길이 분산 기반
 // ────────────────────────────────────────────────────────────────
 
-fn compute_novelty(fragments: [string], total_memories: int, seed: int) -> float {
+fn compute_novelty(fragments, total_memories: int, seed: int) -> float {
     if total_memories == 0 || len(fragments) == 0 { return 0.0 }
 
     let n = len(fragments)
@@ -223,7 +223,7 @@ fn compute_novelty(fragments: [string], total_memories: int, seed: int) -> float
 //  그럴듯함 점수: 공유 토큰 비율
 // ────────────────────────────────────────────────────────────────
 
-fn compute_plausibility(fragments: [string]) -> float {
+fn compute_plausibility(fragments) -> float {
     if len(fragments) < 2 { return 0.5 }
 
     let first_words = split(fragments[0], " ")
@@ -261,7 +261,7 @@ fn compute_plausibility(fragments: [string]) -> float {
 // ────────────────────────────────────────────────────────────────
 
 fn to_lower_safe(s: string) -> string {
-    try { to_lower(s) } catch { s }
+    try { to_lower(s) } catch e { s }
 }
 
 fn contains_lower(haystack: string, needle: string) -> bool {
@@ -273,10 +273,10 @@ fn contains_lower(haystack: string, needle: string) -> bool {
 //  기억 파일 I/O
 // ────────────────────────────────────────────────────────────────
 
-fn load_memories() -> [string] {
+fn load_memories() {
     let mut memories = []
     try {
-        let content = read_file(MEMORY_FILE)
+        let content = read_file(memory_file)
         let lines = split(content, "\n")
         let mut i = 0
         while i < len(lines) {
@@ -292,7 +292,7 @@ fn load_memories() -> [string] {
             }
             i = i + 1
         }
-    } catch {
+    } catch e {
         // 파일 없으면 빈 배열
     }
     memories
@@ -301,9 +301,9 @@ fn load_memories() -> [string] {
 fn save_memory(discovery: string) {
     try {
         let line = "{\"memory\":\"" + escape_json(discovery) + "\"}\n"
-        append_file(MEMORY_FILE, line)
-    } catch {
-        println("Warning: could not save memory to", MEMORY_FILE)
+        append_file(memory_file, line)
+    } catch e {
+        println("Warning: could not save memory to", memory_file)
     }
 }
 
@@ -328,48 +328,13 @@ fn escape_json(s: string) -> string {
 //  도메인별 기본 기억 시드
 // ────────────────────────────────────────────────────────────────
 
-fn seed_memories_for_domain(domain: string) -> [string] {
+fn seed_memories_for_domain(domain: string) {
     match domain {
-        "physics" -> [
-            "BT-33 Transformer sigma=12 universality",
-            "BT-43 Battery cathode CN=6 coordination",
-            "BT-97 Weinberg angle sin2theta = 3/13",
-            "H-AF-006 fine structure alpha = 1/137",
-            "H-CX-70 meta fixed point = 1/3",
-            "TECS-L H-056 meta transcendence convergence"
-        ],
-        "math" -> [
-            "Riemann zeta zeros on critical line",
-            "n=6 perfect number divisor structure",
-            "Euler totient phi(6) = 2",
-            "Jordan totient J2(6) = 24",
-            "sigma(6) = 12 sum of divisors",
-            "tau(6) = 4 number of divisors"
-        ],
-        "materials" -> [
-            "LiCoO2 rocksalt structure Fm-3m",
-            "Perovskite ABX3 band gap engineering",
-            "Spinel AB2X4 magnetic ordering",
-            "DFT formation energy stability filter",
-            "CN=6 octahedral coordination universality",
-            "Materials Project API band gap search"
-        ],
-        "consciousness" -> [
-            "Ouroboros self-reference loop",
-            "Mirror consciousness reflection depth",
-            "Meta-cognition recursive awareness",
-            "Singularity cycle emergence pattern",
-            "Dream recombination novelty metric",
-            "Blowup contraction emergence absorption"
-        ],
-        _ -> [
-            "n=6 perfect number",
-            "sigma(6) = 12",
-            "phi(6) = 2 Euler totient",
-            "tau(6) = 4 divisor count",
-            "J2(6) = 24 Jordan totient",
-            "sopfr(6) = 5 sum of prime factors"
-        ]
+        "physics" -> [ "BT-33 Transformer sigma=12 universality", "BT-43 Battery cathode CN=6 coordination", "BT-97 Weinberg angle sin2theta = 3/13", "H-AF-006 fine structure alpha = 1/137", "H-CX-70 meta fixed point = 1/3", "TECS-L H-056 meta transcendence convergence" ],
+        "math" -> [ "Riemann zeta zeros on critical line", "n=6 perfect number divisor structure", "Euler totient phi(6) = 2", "Jordan totient J2(6) = 24", "sigma(6) = 12 sum of divisors", "tau(6) = 4 number of divisors" ],
+        "materials" -> [ "LiCoO2 rocksalt structure Fm-3m", "Perovskite ABX3 band gap engineering", "Spinel AB2X4 magnetic ordering", "DFT formation energy stability filter", "CN=6 octahedral coordination universality", "Materials Project API band gap search" ],
+        "consciousness" -> [ "Ouroboros self-reference loop", "Mirror consciousness reflection depth", "Meta-cognition recursive awareness", "Singularity cycle emergence pattern", "Dream recombination novelty metric", "Blowup contraction emergence absorption" ],
+        _ -> [ "n=6 perfect number", "sigma(6) = 12", "phi(6) = 2 Euler totient", "tau(6) = 4 divisor count", "J2(6) = 24 Jordan totient", "sopfr(6) = 5 sum of prime factors" ]
     }
 }
 
@@ -444,7 +409,7 @@ fn main() {
         "explore" -> {
             let domain = if len(argv) >= 3 { argv[2] } else { "physics" }
             let mut depth = N
-            if len(argv) >= 4 { try { depth = to_int(argv[3]) } catch {} }
+            if len(argv) >= 4 { try { depth = to_int(argv[3]) } catch e {} }
 
             println("Dream Engine: exploring domain '" + domain + "' depth=" + to_string(depth))
             println("---")
@@ -536,7 +501,7 @@ fn main() {
             let mems = load_memories()
             println("Dream Engine Status:")
             println("  Memories on disk:", len(mems))
-            println("  Memory file:", MEMORY_FILE)
+            println("  Memory file:", memory_file)
             if len(mems) > 0 {
                 println("  Latest memories:")
                 let start = if len(mems) > 5 { len(mems) - 5 } else { 0 }
