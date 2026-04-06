@@ -399,14 +399,23 @@ fn build_directions() -> [Direction] {
         si = si + 1
     }
 
-    // rank 부여
+    // rank 부여 (hexa는 array[i].field 할당 불가 → rebuild)
+    let mut ranked = []
     let mut ri: i64 = 0
     while ri < len(dirs) {
-        dirs[ri].rank = ri + 1
+        let d = dirs[ri]
+        ranked = ranked + [Direction {
+            rank: ri + 1,
+            direction: d.direction,
+            reason: d.reason,
+            urgency: d.urgency,
+            domain: d.domain,
+            ts: d.ts
+        }]
         ri = ri + 1
     }
 
-    return dirs
+    return ranked
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -483,51 +492,49 @@ fn print_brief(dirs) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ─── MAIN ───
+// ─── MAIN (void wrapper functions → top-level call) ───
 // ═══════════════════════════════════════════════════════════
 
-// ─── MAIN (top-level inline) ───
-let _a = args()
-let _m = if _a.len() >= 3 { _a[2] } else { "report" }
-
-// build_directions inline — discovery 수집
-let _disc_raw = exec("tail -100 shared/discovery_log.jsonl 2>/dev/null")
-let _disc_lines = _disc_raw.split("\n")
-let mut _exact_count = 0
-let mut _d1_count = 0
-let mut _recent_domain = "math"
-for _dl in _disc_lines {
-    if _dl.contains("\"EXACT\"") { _exact_count = _exact_count + 1 }
-    if _dl.contains("\"d\":1") || _dl.contains("\"d\": 1") { _d1_count = _d1_count + 1 }
+fn do_report() {
+    let dirs = build_directions()
+    print_report(dirs)
+    save_directions(dirs)
 }
 
-// gap 수집
-let mut _gap_count = 0
-try {
-    let _gap_raw = exec(exec("printenv HOME").trim() + "/Dev/hexa-lang/target/release/hexa " + exec("printenv HOME").trim() + "/Dev/nexus6/mk2_hexa/native/gap_finder.hexa quick 2>/dev/null")
-    let _gap_lines = _gap_raw.split("\n")
-    for _gl in _gap_lines {
-        if _gl.contains("EXACT") { _gap_count = _gap_count + 1 }
-    }
-} catch _e {}
-
-// 방향 출력
-if _m == "report" || _m == "brief" {
-    println("🛸 새 방향 리포트 (자동 생성)")
-    println("┌───┬────────────────────────────────┬──────────────────────────────────────┬──────┐")
-    println("│ # │           방향                 │              근거                    │긴급도│")
-    println("├───┼────────────────────────────────┼──────────────────────────────────────┼──────┤")
-    if _d1_count > 0 {
-        println("│ 1 │ d>=1 발견 심화 검증           │ " + to_string(_d1_count) + "건 AI d=1 — telescope 합의 추가 │ ★★★ │")
-    }
-    println("│ 2 │ 빈공간 DFS 돌파               │ gap_finder EXACT " + to_string(_gap_count) + "건 — 위상변환 확장  │ ★★  │")
-    println("│ 3 │ 교차수분 확장                  │ 최근 EXACT " + to_string(_exact_count) + "건 — 타 프로젝트 seed 주입│ ★   │")
-    println("└───┴────────────────────────────────┴──────────────────────────────────────┴──────┘")
+fn do_update() {
+    let dirs = build_directions()
+    save_directions(dirs)
+    println("directions updated -> " + directions_out)
 }
 
-if _m == "update" || _m == "report" {
-    let _ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
-    let _entry = "{\"ts\":\"" + _ts + "\",\"exact\":" + to_string(_exact_count) + ",\"d1\":" + to_string(_d1_count) + ",\"gaps\":" + to_string(_gap_count) + "}"
-    try { append_file("shared/next_directions.jsonl", _entry + "\n") } catch _e2 {}
-    if _m == "update" { println("directions updated -> shared/next_directions.jsonl") }
+fn do_brief() {
+    let dirs = build_directions()
+    print_brief(dirs)
+}
+
+fn do_help() {
+    println("directions.hexa — 사용: hexa directions.hexa report|update|brief")
+}
+
+// ─── top-level dispatch ───
+let cli_args = args()
+let mut cli_mode = "report"
+if len(cli_args) >= 3 {
+    cli_mode = cli_args[2]
+}
+
+if cli_mode == "report" {
+    do_report()
+}
+
+if cli_mode == "update" {
+    do_update()
+}
+
+if cli_mode == "brief" {
+    do_brief()
+}
+
+if cli_mode == "help" {
+    do_help()
 }
