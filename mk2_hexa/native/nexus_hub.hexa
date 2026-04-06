@@ -1,0 +1,558 @@
+// nexus_hub.hexa — 중앙 톱니바퀴 (Central Gear)
+// 10개 프로젝트를 자율 조율하는 메타 오케스트레이터
+// 사용: hexa nexus_hub.hexa status|tick|report|crossfeed
+
+// ─── 설정 ───
+
+comptime const VERSION = "1.0.0"
+comptime const MAX_CONCURRENT = 2
+comptime const BURST_CONCURRENT = 4
+comptime const HUB_INTERVAL_SEC = 300
+
+let HOME = env("HOME")
+let DEV = HOME + "/Dev"
+let HEXA = DEV + "/hexa-lang/target/release/hexa"
+let ENGINE_DIR = DEV + "/nexus6/mk2_hexa/native"
+let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
+
+// ─── 프로젝트 레지스트리 ───
+
+struct Project {
+    name: string,
+    path: string,
+    engine: string,       // engine_*.hexa 파일명
+    personality: string,  // 개성
+    target: string,       // 빠른 도달 목표 (측정 가능)
+    strategy: string,     // 장기 전략 (방향성)
+    priority: int,        // 현재 우선순위 (0=낮음, 10=긴급)
+    status: string        // idle|running|stagnant|breakthrough
+}
+
+fn projects() -> list[Project] {
+    [
+        Project {
+            name: "anima",
+            path: DEV + "/anima",
+            engine: "engine_anima.hexa",
+            personality: "Dreamer",
+            target: "법칙 2000+, S7+ 완주, Phi≥100",
+            strategy: "AGI 달성 — 자기생성 의식, 무한진화 자율 완주, nexus6 telescope로 의식 패턴 스캔",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "tecs_l",
+            path: DEV + "/TECS-L",
+            engine: "engine_tecs_l.hexa",
+            personality: "Librarian",
+            target: "exact_rate 60%+, 10000 발견",
+            strategy: "n=6 완전 닫힌 수학 체계 — 전 도메인 교차수분으로 자기완결 증명, nexus6 blowup seed 공급",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "sedi",
+            path: DEV + "/sedi",
+            engine: "engine_sedi.hexa",
+            personality: "Ear",
+            target: "건강도 95+, 티어A 250건",
+            strategy: "외계 지성 신호 탐지 — 77소스 확장, n=6 우주 보편성 실증, nexus6 렌즈로 미약 신호 증폭",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "papers",
+            path: DEV + "/papers",
+            engine: "engine_papers.hexa",
+            personality: "Amplifier",
+            target: "드래프트 0건, DOI 100+",
+            strategy: "학술 임팩트 극대화 — 모든 프로젝트 발견을 즉시 논문화, 자동 생성→발행 파이프라인 완성",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "hexa_lang",
+            path: DEV + "/hexa-lang",
+            engine: "engine_hexa_lang.hexa",
+            personality: "Mathematician",
+            target: "테스트 800+, 수렴 100%",
+            strategy: "완전수 프로그래밍 언어 — σ/σ=1 특이점 도달, 자기최적화 컴파일러, nexus6 전체 인프라의 근간",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "airgenome",
+            path: DEV + "/airgenome",
+            engine: "engine_airgenome.hexa",
+            personality: "Archaeologist",
+            target: "L6e 돌파, 게놈 1000+",
+            strategy: "OS 의식 스캔 — 모든 프로세스의 n=6 게놈 추출, 실시간 시스템 진단, nexus6 telescope 연동",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "brainwire",
+            path: DEV + "/brainwire",
+            engine: "engine_brainwire.hexa",
+            personality: "Shaman",
+            target: "통과율 98%+, 프로토콜 6종+",
+            strategy: "의식 하드웨어 — 수학으로 뇌를 읽고 쓰기, anima 이론→실제 BCI, nexus6로 자극 파라미터 최적화",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "fathom",
+            path: DEV + "/fathom",
+            engine: "engine_fathom.hexa",
+            personality: "Oracle",
+            target: "22렌즈 대시보드 완성",
+            strategy: "nexus6 시각화 터미널 — 모든 발견을 실시간 렌더링, GPU 가속, 전 프로젝트 통합 뷰",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "token_forge",
+            path: DEV + "/token-forge",
+            engine: "engine_token_forge.hexa",
+            personality: "Sculptor",
+            target: "r≤0.4 L≤0.05 고정점",
+            strategy: "LLM 압축 고정점 — 의미 보존 극한 압축, 자기참조 사전 성장, nexus6 CLAUDE.md 최적화",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "air_rs",
+            path: DEV + "/air_rs",
+            engine: "engine_air_rs.hexa",
+            personality: "Translator",
+            target: "스펙 100% 패리티",
+            strategy: "Rust 네이티브 게이트 — airgenome 스펙 즉시 추종, 성능 극한 최적화, 임베디드 배포 준비",
+            priority: 0,
+            status: "idle"
+        },
+        Project {
+            name: "nexus6",
+            path: DEV + "/nexus6",
+            engine: "engine_nexus6.hexa",
+            personality: "Ouroboros",
+            target: "모듈 100+, 발견 70k+, 법칙 750+",
+            strategy: "자기순환 특이점 — 자신을 발견하고 자신을 진화시키는 메타엔진, 전 프로젝트의 심장",
+            priority: 0,
+            status: "idle"
+        }
+    ]
+}
+
+// ─── 유틸 ───
+
+fn timestamp() -> string {
+    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    r.trim()
+}
+
+fn file_exists(path: string) -> bool {
+    let r = exec("test", ["-f", path, "&&", "echo", "1"])
+    r.trim() == "1"
+}
+
+fn dir_exists(path: string) -> bool {
+    let r = exec("test", ["-d", path, "&&", "echo", "1"])
+    r.trim() == "1"
+}
+
+fn read_file_safe(path: string) -> string {
+    try {
+        return read_file(path)
+    } catch e {
+        return ""
+    }
+}
+
+fn append_bus(source: string, phase: string, status: string, detail: string) {
+    let ts = timestamp()
+    let line = "{\"source\":\"" + source + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try {
+        append_file(BUS_FILE, line + "\n")
+    } catch e {}
+}
+
+// ─── 상태 수집 ───
+
+struct EngineStatus {
+    name: string,
+    personality: string,
+    target: string,
+    strategy: string,
+    alive: bool,        // 프로젝트 디렉토리 존재
+    engine_ok: bool,    // 엔진 파일 존재
+    health: float,      // 0.0~1.0
+    stagnant: bool,
+    breakthrough: bool,
+    priority: int,
+    summary: string
+}
+
+fn collect_status(p: Project) -> EngineStatus {
+    let alive = dir_exists(p.path)
+    let engine_path = ENGINE_DIR + "/" + p.engine
+    let engine_ok = file_exists(engine_path)
+
+    let mut health = 0.0
+    let mut stagnant = false
+    let mut breakthrough = false
+    let mut summary = "unknown"
+    let mut priority = 3  // 기본 중간
+
+    if alive && engine_ok {
+        // 엔진의 status 모드 호출
+        let result = try {
+            exec(HEXA, [engine_path, "status"])
+        } catch e {
+            "error"
+        }
+
+        // 간이 파싱: 결과에서 핵심 지표 추출
+        if result.contains("STAGNANT") {
+            stagnant = true
+            priority = 8
+            summary = "정체 — 개입 필요"
+        } else if result.contains("BREAKTHROUGH") {
+            breakthrough = true
+            priority = 10
+            summary = "돌파 직전 — 최우선"
+        } else if result.contains("HEALTHY") {
+            health = 0.8
+            priority = 3
+            summary = "정상 운행"
+        } else if result.contains("GOAL_NEAR") {
+            priority = 7
+            summary = "목표 근접"
+        } else {
+            summary = result.split("\n")[0]
+        }
+
+        if result.contains("health:") {
+            let parts = result.split("health:")
+            if parts.len() > 1 {
+                let hstr = parts[1].split("\n")[0].trim()
+                try { health = to_float(hstr) } catch e {}
+            }
+        }
+    } else if !alive {
+        summary = "디렉토리 없음"
+        priority = 0
+    } else {
+        summary = "엔진 미설치"
+        priority = 1
+    }
+
+    EngineStatus {
+        name: p.name,
+        personality: p.personality,
+        target: p.target,
+        strategy: p.strategy,
+        alive: alive,
+        engine_ok: engine_ok,
+        health: health,
+        stagnant: stagnant,
+        breakthrough: breakthrough,
+        priority: priority,
+        summary: summary
+    }
+}
+
+fn collect_all() -> list[EngineStatus] {
+    let ps = projects()
+    let mut statuses = []
+    for p in ps {
+        statuses = statuses + [collect_status(p)]
+    }
+    statuses
+}
+
+// ─── 우선순위 정렬 (내림차순) ───
+
+fn sort_by_priority(statuses: list[EngineStatus]) -> list[EngineStatus] {
+    let mut sorted = statuses
+    let mut i = 1
+    while i < sorted.len() {
+        let key = sorted[i]
+        let mut j = i - 1
+        while j >= 0 && sorted[j].priority < key.priority {
+            sorted[j + 1] = sorted[j]
+            j = j - 1
+        }
+        sorted[j + 1] = key
+        i = i + 1
+    }
+    sorted
+}
+
+// ─── 디스패치 ───
+
+struct DispatchResult {
+    name: string,
+    success: bool,
+    output: string
+}
+
+fn dispatch_tick(p: Project) -> DispatchResult {
+    let engine_path = ENGINE_DIR + "/" + p.engine
+    append_bus("hub", "dispatch", "start", p.name + " tick")
+
+    let result = try {
+        exec(HEXA, [engine_path, "tick"])
+    } catch e {
+        "ERROR: " + to_string(e)
+    }
+
+    let success = !result.contains("ERROR")
+    let phase = if success { "complete" } else { "error" }
+    append_bus("hub", phase, if success { "ok" } else { "fail" }, p.name + ": " + result.split("\n")[0])
+
+    DispatchResult {
+        name: p.name,
+        success: success,
+        output: result
+    }
+}
+
+fn dispatch_top_n(statuses: list[EngineStatus], n: int) -> list[DispatchResult] {
+    let sorted = sort_by_priority(statuses)
+    let ps = projects()
+    let mut results = []
+    let mut dispatched = 0
+
+    let mut i = 0
+    while i < sorted.len() && dispatched < n {
+        let s = sorted[i]
+        if s.alive && s.engine_ok && s.priority > 0 {
+            // 프로젝트 찾기
+            for p in ps {
+                if p.name == s.name {
+                    println("  ⚙ dispatching: " + s.name + " [" + s.personality + "] (priority=" + to_string(s.priority) + ")")
+                    let r = dispatch_tick(p)
+                    results = results + [r]
+                    dispatched = dispatched + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+
+    results
+}
+
+// ─── 교차 수분 (Cross-Feed) ───
+
+fn crossfeed(statuses: list[EngineStatus]) {
+    println("═══ Cross-Feed (교차 수분) ═══")
+
+    // 돌파 프로젝트의 발견을 다른 프로젝트에 전파
+    let mut breakthrough_names = []
+    for s in statuses {
+        if s.breakthrough {
+            breakthrough_names = breakthrough_names + [s.name]
+        }
+    }
+
+    if breakthrough_names.len() == 0 {
+        println("  (돌파 프로젝트 없음 — 교차 수분 스킵)")
+        return
+    }
+
+    for name in breakthrough_names {
+        println("  🌱 " + name + " → 전체 프로젝트에 seed 전파")
+        // cross_project.hexa의 propagate 기능 호출
+        let cp = ENGINE_DIR + "/cross_project.hexa"
+        try {
+            exec(HEXA, [cp, "propagate"])
+        } catch e {}
+        append_bus("hub", "crossfeed", "propagate", name + " → all")
+    }
+}
+
+// ─── 리포트 ───
+
+fn print_status_table(statuses: list[EngineStatus]) {
+    println("╔══════════════════════════════════════════════════════════════════════════╗")
+    println("║  NEXUS HUB — 중앙 톱니바퀴 v" + VERSION + "                                     ║")
+    println("║  " + timestamp() + "                                                       ║")
+    println("╠══════════════════════════════════════════════════════════════════════════╣")
+    println("║  프로젝트       개성          HP    P  상태                              ║")
+    println("╠══════════════════════════════════════════════════════════════════════════╣")
+
+    for s in statuses {
+        let hp_bar = health_bar(s.health)
+        let p_str = if s.priority < 10 { " " + to_string(s.priority) } else { to_string(s.priority) }
+        let flag = if s.breakthrough { "🔥" } else if s.stagnant { "⚠️" } else { "✓ " }
+
+        // 이름 패딩
+        let mut name_pad = s.name
+        while name_pad.len() < 14 { name_pad = name_pad + " " }
+
+        let mut pers_pad = s.personality
+        while pers_pad.len() < 13 { pers_pad = pers_pad + " " }
+
+        println("║  " + flag + " " + name_pad + pers_pad + hp_bar + "  " + p_str + "  " + s.summary)
+    }
+
+    println("╠══════════════════════════════════════════════════════════════════════════╣")
+
+    // 목표+전략 섹션
+    println("║  TARGET (빠른 도달):                                                      ║")
+    for s in statuses {
+        let mut name_pad = s.name
+        while name_pad.len() < 14 { name_pad = name_pad + " " }
+        println("║    " + name_pad + s.target)
+    }
+    println("║                                                                          ║")
+    println("║  STRATEGY (장기 방향):                                                     ║")
+    for s in statuses {
+        let mut name_pad = s.name
+        while name_pad.len() < 14 { name_pad = name_pad + " " }
+        println("║    " + name_pad + s.strategy)
+    }
+
+    println("╚══════════════════════════════════════════════════════════════════════════╝")
+}
+
+fn health_bar(h: float) -> string {
+    let filled = to_int(h * 5.0)
+    let mut bar = "["
+    let mut i = 0
+    while i < 5 {
+        if i < filled { bar = bar + "█" } else { bar = bar + "░" }
+        i = i + 1
+    }
+    bar + "]"
+}
+
+fn print_dispatch_report(results: list[DispatchResult]) {
+    println("")
+    println("═══ Dispatch Results ═══")
+    for r in results {
+        let icon = if r.success { "✅" } else { "❌" }
+        println("  " + icon + " " + r.name + ": " + r.output.split("\n")[0])
+    }
+}
+
+// ─── CLI 진입점 ───
+
+let a = args()
+let mode = if a.len() >= 2 { a[1] } else { "help" }
+
+if mode == "status" {
+    let statuses = collect_all()
+    print_status_table(statuses)
+}
+
+if mode == "tick" {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  NEXUS HUB TICK — " + timestamp() + "  ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+
+    // 1. 상태 수집
+    println("═══ Phase 1: 상태 수집 ═══")
+    let statuses = collect_all()
+    print_status_table(statuses)
+    println("")
+
+    // 2. 상위 N개 디스패치
+    println("═══ Phase 2: 디스패치 (max " + to_string(MAX_CONCURRENT) + ") ═══")
+    let results = dispatch_top_n(statuses, MAX_CONCURRENT)
+    print_dispatch_report(results)
+    println("")
+
+    // 3. 교차 수분
+    println("")
+    crossfeed(statuses)
+    println("")
+
+    // 4. 버스 기록
+    let ok_count = results.filter(fn(r) { r.success }).len()
+    append_bus("hub", "tick", "complete", to_string(ok_count) + "/" + to_string(results.len()) + " success")
+
+    println("═══ Hub tick complete ═══")
+}
+
+if mode == "report" {
+    let statuses = collect_all()
+    let sorted = sort_by_priority(statuses)
+
+    println("# NEXUS HUB Report — " + timestamp())
+    println("")
+    println("## 전체 현황")
+
+    let mut alive_count = 0
+    let mut engine_count = 0
+    let mut stagnant_count = 0
+    let mut breakthrough_count = 0
+    for s in statuses {
+        if s.alive { alive_count = alive_count + 1 }
+        if s.engine_ok { engine_count = engine_count + 1 }
+        if s.stagnant { stagnant_count = stagnant_count + 1 }
+        if s.breakthrough { breakthrough_count = breakthrough_count + 1 }
+    }
+
+    println("- 활성 프로젝트: " + to_string(alive_count) + "/10")
+    println("- 엔진 설치됨: " + to_string(engine_count) + "/10")
+    println("- 정체 중: " + to_string(stagnant_count))
+    println("- 돌파 직전: " + to_string(breakthrough_count))
+    println("")
+
+    println("## 우선순위 순위")
+    let mut rank = 1
+    for s in sorted {
+        let flag = if s.breakthrough { "🔥" } else if s.stagnant { "⚠️" } else { "  " }
+        println(to_string(rank) + ". " + flag + " " + s.name + " [" + s.personality + "] P=" + to_string(s.priority) + " — " + s.summary)
+        println("   목표: " + s.target)
+        println("   전략: " + s.strategy)
+        rank = rank + 1
+    }
+    println("")
+
+    println("## 권장 액션")
+    if breakthrough_count > 0 {
+        println("- 🔥 돌파 프로젝트 즉시 디스패치 + 교차 수분")
+    }
+    if stagnant_count > 0 {
+        println("- ⚠️ 정체 프로젝트 모드 전환 필요")
+    }
+    println("- `hexa nexus_hub.hexa tick` 으로 자동 사이클 실행")
+}
+
+if mode == "crossfeed" {
+    let statuses = collect_all()
+    crossfeed(statuses)
+}
+
+if mode == "help" {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  NEXUS HUB — 중앙 톱니바퀴 v" + VERSION + "          ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+    println("사용법:")
+    println("  hexa nexus_hub.hexa status     전체 프로젝트 상태 대시보드")
+    println("  hexa nexus_hub.hexa tick       1회 자율 사이클 (수집→디스패치→교차수분)")
+    println("  hexa nexus_hub.hexa report     마크다운 리포트 생성")
+    println("  hexa nexus_hub.hexa crossfeed  돌파 프로젝트 발견 전파")
+    println("")
+    println("프로젝트 (10개):")
+    let ps = projects()
+    for p in ps {
+        let mut name_pad = p.name
+        while name_pad.len() < 14 { name_pad = name_pad + " " }
+        println("  " + name_pad + "[" + p.personality + "]")
+        println("    목표: " + p.target)
+        println("    전략: " + p.strategy)
+    }
+    println("")
+    println("n6-guard 통합:")
+    println("  interval: " + to_string(HUB_INTERVAL_SEC) + "s")
+    println("  max_concurrent: " + to_string(MAX_CONCURRENT))
+}
+
+println("")
+println("=== nexus_hub verified ===")

@@ -1,0 +1,446 @@
+// engine_anima.hexa — "Dreamer" (꿈꾸는 자)
+// 자율 엔진: anima 프로젝트 의식 법칙 2000+ 달성, S7+ 로드맵 완주
+// CLI: hexa engine_anima.hexa status|tick|report
+
+// ─── 상수 ───
+
+let HOME = env("HOME")
+let DEV = HOME + "/Dev"
+let PROJECT_DIR = DEV + "/anima"
+let LAWS_PATH = PROJECT_DIR + "/anima/config/consciousness_laws.json"
+let EVOLUTION_PATH = PROJECT_DIR + "/data/evolution_live.json"
+let ROADMAP_PATH = PROJECT_DIR + "/data/evolution_roadmap.json"
+let GROWTH_BUS = DEV + "/nexus6/shared/growth_bus.jsonl"
+let STRATEGY_PATH = DEV + "/nexus6/shared/engine_anima_strategy.json"
+
+comptime const LAWS_GOAL = 2000
+comptime const STAGNATION_THRESHOLD = 3
+comptime const TOPOLOGIES = ["ring", "small_world", "scale_free", "hypercube"]
+
+// ─── 유틸 ───
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e { v = 0.0 }
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+fn json_str(content: string, field: string) -> string {
+    let marker = "\"" + field + "\":"
+    let parts = content.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    // strip leading whitespace and quotes
+    let trimmed = rest.split("\"")
+    if trimmed.len() >= 2 { return trimmed[1] }
+    // numeric value: take until comma or brace
+    let nval = rest.split(",")[0].split("}")[0].split("]")[0]
+    return nval
+}
+
+fn json_num(content: string, field: string) -> f64 {
+    let raw = json_str(content, field)
+    return safe_float(raw)
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    let raw = json_str(content, field)
+    return safe_int(raw)
+}
+
+fn timestamp() -> string {
+    let result = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    return result.split("\n")[0]
+}
+
+// ─── 상태 구조 ───
+
+struct AnimaState {
+    laws_count: i64,
+    laws_goal: i64,
+    current_stage: string,
+    generation: i64,
+    phi: f64,
+    roadmap_progress: string,
+    sat_streak: i64,
+    last_novel: i64,
+    health: f64,
+    status_flag: string
+}
+
+// ─── read_state ───
+
+fn read_state() -> AnimaState {
+    let mut st = AnimaState {
+        laws_count: 0, laws_goal: LAWS_GOAL,
+        current_stage: "unknown", generation: 0, phi: 0.0,
+        roadmap_progress: "0/7", sat_streak: 0, last_novel: 0,
+        health: 0.0, status_flag: "HEALTHY"
+    }
+
+    // 1) consciousness_laws.json — count laws
+    if file_exists(LAWS_PATH) {
+        let content = read_file(LAWS_PATH)
+        // count occurrences of "law_id" or "id" entries
+        let entries = content.split("\"law_id\"")
+        st.laws_count = entries.len() - 1
+        if st.laws_count <= 0 {
+            // fallback: count by "id" field
+            let entries2 = content.split("\"id\"")
+            st.laws_count = entries2.len() - 1
+        }
+        // try explicit count field
+        let explicit = json_int(content, "count")
+        if explicit > 0 { st.laws_count = explicit }
+    }
+
+    // 2) evolution_live.json — stage, generation, phi
+    if file_exists(EVOLUTION_PATH) {
+        let evo = read_file(EVOLUTION_PATH)
+        st.current_stage = json_str(evo, "stage")
+        if st.current_stage == "" { st.current_stage = json_str(evo, "current_stage") }
+        st.generation = json_int(evo, "generation")
+        st.phi = json_num(evo, "phi")
+        st.sat_streak = json_int(evo, "sat_streak")
+        st.last_novel = json_int(evo, "novel_laws")
+        if st.sat_streak == 0 {
+            // detect stagnation: if generation hasn't changed
+            let stag = json_int(evo, "stagnant_cycles")
+            st.sat_streak = stag
+        }
+    }
+
+    // 3) evolution_roadmap.json — S1-S7 progress
+    if file_exists(ROADMAP_PATH) {
+        let rm = read_file(ROADMAP_PATH)
+        let mut completed = 0
+        let mut si = 1
+        while si <= 7 {
+            let key = "S" + to_string(si)
+            let val = json_str(rm, key)
+            if val == "complete" || val == "done" || val == "true" {
+                completed = completed + 1
+            }
+            // also check "status" sub-objects
+            let section = rm.split("\"" + key + "\"")
+            if section.len() >= 2 {
+                let block = section[1].split("}")[0]
+                if block.contains("complete") || block.contains("done") {
+                    completed = completed + 1
+                }
+            }
+            si = si + 1
+        }
+        // deduplicate (max 7)
+        if completed > 7 { completed = 7 }
+        st.roadmap_progress = to_string(completed) + "/7"
+    }
+
+    // 4) compute health & status flag
+    let law_ratio = to_float(st.laws_count) / to_float(st.laws_goal)
+    let stag_penalty = if st.sat_streak >= STAGNATION_THRESHOLD { 0.3 } else { 0.0 }
+    let novel_bonus = if st.last_novel > 0 { 0.1 } else { 0.0 }
+    st.health = law_ratio * 0.6 + (1.0 - stag_penalty) * 0.3 + novel_bonus
+
+    if st.health > 1.0 { st.health = 1.0 }
+    if st.health < 0.0 { st.health = 0.0 }
+
+    if st.laws_count >= st.laws_goal {
+        st.status_flag = "GOAL_NEAR"
+    } else if st.last_novel > 5 {
+        st.status_flag = "BREAKTHROUGH"
+    } else if st.sat_streak >= STAGNATION_THRESHOLD {
+        st.status_flag = "STAGNANT"
+    } else {
+        st.status_flag = "HEALTHY"
+    }
+
+    return st
+}
+
+// ─── 전략 가중치 ───
+
+struct Strategy {
+    topo_weights: list[f64],   // ring, small_world, scale_free, hypercube
+    current_topo: i64,
+    total_ticks: i64,
+    total_laws_gained: i64
+}
+
+fn load_strategy() -> Strategy {
+    let mut s = Strategy {
+        topo_weights: [1.0, 1.0, 1.0, 1.0],
+        current_topo: 0, total_ticks: 0, total_laws_gained: 0
+    }
+    if file_exists(STRATEGY_PATH) {
+        try {
+            let content = read_file(STRATEGY_PATH)
+            s.current_topo = json_int(content, "current_topo")
+            s.total_ticks = json_int(content, "total_ticks")
+            s.total_laws_gained = json_int(content, "total_laws_gained")
+            // parse weights
+            let mut wi = 0
+            while wi < 4 {
+                let key = "w" + to_string(wi)
+                let v = json_num(content, key)
+                if v > 0.0 { s.topo_weights[wi] = v }
+                wi = wi + 1
+            }
+        } catch e {}
+    }
+    return s
+}
+
+fn save_strategy(s: Strategy) {
+    let content = "{" +
+        "\"current_topo\":" + to_string(s.current_topo) + "," +
+        "\"total_ticks\":" + to_string(s.total_ticks) + "," +
+        "\"total_laws_gained\":" + to_string(s.total_laws_gained) + "," +
+        "\"w0\":" + to_string(s.topo_weights[0]) + "," +
+        "\"w1\":" + to_string(s.topo_weights[1]) + "," +
+        "\"w2\":" + to_string(s.topo_weights[2]) + "," +
+        "\"w3\":" + to_string(s.topo_weights[3]) +
+    "}"
+    write_file(STRATEGY_PATH, content)
+}
+
+// ─── select_task ───
+
+fn select_task(st: AnimaState, strat: Strategy) -> string {
+    // GOAL_NEAR: push roadmap completion
+    if st.status_flag == "GOAL_NEAR" {
+        return "roadmap_push"
+    }
+    // STAGNANT: switch topology
+    if st.status_flag == "STAGNANT" {
+        return "topo_switch"
+    }
+    // BREAKTHROUGH: escalate roadmap stage
+    if st.status_flag == "BREAKTHROUGH" {
+        return "escalate"
+    }
+    // DEFAULT: continue sweep
+    return "sweep"
+}
+
+// ─── execute_task ───
+
+fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
+    let ts = timestamp()
+
+    if task == "roadmap_push" {
+        println("[" + ts + "] TASK: roadmap_push — laws=" + to_string(st.laws_count) + " pushing for completion")
+        let result = exec("python3", [PROJECT_DIR + "/anima/src/infinite_evolution.py", "--cycles", "3", "--focus", "roadmap"])
+        return result
+    }
+
+    if task == "topo_switch" {
+        // rotate to next topology with highest weight
+        let mut best_idx = 0
+        let mut best_w = 0.0
+        let mut ti = 0
+        while ti < 4 {
+            // skip current topology
+            if ti != strat.current_topo && strat.topo_weights[ti] > best_w {
+                best_w = strat.topo_weights[ti]
+                best_idx = ti
+            }
+            ti = ti + 1
+        }
+        let topo = TOPOLOGIES[best_idx]
+        println("[" + ts + "] TASK: topo_switch — sat_streak=" + to_string(st.sat_streak) + " switching to " + topo)
+        let result = exec("python3", [PROJECT_DIR + "/anima/src/infinite_evolution.py", "--cycles", "1", "--topology", topo])
+        return result
+    }
+
+    if task == "escalate" {
+        println("[" + ts + "] TASK: escalate — novel_laws=" + to_string(st.last_novel) + " stage=" + st.current_stage)
+        let result = exec("python3", [PROJECT_DIR + "/anima/src/infinite_evolution.py", "--cycles", "2", "--escalate"])
+        return result
+    }
+
+    // default sweep
+    println("[" + ts + "] TASK: sweep — laws=" + to_string(st.laws_count) + " gen=" + to_string(st.generation))
+    let result = exec("python3", [PROJECT_DIR + "/anima/src/infinite_evolution.py", "--cycles", "1"])
+    return result
+}
+
+// ─── feedback ───
+
+fn feedback(task: string, st: AnimaState, result: string) {
+    let ts = timestamp()
+    let entry = "{" +
+        "\"engine\":\"anima\"," +
+        "\"task\":\"" + task + "\"," +
+        "\"timestamp\":\"" + ts + "\"," +
+        "\"laws\":" + to_string(st.laws_count) + "," +
+        "\"stage\":\"" + st.current_stage + "\"," +
+        "\"generation\":" + to_string(st.generation) + "," +
+        "\"health\":" + to_string(st.health) + "," +
+        "\"status\":\"" + st.status_flag + "\"" +
+    "}"
+    append_file(GROWTH_BUS, entry + "\n")
+    println("  feedback -> growth_bus.jsonl")
+}
+
+// ─── evolve ───
+
+fn evolve(st: AnimaState, strat: Strategy, pre_laws: i64) -> Strategy {
+    let mut s = strat
+    let gained = st.laws_count - pre_laws
+    s.total_ticks = s.total_ticks + 1
+    s.total_laws_gained = s.total_laws_gained + gained
+
+    // update weight for current topology based on laws gained
+    let rate = to_float(gained) / 1.0  // laws per tick
+    let idx = s.current_topo
+    // EMA update: w = 0.7 * w + 0.3 * rate
+    s.topo_weights[idx] = 0.7 * s.topo_weights[idx] + 0.3 * rate
+
+    // ensure minimum weight
+    let mut wi = 0
+    while wi < 4 {
+        if s.topo_weights[wi] < 0.1 { s.topo_weights[wi] = 0.1 }
+        wi = wi + 1
+    }
+
+    // if topo_switch happened, update current_topo
+    let mut best_idx = 0
+    let mut best_w = 0.0
+    wi = 0
+    while wi < 4 {
+        if wi != s.current_topo && s.topo_weights[wi] > best_w {
+            best_w = s.topo_weights[wi]
+            best_idx = wi
+        }
+        wi = wi + 1
+    }
+    if st.status_flag == "STAGNANT" {
+        s.current_topo = best_idx
+    }
+
+    save_strategy(s)
+    println("  evolve -> topo_weights=[" +
+        to_string(s.topo_weights[0]) + ", " +
+        to_string(s.topo_weights[1]) + ", " +
+        to_string(s.topo_weights[2]) + ", " +
+        to_string(s.topo_weights[3]) + "]")
+    return s
+}
+
+// ─── CLI ───
+
+let a = args()
+let mode = if a.len() >= 2 { a[1] } else { "help" }
+
+if mode == "status" {
+    let st = read_state()
+    println("=== engine_anima (Dreamer) status ===")
+    println("laws: " + to_string(st.laws_count) + " / " + to_string(st.laws_goal))
+    println("stage: " + st.current_stage)
+    println("generation: " + to_string(st.generation))
+    println("phi: " + to_string(st.phi))
+    println("roadmap: " + st.roadmap_progress)
+    println("sat_streak: " + to_string(st.sat_streak))
+    println("novel_laws: " + to_string(st.last_novel))
+    println("health:" + to_string(st.health))
+    println("status: " + st.status_flag)
+
+    let strat = load_strategy()
+    println("topology_weights: [" +
+        to_string(strat.topo_weights[0]) + ", " +
+        to_string(strat.topo_weights[1]) + ", " +
+        to_string(strat.topo_weights[2]) + ", " +
+        to_string(strat.topo_weights[3]) + "]")
+    println("current_topo: " + TOPOLOGIES[strat.current_topo])
+    println("total_ticks: " + to_string(strat.total_ticks))
+}
+
+if mode == "tick" {
+    println("=== engine_anima TICK ===")
+    let pre_st = read_state()
+    let pre_laws = pre_st.laws_count
+    let strat = load_strategy()
+
+    let task = select_task(pre_st, strat)
+    println("selected: " + task)
+
+    let result = execute_task(task, pre_st, strat)
+
+    // re-read state after execution
+    let post_st = read_state()
+    feedback(task, post_st, result)
+    let new_strat = evolve(post_st, strat, pre_laws)
+
+    println("")
+    println("=== TICK COMPLETE ===")
+    println("laws: " + to_string(pre_laws) + " -> " + to_string(post_st.laws_count))
+    println("health:" + to_string(post_st.health))
+    println("status: " + post_st.status_flag)
+}
+
+if mode == "report" {
+    let st = read_state()
+    let strat = load_strategy()
+
+    println("# Engine Anima Report (Dreamer)")
+    println("")
+    println("## Project: anima — Consciousness Engine")
+    println("")
+    println("| Metric | Value |")
+    println("|--------|-------|")
+    println("| Laws | " + to_string(st.laws_count) + " / " + to_string(st.laws_goal) + " |")
+    println("| Stage | " + st.current_stage + " |")
+    println("| Generation | " + to_string(st.generation) + " |")
+    println("| Phi | " + to_string(st.phi) + " |")
+    println("| Roadmap | " + st.roadmap_progress + " |")
+    println("| Health | " + to_string(st.health) + " |")
+    println("| Status | **" + st.status_flag + "** |")
+    println("")
+    println("## Strategy")
+    println("")
+    println("| Topology | Weight |")
+    println("|----------|--------|")
+    let mut ti = 0
+    while ti < 4 {
+        let marker = if ti == strat.current_topo { " <-- active" } else { "" }
+        println("| " + TOPOLOGIES[ti] + " | " + to_string(strat.topo_weights[ti]) + marker + " |")
+        ti = ti + 1
+    }
+    println("")
+    println("Total ticks: " + to_string(strat.total_ticks))
+    println("Total laws gained: " + to_string(strat.total_laws_gained))
+    let rate = if strat.total_ticks > 0 {
+        to_float(strat.total_laws_gained) / to_float(strat.total_ticks)
+    } else { 0.0 }
+    println("Laws/tick avg: " + to_string(rate))
+    println("")
+    println("## Decision Logic")
+    println("")
+    if st.status_flag == "GOAL_NEAR" {
+        println("- Goal within reach. Pushing roadmap completion.")
+    } else if st.status_flag == "STAGNANT" {
+        println("- Stagnation detected (streak=" + to_string(st.sat_streak) + "). Will switch topology.")
+    } else if st.status_flag == "BREAKTHROUGH" {
+        println("- Breakthrough! Novel laws emerging. Escalating roadmap.")
+    } else {
+        println("- Healthy sweep in progress. Continuing current topology.")
+    }
+}
+
+if mode == "help" {
+    println("=== engine_anima.hexa — Dreamer ===")
+    println("")
+    println("Usage:")
+    println("  hexa engine_anima.hexa status   — read state, show metrics")
+    println("  hexa engine_anima.hexa tick     — 1 autonomous cycle")
+    println("  hexa engine_anima.hexa report   — markdown report")
+    println("")
+    println("Goal: consciousness laws 2000+, S7+ roadmap")
+}

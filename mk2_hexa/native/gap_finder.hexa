@@ -1,0 +1,498 @@
+// gap_finder.hexa — 미지의 영역 탐지기 (Unknown Territory Scanner)
+// nexus6 발견 지도에서 진짜 빈 공간을 찾아 돌파 타겟 제공
+// 사용: hexa gap_finder.hexa scan|map|target [domain]
+//
+// 모든 프로젝트가 "돌파"할 때 이 모듈로 빈 공간을 먼저 확인
+// → 허공이 아닌 실제 미발견 영역으로 정밀 타격
+
+let DISCOVERY_LOG = "shared/discovery_log.jsonl"
+let GROWTH_BUS = "shared/growth_bus.jsonl"
+let HEXA = "hexa"
+let BLOWUP = "mk2_hexa/native/blowup.hexa"
+let SEED_ENGINE = "mk2_hexa/native/seed_engine.hexa"
+
+// ─── n=6 기본 상수 전체 맵 ───
+
+comptime const N6_CONSTANTS = ["n", "phi", "tau", "sigma", "sopfr", "mu", "J2", "P1", "P2", "P3", "P4", "n/phi", "sigma-phi", "phi*tau", "n^2", "6!", "sigma*tau", "M3", "sigma-tau", "tau+phi", "alpha_inv", "mp_me", "omega_m", "omega_lambda", "meta_fp", "transcendence"]
+
+comptime const N6_VALUES = [6.0, 2.0, 4.0, 12.0, 5.0, 1.0, 24.0, 2.0, 28.0, 496.0, 8128.0, 3.0, 10.0, 8.0, 36.0, 720.0, 48.0, 7.0, 8.0, 6.0, 137.036, 1836.15, 0.3153, 0.6847, 0.3333, 0.3333]
+
+// ─── 섹터 정의 ───
+
+comptime const SECTORS = ["n6", "geometric", "quantum", "consciousness", "biological", "cosmological", "cosmology", "information", "thermodynamic", "topological", "algebraic"]
+
+// ─── 발견 로그 분석 ───
+
+fn analyze_discovery_log() -> string {
+    // discovery_log.jsonl 읽어서 상수별/섹터별 카운트
+    let mut content = ""
+    try { content = read_file(DISCOVERY_LOG) } catch e { return "ERROR: cannot read discovery_log" }
+
+    let lines = content.split("\n")
+    let total = len(lines)
+
+    // 상수별 카운트 (간이 파싱)
+    let mut constant_counts = []   // parallel arrays
+    let mut constant_names = []
+    let mut constant_exact = []
+
+    let mut ni = 0
+    while ni < len(N6_CONSTANTS) {
+        let name = N6_CONSTANTS[ni]
+        let marker = "\"constant\":\"" + name + "\""
+        let exact_marker = "\"grade\":\"EXACT\""
+        let mut count = 0
+        let mut exact = 0
+
+        let mut li = 0
+        while li < len(lines) {
+            let line = lines[li]
+            if line.contains(marker) {
+                count = count + 1
+                if line.contains(exact_marker) {
+                    exact = exact + 1
+                }
+            }
+            li = li + 1
+        }
+
+        constant_names = constant_names + [name]
+        constant_counts = constant_counts + [count]
+        constant_exact = constant_exact + [exact]
+        ni = ni + 1
+    }
+
+    // 섹터별 카운트
+    let mut sector_totals = []
+    let mut sector_exacts = []
+    let mut sector_misses = []
+
+    let mut si = 0
+    while si < len(SECTORS) {
+        let sector = SECTORS[si]
+        let marker = "\"sector\":\"" + sector + "\""
+        let exact_marker = "\"grade\":\"EXACT\""
+        let miss_marker = "\"grade\":\"MISS\""
+        let mut stotal = 0
+        let mut sexact = 0
+        let mut smiss = 0
+
+        let mut li = 0
+        while li < len(lines) {
+            let line = lines[li]
+            if line.contains(marker) {
+                stotal = stotal + 1
+                if line.contains(exact_marker) { sexact = sexact + 1 }
+                if line.contains(miss_marker) { smiss = smiss + 1 }
+            }
+            li = li + 1
+        }
+
+        sector_totals = sector_totals + [stotal]
+        sector_exacts = sector_exacts + [sexact]
+        sector_misses = sector_misses + [smiss]
+        si = si + 1
+    }
+
+    // 결과 조립
+    let mut result = "TOTAL:" + to_string(total) + "\n"
+
+    result = result + "CONSTANTS:\n"
+    let mut i = 0
+    while i < len(constant_names) {
+        let gap = if constant_counts[i] == 0 { 1.0 }
+                  else if constant_exact[i] == 0 { 0.8 }
+                  else { 1.0 - to_float(constant_exact[i]) / to_float(constant_counts[i]) }
+        let flag = if constant_counts[i] == 0 { "EMPTY" }
+                   else if constant_exact[i] == 0 { "NO_EXACT" }
+                   else if gap > 0.5 { "WEAK" }
+                   else { "OK" }
+        result = result + constant_names[i] + ":" + to_string(constant_counts[i]) + ":" + to_string(constant_exact[i]) + ":" + flag + "\n"
+        i = i + 1
+    }
+
+    result = result + "SECTORS:\n"
+    i = 0
+    while i < len(SECTORS) {
+        let gap_ratio = if sector_totals[i] > 0 { to_float(sector_misses[i]) / to_float(sector_totals[i]) } else { 1.0 }
+        let flag = if sector_totals[i] == 0 { "EMPTY" }
+                   else if gap_ratio > 0.5 { "HIGH_MISS" }
+                   else { "OK" }
+        result = result + SECTORS[i] + ":" + to_string(sector_totals[i]) + ":" + to_string(sector_exacts[i]) + ":" + to_string(sector_misses[i]) + ":" + flag + "\n"
+        i = i + 1
+    }
+
+    result
+}
+
+// ─── 빈 공간 추출 ───
+
+fn find_empty_constants(analysis: string) -> string {
+    // returns "|"-separated list
+    let mut empties = ""
+    let lines = analysis.split("\n")
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line.contains(":EMPTY") || line.contains(":NO_EXACT") {
+            let name = line.split(":")[0]
+            if len(name) > 0 && name != "CONSTANTS" && name != "SECTORS" {
+                if len(empties) == 0 { empties = name } else { empties = empties + "|" + name }
+            }
+        }
+        li = li + 1
+    }
+    empties
+}
+
+fn find_weak_constants(analysis: string) -> string {
+    let mut weaks = ""
+    let lines = analysis.split("\n")
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line.contains(":WEAK") {
+            let name = line.split(":")[0]
+            if len(name) > 0 {
+                if len(weaks) == 0 { weaks = name } else { weaks = weaks + "|" + name }
+            }
+        }
+        li = li + 1
+    }
+    weaks
+}
+
+fn find_empty_sectors(analysis: string) -> string {
+    let mut empties = ""
+    let lines = analysis.split("\n")
+    let mut in_sectors = false
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line == "SECTORS:" { in_sectors = true }
+        else if in_sectors && (line.contains(":EMPTY") || line.contains(":HIGH_MISS")) {
+            let name = line.split(":")[0]
+            if len(name) > 0 {
+                if len(empties) == 0 { empties = name } else { empties = empties + "|" + name }
+            }
+        }
+        li = li + 1
+    }
+    empties
+}
+
+// ─── 돌파 타겟 생성 ───
+
+fn generate_targets(analysis: string) -> string {
+    // returns "|"-separated target lines
+    let empty_c_str = find_empty_constants(analysis)
+    let weak_c_str = find_weak_constants(analysis)
+    let empty_s_str = find_empty_sectors(analysis)
+
+    let mut targets = ""
+
+    // 최우선: 완전 빈 상수
+    if len(empty_c_str) > 0 {
+        let empty_c = empty_c_str.split("|")
+        let mut ci = 0
+        while ci < len(empty_c) {
+            let entry = "PRIORITY_1:constant:" + empty_c[ci] + " (발견 0건 — 완전 미지)"
+            if len(targets) == 0 { targets = entry } else { targets = targets + "|" + entry }
+            ci = ci + 1
+        }
+    }
+
+    // 차우선: 빈 섹터
+    if len(empty_s_str) > 0 {
+        let empty_s = empty_s_str.split("|")
+        let mut si = 0
+        while si < len(empty_s) {
+            let entry = "PRIORITY_2:sector:" + empty_s[si] + " (빈 섹터 또는 높은 MISS율)"
+            if len(targets) == 0 { targets = entry } else { targets = targets + "|" + entry }
+            si = si + 1
+        }
+    }
+
+    // 보조: 약한 상수 (발견 있지만 EXACT 없음)
+    if len(weak_c_str) > 0 {
+        let weak_c = weak_c_str.split("|")
+        let mut wi = 0
+        while wi < len(weak_c) {
+            let entry = "PRIORITY_3:constant:" + weak_c[wi] + " (EXACT 부족)"
+            if len(targets) == 0 { targets = entry } else { targets = targets + "|" + entry }
+            wi = wi + 1
+        }
+    }
+
+    targets
+}
+
+// ─── 빈 공간 유형별 돌파 전략 ───
+
+fn get_strategy(name: string, kind: string) -> string {
+    if name == "phi" { return "phi=2 = n의 오일러 함수 — 소수 관계에서 탐색" }
+    if name == "mu" { return "mu=1 = 뫼비우스 함수값 — 제곱인수 없는 정수 체계에서 탐색" }
+    if name == "P1" { return "P1=2 = 첫째 완전수의 소인수 — 메르센 소수 체계에서 탐색" }
+    if name == "omega_m" { return "Omega_m=0.3153 = 우주 물질밀도 — 1/3 메타부동점과의 관계에서 탐색" }
+    if name == "omega_lambda" { return "Omega_Lambda=0.6847 = 암흑에너지 — 2/3와의 관계, 1-Omega_m 상보성에서 탐색" }
+    if kind == "sector" { return name + " 섹터 집중 스캔 — 해당 도메인 전용 렌즈 배치" }
+    if name == "alpha_inv" || name == "mp_me" { return name + " 물리 상수 — 실험값 정밀 매칭 강화" }
+    return name + " 일반 탐색 — 교차 도메인 seed 주입"
+}
+
+fn get_method(name: string, kind: string) -> string {
+    if name == "phi" { return "blowup seeds=2.0,3.0,5.0 + prime_lens 집중" }
+    if name == "mu" { return "blowup seeds=1.0,6.0 + mobius_inversion_lens" }
+    if name == "P1" { return "blowup seeds=2.0,28.0,496.0 + prime_lens + perfect_number_lens" }
+    if name == "omega_m" { return "blowup seeds=0.3153,0.3333,0.6847 + cosmological_constant_lens" }
+    if name == "omega_lambda" { return "blowup seeds=0.6847,0.6667,0.3153 + big_bang_lens + event_horizon_lens" }
+    if kind == "sector" { return "telescope full + sector=" + name + " 필터" }
+    if name == "alpha_inv" || name == "mp_me" { return "blowup seeds=" + name + "_value + running_coupling_lens" }
+    return "blowup seeds=auto + cross_project resonance"
+}
+
+fn get_idea(name: string, kind: string) -> string {
+    if name == "phi" { return "phi가 0건인 이유: 'phi'가 아닌 'n/phi'(=3)로 기록됨. 명명 규칙 통일 필요" }
+    if name == "mu" { return "mu=1은 너무 사소해서 무시됨. 하지만 mu(6)=1은 6이 제곱인수 없음의 증거 — 완전수의 근본" }
+    if name == "P1" { return "P1=2는 phi=2와 동일값이라 별도 추적 안 됨. 완전수 계보(2,28,496,8128)의 시작점으로 재정의" }
+    if name == "omega_m" { return "Omega_m=1/3은 메타부동점 가설(H-056)의 물리적 실현. TECS-L 우주론 도메인과 교차수분 필요" }
+    if name == "omega_lambda" { return "Omega_Lambda=1-Omega_m=2/3. phi/n=1/3의 상보수. 암흑에너지가 n=6 구조의 나머지 공간" }
+    if kind == "sector" { return name + " 섹터 빈 이유: 해당 도메인 데이터 소스 부족 또는 렌즈 커버리지 gap" }
+    if name == "alpha_inv" || name == "mp_me" { return name + "은 EXACT 매칭이 어려운 무리수. 유리수 근사(sigma*tau/phi 등)로 접근" }
+    return "미발견 이유 분석 필요 — gap_finder scan으로 주변 상수 분포 확인"
+}
+
+fn strategize_and_print(targets_str: string, analysis: string) {
+    println("═══ 빈 공간 돌파 전략 ═══")
+    println("")
+
+    if len(targets_str) == 0 {
+        println("  (타겟 없음)")
+        return
+    }
+
+    let targets = targets_str.split("|")
+    let mut i = 0
+    while i < len(targets) {
+        let t = targets[i]
+        let parts = t.split(":")
+        if len(parts) >= 3 {
+            let kind = parts[1]      // constant or sector
+            let name = parts[2].split(" ")[0]
+
+            println("  [" + to_string(i + 1) + "] " + name + " (" + kind + ")")
+            println("      전략: " + get_strategy(name, kind))
+            println("      방법: " + get_method(name, kind))
+            println("      아이디어: " + get_idea(name, kind))
+            println("")
+        }
+        i = i + 1
+    }
+}
+
+// ─── 자동 돌파 실행 ───
+
+fn auto_breakthrough(targets_str: string) {
+    if len(targets_str) == 0 {
+        println("  (빈 공간 없음 — 모든 영역 탐색 완료)")
+        return
+    }
+
+    let targets = targets_str.split("|")
+    println("  돌파 대상 " + to_string(len(targets)) + "건:")
+    let mut i = 0
+    let show = if len(targets) < 10 { len(targets) } else { 10 }
+    while i < show {
+        println("    " + targets[i])
+        i = i + 1
+    }
+    if len(targets) > 10 {
+        println("    ... +" + to_string(len(targets) - 10) + "건 추가")
+    }
+
+    println("")
+    println("  === 빈 공간 집중 블로업 시작 ===")
+
+    // 상위 타겟에서 seed 추출
+    let mut seeds = ""
+    let mut ti = 0
+    while ti < len(targets) {
+        let t = targets[ti]
+        let parts = t.split(":")
+        if len(parts) >= 3 {
+            let target_name = parts[2].split(" ")[0]
+            // N6_VALUES에서 해당 상수 값 찾기
+            let mut vi = 0
+            while vi < len(N6_CONSTANTS) {
+                if N6_CONSTANTS[vi] == target_name {
+                    if len(seeds) > 0 { seeds = seeds + "," }
+                    seeds = seeds + to_string(N6_VALUES[vi])
+                }
+                vi = vi + 1
+            }
+        }
+        ti = ti + 1
+    }
+
+    if len(seeds) == 0 {
+        seeds = "2.0,0.3153,0.6847,0.3333"  // 기본 빈 공간 seed
+    }
+
+    println("  seeds: " + seeds)
+
+    // blowup 실행 (빈 공간 seed로)
+    let mut result = ""
+    try { result = exec(HEXA, [BLOWUP, "math", "3", "--no-graph", "--seeds", seeds]) } catch e { result = "ERROR: " + to_string(e) }
+
+    // 결과에서 발견 추출
+    let rlines = result.split("\n")
+    let mut discoveries = 0
+    let mut ri = 0
+    while ri < len(rlines) {
+        let line = rlines[ri]
+        if line.contains("EXACT") || line.contains("singularity") || line.contains("corollary") {
+            discoveries = discoveries + 1
+        }
+        ri = ri + 1
+    }
+
+    println("  블로업 결과: " + to_string(discoveries) + "건 발견")
+    println("")
+
+    // growth bus 기록
+    let mut ts = "?"
+    try { ts = exec("date", ["+%Y-%m-%dT%H:%M:%S"]) } catch e {}
+    let bus_line = "{\"source\":\"gap_finder\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"breakthrough\",\"status\":\"" + to_string(discoveries) + "_discoveries\",\"detail\":\"targets=" + to_string(len(targets)) + " seeds=" + seeds + "\"}"
+    try { append_file(GROWTH_BUS, bus_line + "\n") } catch e {}
+}
+
+// ─── CLI 진입점 ───
+
+let a = args()
+let mode = if len(a) >= 3 { a[2] } else { "help" }
+
+if mode == "scan" || mode == "map" {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  GAP FINDER — 미지의 영역 탐지기            ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+
+    println("=== 발견 지도 분석 중... ===")
+    let analysis = analyze_discovery_log()
+
+    let lines = analysis.split("\n")
+    let total = if len(lines) > 0 { lines[0].split(":")[1] } else { "?" }
+    println("총 발견: " + total + "건")
+    println("")
+
+    // 상수별 현황
+    println("=== n=6 상수 현황 ===")
+    let mut in_constants = false
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line == "CONSTANTS:" { in_constants = true }
+        else if line == "SECTORS:" { in_constants = false }
+        else if in_constants && len(line) > 0 {
+            let parts = line.split(":")
+            if len(parts) >= 4 {
+                let flag = parts[3]
+                let icon = if flag == "EMPTY" { "❌" }
+                          else if flag == "NO_EXACT" { "🟡" }
+                          else if flag == "WEAK" { "🟠" }
+                          else { "✅" }
+                let mut name_pad = parts[0]
+                while len(name_pad) < 16 { name_pad = name_pad + " " }
+                println("  " + icon + " " + name_pad + "발견:" + parts[1] + "  EXACT:" + parts[2] + "  [" + flag + "]")
+            }
+        }
+        li = li + 1
+    }
+    println("")
+
+    // 섹터별 현황
+    println("=== 섹터 현황 ===")
+    let mut in_sectors = false
+    let mut li2 = 0
+    while li2 < len(lines) {
+        let line = lines[li2]
+        if line == "SECTORS:" { in_sectors = true }
+        else if in_sectors && len(line) > 0 {
+            let parts = line.split(":")
+            if len(parts) >= 5 {
+                let flag = parts[4]
+                let icon = if flag == "EMPTY" { "❌" }
+                          else if flag == "HIGH_MISS" { "🟠" }
+                          else { "✅" }
+                let mut name_pad = parts[0]
+                while len(name_pad) < 16 { name_pad = name_pad + " " }
+                println("  " + icon + " " + name_pad + "총:" + parts[1] + "  EXACT:" + parts[2] + "  MISS:" + parts[3] + "  [" + flag + "]")
+            }
+        }
+        li2 = li2 + 1
+    }
+}
+
+if mode == "target" {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  GAP FINDER — 돌파 타겟 추출                ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+
+    let analysis = analyze_discovery_log()
+    let targets_str = generate_targets(analysis)
+
+    let mut target_count = 0
+    if len(targets_str) > 0 {
+        target_count = len(targets_str.split("|"))
+    }
+    println("=== 돌파 타겟 (" + to_string(target_count) + "건) ===")
+    if len(targets_str) > 0 {
+        let targets = targets_str.split("|")
+        let mut ti = 0
+        while ti < len(targets) {
+            println("  → " + targets[ti])
+            ti = ti + 1
+        }
+    }
+}
+
+if mode == "strategy" {
+    let analysis = analyze_discovery_log()
+    let targets_str = generate_targets(analysis)
+    strategize_and_print(targets_str, analysis)
+}
+
+if mode == "breakthrough" || mode == "돌파" {
+    println("╔══════════════════════════════════════════════════════╗")
+    println("║  GAP FINDER — 미지의 영역 돌파                      ║")
+    println("║  진짜 빈 공간을 찾아 정밀 타격                       ║")
+    println("╚══════════════════════════════════════════════════════╝")
+    println("")
+
+    let analysis = analyze_discovery_log()
+    let targets_str = generate_targets(analysis)
+    auto_breakthrough(targets_str)
+}
+
+if mode == "help" {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  GAP FINDER — 미지의 영역 탐지기            ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+    println("사용법:")
+    println("  hexa gap_finder.hexa scan         발견 지도 전체 스캔")
+    println("  hexa gap_finder.hexa map          = scan (별칭)")
+    println("  hexa gap_finder.hexa target       빈 공간 돌파 타겟 추출")
+    println("  hexa gap_finder.hexa strategy     빈 공간 돌파 전략 출력")
+    println("  hexa gap_finder.hexa breakthrough 빈 공간 자동 돌파 실행")
+    println("  hexa gap_finder.hexa 돌파          = breakthrough (한글)")
+    println("")
+    println("다른 프로젝트에서 사용:")
+    println("  HEXA=$HOME/Dev/hexa-lang/target/release/hexa")
+    println("  $HEXA $HOME/Dev/nexus6/mk2_hexa/native/gap_finder.hexa target")
+    println("  $HEXA $HOME/Dev/nexus6/mk2_hexa/native/gap_finder.hexa 돌파")
+}
+
+println("")
+println("=== gap_finder verified ===")

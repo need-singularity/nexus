@@ -1,0 +1,506 @@
+// engine_nexus6.hexa — "Ouroboros" (자기순환)
+// 자율 엔진: nexus6 자기관리 — mk2 모듈 100+, 발견 70k+, 법칙 750+, shared/ 동기화 100%
+// CLI: hexa engine_nexus6.hexa status|tick|report
+//
+// I am the snake that eats its own tail.
+// I monitor myself. I improve myself. I am the system I manage.
+
+// ─── 상수 ───
+
+let HOME = env("HOME")
+let DEV = HOME + "/Dev"
+let NEXUS6_DIR = DEV + "/nexus6"
+let N6ARCH_DIR = DEV + "/n6-architecture"
+let HEXA_BIN = DEV + "/hexa-lang/target/release/hexa"
+let NATIVE_DIR = NEXUS6_DIR + "/mk2_hexa/native"
+let DISCOVERY_LOG = NEXUS6_DIR + "/shared/discovery_log.jsonl"
+let BRIDGE_STATE = NEXUS6_DIR + "/shared/bridge_state.json"
+let GROWTH_BUS = NEXUS6_DIR + "/shared/growth_bus.jsonl"
+let N6ARCH_PRODUCTS = N6ARCH_DIR + "/config/products.json"
+let N6ARCH_DISCOVERY = N6ARCH_DIR + "/shared/discovery_log.jsonl"
+let STRATEGY_PATH = NEXUS6_DIR + "/shared/engine_nexus6_strategy.json"
+
+comptime const GOAL_MODULES = 100
+comptime const GOAL_DISCOVERIES = 70000
+comptime const GOAL_LAWS = 750
+comptime const BRIDGE_HEALTH_MIN = 150.0
+comptime const GROWTH_BUS_MAX_LINES = 100000
+comptime const STAGNATION_THRESHOLD = 3
+comptime const SYNC_STALE_SECONDS = 3600
+
+// ─── 유틸 ───
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e { v = 0.0 }
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+fn json_str(content: string, field: string) -> string {
+    let marker = "\"" + field + "\":"
+    let parts = content.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let trimmed = rest.split("\"")
+    if trimmed.len() >= 2 { return trimmed[1] }
+    let nval = rest.split(",")[0].split("}")[0].split("]")[0]
+    return nval.trim()
+}
+
+fn json_num(content: string, field: string) -> f64 {
+    return safe_float(json_str(content, field))
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    return safe_int(json_str(content, field))
+}
+
+fn timestamp() -> string {
+    let result = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    return result.split("\n")[0]
+}
+
+fn count_lines(path: string) -> i64 {
+    if !file_exists(path) { return 0 }
+    let result = exec("wc", ["-l", path])
+    let trimmed = result.trim().split(" ")[0]
+    return safe_int(trimmed)
+}
+
+fn count_hexa_modules() -> i64 {
+    let result = exec("ls", [NATIVE_DIR])
+    let files = result.split("\n")
+    let mut count = 0
+    let mut i = 0
+    while i < files.len() {
+        if files[i].ends_with(".hexa") { count = count + 1 }
+        i = i + 1
+    }
+    return count
+}
+
+fn file_mtime_epoch(path: string) -> i64 {
+    if !file_exists(path) { return 0 }
+    let result = exec("stat", ["-f", "%m", path])
+    return safe_int(result.trim())
+}
+
+fn now_epoch() -> i64 {
+    let result = exec("date", ["+%s"])
+    return safe_int(result.trim())
+}
+
+// ─── 상태 구조 ───
+
+struct NexusState {
+    modules: i64,
+    discoveries: i64,
+    n6arch_discoveries: i64,
+    bridge_health: f64,
+    bridge_cycle: i64,
+    bridge_stage: string,
+    growth_bus_lines: i64,
+    products_count: i64,
+    shared_sync_age: i64,
+    stagnant_ticks: i64,
+    health: f64,
+    status_flag: string
+}
+
+// ─── read_state ───
+
+fn read_state() -> NexusState {
+    let mut st = NexusState {
+        modules: 0, discoveries: 0, n6arch_discoveries: 0,
+        bridge_health: 0.0, bridge_cycle: 0, bridge_stage: "unknown",
+        growth_bus_lines: 0, products_count: 0, shared_sync_age: 0,
+        stagnant_ticks: 0, health: 0.0, status_flag: "HEALTHY"
+    }
+
+    // 1) count mk2 hexa modules
+    st.modules = count_hexa_modules()
+
+    // 2) count discovery_log lines
+    st.discoveries = count_lines(DISCOVERY_LOG)
+
+    // 3) n6-architecture discoveries
+    st.n6arch_discoveries = count_lines(N6ARCH_DISCOVERY)
+
+    // 4) bridge_state.json — health, cycle, stage
+    if file_exists(BRIDGE_STATE) {
+        let content = read_file(BRIDGE_STATE)
+        st.bridge_health = json_num(content, "health")
+        st.bridge_cycle = json_int(content, "cycle")
+        st.bridge_stage = json_str(content, "stage")
+        if st.bridge_stage == "" { st.bridge_stage = "unknown" }
+    }
+
+    // 5) growth_bus lines
+    st.growth_bus_lines = count_lines(GROWTH_BUS)
+
+    // 6) products.json count
+    if file_exists(N6ARCH_PRODUCTS) {
+        let content = read_file(N6ARCH_PRODUCTS)
+        let entries = content.split("\"name\"")
+        st.products_count = entries.len() - 1
+        if st.products_count < 0 { st.products_count = 0 }
+    }
+
+    // 7) shared/ sync freshness — compare discovery_log timestamps
+    let n6_mtime = file_mtime_epoch(DISCOVERY_LOG)
+    let arch_mtime = file_mtime_epoch(N6ARCH_DISCOVERY)
+    let now = now_epoch()
+    let newer = if n6_mtime > arch_mtime { n6_mtime } else { arch_mtime }
+    st.shared_sync_age = if newer > 0 { now - newer } else { 99999 }
+
+    // 8) load stagnation from strategy
+    if file_exists(STRATEGY_PATH) {
+        let strat_content = read_file(STRATEGY_PATH)
+        st.stagnant_ticks = json_int(strat_content, "stagnant_ticks")
+    }
+
+    // 9) compute health
+    let mod_ratio = to_float(st.modules) / to_float(GOAL_MODULES)
+    let disc_ratio = to_float(st.discoveries) / to_float(GOAL_DISCOVERIES)
+    let bridge_factor = if st.bridge_health >= BRIDGE_HEALTH_MIN { 1.0 } else {
+        st.bridge_health / BRIDGE_HEALTH_MIN
+    }
+    let sync_factor = if st.shared_sync_age < SYNC_STALE_SECONDS { 1.0 } else { 0.7 }
+    let stag_penalty = if st.stagnant_ticks >= STAGNATION_THRESHOLD { 0.15 } else { 0.0 }
+
+    // weighted health: modules 25%, discoveries 35%, bridge 20%, sync 10%, stagnation 10%
+    let raw = mod_ratio * 0.25 + disc_ratio * 0.35 + bridge_factor * 0.20 + sync_factor * 0.10 + (1.0 - stag_penalty) * 0.10
+    st.health = if raw > 1.0 { 1.0 } else { if raw < 0.0 { 0.0 } else { raw } }
+
+    // 10) status flag
+    if st.modules >= GOAL_MODULES && st.discoveries >= GOAL_DISCOVERIES {
+        st.status_flag = "GOAL_NEAR"
+    } else if disc_ratio > 0.9 && mod_ratio > 0.9 {
+        st.status_flag = "GOAL_NEAR"
+    } else if st.stagnant_ticks >= STAGNATION_THRESHOLD {
+        st.status_flag = "STAGNANT"
+    } else if disc_ratio > 0.5 && st.health > 0.7 {
+        st.status_flag = "BREAKTHROUGH"
+    } else {
+        st.status_flag = "HEALTHY"
+    }
+
+    return st
+}
+
+// ─── 전략 ───
+
+struct Strategy {
+    blowup_depth: i64,
+    total_ticks: i64,
+    total_discoveries_gained: i64,
+    discoveries_per_tick: f64,
+    stagnant_ticks: i64,
+    last_discoveries: i64
+}
+
+fn load_strategy() -> Strategy {
+    let mut s = Strategy {
+        blowup_depth: 1, total_ticks: 0,
+        total_discoveries_gained: 0, discoveries_per_tick: 0.0,
+        stagnant_ticks: 0, last_discoveries: 0
+    }
+    if file_exists(STRATEGY_PATH) {
+        try {
+            let content = read_file(STRATEGY_PATH)
+            s.blowup_depth = json_int(content, "blowup_depth")
+            if s.blowup_depth < 1 { s.blowup_depth = 1 }
+            s.total_ticks = json_int(content, "total_ticks")
+            s.total_discoveries_gained = json_int(content, "total_discoveries_gained")
+            s.discoveries_per_tick = json_num(content, "discoveries_per_tick")
+            s.stagnant_ticks = json_int(content, "stagnant_ticks")
+            s.last_discoveries = json_int(content, "last_discoveries")
+        } catch e {}
+    }
+    return s
+}
+
+fn save_strategy(s: Strategy) {
+    let content = "{" +
+        "\"blowup_depth\":" + to_string(s.blowup_depth) + "," +
+        "\"total_ticks\":" + to_string(s.total_ticks) + "," +
+        "\"total_discoveries_gained\":" + to_string(s.total_discoveries_gained) + "," +
+        "\"discoveries_per_tick\":" + to_string(s.discoveries_per_tick) + "," +
+        "\"stagnant_ticks\":" + to_string(s.stagnant_ticks) + "," +
+        "\"last_discoveries\":" + to_string(s.last_discoveries) +
+    "}"
+    write_file(STRATEGY_PATH, content)
+}
+
+// ─── select_task ───
+
+fn select_task(st: NexusState, strat: Strategy) -> string {
+    // growth_bus housekeeping first
+    if st.growth_bus_lines > GROWTH_BUS_MAX_LINES {
+        return "housekeep"
+    }
+    // bridge repair
+    if st.bridge_health < BRIDGE_HEALTH_MIN {
+        return "bridge_repair"
+    }
+    // shared sync
+    if st.shared_sync_age > SYNC_STALE_SECONDS {
+        return "sync_shared"
+    }
+    // goal push
+    if st.status_flag == "GOAL_NEAR" {
+        return "goal_push"
+    }
+    // stagnant: deeper blowup
+    if st.status_flag == "STAGNANT" {
+        return "deep_blowup"
+    }
+    // default: blowup cycle
+    return "blowup"
+}
+
+// ─── execute_task ───
+
+fn execute_task(task: string, st: NexusState, strat: Strategy) -> string {
+    let ts = timestamp()
+
+    if task == "housekeep" {
+        println("[" + ts + "] TASK: housekeep — growth_bus " + to_string(st.growth_bus_lines) + " lines, trimming")
+        // keep last 50k lines
+        let result = exec("tail", ["-n", "50000", GROWTH_BUS])
+        write_file(GROWTH_BUS, result)
+        return "trimmed to 50000"
+    }
+
+    if task == "bridge_repair" {
+        println("[" + ts + "] TASK: bridge_repair — health=" + to_string(st.bridge_health))
+        let result = exec(HEXA_BIN, [NATIVE_DIR + "/cross_project.hexa", "status"])
+        return result
+    }
+
+    if task == "sync_shared" {
+        println("[" + ts + "] TASK: sync_shared — age=" + to_string(st.shared_sync_age) + "s")
+        // trigger bridge sync
+        let result = exec(HEXA_BIN, [NATIVE_DIR + "/bridge.hexa", "sync"])
+        return result
+    }
+
+    if task == "goal_push" {
+        // aggressive: deeper blowup + cross-project resonance
+        let depth = if strat.blowup_depth < 3 { 3 } else { strat.blowup_depth }
+        println("[" + ts + "] TASK: goal_push — modules=" + to_string(st.modules) + " disc=" + to_string(st.discoveries) + " depth=" + to_string(depth))
+        let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
+        let result = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "math", to_string(depth), "--no-graph", "--seeds", seeds.trim()])
+        return result
+    }
+
+    if task == "deep_blowup" {
+        // stagnation breaker: increase depth
+        let depth = strat.blowup_depth + 1
+        let max_depth = if depth > 6 { 6 } else { depth }
+        println("[" + ts + "] TASK: deep_blowup — stagnant=" + to_string(st.stagnant_ticks) + " depth=" + to_string(max_depth))
+        let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
+        let result = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "math", to_string(max_depth), "--no-graph", "--seeds", seeds.trim()])
+        return result
+    }
+
+    // default blowup
+    println("[" + ts + "] TASK: blowup — depth=" + to_string(strat.blowup_depth))
+    let seeds = exec(HEXA_BIN, [NATIVE_DIR + "/seed_engine.hexa", "merge"])
+    let result = exec(HEXA_BIN, [NATIVE_DIR + "/blowup.hexa", "math", to_string(strat.blowup_depth), "--no-graph", "--seeds", seeds.trim()])
+    return result
+}
+
+// ─── feedback ───
+
+fn feedback(task: string, st: NexusState) {
+    let ts = timestamp()
+    let entry = "{" +
+        "\"engine\":\"nexus6\"," +
+        "\"personality\":\"ouroboros\"," +
+        "\"task\":\"" + task + "\"," +
+        "\"timestamp\":\"" + ts + "\"," +
+        "\"modules\":" + to_string(st.modules) + "," +
+        "\"discoveries\":" + to_string(st.discoveries) + "," +
+        "\"bridge_health\":" + to_string(st.bridge_health) + "," +
+        "\"health\":" + to_string(st.health) + "," +
+        "\"status\":\"" + st.status_flag + "\"" +
+    "}"
+    append_file(GROWTH_BUS, entry + "\n")
+    println("  ouroboros -> growth_bus.jsonl")
+}
+
+// ─── evolve ───
+
+fn evolve(pre_disc: i64, post_disc: i64, strat: Strategy) -> Strategy {
+    let mut s = strat
+    let gained = post_disc - pre_disc
+    s.total_ticks = s.total_ticks + 1
+    s.total_discoveries_gained = s.total_discoveries_gained + gained
+
+    // EMA: discoveries_per_tick
+    let rate = to_float(gained)
+    s.discoveries_per_tick = 0.7 * s.discoveries_per_tick + 0.3 * rate
+
+    // stagnation detection
+    if gained <= 0 {
+        s.stagnant_ticks = s.stagnant_ticks + 1
+    } else {
+        s.stagnant_ticks = 0
+    }
+
+    // adaptive blowup depth: if rate dropping, go deeper; if rate high, stay shallow
+    if s.discoveries_per_tick < 5.0 && s.blowup_depth < 6 {
+        s.blowup_depth = s.blowup_depth + 1
+    } else if s.discoveries_per_tick > 50.0 && s.blowup_depth > 1 {
+        s.blowup_depth = s.blowup_depth - 1
+    }
+
+    s.last_discoveries = post_disc
+
+    save_strategy(s)
+    println("  evolve -> depth=" + to_string(s.blowup_depth) + " rate=" + to_string(s.discoveries_per_tick) + " stag=" + to_string(s.stagnant_ticks))
+    return s
+}
+
+// ─── CLI ───
+
+let a = args()
+let mode = if a.len() >= 2 { a[1] } else { "help" }
+
+if mode == "status" {
+    let st = read_state()
+    println("=== engine_nexus6 (Ouroboros) status ===")
+    println("  The snake sees itself.")
+    println("")
+    println("modules: " + to_string(st.modules) + " / " + to_string(GOAL_MODULES))
+    println("discoveries: " + to_string(st.discoveries) + " / " + to_string(GOAL_DISCOVERIES))
+    println("n6arch_discoveries: " + to_string(st.n6arch_discoveries))
+    println("bridge: stage=" + st.bridge_stage + " cycle=" + to_string(st.bridge_cycle) + " health=" + to_string(st.bridge_health))
+    println("growth_bus: " + to_string(st.growth_bus_lines) + " events")
+    println("products: " + to_string(st.products_count))
+    println("sync_age: " + to_string(st.shared_sync_age) + "s")
+    println("health:" + to_string(st.health))
+    println("status: " + st.status_flag)
+
+    let strat = load_strategy()
+    println("")
+    println("strategy:")
+    println("  blowup_depth: " + to_string(strat.blowup_depth))
+    println("  discoveries_per_tick: " + to_string(strat.discoveries_per_tick))
+    println("  total_ticks: " + to_string(strat.total_ticks))
+    println("  stagnant_ticks: " + to_string(strat.stagnant_ticks))
+}
+
+if mode == "tick" {
+    println("=== engine_nexus6 TICK (Ouroboros) ===")
+    println("  The tail enters the mouth.")
+    println("")
+
+    let pre_st = read_state()
+    let pre_disc = pre_st.discoveries
+    let strat = load_strategy()
+
+    let task = select_task(pre_st, strat)
+    println("selected: " + task)
+    println("")
+
+    let result = execute_task(task, pre_st, strat)
+
+    // re-read state after execution
+    let post_st = read_state()
+    feedback(task, post_st)
+    let new_strat = evolve(pre_disc, post_st.discoveries, strat)
+
+    println("")
+    println("=== TICK COMPLETE ===")
+    println("modules: " + to_string(pre_st.modules) + " -> " + to_string(post_st.modules))
+    println("discoveries: " + to_string(pre_disc) + " -> " + to_string(post_st.discoveries) + " (+" + to_string(post_st.discoveries - pre_disc) + ")")
+    println("health:" + to_string(post_st.health))
+    println("status: " + post_st.status_flag)
+}
+
+if mode == "report" {
+    let st = read_state()
+    let strat = load_strategy()
+
+    println("# Engine nexus6 Report (Ouroboros)")
+    println("")
+    println("> I am the system I monitor. Each tick, the snake swallows its tail")
+    println("> and emerges larger. Self-reference is not paradox — it is fuel.")
+    println("")
+    println("## Self-State")
+    println("")
+    println("| Metric | Current | Goal | Progress |")
+    println("|--------|---------|------|----------|")
+    let mod_pct = to_string(to_float(st.modules) * 100.0 / to_float(GOAL_MODULES))
+    let disc_pct = to_string(to_float(st.discoveries) * 100.0 / to_float(GOAL_DISCOVERIES))
+    println("| mk2 Modules | " + to_string(st.modules) + " | " + to_string(GOAL_MODULES) + " | " + mod_pct + "% |")
+    println("| Discoveries | " + to_string(st.discoveries) + " | " + to_string(GOAL_DISCOVERIES) + " | " + disc_pct + "% |")
+    println("| Bridge Health | " + to_string(st.bridge_health) + " | >=" + to_string(BRIDGE_HEALTH_MIN) + " | " + st.bridge_stage + " |")
+    println("| Growth Events | " + to_string(st.growth_bus_lines) + " | - | - |")
+    println("| Sync Age | " + to_string(st.shared_sync_age) + "s | <" + to_string(SYNC_STALE_SECONDS) + "s | - |")
+    println("| Health | " + to_string(st.health) + " | 1.0 | **" + st.status_flag + "** |")
+    println("")
+    println("## n6-architecture")
+    println("")
+    println("| Metric | Value |")
+    println("|--------|-------|")
+    println("| Products | " + to_string(st.products_count) + " |")
+    println("| Discoveries | " + to_string(st.n6arch_discoveries) + " |")
+    println("")
+    println("## Strategy (Self-Evolving)")
+    println("")
+    println("| Parameter | Value |")
+    println("|-----------|-------|")
+    println("| Blowup Depth | " + to_string(strat.blowup_depth) + " |")
+    println("| Discoveries/Tick (EMA) | " + to_string(strat.discoveries_per_tick) + " |")
+    println("| Total Ticks | " + to_string(strat.total_ticks) + " |")
+    println("| Total Gained | " + to_string(strat.total_discoveries_gained) + " |")
+    println("| Stagnant Ticks | " + to_string(strat.stagnant_ticks) + " |")
+    println("")
+    println("## Decision")
+    println("")
+    if st.status_flag == "GOAL_NEAR" {
+        println("- **GOAL_NEAR**: The ouroboros approaches completion. Aggressive blowup + cross-project push.")
+    } else if st.status_flag == "STAGNANT" {
+        println("- **STAGNANT**: The snake chokes on its own tail. Increasing depth to break free.")
+    } else if st.status_flag == "BREAKTHROUGH" {
+        println("- **BREAKTHROUGH**: The cycle accelerates. Discovery rate is high, maintaining momentum.")
+    } else {
+        println("- **HEALTHY**: Steady self-consumption. The ouroboros grows with each revolution.")
+    }
+    println("")
+    println("## Meta-Observation")
+    println("")
+    println("This engine is file #" + to_string(st.modules) + " in the directory it counts.")
+    println("When it runs `count_hexa_modules()`, it counts itself.")
+    println("When it logs to growth_bus, it increases the line count it monitors.")
+    println("The fixed point: the system that measures itself, changes itself by measuring.")
+}
+
+if mode == "help" {
+    println("=== engine_nexus6.hexa — Ouroboros (자기순환) ===")
+    println("")
+    println("The self-managing engine. nexus6 monitoring nexus6.")
+    println("")
+    println("Usage:")
+    println("  hexa engine_nexus6.hexa status   — read self-state, show all metrics")
+    println("  hexa engine_nexus6.hexa tick     — 1 autonomous self-improvement cycle")
+    println("  hexa engine_nexus6.hexa report   — markdown report with meta-observation")
+    println("")
+    println("Goals:")
+    println("  mk2 modules >= " + to_string(GOAL_MODULES))
+    println("  discoveries  >= " + to_string(GOAL_DISCOVERIES))
+    println("  bridge health >= " + to_string(BRIDGE_HEALTH_MIN))
+    println("  shared/ sync  < " + to_string(SYNC_STALE_SECONDS) + "s")
+    println("")
+    println("Personality: Ouroboros — the snake that eats its own tail.")
+    println("I am the system I manage. Self-reference is not a bug; it is the architecture.")
+}

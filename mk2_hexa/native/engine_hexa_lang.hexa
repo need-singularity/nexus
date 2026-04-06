@@ -1,0 +1,488 @@
+// engine_hexa_lang.hexa — "Mathematician" (수학자) 엔진
+// hexa-lang 프로젝트: 테스트 800+, 이머전스 100% 수렴
+// 사용: hexa engine_hexa_lang.hexa status|tick|report
+
+// ═══════════════════════════════════════════════════════════
+// ─── CONSTANTS ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const VERSION = "1.0.0"
+comptime const PROJECT = "hexa_lang"
+comptime const PERSONALITY = "Mathematician"
+comptime const GOAL = "테스트 800+, 이머전스 100% 수렴"
+
+let HOME = env("HOME")
+let DEV = HOME + "/Dev"
+let PROJECT_DIR = DEV + "/hexa-lang"
+let METRICS_PATH = PROJECT_DIR + "/config/eso_metrics.json"
+let PATTERNS_PATH = PROJECT_DIR + "/config/emergence_patterns.json"
+let BUS_FILE = DEV + "/nexus6/shared/growth_bus.jsonl"
+let STATE_PATH = DEV + "/nexus6/shared/engine_hexa_lang_state.json"
+
+comptime const TEST_GOAL = 800
+comptime const EMERGENCE_TARGET = 1.0
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(s.trim()) } catch e {}
+    return v
+}
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn timestamp() -> string {
+    let r = exec("date", ["+%Y-%m-%dT%H:%M:%S"])
+    r.trim()
+}
+
+fn read_file_safe(path: string) -> string {
+    try { return read_file(path) } catch e { return "" }
+}
+
+fn file_exists_check(path: string) -> bool {
+    let r = exec("test", ["-f", path, "&&", "echo", "1"])
+    r.trim() == "1"
+}
+
+// ─── JSON field extraction ───
+
+fn json_float(content: string, field: string) -> f64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let after = parts[1]
+    // skip past ":"
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0.0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(val_str)
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_int(val_str)
+}
+
+// ─── Growth bus ───
+
+fn append_bus(phase: string, status: string, detail: string) {
+    let ts = timestamp()
+    let line = "{\"source\":\"" + PROJECT + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(BUS_FILE, line + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA COLLECTION ───
+// ═══════════════════════════════════════════════════════════
+
+struct Metrics {
+    test_count: i64,
+    test_pass: i64,
+    test_fail: i64,
+    emergence_density: f64,
+    convergence_round: i64,
+    pattern_count: i64,
+    build_ok: bool
+}
+
+fn count_tests() -> [i64, i64, i64] {
+    // Run cargo test in hexa-lang dir, parse results
+    let result = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+    } catch e {
+        ""
+    }
+
+    // Parse: "test result: ok. X passed; Y failed;"
+    let mut total: i64 = 0
+    let mut passed: i64 = 0
+    let mut failed: i64 = 0
+
+    if result.contains("passed") {
+        let parts = result.split("passed")
+        if parts.len() >= 1 {
+            // work backwards from "passed" to find the number
+            let before = parts[0]
+            let tokens = before.split(" ")
+            let mut i = tokens.len() - 1
+            while i >= 0 {
+                let n = safe_int(tokens[i])
+                if n > 0 { passed = n; break }
+                i = i - 1
+            }
+        }
+    }
+
+    if result.contains("failed") {
+        let parts = result.split("failed")
+        if parts.len() >= 1 {
+            let before = parts[0]
+            let tokens = before.split(" ")
+            let mut i = tokens.len() - 1
+            while i >= 0 {
+                let n = safe_int(tokens[i])
+                if n >= 0 { failed = n; break }
+                i = i - 1
+            }
+        }
+    }
+
+    total = passed + failed
+    return [total, passed, failed]
+}
+
+fn read_emergence_metrics() -> [f64, i64] {
+    let content = read_file_safe(METRICS_PATH)
+    if content == "" { return [0.0, 0] }
+    let density = json_float(content, "emergence_density")
+    let round = json_int(content, "convergence_round")
+    return [density, round]
+}
+
+fn read_pattern_count() -> i64 {
+    let content = read_file_safe(PATTERNS_PATH)
+    if content == "" { return 0 }
+    // Count entries by counting occurrences of a key field
+    let parts = content.split("\"pattern\"")
+    let count = parts.len() - 1
+    if count < 0 { return 0 }
+    return count
+}
+
+fn collect_metrics() -> Metrics {
+    let tests = count_tests()
+    let emergence = read_emergence_metrics()
+    let patterns = read_pattern_count()
+
+    let build_ok = tests[0] > 0 && tests[2] == 0
+
+    Metrics {
+        test_count: tests[0],
+        test_pass: tests[1],
+        test_fail: tests[2],
+        emergence_density: emergence[0],
+        convergence_round: emergence[1],
+        pattern_count: patterns,
+        build_ok: build_ok
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── HEALTH CALCULATION ───
+// ═══════════════════════════════════════════════════════════
+
+fn calc_health(m: Metrics) -> f64 {
+    // 40% test progress toward 800
+    let test_ratio = clamp01(to_float(m.test_count) / to_float(TEST_GOAL))
+    let test_score = test_ratio * 0.4
+
+    // 20% no failures
+    let fail_score = if m.test_fail == 0 { 0.2 } else { 0.2 * max_f(0.0, 1.0 - to_float(m.test_fail) / 10.0) }
+
+    // 25% emergence density toward 1.0
+    let emergence_score = clamp01(m.emergence_density / EMERGENCE_TARGET) * 0.25
+
+    // 15% pattern accumulation (100 patterns = full)
+    let pattern_score = clamp01(to_float(m.pattern_count) / 100.0) * 0.15
+
+    return clamp01(test_score + fail_score + emergence_score + pattern_score)
+}
+
+fn classify(m: Metrics, health: f64) -> string {
+    if m.test_fail > 0 { return "STAGNANT" }
+    if m.emergence_density >= 0.95 && m.test_count >= TEST_GOAL { return "BREAKTHROUGH" }
+    if m.test_count >= to_int(to_float(TEST_GOAL) * 0.9) || m.emergence_density >= 0.9 { return "GOAL_NEAR" }
+    if health >= 0.3 { return "HEALTHY" }
+    return "STAGNANT"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── EVOLVE — Track growth rates ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_prev_state() -> [i64, i64, f64] {
+    let content = read_file_safe(STATE_PATH)
+    if content == "" { return [0, 0, 0.0] }
+    let prev_tests = json_int(content, "test_count")
+    let prev_patterns = json_int(content, "pattern_count")
+    let prev_density = json_float(content, "emergence_density")
+    return [prev_tests, prev_patterns, prev_density]
+}
+
+fn save_state(m: Metrics, health: f64) {
+    let content = "{\n" +
+        "  \"test_count\": " + to_string(m.test_count) + ",\n" +
+        "  \"test_pass\": " + to_string(m.test_pass) + ",\n" +
+        "  \"test_fail\": " + to_string(m.test_fail) + ",\n" +
+        "  \"emergence_density\": " + to_string(m.emergence_density) + ",\n" +
+        "  \"convergence_round\": " + to_string(m.convergence_round) + ",\n" +
+        "  \"pattern_count\": " + to_string(m.pattern_count) + ",\n" +
+        "  \"health\": " + to_string(health) + ",\n" +
+        "  \"timestamp\": \"" + timestamp() + "\"\n" +
+        "}\n"
+    try {
+        exec("bash", ["-c", "cat > " + STATE_PATH + " << 'JSONEOF'\n" + content + "JSONEOF"])
+    } catch e {}
+}
+
+fn evolve_report(m: Metrics) -> string {
+    let prev = load_prev_state()
+    let test_delta = m.test_count - prev[0]
+    let pattern_delta = m.pattern_count - prev[1]
+    let density_delta = m.emergence_density - prev[2]
+
+    let mut report = "evolve:"
+    if test_delta > 0 {
+        report = report + " tests+" + to_string(test_delta)
+    } else if test_delta == 0 {
+        report = report + " tests=stale"
+    } else {
+        report = report + " tests" + to_string(test_delta) + "(regression!)"
+    }
+
+    if pattern_delta > 0 {
+        report = report + " patterns+" + to_string(pattern_delta)
+    }
+
+    if abs_f(density_delta) > 0.001 {
+        if density_delta > 0.0 {
+            report = report + " density+" + to_string(density_delta)
+        } else {
+            report = report + " density" + to_string(density_delta)
+        }
+    }
+
+    return report
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── TICK ACTIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn tick_priority_fix(m: Metrics) {
+    println("[TICK] Priority fix cycle — " + to_string(m.test_fail) + " failures detected")
+    append_bus("tick", "fix_cycle", to_string(m.test_fail) + " test failures")
+
+    // Re-run cargo build to surface errors
+    let build_out = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -20"])
+    } catch e {
+        "build error: " + to_string(e)
+    }
+
+    println("  build output (tail):")
+    let lines = build_out.split("\n")
+    let mut i = 0
+    while i < lines.len() {
+        println("    " + lines[i])
+        i = i + 1
+    }
+}
+
+fn tick_adaptive_optimization(m: Metrics) {
+    println("[TICK] Adaptive optimization — emergence_density=" + to_string(m.emergence_density))
+    append_bus("tick", "adaptive", "density=" + to_string(m.emergence_density))
+
+    // Focus: build release + run tests to capture new passes
+    let result = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -3"])
+    } catch e {
+        "error"
+    }
+    println("  build: " + result.split("\n")[0])
+
+    let test_out = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+    } catch e {
+        "error"
+    }
+    println("  test: " + test_out.split("\n")[0])
+}
+
+fn tick_canonicalize(m: Metrics) {
+    println("[TICK] Canonicalize n=6 constant — convergence complete!")
+    println("  emergence_density: " + to_string(m.emergence_density))
+    println("  convergence_round: " + to_string(m.convergence_round))
+    println("  pattern_count: " + to_string(m.pattern_count))
+    append_bus("tick", "canonicalize", "convergence_round=" + to_string(m.convergence_round))
+}
+
+fn tick_default(m: Metrics) {
+    println("[TICK] Default cycle — build + test")
+    append_bus("tick", "default", "build+test")
+
+    let build_out = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo build --release 2>&1 | tail -3"])
+    } catch e {
+        "build error"
+    }
+    println("  build: " + build_out.split("\n")[0])
+
+    let test_out = try {
+        exec("bash", ["-c", "cd " + PROJECT_DIR + " && cargo test 2>&1 | tail -5"])
+    } catch e {
+        "test error"
+    }
+    let test_lines = test_out.split("\n")
+    let mut i = 0
+    while i < test_lines.len() {
+        if test_lines[i].len() > 0 {
+            println("  " + test_lines[i])
+        }
+        i = i + 1
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── CLI MODES ───
+// ═══════════════════════════════════════════════════════════
+
+fn mode_status() {
+    let m = collect_metrics()
+    let health = calc_health(m)
+    let class = classify(m, health)
+
+    println("═══ " + PERSONALITY + " Engine [" + PROJECT + "] v" + VERSION + " ═══")
+    println("project: " + PROJECT_DIR)
+    println("goal: " + GOAL)
+    println("")
+    println("tests: " + to_string(m.test_pass) + "/" + to_string(m.test_count) + " pass (" + to_string(m.test_fail) + " fail)")
+    println("test_progress: " + to_string(m.test_count) + "/" + to_string(TEST_GOAL))
+    println("emergence_density: " + to_string(m.emergence_density))
+    println("convergence_round: " + to_string(m.convergence_round))
+    println("pattern_count: " + to_string(m.pattern_count))
+    println("")
+    println("health:" + to_string(health))
+    println(class)
+    println("")
+    println(evolve_report(m))
+}
+
+fn mode_tick() {
+    println("═══ " + PERSONALITY + " Tick — " + timestamp() + " ═══")
+
+    let m = collect_metrics()
+    let health = calc_health(m)
+    let class = classify(m, health)
+
+    println("status: " + class + " (health:" + to_string(health) + ")")
+    println("tests: " + to_string(m.test_pass) + "/" + to_string(m.test_count) + " (" + to_string(m.test_fail) + " fail)")
+    println("emergence: " + to_string(m.emergence_density) + " patterns:" + to_string(m.pattern_count))
+    println("")
+
+    // Dispatch based on state
+    if m.test_fail > 0 {
+        tick_priority_fix(m)
+    } else if m.emergence_density > 0.5 {
+        tick_adaptive_optimization(m)
+    } else if m.emergence_density >= 0.99 && m.convergence_round > 0 {
+        tick_canonicalize(m)
+    } else {
+        tick_default(m)
+    }
+
+    // Evolve tracking
+    println("")
+    println(evolve_report(m))
+    save_state(m, health)
+
+    // Bus record
+    append_bus("tick", class, "h=" + to_string(health) + " t=" + to_string(m.test_count) + " e=" + to_string(m.emergence_density))
+    println("")
+    println("health:" + to_string(health))
+    println(class)
+}
+
+fn mode_report() {
+    let m = collect_metrics()
+    let health = calc_health(m)
+    let class = classify(m, health)
+    let evo = evolve_report(m)
+
+    println("# " + PERSONALITY + " Engine Report")
+    println("## " + timestamp())
+    println("")
+    println("| Metric | Value | Target | Progress |")
+    println("|--------|-------|--------|----------|")
+
+    let test_pct = if TEST_GOAL > 0 { to_float(m.test_count) * 100.0 / to_float(TEST_GOAL) } else { 0.0 }
+    println("| Tests | " + to_string(m.test_count) + " | " + to_string(TEST_GOAL) + " | " + to_string(test_pct) + "% |")
+
+    let em_pct = m.emergence_density * 100.0
+    println("| Emergence | " + to_string(m.emergence_density) + " | 1.0 | " + to_string(em_pct) + "% |")
+
+    println("| Patterns | " + to_string(m.pattern_count) + " | 100 | " + to_string(to_float(m.pattern_count)) + "% |")
+    println("| Failures | " + to_string(m.test_fail) + " | 0 | " + if m.test_fail == 0 { "OK" } else { "ALERT" } + " |")
+    println("")
+    println("**Status**: " + class)
+    println("**Health**: " + to_string(health))
+    println("**" + evo + "**")
+    println("")
+
+    // Recommendations
+    println("## Recommendations")
+    if m.test_fail > 0 {
+        println("- URGENT: Fix " + to_string(m.test_fail) + " failing tests before any new work")
+    }
+    if m.test_count < TEST_GOAL {
+        let remaining = TEST_GOAL - m.test_count
+        println("- Need " + to_string(remaining) + " more tests to reach goal")
+    }
+    if m.emergence_density < 0.5 {
+        println("- Emergence density low — focus on n=6 pattern detection")
+    } else if m.emergence_density < 0.95 {
+        println("- Emergence density medium — adaptive optimization recommended")
+    } else {
+        println("- Emergence near convergence — prepare for canonicalization")
+    }
+}
+
+// ─── MAIN ───
+
+let a = args()
+let mode = if a.len() >= 2 { a[1] } else { "status" }
+
+if mode == "status" { mode_status() }
+if mode == "tick" { mode_tick() }
+if mode == "report" { mode_report() }
+if mode == "help" {
+    println("engine_hexa_lang.hexa — Mathematician (수학자)")
+    println("  status  — 현재 상태 + health 출력")
+    println("  tick    — 틱 실행 (조건별 분기)")
+    println("  report  — 마크다운 리포트")
+}
