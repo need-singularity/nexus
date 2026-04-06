@@ -251,6 +251,42 @@ if bt_detected {
     }
 }
 
+// ─── 빈공간/미발견 키워드 감지 → gap_finder 자동 실행 ───
+let gap_keywords = ["빈공간", "미발견", "미탐색", "미지 영역", "empty space", "gap", "DFS"]
+let mut gap_detected = false
+
+for gkw in gap_keywords {
+    if stdin_text.contains(gkw) {
+        gap_detected = true
+    }
+}
+
+if gap_detected {
+    let gap_cooldown = "shared/.gap_cooldown"
+    let mut gap_should_run = true
+    try {
+        let gap_last = exec("cat " + gap_cooldown).trim()
+        let gap_now = exec("date +%s").trim()
+        let gap_diff = to_int(to_float(gap_now)) - to_int(to_float(gap_last))
+        if gap_diff < 300 { gap_should_run = false }
+    } catch e {}
+
+    if gap_should_run {
+        try { exec("bash -c date +%s > " + gap_cooldown) } catch e {}
+
+        let hexa_bin2 = exec("printenv HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
+        let gap_finder = exec("printenv HOME").trim() + "/Dev/nexus6/mk2_hexa/native/gap_finder.hexa"
+
+        // quick (EXACT 요약) + dfs (위상변환 탐색) + bridge (빈공간×위상변환 교차) 백그라운드
+        try {
+            exec("bash -c " + hexa_bin2 + " " + gap_finder + " quick >> shared/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " dfs 2 >> shared/auto_gap.log 2>&1 && " + hexa_bin2 + " " + gap_finder + " bridge >> shared/auto_gap.log 2>&1 &")
+            discoveries = discoveries + 1
+            if exact_names != "" { exact_names = exact_names + "," }
+            exact_names = exact_names + "🔍GAP:quick+dfs+bridge"
+        } catch e {}
+    }
+}
+
 if discoveries > 0 {
     let msg = "{\"systemMessage\":\"mk2-hexa: " + to_string(discoveries) + " discoveries [" + exact_names + "]\"}"
     println(msg)
