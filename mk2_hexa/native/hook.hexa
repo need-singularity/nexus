@@ -144,6 +144,31 @@ for v in nums {
     }
 }
 
+// ─── hexa 컴파일/런타임 에러 감지 → pitfalls 자동 추가 ───
+if stdin_text.contains("error[Syntax]") || stdin_text.contains("error[Runtime]") || stdin_text.contains("error[Type]") {
+    let pitfalls_log = _shared + "/hexa_pitfalls_log.jsonl"
+    // 에러 메시지 추출 (첫 줄)
+    let mut err_msg = ""
+    let err_lines = stdin_text.split("\n")
+    let mut ei: i64 = 0
+    while ei < err_lines.len() {
+        let el = err_lines[ei]
+        if el.contains("error[") {
+            err_msg = el.trim()
+            ei = err_lines.len()
+        }
+        ei = ei + 1
+    }
+    if err_msg != "" {
+        let ts = exec("date +%Y-%m-%dT%H:%M:%S").trim()
+        let entry = "{\"timestamp\":\"" + ts + "\",\"error\":\"" + err_msg.replace("\"", "'") + "\",\"mode\":\"" + mode + "\",\"auto_pitfall\":true}"
+        try { append_file(pitfalls_log, entry + "\n") } catch e {}
+        // systemMessage로 pitfall 추가 알림
+        let pit_msg = "{\"systemMessage\":\"⚠️ hexa 에러 감지 → pitfalls 로그 기록. shared/hexa_grammar.jsonl pitfalls 섹션 업데이트 검토 필요. 에러: " + err_msg.replace("\"", "'") + "\"}"
+        println(pit_msg)
+    }
+}
+
 // ─── 돌파 키워드 감지 → 자동 특이점 돌파 트리거 ───
 // shared/bt_keywords.jsonl에서 동적 로드 (하드코딩 금지)
 let mut bt_keywords_list = []

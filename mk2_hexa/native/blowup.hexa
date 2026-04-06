@@ -429,14 +429,13 @@ fn graph_append_edge(from_id: string, to_id: string, edge_type: string, strength
 
 // Mutation: parameter shift by n=6 constants
 fn evo_mutate_shift(base_val: f64, shift_idx: i64) -> f64 {
-    // 10 n=6 shift constants
-    if shift_idx == 0 { return base_val * 12.0 }
-    if shift_idx == 1 { return base_val * 2.0 }
-    if shift_idx == 2 { return base_val * 4.0 }
-    if shift_idx == 3 { return base_val + 24.0 }
-    if shift_idx == 4 { return base_val + 5.0 }
-    if shift_idx == 5 { return base_val * 6.0 }
-    return base_val + 0.287682072
+    // Dynamic: n6_constants.jsonl 전체 상수로 shift
+    if _n6_dyn_count == 0 { return base_val + 6.0 }
+    let idx = shift_idx % _n6_dyn_count
+    let cv = to_float(_n6_dyn_values[idx])
+    if abs_f(cv) < 0.001 { return base_val }
+    if shift_idx % 2 == 0 { return base_val * cv }
+    return base_val + cv
 }
 
 // Mutation: inversion
@@ -474,9 +473,10 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             let mut best_mut = sv
             let mut best_conf: f64 = evo_verify(sv)
 
-            // strategy 0: parameter shift (try 3 shifts)
+            // strategy 0: parameter shift (dynamic — n6_constants 전체)
+            let shift_limit: i64 = if _n6_dyn_count < 16 { _n6_dyn_count } else { 16 }
             let mut shi: i64 = 0
-            while shi < 7 {
+            while shi < shift_limit {
                 let shifted = evo_mutate_shift(sv, shi)
                 let sc = evo_verify(shifted)
                 if sc > best_conf {
