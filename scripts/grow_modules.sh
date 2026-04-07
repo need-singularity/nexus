@@ -266,7 +266,7 @@ generate_prompt() {
   local tests_needed=$((target_tests > current_tests ? target_tests - current_tests : 0))
 
   cat <<PROMPT
-Upgrade the '${name}' module in tools/nexus6/src/${name}/ from ${current_maturity} to ${target_maturity} maturity.
+Upgrade the '${name}' module in tools/nexus/src/${name}/ from ${current_maturity} to ${target_maturity} maturity.
 
 Module purpose: ${purpose}
 Current state: ${MOD_FILES[$name]} files, ${current_lines} lines, ${current_tests} tests
@@ -279,7 +279,7 @@ Required:
 4. All constants must have comments explaining their n=6 origin
 5. Include #[cfg(test)] mod tests block
 6. No external crates (std only)
-7. Ensure \`cd tools/nexus6 && cargo check\` passes with no errors
+7. Ensure \`cd tools/nexus && cargo check\` passes with no errors
 
 Project root: $(dirname "$NEXUS_ROOT")
 Crate root: ${NEXUS_ROOT}

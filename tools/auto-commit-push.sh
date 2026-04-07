@@ -4,8 +4,8 @@
 # Skips if no changes or if inside a manual git operation.
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-cd "$NEXUS6"
+NEXUS="${HOME}/Dev/nexus"
+cd "$NEXUS"
 
 # Skip if merge/rebase in progress
 if [ -e .git/MERGE_HEAD ] || [ -e .git/REBASE_HEAD ] || [ -d .git/rebase-merge ]; then
@@ -43,7 +43,7 @@ MSG="auto: agent sweep +${LINES_ADDED} lines ${FILES_CHANGED} files @ $(date -u 
 
 git -c commit.gpgsign=false commit -m "$MSG" -m "Auto-committed by tools/auto-commit-push.sh
 
-Co-Authored-By: nexus6-auto-loop <noreply@need-singularity>
+Co-Authored-By: nexus-auto-loop <noreply@need-singularity>
 " 2>&1 | tail -3
 
 # Push (non-blocking: retry once on failure, then give up)

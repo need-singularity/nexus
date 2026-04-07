@@ -3,11 +3,11 @@
 # Runs periodically alongside closure-sweep.
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-VC="${NEXUS6}/shared/verified_constants.jsonl"
-CALC_DIR="${NEXUS6}/shared/calc"
+NEXUS="${HOME}/Dev/nexus"
+VC="${NEXUS}/shared/verified_constants.jsonl"
+CALC_DIR="${NEXUS}/shared/calc"
 STUBS_DIR="${CALC_DIR}/auto_stubs"
-STATE="${NEXUS6}/shared/.calc_stubs_state.json"
+STATE="${NEXUS}/shared/.calc_stubs_state.json"
 
 [ -f "$VC" ] || exit 0
 mkdir -p "$STUBS_DIR"
@@ -17,9 +17,9 @@ import json, os, hashlib
 from datetime import datetime
 
 HOME = os.path.expanduser('~')
-VC = f'{HOME}/Dev/nexus6/shared/verified_constants.jsonl'
-STUBS = f'{HOME}/Dev/nexus6/shared/calc/auto_stubs'
-STATE_PATH = f'{HOME}/Dev/nexus6/shared/.calc_stubs_state.json'
+VC = f'{HOME}/Dev/nexus/shared/verified_constants.jsonl'
+STUBS = f'{HOME}/Dev/nexus/shared/calc/auto_stubs'
+STATE_PATH = f'{HOME}/Dev/nexus/shared/.calc_stubs_state.json'
 
 # Load state: which closures already have stubs
 state = {'generated_ids': []}
@@ -57,7 +57,7 @@ for cid, val, expr, name in candidates[:MAX_PER_RUN]:
         continue
     body = f'''#!/usr/bin/env python3
 """
-AUTO-GENERATED stub from nexus6 closure-sweep.
+AUTO-GENERATED stub from nexus closure-sweep.
 
 Closure: {val} = {expr}
 Full: {name[:120]}

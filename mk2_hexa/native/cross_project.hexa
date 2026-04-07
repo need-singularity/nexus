@@ -1,8 +1,8 @@
 // cross_project.hexa -- 타 프로젝트 흡수 + 전파 엔진
 // 사용: hexa cross_project.hexa absorb|propagate|resonance|status
 //
-// 흡수: 타 프로젝트 데이터 -> nexus6 seed
-// 전파: nexus6 발견 -> 타 프로젝트에 주입 (anima 교차수분 포함)
+// 흡수: 타 프로젝트 데이터 -> nexus seed
+// 전파: nexus 발견 -> 타 프로젝트에 주입 (anima 교차수분 포함)
 // 공명: 교차 프로젝트 동일 상수 탐지
 
 fn abs_f(x: f64) -> f64 { if x < 0.0 { return 0.0 - x } return x }
@@ -128,7 +128,7 @@ fn absorb_consciousness(dev: string) -> string {
 fn absorb_sedi(dev: string) -> string {
     let path = dev + "/sedi/.shared/sedi-grades.json"
     if !file_exists(path) {
-        // fallback: nexus6/shared
+        // fallback: nexus/shared
         let path2 = repo_root() + "/shared/sedi-grades.json"
         if !file_exists(path2) { return "" }
         let content = read_file(path2)
@@ -227,7 +227,7 @@ fn absorb_anima(dev: string) -> string {
     return result
 }
 
-// ─── 전파 (nexus6 -> 타 프로젝트) ───
+// ─── 전파 (nexus -> 타 프로젝트) ───
 
 fn propagate_to_bridge(root: string) {
     // bridge_state.json에 교차 프로젝트 발견 기록
@@ -236,7 +236,7 @@ fn propagate_to_bridge(root: string) {
     println("  propagate: bridge_state.json 갱신 예정")
 }
 
-// ─── anima 교차수분: nexus6 발견 -> anima 프로젝트 주입 ───
+// ─── anima 교차수분: nexus 발견 -> anima 프로젝트 주입 ───
 
 fn line_matches_anima(line: string) -> bool {
     // consciousness, psi, phi, awareness, meta, omega 키워드 매칭
@@ -258,7 +258,7 @@ fn line_matches_anima(line: string) -> bool {
 }
 
 fn propagate_to_anima(root: string, dev: string) -> i64 {
-    // discovery_log.jsonl에서 anima 관련 발견 추출 -> anima/.growth/absorbed/nexus6_seeds.json
+    // discovery_log.jsonl에서 anima 관련 발견 추출 -> anima/.growth/absorbed/nexus_seeds.json
     let log_path = root + "/shared/discovery_log.jsonl"
     if !file_exists(log_path) {
         println("  [anima] discovery_log.jsonl not found -- skip")
@@ -267,8 +267,8 @@ fn propagate_to_anima(root: string, dev: string) -> i64 {
     let anima_dir = dev + "/anima/.growth/absorbed"
     exec("mkdir -p \"" + anima_dir + "\"")
 
-    // 기존 nexus6_seeds.json 로드 — 이미 전달된 상수명 집합
-    let seeds_path = anima_dir + "/nexus6_seeds.json"
+    // 기존 nexus_seeds.json 로드 — 이미 전달된 상수명 집합
+    let seeds_path = anima_dir + "/nexus_seeds.json"
     let mut existing_keys = ""
     if file_exists(seeds_path) {
         try {
@@ -307,7 +307,7 @@ fn propagate_to_anima(root: string, dev: string) -> i64 {
                     let v_float = safe_float(cval)
                     let n6s = n6_prox(v_float) * 100.0
                     let ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
-                    let entry = "  {\"constant\":\"" + cname + "\",\"value\":" + cval + ",\"grade\":\"" + grade + "\",\"n6_score\":" + to_string(n6s) + ",\"source\":\"" + source + "\",\"origin\":\"nexus6-cross-pollination\"" + ",\"domain\":\"consciousness-physics\",\"timestamp\":\"" + ts + "\"}"
+                    let entry = "  {\"constant\":\"" + cname + "\",\"value\":" + cval + ",\"grade\":\"" + grade + "\",\"n6_score\":" + to_string(n6s) + ",\"source\":\"" + source + "\",\"origin\":\"nexus-cross-pollination\"" + ",\"domain\":\"consciousness-physics\",\"timestamp\":\"" + ts + "\"}"
                     entries = entries.push(entry)
                     existing_keys = existing_keys + "|" + cname
                 }
@@ -317,7 +317,7 @@ fn propagate_to_anima(root: string, dev: string) -> i64 {
         i = i + 1
     }
 
-    // 새 항목이 있으면 nexus6_seeds.json 갱신 (append 방식)
+    // 새 항목이 있으면 nexus_seeds.json 갱신 (append 방식)
     let mut written = 0
     if entries.len() > 0 {
         // 기존 파일의 엔트리를 유지하면서 새 항목 추가
@@ -371,10 +371,10 @@ fn propagate_to_anima(root: string, dev: string) -> i64 {
     return written
 }
 
-// ─── anima -> nexus6 seed 피드백 ───
+// ─── anima -> nexus seed 피드백 ───
 
 fn feedback_anima_to_seeds(root: string, dev: string) -> i64 {
-    // anima의 의식 법칙 상수를 nexus6 seed_engine이 읽을 수 있는 형태로 피드백
+    // anima의 의식 법칙 상수를 nexus seed_engine이 읽을 수 있는 형태로 피드백
     // -> shared/anima_seeds.json
     let mut seeds = []
     let mut count = 0
@@ -470,9 +470,9 @@ fn feedback_anima_to_seeds(root: string, dev: string) -> i64 {
         }
         json = json + "]"
         write_file(out_path, json)
-        println("  [feedback] anima -> nexus6: " + to_string(seeds.len()) + " seeds -> " + out_path)
+        println("  [feedback] anima -> nexus: " + to_string(seeds.len()) + " seeds -> " + out_path)
     } else {
-        println("  [feedback] anima -> nexus6: no seeds found")
+        println("  [feedback] anima -> nexus: no seeds found")
     }
     return seeds.len()
 }
@@ -579,7 +579,7 @@ if mode == "status" || mode == "absorb" || mode == "resonance" {
 }
 
 if mode == "propagate" || mode == "absorb" {
-    println("--- Propagate: nexus6 -> 타 프로젝트 ---")
+    println("--- Propagate: nexus -> 타 프로젝트 ---")
     propagate_to_bridge(root)
 
     // anima 교차수분: discovery_log -> anima/.growth/absorbed/
@@ -588,7 +588,7 @@ if mode == "propagate" || mode == "absorb" {
         println("  [anima] " + to_string(anima_wrote) + " new discoveries injected")
     }
 
-    // anima -> nexus6 seed 피드백: anima 법칙 -> shared/anima_seeds.json
+    // anima -> nexus seed 피드백: anima 법칙 -> shared/anima_seeds.json
     let fb_count = feedback_anima_to_seeds(root, dev)
     if fb_count > 0 {
         println("  [feedback] " + to_string(fb_count) + " anima seeds registered for seed_engine")
@@ -601,12 +601,12 @@ if mode == "anima" {
     println("--- Anima Cross-Pollination (bidirectional) ---")
     println("")
 
-    // 1) nexus6 -> anima
-    println("[1] nexus6 -> anima (discovery injection)")
+    // 1) nexus -> anima
+    println("[1] nexus -> anima (discovery injection)")
     let anima_wrote = propagate_to_anima(root, dev)
 
-    // 2) anima -> nexus6
-    println("[2] anima -> nexus6 (seed feedback)")
+    // 2) anima -> nexus
+    println("[2] anima -> nexus (seed feedback)")
     let fb_count = feedback_anima_to_seeds(root, dev)
 
     // 3) 흡수 상태 보고

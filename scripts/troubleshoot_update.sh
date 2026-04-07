@@ -11,7 +11,7 @@ CLAUDE_CLI="${CLAUDE_CLI:-/Users/ghost/.local/bin/claude}"
 #   ./troubleshoot_update.sh --auto-fix       (use Claude CLI to fix known patterns)
 #   ./troubleshoot_update.sh --report         (print convergence report)
 
-TROUBLESHOOT_FILE="$HOME/.nexus6/troubleshoot.json"
+TROUBLESHOOT_FILE="$HOME/.nexus/troubleshoot.json"
 NEXUS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Ensure file exists
@@ -186,7 +186,7 @@ check_rules() {
     fi
 
     # AR-005: grow_lenses vs grow_lens
-    if grep -q "grow_lens\.sh.*--batch" "$NEXUS_ROOT/scripts/nexus6_growth_daemon.sh" 2>/dev/null; then
+    if grep -q "grow_lens\.sh.*--batch" "$NEXUS_ROOT/scripts/nexus_growth_daemon.sh" 2>/dev/null; then
         echo "  [FAIL] AR-005: Daemon calls grow_lens.sh with --batch (should be grow_lenses.sh)"
         violations=$((violations + 1))
     else
@@ -241,7 +241,7 @@ for item in uf[:3]:
 
     echo "$unresolved" | while IFS='|||' read -r dim err; do
         echo "Fixing: $dim — $err"
-        $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, fix this error that occurred during growth of '$dim' dimension: $err. Check troubleshoot.json at ~/.nexus6/troubleshoot.json for known patterns and absolute rules. After fixing, run cargo check && cargo test to verify." \
+        $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, fix this error that occurred during growth of '$dim' dimension: $err. Check troubleshoot.json at ~/.nexus/troubleshoot.json for known patterns and absolute rules. After fixing, run cargo check && cargo test to verify." \
             --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || true
     done
 }

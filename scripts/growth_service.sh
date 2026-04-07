@@ -2,10 +2,10 @@
 # NEXUS-6 Autonomous Daemon Controller
 # Usage: ./scripts/growth_service.sh [start|stop|status|logs]
 
-PLIST="$HOME/Library/LaunchAgents/com.n6.sync.nexus6.plist"
-LABEL="com.n6.sync.nexus6"
-LOG_FILE="$HOME/Library/Logs/nexus6/daemon.log"
-STATUS_FILE="$HOME/.nexus6/daemon_status.txt"
+PLIST="$HOME/Library/LaunchAgents/com.n6.sync.nexus.plist"
+LABEL="com.n6.sync.nexus"
+LOG_FILE="$HOME/Library/Logs/nexus/daemon.log"
+STATUS_FILE="$HOME/.nexus/daemon_status.txt"
 
 case "${1:-status}" in
   start)
@@ -35,9 +35,9 @@ case "${1:-status}" in
       cat "$STATUS_FILE"
     fi
     echo ""
-    if [ -f "$HOME/.nexus6/last_loop_report.txt" ]; then
+    if [ -f "$HOME/.nexus/last_loop_report.txt" ]; then
       echo "📋 마지막 루프 리포트:"
-      cat "$HOME/.nexus6/last_loop_report.txt"
+      cat "$HOME/.nexus/last_loop_report.txt"
     fi
     ;;
   logs)

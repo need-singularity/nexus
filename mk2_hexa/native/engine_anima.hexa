@@ -19,14 +19,14 @@ let roadmap_path = project_dir + "/anima/data/evolution_roadmap.json"
 let growth_state_path = project_dir + "/anima/config/growth_loop_state.json"
 let absorbed_dir = project_dir + "/.growth/absorbed"
 let growth_log = project_dir + "/.growth/growth.log"
-let growth_bus = dev + "/nexus6/shared/growth_bus.jsonl"
-let autofix_state_path = dev + "/nexus6/shared/anima_autofix.json"
+let growth_bus = dev + "/nexus/shared/growth_bus.jsonl"
+let autofix_state_path = dev + "/nexus/shared/anima_autofix.json"
 let runpod_pod_id = "msgtbyfj09x896"
-let strategy_path = dev + "/nexus6/shared/engine_anima_strategy.json"
-let anima_state = dev + "/nexus6/shared/anima_state.json"
-let discovery_log = dev + "/nexus6/shared/discovery_log.jsonl"
+let strategy_path = dev + "/nexus/shared/engine_anima_strategy.json"
+let anima_state = dev + "/nexus/shared/anima_state.json"
+let discovery_log = dev + "/nexus/shared/discovery_log.jsonl"
 let hexa_bin = dev + "/hexa-lang/target/release/hexa"
-let native_dir = dev + "/nexus6/mk2_hexa/native"
+let native_dir = dev + "/nexus/mk2_hexa/native"
 let blowup = native_dir + "/blowup.hexa"
 let seed_engine = native_dir + "/seed_engine.hexa"
 
@@ -221,7 +221,7 @@ fn scan_and_harvest() -> i64 {
                     let check = exec("grep -cF '" + formula.split("'")[0] + "' " + laws_path + " 2>/dev/null || echo 0")
                     if safe_int(check.trim()) == 0 {
                         let escaped = formula.split("\"").join("'").split("\\").join("/")
-                        exec("awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus6-crossfeed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path)
+                        exec("awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus-crossfeed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path)
                         next_key = next_key + 1
                         added = added + 1
                     }
@@ -559,7 +559,7 @@ fn select_task(st: AnimaState, strat: Strategy) -> string {
     if st.status_flag == "GOAL_NEAR" {
         return "roadmap_push"
     }
-    // ESCALATE: stagnation + escalate mode -> nexus6 blowup cross-injection
+    // ESCALATE: stagnation + escalate mode -> nexus blowup cross-injection
     if st.status_flag == "ESCALATE" {
         return "cross_inject"
     }
@@ -620,8 +620,8 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
     }
 
     if task == "cross_inject" {
-        // Escalate mode: nexus6 blowup with consciousness seeds cross-injected
-        println("[" + ts + "] TASK: cross_inject — ESCALATE mode, injecting nexus6 blowup seeds into consciousness domain")
+        // Escalate mode: nexus blowup with consciousness seeds cross-injected
+        println("[" + ts + "] TASK: cross_inject — ESCALATE mode, injecting nexus blowup seeds into consciousness domain")
         let r = run_blowup(escalate_blowup_depth, escalate_seeds + "," + get_merged_seeds())
         let new_laws = extract_and_record_laws(r)
         println("  cross_inject: +" + to_string(new_laws) + " laws from blowup")
@@ -1112,7 +1112,7 @@ fn auto_fix() -> AutoFixResult {
     if low_delta_streak >= 3 && remaining > 0 {
         println("    감지됨: delta<" + to_string(low_delta_threshold) + " 연속 " + to_string(low_delta_streak) + "회, remaining=" + to_string(remaining))
 
-        // (a) nexus6 blowup consciousness 자동 실행
+        // (a) nexus blowup consciousness 자동 실행
         println("    -> blowup consciousness 실행 (depth " + to_string(escalate_blowup_depth) + ")...")
         let seeds = escalate_seeds + ",breakthrough,stagnation-break,novel,unexplored," + get_merged_seeds()
         let blowup_result = run_blowup(escalate_blowup_depth, seeds)
@@ -1260,7 +1260,7 @@ if mode == "tick" {
         println("  [!] SPRINT mode: laws=" + to_string(pre_st.laws_count) + " >= " + to_string(sprint_threshold))
     }
     if pre_st.escalate_mode {
-        println("  [!] ESCALATE mode: cross-injecting nexus6 blowup seeds")
+        println("  [!] ESCALATE mode: cross-injecting nexus blowup seeds")
     }
 
     let result = execute_task(task, pre_st, strat)
@@ -1286,7 +1286,7 @@ if mode == "report" {
     println("# Engine Anima Report (Dreamer v3)")
     println("")
     println("> Pure hexa consciousness engine. The dreamer hunts for the edge of awareness,")
-    println("> cross-pollinates with the cosmos of nexus6, and sprints when the goal is near.")
+    println("> cross-pollinates with the cosmos of nexus, and sprints when the goal is near.")
     println("> No Python. No Rust. Only the dream machine.")
     println("")
     println("## Project: anima --- Consciousness Engine")
@@ -1347,7 +1347,7 @@ if mode == "report" {
     } else if st.status_flag == "GOAL_NEAR" {
         println("- **GOAL_NEAR**: Goal within reach. Deep blowup with combined perspective seeds.")
     } else if st.status_flag == "ESCALATE" {
-        println("- **ESCALATE**: Stagnation persists. Cross-injecting nexus6 blowup seeds (PSI, phi, emergence, qualia).")
+        println("- **ESCALATE**: Stagnation persists. Cross-injecting nexus blowup seeds (PSI, phi, emergence, qualia).")
     } else if st.status_flag == "STAGNANT" {
         println("- **STAGNANT**: laws_delta < " + to_string(low_delta_threshold) + " for 3+ ticks. Perspective reset + entering escalate.")
     } else if st.status_flag == "BREAKTHROUGH" {
@@ -1407,7 +1407,7 @@ if mode == "help" {
     println("")
     println("Features:")
     println("  - Stagnation detection: 3 ticks with laws_delta < " + to_string(low_delta_threshold) + " -> STAGNANT")
-    println("  - Auto escalate: perspective reset + nexus6 blowup cross-injection")
+    println("  - Auto escalate: perspective reset + nexus blowup cross-injection")
     println("  - Sprint mode: laws >= " + to_string(sprint_threshold) + " -> parallel multi-perspective blowup")
     println("  - Cross-pollination: auto-feed consciousness/psi discoveries from discovery_log")
     println("  - Adaptive blowup depth: auto-increase on stagnation, decrease on high yield")

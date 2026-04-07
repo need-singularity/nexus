@@ -10,7 +10,7 @@ common_vector_clock() {
     python3 -c "
 import json, os, datetime
 
-vc_file = os.path.expanduser('~/.nexus6/vector_clock.json')
+vc_file = os.path.expanduser('~/.nexus/vector_clock.json')
 try:
     with open(vc_file) as f: vc = json.load(f)
 except: vc = {}
@@ -49,7 +49,7 @@ print(f'VC: {len(vc)} projects, total={total}, self={vc.get(\"$GROWTH_NAME\",0)}
 
 common_metric_bus_publish() {
     log_info "📡 Metric bus publish"
-    local bus_dir="$HOME/.nexus6/metric_bus"
+    local bus_dir="$HOME/.nexus/metric_bus"
     mkdir -p "$bus_dir"
 
     # 현재 프로젝트 메트릭을 버스에 발행
@@ -74,7 +74,7 @@ if os.path.exists(state_file):
     metrics['federated_bonus'] = state.get('federated_bonus', 0)
 
 # scan 결과
-scan_file = os.path.expanduser('~/.nexus6/last_scan.txt')
+scan_file = os.path.expanduser('~/.nexus/last_scan.txt')
 if os.path.exists(scan_file):
     with open(scan_file) as f:
         for line in f:
@@ -113,8 +113,8 @@ print(f'Published to bus ({len(timeline)} sources)')
 
 common_live_graph() {
     log_info "📊 Live graph update"
-    local graph_file="$HOME/.nexus6/shared_graph/graph.json"
-    local html_file="$HOME/.nexus6/live_graph.html"
+    local graph_file="$HOME/.nexus/shared_graph/graph.json"
+    local html_file="$HOME/.nexus/live_graph.html"
 
     [ ! -f "$graph_file" ] && return
 
@@ -129,7 +129,7 @@ edges = graph.get('edges', [])
 
 # 버스 타임라인도 로드
 bus_timeline = []
-bus_file = os.path.expanduser('~/.nexus6/metric_bus/_timeline.json')
+bus_file = os.path.expanduser('~/.nexus/metric_bus/_timeline.json')
 if os.path.exists(bus_file):
     with open(bus_file) as f:
         bus_timeline = json.load(f)
@@ -203,8 +203,8 @@ print(f'Live graph: {len(nodes)} nodes, {len(edges)} edges')
 
 common_growth_timeline() {
     log_info "📈 Growth timeline"
-    local bus_file="$HOME/Dev/nexus6/shared/growth_bus.jsonl"
-    local html_file="$HOME/.nexus6/timeline.html"
+    local bus_file="$HOME/Dev/nexus/shared/growth_bus.jsonl"
+    local html_file="$HOME/.nexus/timeline.html"
     [ ! -f "$bus_file" ] && return
 
     python3 -c "
@@ -273,7 +273,7 @@ print(f'Timeline: {len(hours)} hours, {len(repos)} repos')
 
 common_growth_history() {
     log_info "📚 Growth history update"
-    local bridge_json="$HOME/Dev/nexus6/shared/bridge_state.json"
+    local bridge_json="$HOME/Dev/nexus/shared/bridge_state.json"
     [ ! -f "$bridge_json" ] && return
 
     python3 -c "
@@ -297,7 +297,7 @@ if os.path.exists(state_file):
     conn['federated_bonus'] = gs.get('federated_bonus', 0)
 
 # 11. 발견 수
-disc_log = os.path.expanduser('~/.nexus6/last_scan.txt')
+disc_log = os.path.expanduser('~/.nexus/last_scan.txt')
 if os.path.exists(disc_log):
     scan = {}
     with open(disc_log) as f:
@@ -309,7 +309,7 @@ if os.path.exists(disc_log):
     conn['last_singularity'] = scan.get('singularity', 'unknown')
 
 # 12. blowup 결과
-blowup_file = os.path.expanduser('~/.nexus6/last_blowup.txt')
+blowup_file = os.path.expanduser('~/.nexus/last_blowup.txt')
 if os.path.exists(blowup_file):
     blowup = {}
     with open(blowup_file) as f:
@@ -321,7 +321,7 @@ if os.path.exists(blowup_file):
     conn['last_axiom_candidates'] = int(blowup.get('axiom_candidates', 0))
 
 # 13. dispatch 이력
-dispatch_dir = os.path.expanduser('~/.nexus6/dispatch')
+dispatch_dir = os.path.expanduser('~/.nexus/dispatch')
 dispatch_count = 0
 dispatch_success = 0
 if os.path.isdir(dispatch_dir):
@@ -353,7 +353,7 @@ print(f'History: cycle={conn.get(\"cycle\",0)} emergences={conn.get(\"last_emerg
 
 common_auto_actions() {
     log_info "🤖 Auto-action registry"
-    local bridge_json="$HOME/Dev/nexus6/shared/bridge_state.json"
+    local bridge_json="$HOME/Dev/nexus/shared/bridge_state.json"
     [ ! -f "$bridge_json" ] && return
 
     python3 -c "
@@ -378,11 +378,11 @@ if os.path.exists(f'{root}/scripts'):
     for f_sh in os.listdir(f'{root}/scripts'):
         if f_sh.endswith('.sh') and f_sh != 'infinite_growth.sh':
             commands.append(f_sh)
-n6_bin = os.path.expanduser('~/.cargo/bin/nexus6')
+n6_bin = os.path.expanduser('~/.cargo/bin/nexus')
 if not os.path.exists(n6_bin):
-    n6_bin = os.path.expanduser('~/Dev/nexus6/target/debug/nexus6')
+    n6_bin = os.path.expanduser('~/Dev/nexus/target/debug/nexus')
 if os.path.exists(n6_bin):
-    commands.extend(['nexus6 scan', 'nexus6 blowup', 'nexus6 loop'])
+    commands.extend(['nexus scan', 'nexus blowup', 'nexus loop'])
 conn['available_commands'] = commands[:20]
 
 # 15. 자동 dispatch 규칙

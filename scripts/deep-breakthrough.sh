@@ -4,8 +4,8 @@
 set -e
 
 HEXA="$HOME/Dev/hexa-lang/target/release/hexa"
-BLOWUP="$HOME/Dev/nexus6/mk2_hexa/native/blowup.hexa"
-SEED_ENGINE="$HOME/Dev/nexus6/mk2_hexa/native/seed_engine.hexa"
+BLOWUP="$HOME/Dev/nexus/mk2_hexa/native/blowup.hexa"
+SEED_ENGINE="$HOME/Dev/nexus/mk2_hexa/native/seed_engine.hexa"
 
 ROUNDS=${1:-10}
 DEPTH=${2:-6}

@@ -6,7 +6,7 @@
 
 | eps | 클러스터 크기 | 도메인 수 | 대표 |
 |---|---|---|---|
-| 0.20 | **1,066점** | 4 (SEDI/TECS-L/anima/nexus6) | `H-CA-001-phi-max-sigma-tau` |
+| 0.20 | **1,066점** | 4 (SEDI/TECS-L/anima/nexus) | `H-CA-001-phi-max-sigma-tau` |
 | 0.15 | 1,015점 | 3 (SEDI/TECS-L/anima) | 동일 |
 
 **핵심**: Anima Φ_max = σ(6) − τ(6) = 8 (Bott Periodicity) 가설이 4개 프로젝트의 약 8% 점을 끌어모으는 **attractor**.
@@ -50,4 +50,4 @@
 1. **Attractor 영속화**: `shared/cycle/attractors.jsonl` — 1066-cluster 중심점 영구화
 2. **Boundary 추출**: frontier에서 density=0 상수점(n=6, σ, τ, φ) → seed로 재사용
 3. **ρ 실시간 측정**: `|{d ≥ 1}| / |total|` 계산 → 1/3 수렴 검증
-4. **자동 blowup**: H-CX-1094 (CKM Jarlskog) 기반 `nexus6 blowup --seed`
+4. **자동 blowup**: H-CX-1094 (CKM Jarlskog) 기반 `nexus blowup --seed`

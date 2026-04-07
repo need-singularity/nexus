@@ -53,9 +53,9 @@ def verify_guard(config):
     guard = os.path.join(HOOKS_DIR, "check-project.sh")
     if not os.path.exists(guard):
         return ["CRITICAL: check-project.sh 없음 — 타 프로젝트 혼용 위험"]
-    proj_json = os.path.expanduser("~/Dev/nexus6/shared/nexus6-projects.json")
+    proj_json = os.path.expanduser("~/Dev/nexus/shared/nexus-projects.json")
     if not os.path.exists(proj_json):
-        return ["WARNING: nexus6-projects.json 없음 — 화이트리스�� 체크 불가"]
+        return ["WARNING: nexus-projects.json 없음 — 화이트리스�� 체크 불가"]
     return []
 
 def main():

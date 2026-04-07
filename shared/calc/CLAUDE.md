@@ -24,7 +24,7 @@
 
 ```
   위치: mk2_hexa/native/
-  실행: nexus6 mk2 run <module>
+  실행: nexus mk2 run <module>
   모듈: constants.hexa, pure_math.hexa, classify.hexa, grading.hexa, cycle.hexa
 ```
 

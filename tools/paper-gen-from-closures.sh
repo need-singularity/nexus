@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Generate paper stubs from high-value nexus6 closures.
-# Writes to /Users/ghost/Dev/papers/nexus6/N6-auto-*.md
+# Generate paper stubs from high-value nexus closures.
+# Writes to /Users/ghost/Dev/papers/nexus/N6-auto-*.md
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-PAPERS_DIR="${HOME}/Dev/papers/nexus6"
-STATE="${NEXUS6}/shared/.paper_gen_state.json"
+NEXUS="${HOME}/Dev/nexus"
+PAPERS_DIR="${HOME}/Dev/papers/nexus"
+STATE="${NEXUS}/shared/.paper_gen_state.json"
 
 mkdir -p "$PAPERS_DIR"
 
@@ -15,9 +15,9 @@ from datetime import datetime
 from collections import Counter
 
 HOME = os.path.expanduser('~')
-VC = f'{HOME}/Dev/nexus6/shared/verified_constants.jsonl'
-PAPERS = f'{HOME}/Dev/papers/nexus6'
-STATE_PATH = f'{HOME}/Dev/nexus6/shared/.paper_gen_state.json'
+VC = f'{HOME}/Dev/nexus/shared/verified_constants.jsonl'
+PAPERS = f'{HOME}/Dev/papers/nexus'
+STATE_PATH = f'{HOME}/Dev/nexus/shared/.paper_gen_state.json'
 
 state = {'paper_ids': []}
 if os.path.exists(STATE_PATH):
@@ -58,7 +58,7 @@ for val, records in top_values:
     body = f"""---
 title: Convergence {val} — Multi-Expression n=6 Closure
 date: {ts}
-generator: nexus6 paper-gen-from-closures
+generator: nexus paper-gen-from-closures
 grade: draft
 alien_index: 10
 value: {val}
@@ -119,9 +119,9 @@ PYEOF
 # Auto-commit+push papers repo
 cd "$PAPERS_DIR/.." || exit 0
 if [ -d .git ]; then
-    git add nexus6/ 2>/dev/null || true
+    git add nexus/ 2>/dev/null || true
     if ! git diff --cached --quiet; then
-        git -c commit.gpgsign=false commit -m "auto: nexus6 closure paper stubs $(date -u +%FT%TZ)" 2>&1 | tail -1
+        git -c commit.gpgsign=false commit -m "auto: nexus closure paper stubs $(date -u +%FT%TZ)" 2>&1 | tail -1
         git push 2>&1 | tail -1 || echo "push failed"
     fi
 fi

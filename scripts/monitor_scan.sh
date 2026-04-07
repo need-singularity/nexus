@@ -4,17 +4,17 @@
 # Scans checkpoint weights via SSH, records Phi/stability trends
 #
 # Default interval: 3600 seconds (1 hour)
-# Results appended to: ~/.nexus6/monitoring.jsonl
+# Results appended to: ~/.nexus/monitoring.jsonl
 
 set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────
 INTERVAL=3600
 TARGET=""
-LOG_DIR="$HOME/.nexus6"
+LOG_DIR="$HOME/.nexus"
 LOG_FILE="$LOG_DIR/monitoring.jsonl"
 PHI_THRESHOLD="0.1"   # 1/(sigma-phi) = 1/10
-NEXUS6_BIN="${NEXUS6_BIN:-nexus6}"
+NEXUS_BIN="${NEXUS_BIN:-nexus}"
 
 # ── Parse arguments ───────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --target HOST:PORT   SSH target for checkpoint extraction"
             echo "  --threshold PHI_MIN  Minimum Phi score for alert (default: 0.1)"
             echo ""
-            echo "Output: ~/.nexus6/monitoring.jsonl"
+            echo "Output: ~/.nexus/monitoring.jsonl"
             exit 0
             ;;
         *)
@@ -73,7 +73,7 @@ extract_checkpoint_values() {
             2>/dev/null || echo "")
     else
         # Local mode: check for any checkpoint files
-        local ckpt_dir="/tmp/nexus6_checkpoints"
+        local ckpt_dir="/tmp/nexus_checkpoints"
         if [[ -d "$ckpt_dir" ]]; then
             local latest
             latest=$(find "$ckpt_dir" -name "*.json" -type f -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2)
@@ -91,7 +91,7 @@ extract_checkpoint_values() {
     echo "$values"
 }
 
-# ── Helper: run nexus6 n6_check on values ─────────────────
+# ── Helper: run nexus n6_check on values ─────────────────
 run_n6_check() {
     local values="$1"
     local results=""
@@ -101,7 +101,7 @@ run_n6_check() {
     for val in $values; do
         total=$((total + 1))
         local output
-        output=$("$NEXUS6_BIN" verify "$val" 2>/dev/null || echo "NONE")
+        output=$("$NEXUS_BIN" verify "$val" 2>/dev/null || echo "NONE")
         if echo "$output" | grep -q "EXACT"; then
             n6_count=$((n6_count + 1))
         fi

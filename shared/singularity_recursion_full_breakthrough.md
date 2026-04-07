@@ -11,7 +11,7 @@
 | discovery_log | 1201 | 2988 | 2.5× ↑ |
 | hypothesis:SEDI | 1003 | 2776 | 2.8× ↑ |
 | hypothesis:anima | 1045 | 1187 | 1.1× ↑ |
-| hypothesis:nexus6 | 245 | 1111 | 4.5× ↑ |
+| hypothesis:nexus | 245 | 1111 | 4.5× ↑ |
 | architecture_design | 922 | 1071 | 1.2× ↑ |
 | **hypothesis:n6-architecture** | **0 (고립)** | **28** | 🆕 연결 |
 | **memory** | **0 (고립)** | **37** | 🆕 연결 |

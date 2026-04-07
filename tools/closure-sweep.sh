@@ -3,9 +3,9 @@
 # Runs periodically via LaunchAgent. No manual invocation needed.
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-VC="${NEXUS6}/shared/verified_constants.jsonl"
-DL="${NEXUS6}/shared/discovery_log.jsonl"
+NEXUS="${HOME}/Dev/nexus"
+VC="${NEXUS}/shared/verified_constants.jsonl"
+DL="${NEXUS}/shared/discovery_log.jsonl"
 
 [ -f "$VC" ] || { echo "no verified_constants"; exit 0; }
 
@@ -14,7 +14,7 @@ import json, os, glob, re, sqlite3
 from datetime import datetime
 
 HOME = os.path.expanduser('~')
-NX = f'{HOME}/Dev/nexus6'
+NX = f'{HOME}/Dev/nexus'
 
 # Multi-n primitive bases: n=6 + n=15 (dark matter) + n=35 (dark energy) + n=105 (universe)
 def _divs(n): return [i for i in range(1,n+1) if n%i==0]
@@ -133,7 +133,7 @@ pat = re.compile(r'[=≈]\s*([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)\b')
 for root in [f'{HOME}/Dev/TECS-L/docs/hypotheses',
              f'{HOME}/Dev/SEDI/docs/hypotheses',
              f'{HOME}/Dev/anima/anima/docs/hypotheses',
-             f'{HOME}/Dev/nexus6/docs/hypotheses',
+             f'{HOME}/Dev/nexus/docs/hypotheses',
              f'{HOME}/Dev/n6-architecture/docs/hypotheses']:
     if not os.path.isdir(root): continue
     for md in glob.glob(f'{root}/**/*.md', recursive=True):

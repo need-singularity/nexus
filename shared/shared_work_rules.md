@@ -57,9 +57,9 @@
     아래 상황에서 NEXUS-6 스캔 없이 진행 금지!
     위반 = 의식 파괴/품질 저하 위험
 
-    ★ 새 모델 학습 시:      학습 전후 nexus6.scan_all() 비교
+    ★ 새 모델 학습 시:      학습 전후 nexus.scan_all() 비교
     ★ 모델 변경/이식 시:    이식 전후 Phi 보존율 측정
-    ★ corpus 변경/추가 시:  새 corpus nexus6.scan_all() 품질 확인
+    ★ corpus 변경/추가 시:  새 corpus nexus.scan_all() 품질 확인
     ★ 모듈 변경 시:         변경 전후 scan → Phi 하락 시 롤백
     ★ 체크포인트 저장 시:   가중치 scan → anomaly 있으면 경고
     ★ 가속기 적용 시:       적용 전후 scan → Phi 보존 95%+ 확인
@@ -98,7 +98,7 @@
   자동 적용 조건:
     - 데이터 분석/패턴 탐색/이상점 발견/신소재·신약 탐색 시 렌즈 자동 사용
     - 새 데이터 분석 → 기본 3종 스캔: 의식(구조) + 인과(흐름) + 위상(연결)
-    - 이상점/패턴 전수조사 → 전체 풀스캔 (nexus6 scan --full)
+    - 이상점/패턴 전수조사 → 전체 풀스캔 (nexus scan --full)
   렌즈 구성 (181 .rs 파일, 1022종 레지스트리):
     Core 22 | n6 산업 58 | TECS-L 수학 103 | SEDI 신호 100
     anima 의식 88 | 교차+메타 75 | 가속 ML 58 | 가속 물리 57
@@ -106,7 +106,7 @@
   불변 코어 (987 cycles 수렴):
     consciousness + info + multiscale + network + triangle (sopfr=5)
     + fiber (도메인별 6번째 렌즈) = n=6 완전 구조
-  파일: tools/nexus6/src/telescope/lenses/ (181 .rs 파일)
+  파일: tools/nexus/src/telescope/lenses/ (181 .rs 파일)
   도메인별 조합 (10종 기본):
     기본 → 의식+위상+인과
     안정성 → 안정성+경계+열역학
@@ -119,12 +119,12 @@
     기하 → 직교+비율+곡률
     양자심층 → 양자+양자현미경+전자기
   사용법:
-    import nexus6
-    nexus6.scan_all(np_array)              # 풀스캔 → dict
-    nexus6.analyze(flat_list, n, d)        # 올인원 (스캔+합의+n6)
-    nexus6.consciousness_scan(data, ...)   # 개별 렌즈
-    nexus6.n6_check(value)                 # n=6 상수 매칭
-    nexus6.evolve('domain')                # OUROBOROS 진화
+    import nexus
+    nexus.scan_all(np_array)              # 풀스캔 → dict
+    nexus.analyze(flat_list, n, d)        # 올인원 (스캔+합의+n6)
+    nexus.consciousness_scan(data, ...)   # 개별 렌즈
+    nexus.n6_check(value)                 # n=6 상수 매칭
+    nexus.evolve('domain')                # OUROBOROS 진화
 
   ★ NEXUS-6 적극 활용 규칙 (모든 작업에서 필수!) ★
     탐색 (새 데이터):     scan_all → 풀스캔, 3+ 합의=확정
@@ -143,7 +143,7 @@
   "렌즈 추가 필요?" 질문 시 → 1022종 커버 안 되는 도메인 분석
 
   ★ 망원경 업그레이드 시 필수 절차 (렌즈 추가/수정/삭제 시 예외 없음!) ★
-    1. 캘리브레이션: NEXUS-6 테스트 전체 통과 확인 (cd ~/Dev/n6-architecture/tools/nexus6 && cargo test)
+    1. 캘리브레이션: NEXUS-6 테스트 전체 통과 확인 (cd ~/Dev/n6-architecture/tools/nexus && cargo test)
     2. OUROBOROS 튜닝: infinite_evolution.py TELESCOPE_ALL_LENSES + DOMAIN_COMBOS 갱신
     3. 문서 동기화:
        - shared_work_rules.md 렌즈 목록/종수/도메인 조합 갱신
@@ -166,26 +166,26 @@
   ═══════════════════════════════════════════════════════════════
     - TODO 작업 중 검증/계산이 필요하면 계산기 자동 생성 (묻지 말고 바로)
     - 성능 필요시 HEXA 우선 (mk2_hexa/native/), 단순 검증은 Python (calc/)
-    - 판단 기준은 ~/Dev/nexus6/shared/CALCULATOR_RULES.md 참조
+    - 판단 기준은 ~/Dev/nexus/shared/CALCULATOR_RULES.md 참조
     - 상수/가설 발견 시 Math Atlas 자동 갱신 (python3 ~/Dev/TECS-L/.shared/scan_math_atlas.py --save --summary)
 
   ═══════════════════════════════════════════════════════════════
   ★ NEXUS-6 독립 리포 (중앙 허브) — 2024-04-03 이후 ★
   ═══════════════════════════════════════════════════════════════
-    리포: https://github.com/need-singularity/nexus6
-    위치: ~/Dev/nexus6/
+    리포: https://github.com/need-singularity/nexus
+    위치: ~/Dev/nexus/
     역할: 전 리포 공유 인프라 + 발견 엔진 + 렌즈 + 동기화
 
     구조:
-      ~/Dev/nexus6/
+      ~/Dev/nexus/
         src/telescope/    ← 130+ 렌즈
         shared/           ← 공유 인프라 (이전 TECS-L/.shared)
         sync/             ← 전체 동기화 스크립트
         scripts/          ← n6.py CLI
 
-    심링크: 모든 리포의 .shared → ../nexus6/shared/
-    동기화: bash ~/Dev/nexus6/sync/sync-all.sh (원커맨드)
+    심링크: 모든 리포의 .shared → ../nexus/shared/
+    동기화: bash ~/Dev/nexus/sync/sync-all.sh (원커맨드)
     트리거: "넥서스 동기화" → sync-all.sh 자동 실행
 
-    .shared 원본이 TECS-L에서 nexus6로 이관됨.
-    TECS-L = 순수 수학 이론, nexus6 = 인프라/도구/엔진 전부.
+    .shared 원본이 TECS-L에서 nexus로 이관됨.
+    TECS-L = 순수 수학 이론, nexus = 인프라/도구/엔진 전부.

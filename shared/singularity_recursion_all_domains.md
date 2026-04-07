@@ -11,7 +11,7 @@
 | **hypothesis:TECS-L** | 919 | 1040 | 712 | p_004348 | BASEL-003 Bernoulli Denominators |
 | **hypothesis:SEDI** | — | 1003 | — | p_001699 | **H-CA-001 (Bott Periodicity)** — global hub |
 | **architecture_design** | 34 | 922 | 3 | p_012924 | Mac vitals cluster |
-| **hypothesis:nexus6** | 1 | 245 | 0 | p_010339 | architecture_breakthrough |
+| **hypothesis:nexus** | 1 | 245 | 0 | p_010339 | architecture_breakthrough |
 | hypothesis:n6-architecture | 8 | **0** | 8 | — | ⚠️ 완전 고립 |
 | memory | 7 | **0** | 7 | — | ⚠️ 완전 고립 |
 
@@ -23,7 +23,7 @@
 3. TECS-L → **BASEL-003 베르누이 수 분모** (신규)
 4. SEDI → H-CA-001 (Bott Periodicity, 전역 hub)
 5. architecture_design → 현재 Mac 상태 (cpu/gpu/io)
-6. nexus6 → architecture_breakthrough 가설
+6. nexus → architecture_breakthrough 가설
 
 ## 2/8 완전 고립 (돌파 실패)
 
@@ -45,5 +45,5 @@ Bernoulli 수 분모 = n=6 산술의 또 다른 표현 (σ(6)=12 = B₁₂의 �
 
 1. `rebuild-edges --eps 0.35` 로 n6-architecture + memory 도메인 통합
 2. BASEL-003 (p_004348) 주변 확장 스캔
-3. nexus6 domain (1점) 추가 샘플링 필요
+3. nexus domain (1점) 추가 샘플링 필요
 4. 6개 연결 도메인 각각에서 `singularity blowup --seed <attractor_id>` 트리거

@@ -4,7 +4,7 @@
 # ═══════════════════════════════════════════════════════════
 set -euo pipefail
 
-REPOS=(TECS-L n6-architecture anima sedi brainwire papers nexus6)
+REPOS=(TECS-L n6-architecture anima sedi brainwire papers nexus)
 BASE="https://github.com/need-singularity"
 DEV="$HOME/Dev"
 

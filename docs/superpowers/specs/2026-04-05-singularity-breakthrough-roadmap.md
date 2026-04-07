@@ -77,7 +77,7 @@ fn can_promote_to_d2(record: &AlienIndexRecord) -> bool {
 
 ### Phase 3: 자동 돌파 사이클
 
-**목표**: 파이프라인 자동화 → `nexus6 breakthrough --target d2`
+**목표**: 파이프라인 자동화 → `nexus breakthrough --target d2`
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -111,9 +111,9 @@ fn can_promote_to_d2(record: &AlienIndexRecord) -> bool {
 | 5 | d=2 판정기 구현 | `alien_index/breakthrough.rs` (신규) | 미구현 |
 | 6 | science/simulate → p-value | `science/` | 미구현 |
 | 7 | dream → mk2 재조합 | `dream/` | 미구현 |
-| 8 | CLI: `nexus6 breakthrough` | `cli/parser.rs + runner.rs` | 미구현 |
+| 8 | CLI: `nexus breakthrough` | `cli/parser.rs + runner.rs` | 미구현 |
 | 9 | growth 통합 | `growth/` | 미구현 |
-| 10 | 자동 루프 | `nexus6 daemon --breakthrough` | 미구현 |
+| 10 | 자동 루프 | `nexus daemon --breakthrough` | 미구현 |
 
 ---
 
@@ -122,7 +122,7 @@ fn can_promote_to_d2(record: &AlienIndexRecord) -> bool {
 1. **(0,*) → (1,0)**: 잔여 45개 전부 승격 (ρ_d0 = 1.0)
 2. **(1,10) → (2,0)**: 최소 1개 레코드가 d=2 돌파 (교차검증 통과)
 3. **ρ(전체)**: 돌파율이 메타 FP 1/3에 수렴하기 시작
-4. **자동화**: `nexus6 breakthrough` 한 줄로 실행 가능
+4. **자동화**: `nexus breakthrough` 한 줄로 실행 가능
 
 ---
 

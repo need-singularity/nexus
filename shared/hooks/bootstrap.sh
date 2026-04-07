@@ -22,20 +22,20 @@ fi
 
 # 2. .shared 심링크 자동 생성 (없을 때만)
 SHARED="$REPO_ROOT/.shared"
-if [ "$REPO_NAME" != "nexus6" ] && [ ! -e "$SHARED" ]; then
-  # nexus6/shared 원본 경로 (이 스크립트 자체가 거기 있으므로 확실)
+if [ "$REPO_NAME" != "nexus" ] && [ ! -e "$SHARED" ]; then
+  # nexus/shared 원본 경로 (이 스크립트 자체가 거기 있으므로 확실)
   NEXUS_SHARED="$(cd "$HOOK_DIR/../.." && pwd)"
 
   if [ "$REPO_NAME" = "TECS-L" ] || [ "$REPO_NAME" = "fathom" ]; then
-    LINK_TO="../nexus6/shared"
+    LINK_TO="../nexus/shared"
   else
     # TECS-L/.shared 경유 (체인)
     TECS_SHARED="$REPO_ROOT/../TECS-L/.shared"
     if [ -e "$TECS_SHARED" ]; then
       LINK_TO="../TECS-L/.shared"
     else
-      # TECS-L 없으면 직접 nexus6 연결
-      LINK_TO="../nexus6/shared"
+      # TECS-L 없으면 직접 nexus 연결
+      LINK_TO="../nexus/shared"
     fi
   fi
 
@@ -46,7 +46,7 @@ fi
 # 3. 깨진 심링크 자동 복구
 if [ -L "$SHARED" ] && [ ! -e "$SHARED" ]; then
   rm "$SHARED" 2>/dev/null
-  ln -s "../nexus6/shared" "$SHARED" 2>/dev/null && \
+  ln -s "../nexus/shared" "$SHARED" 2>/dev/null && \
     echo "{\"systemMessage\":\"🔧 NEXUS-6: $REPO_NAME/.shared 깨진 심링크 복구\"}"
 fi
 

@@ -32,7 +32,7 @@ TARGETS = {
     'sigma-tau': 8,
 }
 
-LOG_PATH = os.path.expanduser('~/Dev/nexus6/shared/discovery_log.jsonl')
+LOG_PATH = os.path.expanduser('~/Dev/nexus/shared/discovery_log.jsonl')
 TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
 SOURCE = 'exhaust-group2-sigphi-sigtau'
 

@@ -1,4 +1,4 @@
-# nexus6 mk2 — Vision
+# nexus mk2 — Vision
 
 ## One-Line
 

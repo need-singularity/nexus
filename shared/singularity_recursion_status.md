@@ -12,16 +12,16 @@
 ## 시스템 구성
 
 ### LaunchAgent
-- `com.nexus6.cycle-tick` (60s ThrottleInterval, KeepAlive)
+- `com.nexus.cycle-tick` (60s ThrottleInterval, KeepAlive)
 - 제어: `bash tools/install-cycle-tick.sh {install|uninstall|halt|resume|status}`
-- 로그: `~/Library/Logs/nexus6/cycle-tick.{log,err}`
+- 로그: `~/Library/Logs/nexus/cycle-tick.{log,err}`
 
 ### CLI (3종)
 | 명령 | 역할 |
 |------|------|
-| `nexus6 singularity-tick [--base-dir <path>]` | 1-tick one-shot (launchd용) |
-| `nexus6 singularity-backfill --base-dir <path>` | 기존 발견 일괄 흡수 |
-| `nexus6 singularity-daemon --interval 30 --base-dir <path>` | 실시간 흡수 + airgenome Mac vitals |
+| `nexus singularity-tick [--base-dir <path>]` | 1-tick one-shot (launchd용) |
+| `nexus singularity-backfill --base-dir <path>` | 기존 발견 일괄 흡수 |
+| `nexus singularity-daemon --interval 30 --base-dir <path>` | 실시간 흡수 + airgenome Mac vitals |
 
 ### 흡수 도메인 (캡 없음, u64::MAX)
 - `discovery_log` — `shared/discovery_log.jsonl` 각 라인
@@ -53,7 +53,7 @@
 - halt 파일 없음
 
 **미완** ⏳
-- `com.nexus6.cycle-tick` LaunchAgent 현재 **unload 상태**
+- `com.nexus.cycle-tick` LaunchAgent 현재 **unload 상태**
 - **ShimRunner placeholder** — 실제 `CycleEngine` 연동은 follow-up
 - 지금까지 발견되는 점은 placeholder 불변자
 
@@ -70,8 +70,8 @@ touch shared/cycle/halt     # 정지 (tick skip)
 rm shared/cycle/halt        # 재개
 
 # 일괄 흡수 / 실시간 흡수
-nexus6 singularity-backfill --base-dir /Users/ghost/Dev/nexus6/shared/cycle
-nexus6 singularity-daemon --interval 30 --base-dir /Users/ghost/Dev/nexus6/shared/cycle
+nexus singularity-backfill --base-dir /Users/ghost/Dev/nexus/shared/cycle
+nexus singularity-daemon --interval 30 --base-dir /Users/ghost/Dev/nexus/shared/cycle
 ```
 
 ## 관련 스펙

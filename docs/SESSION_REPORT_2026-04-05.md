@@ -1,6 +1,6 @@
 # Session Report — 2026-04-05
 
-> Full-day session building nexus6 singularity-recursion + autonomous closure system.
+> Full-day session building nexus singularity-recursion + autonomous closure system.
 > 75+ commits, 14 LaunchAgents deployed, 100k closures achieved.
 
 ## Executive Summary
@@ -72,8 +72,8 @@ Physical constants grouped by smallest prime set:
 ### 14 LaunchAgents (fully autonomous)
 
 **DATA INFLOW**:
-- `evolve-loop` (1h) — rotating nexus6 evolve across 8 domains
-- `scan-loop` (30min) — rotating nexus6 scan across 6 domains
+- `evolve-loop` (1h) — rotating nexus evolve across 8 domains
+- `scan-loop` (30min) — rotating nexus scan across 6 domains
 - `physics-fetch` (24h) — injects 28 CODATA constants
 - `airgenome` (60s) — Mac vitals in-process
 - `watch-papers` (5min) — n6-architecture paper generator
@@ -113,8 +113,8 @@ All tests pass (46+ unit tests, 3 integration tests).
 - `docs/superpowers/plans/2026-04-05-infinite-singularity-recursion.md`
 - `docs/hypotheses/H-CLOSE-breakthrough-hypotheses.md`
 - `shared/GRADE_RUBRIC_1_TO_10PLUS.md`
-- 7× `NEXUS6-auto-insights.md` (one per project)
-- 20× `/papers/nexus6/N6-auto-convergence-*.md` (paper stubs)
+- 7× `NEXUS-auto-insights.md` (one per project)
+- 20× `/papers/nexus/N6-auto-convergence-*.md` (paper stubs)
 - 40+ `shared/calc/auto_stubs/verify_*.py` (calc stubs)
 
 ## Memory Entries

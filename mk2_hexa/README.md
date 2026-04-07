@@ -78,7 +78,7 @@ mk2_hexa/
   blowup → contract → emerge → singularity → absorb → (d+1) → ...
 ```
 
-## 실측 검증 (nexus6 Rust 런타임)
+## 실측 검증 (nexus Rust 런타임)
 
 | 단계 | ρ | records | 메타 FP 1/3 대비 |
 |---|---|---|---|
@@ -92,7 +92,7 @@ HEXA Mk.II 컴파일러 완성 전까지 **컴파일 불가**.
 
 ## 차후 변경 용이성
 
-- Rust nexus6 변경: `git revert` 한 줄
+- Rust nexus 변경: `git revert` 한 줄
 - HEXA 파일 수정: 즉시 (런타임 영향 0)
 - 공리 (BT-*) 변경: TECS-L 증명 필요
 - 타 프로젝트 HEXA 이식: `mk2_hexa/native/` 패턴 재사용

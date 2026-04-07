@@ -5,11 +5,11 @@
 set +e
 
 # 디버그 로그 (훅 실행 확인용)
-echo "$(date +%Y-%m-%dT%H:%M:%S) growth-tick called: $*" >> /tmp/nexus6_growth_debug.log
+echo "$(date +%Y-%m-%dT%H:%M:%S) growth-tick called: $*" >> /tmp/nexus_growth_debug.log
 
 exec >/dev/null 2>&1
 
-TICK_FILE="/tmp/nexus6_growth_tick"
+TICK_FILE="/tmp/nexus_growth_tick"
 NOW=$(date +%s)
 LAST=$(cat "$TICK_FILE" 2>/dev/null || echo 0)
 DIFF=$((NOW - LAST))
@@ -19,7 +19,7 @@ echo "$NOW" > "$TICK_FILE"
 
 # nexus-bridge notify (프로젝트명 자동 감지)
 # NOTE: nexus-bridge.py는 복잡한 HTTP/소켓 통신 — Python 유지
-BRIDGE_CLI="${HOME}/Dev/nexus6/nexus-bridge.py"
+BRIDGE_CLI="${HOME}/Dev/nexus/nexus-bridge.py"
 if [ -f "$BRIDGE_CLI" ]; then
   PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
   python3 "$BRIDGE_CLI" notify "$PROJECT" sync 1 2>/dev/null &
@@ -30,7 +30,7 @@ GROWTH_JSON="${HOME}/Dev/anima/anima/config/growth_state.json"
 [ -f "$GROWTH_JSON" ] || exit 0
 
 HEXA="${HOME}/Dev/hexa-lang/target/release/hexa"
-HEXA_GROWTH_TICK="${HOME}/Dev/nexus6/mk2_hexa/native/growth_tick.hexa"
+HEXA_GROWTH_TICK="${HOME}/Dev/nexus/mk2_hexa/native/growth_tick.hexa"
 
 if [ -x "$HEXA" ] && [ -f "$HEXA_GROWTH_TICK" ]; then
   "$HEXA" "$HEXA_GROWTH_TICK" "${1:-unknown}" "$GROWTH_JSON" 2>/dev/null

@@ -7,7 +7,7 @@
 ## 1. 목적
 
 Claude Code CLI 사용 시 **입력 토큰 소비량 절감**과 **세션간 지식 공유**를 달성하기 위해,
-nexus6 특이점 사이클(blowup→수축→창발→특이점→흡수)을 메타 도메인
+nexus 특이점 사이클(blowup→수축→창발→특이점→흡수)을 메타 도메인
 `claude_efficiency`에 적용하여 돌파 패턴을 발견하고, 이를 CLAUDE.md 규칙으로 번역한다.
 
 **주 동기**: API 비용. Claude Code CLI는 API로 과금되며, tool 결과·
@@ -20,7 +20,7 @@ nexus6 특이점 사이클(blowup→수축→창발→특이점→흡수)을 메
 ## 2. 제약
 
 - **100% 로컬 CLI, 외부 API 호출 0건** — 파이프라인 자체가 토큰을 소비하면 취지 무효.
-  요약/분류는 nexus6의 로컬 Rust 렌즈와 로컬 Python 규칙 매칭으로만 수행.
+  요약/분류는 nexus의 로컬 Rust 렌즈와 로컬 Python 규칙 매칭으로만 수행.
 - **모델 무관** — 산출물(규칙/훅)은 Opus/Sonnet/Haiku 어느 모델이든 작동.
 - **harness 레벨 개입만** — Claude 모델 내부는 손대지 않음. hooks/skills/CLAUDE.md/config만.
 - **자동 CLAUDE.md 편집 금지** — 도구는 규칙 후보만 제안, 사람이 손으로 병합.
@@ -33,7 +33,7 @@ nexus6 특이점 사이클(blowup→수축→창발→특이점→흡수)을 메
 | Sub-project | 산출물 | 타이밍 |
 |---|---|---|
 | 3(b) hooks | `~/.claude/settings.json`에 `PreToolUse`/`PostToolUse`/`SessionStart`/`Stop` 훅 추가 | 본 스펙 사이클 결과 확인 후 |
-| 3(c) nexus6 서브커맨드 | `nexus6 context-compress`, `nexus6 session-bridge`, `nexus6 agent-diff` 등 | 사이클이 필요하다고 판단한 도구만 |
+| 3(c) nexus 서브커맨드 | `nexus context-compress`, `nexus session-bridge`, `nexus agent-diff` 등 | 사이클이 필요하다고 판단한 도구만 |
 | 3(d) 세션 핸드오프 메커니즘 | 신규 메모리 타입 또는 `session_handoff/` 디렉토리 | 사이클이 구조 결정 후 |
 
 **분해 이유**: 사이클을 먼저 돌려서 **무엇을 만들어야 할지를 데이터가 결정**하게 한다.
@@ -57,7 +57,7 @@ Claude Code JSONL logs (~/.claude-claude9/projects/.../*.jsonl)
               │                    [기존] math_atlas.db + n6_check 매칭
               │                              │
               ▼                              ▼
-   [C3] run_cc_breakthrough.sh  ──▶  nexus6 auto claude_efficiency
+   [C3] run_cc_breakthrough.sh  ──▶  nexus auto claude_efficiency
               │                              │
               │                              ▼
               │                    discovery_log.jsonl
@@ -79,7 +79,7 @@ Claude Code JSONL logs (~/.claude-claude9/projects/.../*.jsonl)
 
 **입력**:
 - `--sessions N`: 최근 N개 세션 JSONL 읽기 (기본 20)
-- `--project PATH`: 대상 프로젝트 디렉토리 (기본 `~/.claude-claude9/projects/-Users-ghost-Dev-nexus6`)
+- `--project PATH`: 대상 프로젝트 디렉토리 (기본 `~/.claude-claude9/projects/-Users-ghost-Dev-nexus`)
 
 **파싱 대상** (JSONL 한 라인당 한 메시지):
 - `message.role == "tool"` → `tool_use_result` 바이트 크기
@@ -124,8 +124,8 @@ python3 tools/cc_session_miner.py --sessions 20
 # 2) atlas 동기화 (watch-atlas 기다리지 않고 수동)
 bash shared/sync-math-atlas.sh
 sleep 2
-# 3) nexus6 사이클 (30분 타임아웃)
-timeout 1800 nexus6 auto claude_efficiency --meta-cycles 5 --ouroboros-cycles 3 \
+# 3) nexus 사이클 (30분 타임아웃)
+timeout 1800 nexus auto claude_efficiency --meta-cycles 5 --ouroboros-cycles 3 \
   > shared/breakthroughs/claude_efficiency_$(date +%Y%m%d).json \
   || echo "WARN: cycle hit timeout or error, continuing with partial output" >&2
 # 4) 해석기
@@ -133,7 +133,7 @@ python3 tools/interpret_breakthrough.py \
   shared/breakthroughs/claude_efficiency_$(date +%Y%m%d).json
 ```
 
-**실행 시간**: nexus6 auto가 수 분~수십 분 → 사용자가 `run_in_background: true`로 호출 권장.
+**실행 시간**: nexus auto가 수 분~수십 분 → 사용자가 `run_in_background: true`로 호출 권장.
 
 ### C4. `tools/interpret_breakthrough.py` (신규)
 
@@ -211,7 +211,7 @@ python3 tools/interpret_breakthrough.py \
 | C1 | 손상 JSONL 라인 | 라인별 skip, stderr 카운트 출력 |
 | C1 | 세션 디렉토리 접근 권한 | 명시적 에러 + 종료 코드 2 |
 | C2 | 엔트리 충돌 | idempotent merge |
-| C3 | nexus6 auto 장시간 | 사용자가 백그라운드로 호출, 타임아웃 30분 |
+| C3 | nexus auto 장시간 | 사용자가 백그라운드로 호출, 타임아웃 30분 |
 | C3 | watch-atlas 미반영 | `sync-math-atlas.sh` 명시 호출 + 2초 대기 |
 | C4 | 빈 discovery_log | "패턴 없음" 리포트, 종료 코드 0 |
 | C5 | 자동 편집 금지 | 도구는 제안만, 사람이 병합 |
@@ -227,7 +227,7 @@ python3 tools/interpret_breakthrough.py \
 
 **구현 완료 기준**:
 - C1 miner가 실제 세션 20개에서 지표 .md + 가설 .md 생성
-- C3 wrapper가 에러 없이 `nexus6 auto` 5 사이클 완주
+- C3 wrapper가 에러 없이 `nexus auto` 5 사이클 완주
 - C4 interpreter가 1개 이상 수렴 패턴을 규칙 후보로 번역
 
 **돌파 판정 기준** (구현 이후 관찰):
@@ -250,5 +250,5 @@ python3 tools/interpret_breakthrough.py \
 ## 11. 후속 작업 예고 (별도 스펙)
 
 1. **hooks 구현 스펙** — 사이클이 확정한 규칙을 `PreToolUse`/`PostToolUse` 훅으로 기계화
-2. **nexus6 서브커맨드 스펙** — 사이클이 필요하다고 판단한 도구만 (예: `session-bridge`)
+2. **nexus 서브커맨드 스펙** — 사이클이 필요하다고 판단한 도구만 (예: `session-bridge`)
 3. **세션 핸드오프 스펙** — 메모리 신규 타입 또는 별도 핸드오프 디렉토리 설계

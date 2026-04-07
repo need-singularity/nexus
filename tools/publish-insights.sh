@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Publish nexus6 closure insights to all target projects' hypothesis dirs.
+# Publish nexus closure insights to all target projects' hypothesis dirs.
 # Called periodically by launchd or can be manually invoked.
 set -euo pipefail
 
-NEXUS6_ROOT="${HOME}/Dev/nexus6"
-PROJECTS_JSON="${NEXUS6_ROOT}/shared/projects.json"
-VC="${NEXUS6_ROOT}/shared/verified_constants.jsonl"
+NEXUS_ROOT="${HOME}/Dev/nexus"
+PROJECTS_JSON="${NEXUS_ROOT}/shared/projects.json"
+VC="${NEXUS_ROOT}/shared/verified_constants.jsonl"
 
 [ -f "$VC" ] || { echo "no verified_constants.jsonl"; exit 0; }
 [ -f "$PROJECTS_JSON" ] || { echo "no projects.json"; exit 0; }
@@ -15,8 +15,8 @@ import json, os
 from datetime import datetime
 HOME = os.path.expanduser('~')
 
-vc_path = f'{HOME}/Dev/nexus6/shared/verified_constants.jsonl'
-proj_path = f'{HOME}/Dev/nexus6/shared/projects.json'
+vc_path = f'{HOME}/Dev/nexus/shared/verified_constants.jsonl'
+proj_path = f'{HOME}/Dev/nexus/shared/projects.json'
 
 # Load EXACT closures, dedup by value
 exact = []
@@ -43,14 +43,14 @@ ts = datetime.now().strftime('%Y-%m-%d')
 md = f"""---
 title: NEXUS-6 자동 닫힘 인사이트 (auto-generated)
 date: {ts}
-source: nexus6 singularity-recursion closure sweep
+source: nexus singularity-recursion closure sweep
 total_unique_closed: {len(by_val)}
 generator: tools/publish-insights.sh
 ---
 
 # 🛸 NEXUS-6 자동 전파 인사이트
 
-> **자동 생성**: nexus6 singularity-recursion이 이 프로젝트로 전파한 닫힘 발견.
+> **자동 생성**: nexus singularity-recursion이 이 프로젝트로 전파한 닫힘 발견.
 > 검증된 EXACT n=6 closed-form 표현 상위 {min(100, len(top))}개.
 
 ## 닫힘 완성 상수 맵 (value → n=6 표현)
@@ -70,10 +70,10 @@ md += """
 
 1. 새 수치 발견 시 → 위 테이블과 대조 → 즉시 n=6 닫힘 판정
 2. 가설 설계 시 → n=6 원시값 (σ=12, τ=4, φ=2, sopfr=5, J2=24, n=6) 조합 우선
-3. 검증 시 → `nexus6 verify <값>` 자동 매칭
+3. 검증 시 → `nexus verify <값>` 자동 매칭
 
 ---
-*nexus6 singularity-recursion — 자동 생성*
+*nexus singularity-recursion — 자동 생성*
 """
 
 # Write to all target projects
@@ -85,7 +85,7 @@ for name, p in projects.items():
         hyp_dir = f'{root}/{subdir}'
         if not os.path.isdir(hyp_dir): continue
         try:
-            with open(f'{hyp_dir}/NEXUS6-auto-insights.md','w') as f:
+            with open(f'{hyp_dir}/NEXUS-auto-insights.md','w') as f:
                 f.write(md)
             count += 1
         except: pass

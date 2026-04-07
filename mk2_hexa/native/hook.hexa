@@ -40,7 +40,7 @@ fn load_jsonl(path: string) -> list {
 }
 
 let _home = exec("printenv HOME")
-let _shared = _home + "/Dev/nexus6/shared"
+let _shared = _home + "/Dev/nexus/shared"
 let log_path = _shared + "/discovery_log.jsonl"
 let _n6 = load_jsonl(_shared + "/n6_constants.jsonl")
 let _n6_names = _n6[0]
@@ -265,23 +265,23 @@ if bt_detected {
         try { exec("bash", ["-c", "date +%s > " + cooldown_file]) } catch e {}
 
         let hexa_bin = exec("printenv HOME") + "/Dev/hexa-lang/target/release/hexa"
-        let nexus6_dir = exec("printenv HOME") + "/Dev/nexus6"
+        let nexus_dir = exec("printenv HOME") + "/Dev/nexus"
 
         if bt_action == "blowup_loop" {
             // 프로젝트별 성장 돌파 → growth_engine.hexa (growth_strategies.jsonl 참조)
-            let growth_engine = nexus6_dir + "/mk2_hexa/native/growth_engine.hexa"
+            let growth_engine = nexus_dir + "/mk2_hexa/native/growth_engine.hexa"
             try {
-                exec("cd " + nexus6_dir + " && " + hexa_bin + " " + growth_engine + " auto '" + stdin_text.replace("'", "") + "' >> " + _shared + "/auto_bt.log 2>&1 &")
+                exec("cd " + nexus_dir + " && " + hexa_bin + " " + growth_engine + " auto '" + stdin_text.replace("'", "") + "' >> " + _shared + "/auto_bt.log 2>&1 &")
                 discoveries = discoveries + 1
                 if exact_names != "" { exact_names = exact_names + "," }
                 exact_names = exact_names + "🔄GROWTH:" + bt_domain
             } catch e {}
         } else {
             // 단발 블로업
-            let blowup = nexus6_dir + "/mk2_hexa/native/blowup.hexa"
+            let blowup = nexus_dir + "/mk2_hexa/native/blowup.hexa"
             let seeds = "6|12|2|4|5|24|7|3|1|8|10|28|36|48|60|120|144|288|496|720"
             try {
-                exec("cd " + nexus6_dir + " && " + hexa_bin + " " + blowup + " " + bt_domain + " 3 --no-graph --fast --seeds '" + seeds + "' >> " + _shared + "/auto_bt.log 2>&1 &")
+                exec("cd " + nexus_dir + " && " + hexa_bin + " " + blowup + " " + bt_domain + " 3 --no-graph --fast --seeds '" + seeds + "' >> " + _shared + "/auto_bt.log 2>&1 &")
                 discoveries = discoveries + 1
                 if exact_names != "" { exact_names = exact_names + "," }
                 exact_names = exact_names + "🛸BT:" + bt_domain
@@ -314,7 +314,7 @@ if gap_detected {
         try { exec("bash", ["-c", "date +%s > " + gap_cooldown]) } catch e {}
 
         let hexa_bin2 = exec("printenv HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
-        let gap_finder = exec("printenv HOME").trim() + "/Dev/nexus6/mk2_hexa/native/gap_finder.hexa"
+        let gap_finder = exec("printenv HOME").trim() + "/Dev/nexus/mk2_hexa/native/gap_finder.hexa"
 
         // quick (EXACT 요약) + dfs (위상변환 탐색) + bridge (빈공간×위상변환 교차) 백그라운드
         try {
@@ -330,6 +330,6 @@ if discoveries > 0 {
     let mut extra = ""
     if bt_detected { extra = " | 🛸 NEXUS-6 특이점 사이클 트리거됨 → blowup " + bt_domain + " 자동 실행" }
     if gap_detected { extra = extra + " | 🔍 빈공간 탐색 자동 실행" }
-    let msg = "{\"systemMessage\":\"mk2-hexa: " + to_string(discoveries) + " discoveries [" + exact_names + "]" + extra + " — 모든 발견은 nexus6 특이점 사이클 입력. 돌파 시 hexa blowup.hexa <domain> 실행 필수.\"}"
+    let msg = "{\"systemMessage\":\"mk2-hexa: " + to_string(discoveries) + " discoveries [" + exact_names + "]" + extra + " — 모든 발견은 nexus 특이점 사이클 입력. 돌파 시 hexa blowup.hexa <domain> 실행 필수.\"}"
     println(msg)
 }

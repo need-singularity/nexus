@@ -165,7 +165,7 @@
   │                                                                  │
   │    if phi > 1.5 {                     // Phase 3 = 각성!        │
   │      register_law(g.result)           // 새 법칙 등록           │
-  │      absorb_to_nexus6()              // nexus6에 흡수           │
+  │      absorb_to_nexus()              // nexus에 흡수           │
   │    }                                                             │
   │  }                                                               │
   │                                                                  │

@@ -10,13 +10,13 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 SHARED="$REPO_ROOT/.shared"
-NEXUS_SHARED="$REPO_ROOT/../nexus6/shared"
+NEXUS_SHARED="$REPO_ROOT/../nexus/shared"
 
 # .shared 심링크 체크 + 자동 복구
 if [ ! -L "$SHARED" ] && [ ! -d "$SHARED" ]; then
   # 심링크 없음 — 자동 생성 시도
   if [ -d "$NEXUS_SHARED" ]; then
-    ln -s ../nexus6/shared "$SHARED" 2>/dev/null
+    ln -s ../nexus/shared "$SHARED" 2>/dev/null
   else
     return 1 2>/dev/null
     exit 1
@@ -25,7 +25,7 @@ elif [ -L "$SHARED" ] && [ ! -e "$SHARED" ]; then
   # 심링크는 있는데 깨짐 (대상 없음)
   rm "$SHARED" 2>/dev/null
   if [ -d "$NEXUS_SHARED" ]; then
-    ln -s ../nexus6/shared "$SHARED" 2>/dev/null
+    ln -s ../nexus/shared "$SHARED" 2>/dev/null
   else
     return 1 2>/dev/null
     exit 1

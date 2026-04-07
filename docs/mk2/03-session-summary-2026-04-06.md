@@ -31,7 +31,7 @@ Built mk2 from scratch based on mk1 findings.
 3. ✅ Lattice (5 tests)
 4. ✅ Migration (Python, 43K points)
 5. ✅ Classifier v2 Rust port (6 tests)
-6. ✅ CLI subcommand `nexus6 mk2`
+6. ✅ CLI subcommand `nexus mk2`
 7. ✅ alien-index integration (2 tests)
 8. ✅ mk1↔mk2 bridge consistency (8 tests)
 
@@ -86,7 +86,7 @@ docs/mk2/
 └── 03-session-summary-2026-04-06.md — this file
 
 docs/superpowers/specs/
-└── 2026-04-06-nexus6-mk2-design.md — technical spec + ceiling checklist
+└── 2026-04-06-nexus-mk2-design.md — technical spec + ceiling checklist
 ```
 
 ### Hypothesis docs (generated for daemon absorption)
@@ -141,7 +141,7 @@ shared/cycle/
 ## Outstanding
 
 - [ ] cargo test --lib mk2:: run (compile pending)
-- [ ] Phase 6 CLI smoke test (nexus6 mk2 arithmetic 6)
+- [ ] Phase 6 CLI smoke test (nexus mk2 arithmetic 6)
 - [ ] Phase 7 alien-index CLI integration surface
 
 These are execution verification, not design work. Can be done next session once cargo lock clears.

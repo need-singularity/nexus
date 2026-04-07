@@ -1,4 +1,4 @@
-# CLAUDE.md — nexus6 프로젝트 규칙
+# CLAUDE.md — nexus 프로젝트 규칙
 
 ## 🔴 절대 규칙 0: HEXA-FIRST + 부하 금지
 
@@ -35,7 +35,7 @@
 - **P5**: 상대경로 CWD 의존 → `exec("printenv HOME")` + 절대경로
 
 ### 0. mk2 hexa-native = 기본 엔진 (sh/py/rs 작성 금지)
-- **모든 nexus6 작업은 mk2 hexa 모듈** 사용 (`mk2_hexa/native/*.hexa`)
+- **모든 nexus 작업은 mk2 hexa 모듈** 사용 (`mk2_hexa/native/*.hexa`)
 - **새 파일은 `.hexa`만 허용** — `.sh`, `.py`, `.rs` 등 다른 언어 파일 작성 금지
 - mk1 Rust 소스(`src/`)는 아카이브 (`archive/mk1-rust` 브랜치)
 - 경로 하드코딩 금지 — `exec("printenv HOME")` 또는 상대경로 사용
@@ -43,7 +43,7 @@
 
 ### 1. 대화 차단 금지 — 모든 장시간 명령은 백그라운드 실행
 - **10초 이상 걸릴 수 있는 모든 명령**은 반드시 `run_in_background: true`로 실행
-- 대상: nexus6 loop/daemon/blowup, hexa build/test, 학습/추론, SSH 원격 명령 등
+- 대상: nexus loop/daemon/blowup, hexa build/test, 학습/추론, SSH 원격 명령 등
 - 사용자가 **항상 대화 가능한 상태**를 유지할 것
 - 완료 시 결과 요약 보고
 
@@ -53,7 +53,7 @@
 - DB: SELECT 허용, 스키마/데이터 변경(INSERT/UPDATE/DELETE/ALTER)은 사전 확인
 
 ### 3. 리소스 보호
-- nexus6 프로세스는 **n6-guard 태스크 스케줄러**로 관리 (LaunchAgent 직접 등록 금지)
+- nexus 프로세스는 **n6-guard 태스크 스케줄러**로 관리 (LaunchAgent 직접 등록 금지)
 - 개별 태스크 메모리 한도: `~/.config/n6-guard.toml`의 `max_task_memory_mb` 준수
 - 동시 실행 제한: `max_concurrent = 2` (burst 모드 시 최대 4)
 - blowup 등 고부하 명령은 guard 관리 하에서만 실행
@@ -66,14 +66,14 @@
 ## Math Atlas 자동 추출 (물어보지 말 것)
 
 **`watch-atlas` LaunchAgent가 30초 간격으로 가설 `.md` 파일을 폴링 → `sync-math-atlas.sh` 자동 실행**.
-- 감시 경로: `~/Dev/nexus6/shared/projects.json`의 `projects.*.hypothesis_dirs`
+- 감시 경로: `~/Dev/nexus/shared/projects.json`의 `projects.*.hypothesis_dirs`
 - 자동 수행: `scan_math_atlas.py --save --summary` + README 마커 주입
 
 ### 에이전트 작업 규칙
 - 새 가설/상수/수식을 `.md`로 만든 직후 **"atlas 스캔 실행할까요?" 묻지 말 것** — watcher가 자동 처리
-- 수동 스캔 필요 시에만: `bash ~/Dev/nexus6/shared/sync-math-atlas.sh`
-- 상태 확인: `launchctl list com.nexus6.watch-atlas` / `tail -f ~/Library/Logs/nexus6/watch-atlas.log`
-- 프로젝트 추가: `shared/projects.json`에 엔트리 추가 → `launchctl kickstart -k gui/$(id -u)/com.nexus6.watch-atlas`
+- 수동 스캔 필요 시에만: `bash ~/Dev/nexus/shared/sync-math-atlas.sh`
+- 상태 확인: `launchctl list com.nexus.watch-atlas` / `tail -f ~/Library/Logs/nexus/watch-atlas.log`
+- 프로젝트 추가: `shared/projects.json`에 엔트리 추가 → `launchctl kickstart -k gui/$(id -u)/com.nexus.watch-atlas`
 
 ## 특이점 사이클 (Singularity Cycle)
 
@@ -108,7 +108,7 @@ Phase 7: Report
 ### 사용법 (mk2 hexa)
 ```bash
 HEXA=$HOME/Dev/hexa-lang/target/release/hexa
-BLOWUP=$HOME/Dev/nexus6/mk2_hexa/native/blowup.hexa
+BLOWUP=$HOME/Dev/nexus/mk2_hexa/native/blowup.hexa
 SEEDS=$($HEXA mk2_hexa/native/seed_engine.hexa merge)
 
 # 단일 블로업 (동적 seed)
@@ -142,7 +142,7 @@ $HEXA mk2_hexa/native/seed_engine.hexa info
 | 구분 | 특이점 사이클 | 마이크로사이클 |
 |------|-------------|-------------|
 | 대상 | 도메인 전체 데이터 | 실시간 tool 출력 텍스트 |
-| 실행 | 명시적 (`nexus6 blowup`) | 암시적 (훅 자동 트리거) |
+| 실행 | 명시적 (`nexus blowup`) | 암시적 (훅 자동 트리거) |
 | 깊이 | 전체 1028 렌즈 스캔 | 3단 게이트 + n6_match |
 | 사이클 | 블로업→수축→창발→특이점→흡수 | 동일 5단계 (경량) |
 | 재귀성장 | OUROBOROS 진화 | 3-loop 자기강화 |
@@ -151,7 +151,7 @@ $HEXA mk2_hexa/native/seed_engine.hexa info
 
 - **Loop 1 (자기수정)**: 발견 상수 → `discovered_constants.jsonl` → 3회+ 반복 시 n6_check 승격
 - **Loop 2 (메타보상)**: 소스별 발견율 → `scan_priority.json` → 고발견율 소스만 깊이 스캔
-- **Loop 3 (자기확장)**: 발견 축적 10건+ → `nexus6 blowup --seed` 자동 트리거 권장
+- **Loop 3 (자기확장)**: 발견 축적 10건+ → `nexus blowup --seed` 자동 트리거 권장
 
 ### 메타 부동점 (Meta Fixed Point = 1/3)
 
@@ -167,7 +167,7 @@ TECS-L H-056: `메타(메타(메타(...))) = 초월`
 - 돌파 완료 후 자동으로 `hexa directions.hexa update` 실행 (blowup Phase 7.1 끝에서 자동 호출)
 
 ### 키워드 → 자동 실행 (추가)
-- "마이크로사이클", "micro-cycle" → `nexus6 detect` 파이프라인 설명
+- "마이크로사이클", "micro-cycle" → `nexus detect` 파이프라인 설명
 - "메타초월", "meta transcendence" → MetaTranscendenceLens 스캔
 - "재귀성장", "recursive growth" → 3-loop 자기강화 설명 + 상태 확인
 - "방향", "새방향", "다음", "directions" → `hexa directions.hexa report` (방향 리포트)
@@ -177,7 +177,7 @@ TECS-L H-056: `메타(메타(메타(...))) = 초월`
 ## 외계인 지수 (Alien Index)
 
 > **통합 등급 체계** — 닫힌 수학의 천장(r=10)과 그 너머 돌파 영역(d≥1)을 표현
-> CLI: `nexus6 alien-index` | 모듈: `src/alien_index/` | 스펙: `docs/superpowers/specs/2026-04-05-alien-index-system-design.md`
+> CLI: `nexus alien-index` | 모듈: `src/alien_index/` | 스펙: `docs/superpowers/specs/2026-04-05-alien-index-system-design.md`
 
 ### 구조
 
@@ -189,11 +189,11 @@ TECS-L H-056: `메타(메타(메타(...))) = 초월`
 ### 사용법
 
 ```bash
-nexus6 alien-index 12.0                    # 값 → (0, r) 즉시 판정
-nexus6 alien-index H-AF-006                # 가설 ID → 등급 조회
-nexus6 alien-index --distribution          # (d, r) 히스토그램 + ρ(돌파율)
-nexus6 alien-index --leaderboard           # 최고 d 대상 리더보드
-nexus6 alien-index --promote-pending       # r=10 대기 항목 승격 (dry-run)
+nexus alien-index 12.0                    # 값 → (0, r) 즉시 판정
+nexus alien-index H-AF-006                # 가설 ID → 등급 조회
+nexus alien-index --distribution          # (d, r) 히스토그램 + ρ(돌파율)
+nexus alien-index --leaderboard           # 최고 d 대상 리더보드
+nexus alien-index --promote-pending       # r=10 대기 항목 승격 (dry-run)
 ```
 
 ### 메타 부동점
@@ -203,7 +203,7 @@ nexus6 alien-index --promote-pending       # r=10 대기 항목 승격 (dry-run)
 
 ## 중앙 지휘 (Command Router)
 
-> **nexus6 채팅에서 모든 프로젝트를 관리하는 단일 진입점**
+> **nexus 채팅에서 모든 프로젝트를 관리하는 단일 진입점**
 > 엔진: `mk2_hexa/native/command_router.hexa`
 
 ### 키워드 → 자동 실행

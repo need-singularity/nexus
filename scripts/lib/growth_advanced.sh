@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # growth_advanced.sh — 고급 성장 함수 (growth_common.sh에서 source됨)
 # 이 파일의 함수들은 growth_common.sh의 log_info, log_warn, write_growth_bus,
-# GROWTH_NAME, PROJECT_ROOT, GROWTH_DIR, NEXUS6_BIN 등이 이미 정의되어 있다고 가정합니다.
+# GROWTH_NAME, PROJECT_ROOT, GROWTH_DIR, NEXUS_BIN 등이 이미 정의되어 있다고 가정합니다.
 
 # ── #1: 렌즈 공명 브릿지 ──
 common_resonance_bridge() {
     log_info "🔗 Resonance Bridge"
-    local mirror_file="$HOME/.nexus6/last_mirror.json"
+    local mirror_file="$HOME/.nexus/last_mirror.json"
     [ ! -f "$mirror_file" ] && return
 
     python3 -c "
@@ -39,7 +39,7 @@ print(f'Resonance bridged (harmony={mirror.get(\"harmony\",0):.1f})')
 # ── #6: 크로스 도메인 실험 ──
 common_cross_experiment() {
     log_info "🧪 Cross-domain experiment"
-    if [ ! -f "$NEXUS6_BIN" ]; then return; fi
+    if [ ! -f "$NEXUS_BIN" ]; then return; fi
 
     # 형제 프로젝트의 도메인으로 실험 실행
     local domains=""
@@ -58,7 +58,7 @@ common_cross_experiment() {
     if [ -n "$domains" ]; then
         local count=0
         for dom in $domains; do
-            NEXUS6_ROOT="$HOME/Dev/nexus6" "$NEXUS6_BIN" scan "$dom" 2>/dev/null | grep -E "exact_ratio|singularity" | head -2 | while IFS= read -r line; do
+            NEXUS_ROOT="$HOME/Dev/nexus" "$NEXUS_BIN" scan "$dom" 2>/dev/null | grep -E "exact_ratio|singularity" | head -2 | while IFS= read -r line; do
                 log_info "  [$dom] $line"
             done
             count=$((count + 1))
@@ -74,7 +74,7 @@ common_sync_priority_queue() {
     python3 -c "
 import json, os, datetime
 
-bridge_file = os.path.expanduser('~/Dev/nexus6/shared/bridge_state.json')
+bridge_file = os.path.expanduser('~/Dev/nexus/shared/bridge_state.json')
 if not os.path.exists(bridge_file):
     print('No bridge state')
     exit(0)
@@ -107,7 +107,7 @@ for name, info in conns.items():
 priorities.sort(key=lambda x: -x[1])
 
 # 우선순위 큐 저장
-queue_file = os.path.expanduser('~/.nexus6/sync_priority.json')
+queue_file = os.path.expanduser('~/.nexus/sync_priority.json')
 queue = [{'project': p[0], 'priority': round(p[1], 1), 'affinity': p[2], 'absorbed': p[3]} for p in priorities]
 with open(queue_file, 'w') as f:
     json.dump(queue, f, indent=2)
@@ -152,7 +152,7 @@ common_cross_test() {
 # ── #15: 연결 메트릭 자동 수집 ──
 common_connection_metrics() {
     log_info "🔗 Connection metrics"
-    local bridge_json="$HOME/Dev/nexus6/shared/bridge_state.json"
+    local bridge_json="$HOME/Dev/nexus/shared/bridge_state.json"
     [ ! -f "$bridge_json" ] && return
 
     python3 -c "
@@ -200,7 +200,7 @@ for proj_dir in os.listdir(os.path.expanduser('~/Dev')):
 conn['cross_imports'] = list(set(cross_imports))
 
 # 8. 공명 쌍 (mirror 결과에서)
-mirror_file = os.path.expanduser('~/.nexus6/last_mirror.json')
+mirror_file = os.path.expanduser('~/.nexus/last_mirror.json')
 if os.path.exists(mirror_file):
     try:
         with open(mirror_file) as mf:

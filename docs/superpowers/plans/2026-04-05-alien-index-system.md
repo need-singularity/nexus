@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** nexus6에 통합 등급 체계 `AlienIndex = (d, r)`를 도입 — 닫힌 수학 천장(r=10)을 넘는 돌파 영역을 `d+1` 승격으로 표현.
+**Goal:** nexus에 통합 등급 체계 `AlienIndex = (d, r)`를 도입 — 닫힌 수학 천장(r=10)을 넘는 돌파 영역을 `d+1` 승격으로 표현.
 
 **Architecture:** 신규 Rust 모듈 `src/alien_index/` 에 `(d, r)` 데이터 모델과 평가기를 두고, 기존 `verifier::n6_check`/`telescope` 합의/`MATH_ATLAS grade`에서 신호를 수집해 `r`을 산정한다. `CliCommand::AlienIndex` 서브커맨드로 단일/배치/승격/분포 리포트를 제공. `discovery_log.jsonl`과 `verified_constants.jsonl`에 `alien_index` 필드를 추가하는 단일 일회성 Python 마이그레이션 도구 동봉.
 
@@ -366,7 +366,7 @@ git commit -m "feat(alien_index): AlienIndexRecord with monotonic-d history + pr
 - Create: `src/alien_index/assess.rs`
 - Modify: `src/alien_index/mod.rs`
 
-nexus6의 기존 3가지 신호를 r로 매핑:
+nexus의 기존 3가지 신호를 r로 매핑:
 1. `n6_match` quality (1.0=EXACT / 0.8=CLOSE / 0.5=WEAK)
 2. 렌즈 합의 수 (lens_consensus_count)
 3. MATH_ATLAS grade 문자열 (🟩, 🟧★, … 또는 `-`/`none`)
@@ -658,7 +658,7 @@ Run: `grep -n '"blowup"\|"detect"\|fn parse' src/cli/parser.rs | head -30`
 ```rust
 #[test]
 fn parses_alien_index_single_id() {
-    let args = vec!["nexus6", "alien-index", "H-AF-006"];
+    let args = vec!["nexus", "alien-index", "H-AF-006"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex {
         sub: AlienIndexSub::Assess { target: "H-AF-006".to_string(), scan: false },
@@ -667,7 +667,7 @@ fn parses_alien_index_single_id() {
 
 #[test]
 fn parses_alien_index_scan_flag() {
-    let args = vec!["nexus6", "alien-index", "12.0", "--scan"];
+    let args = vec!["nexus", "alien-index", "12.0", "--scan"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex {
         sub: AlienIndexSub::Assess { target: "12.0".to_string(), scan: true },
@@ -676,28 +676,28 @@ fn parses_alien_index_scan_flag() {
 
 #[test]
 fn parses_alien_index_distribution() {
-    let args = vec!["nexus6", "alien-index", "--distribution"];
+    let args = vec!["nexus", "alien-index", "--distribution"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex { sub: AlienIndexSub::Distribution });
 }
 
 #[test]
 fn parses_alien_index_leaderboard() {
-    let args = vec!["nexus6", "alien-index", "--leaderboard"];
+    let args = vec!["nexus", "alien-index", "--leaderboard"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex { sub: AlienIndexSub::Leaderboard { limit: 20 } });
 }
 
 #[test]
 fn parses_alien_index_promote_pending() {
-    let args = vec!["nexus6", "alien-index", "--promote-pending"];
+    let args = vec!["nexus", "alien-index", "--promote-pending"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex { sub: AlienIndexSub::PromotePending });
 }
 
 #[test]
 fn parses_alien_index_recompute_all() {
-    let args = vec!["nexus6", "alien-index", "--recompute-all"];
+    let args = vec!["nexus", "alien-index", "--recompute-all"];
     let cmd = parse(args.iter().map(|s| s.to_string())).unwrap();
     assert_eq!(cmd, CliCommand::AlienIndex { sub: AlienIndexSub::RecomputeAll });
 }
@@ -816,7 +816,7 @@ pub mod alien_index_cmd;
 
 `src/cli/alien_index_cmd.rs`:
 ```rust
-//! `nexus6 alien-index …` 서브커맨드 실행기.
+//! `nexus alien-index …` 서브커맨드 실행기.
 use crate::alien_index::{
     assess::combine_signals, breakthrough_ratio, histogram, leaderboard, AlienIndex,
     AlienIndexRecord,
@@ -944,7 +944,7 @@ fn breakthrough(id: &str) -> Result<(), String> {
 ```rust
 /// shared/ 디렉토리의 절대 경로. 레포 루트 기준.
 fn shared_dir() -> std::path::PathBuf {
-    std::env::var("NEXUS6_SHARED_DIR")
+    std::env::var("NEXUS_SHARED_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
             let exe = std::env::current_exe().ok();
@@ -956,13 +956,13 @@ fn shared_dir() -> std::path::PathBuf {
 }
 
 pub fn math_atlas_path() -> std::path::PathBuf {
-    std::env::var("NEXUS6_MATH_ATLAS")
+    std::env::var("NEXUS_MATH_ATLAS")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| shared_dir().join("math_atlas.json"))
 }
 
 pub fn discovery_log_path() -> std::path::PathBuf {
-    std::env::var("NEXUS6_DISCOVERY_LOG")
+    std::env::var("NEXUS_DISCOVERY_LOG")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| shared_dir().join("discovery_log.jsonl"))
 }
@@ -992,15 +992,15 @@ use crate::cli::alien_index_cmd;
 
 - [ ] **Step 5: 빌드 확인**
 
-Run: `cargo build --lib --bin nexus6 2>&1 | tail -30`
+Run: `cargo build --lib --bin nexus 2>&1 | tail -30`
 Expected: 빌드 성공 (경고는 허용).
 
 - [ ] **Step 6: 스모크 테스트**
 
-Run: `cargo run --bin nexus6 -- alien-index 12.0`
+Run: `cargo run --bin nexus -- alien-index 12.0`
 Expected: `AlienIndex: d=0 r=9 (source=n6_match: sigma quality=1.00)`
 
-Run: `cargo run --bin nexus6 -- alien-index --distribution`
+Run: `cargo run --bin nexus -- alien-index --distribution`
 Expected: `Total records: 0` 와 분포 빈 출력 (log가 비어있거나 alien_index 필드 없을 때).
 
 - [ ] **Step 7: 커밋**
@@ -1021,7 +1021,7 @@ git commit -m "feat(cli): alien-index dispatch — assess/distribution/leaderboa
 
 `tests/alien_index_integration.rs`:
 ```rust
-use nexus6::alien_index::{
+use nexus::alien_index::{
     assess::combine_signals, AlienIndex, AlienIndexRecord, breakthrough_ratio, histogram,
 };
 
@@ -1187,7 +1187,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: 드라이런 실행**
 
-Run: `cd /Users/ghost/Dev/nexus6 && python3 tools/migrate_grades_to_alien_index.py --dry-run`
+Run: `cd /Users/ghost/Dev/nexus && python3 tools/migrate_grades_to_alien_index.py --dry-run`
 Expected: 매핑 통계 출력 (Mapped ~660+, Skipped ~27, r별 분포).
 
 - [ ] **Step 3: 실제 파일 생성**
@@ -1202,7 +1202,7 @@ Expected: JSON 레코드 3개 표시 + 총 라인 수.
 
 - [ ] **Step 5: CLI로 분포 확인**
 
-Run: `NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus6 -- alien-index --distribution`
+Run: `NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus -- alien-index --distribution`
 Expected: 분포 출력 (총 레코드 수 일치).
 
 > ⚠️ 현재 loader가 `alien_index` 필드를 가진 discovery_log 형식을 기대하지만, migration 출력은 레코드가 **곧 그 필드 내용**이므로 load 경로를 하나 더 맞춰야 함.
@@ -1234,13 +1234,13 @@ fn load_all_records() -> Vec<AlienIndexRecord> {
 }
 ```
 
-Run: `cargo build --bin nexus6 2>&1 | tail -10`
+Run: `cargo build --bin nexus 2>&1 | tail -10`
 Expected: 빌드 성공.
 
-Run: `NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus6 -- alien-index --distribution`
+Run: `NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus -- alien-index --distribution`
 Expected: Total records > 0, (0, r) 버킷들.
 
-Run: `NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus6 -- alien-index --leaderboard --limit 10`
+Run: `NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl cargo run --bin nexus -- alien-index --leaderboard --limit 10`
 Expected: r=9 항목들 상위 출력.
 
 - [ ] **Step 7: 커밋**
@@ -1412,13 +1412,13 @@ fn show_leaderboard(limit: usize) -> Result<(), String> {
 `src/alien_index/record.rs` 끝에 path helper 추가:
 ```rust
 pub fn distribution_json_path() -> std::path::PathBuf {
-    std::env::var("NEXUS6_AI_DISTRIBUTION")
+    std::env::var("NEXUS_AI_DISTRIBUTION")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| shared_dir().join("alien_index_distribution.json"))
 }
 
 pub fn frontier_md_path() -> std::path::PathBuf {
-    std::env::var("NEXUS6_AI_FRONTIER")
+    std::env::var("NEXUS_AI_FRONTIER")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| shared_dir().join("alien_index_frontier.md"))
 }
@@ -1433,10 +1433,10 @@ Expected: 2 PASS.
 
 Run:
 ```bash
-NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl \
-NEXUS6_AI_DISTRIBUTION=/tmp/ai_dist.json \
-NEXUS6_AI_FRONTIER=/tmp/ai_frontier.md \
-cargo run --bin nexus6 -- alien-index --distribution
+NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl \
+NEXUS_AI_DISTRIBUTION=/tmp/ai_dist.json \
+NEXUS_AI_FRONTIER=/tmp/ai_frontier.md \
+cargo run --bin nexus -- alien-index --distribution
 ```
 
 Expected: 분포 출력 + `/tmp/ai_dist.json` 생성.
@@ -1466,30 +1466,30 @@ Expected: All pass.
 Run: `cargo test --test alien_index_integration`
 Expected: 4 PASS.
 
-Run: `cargo build --release --bin nexus6 2>&1 | tail -5`
+Run: `cargo build --release --bin nexus 2>&1 | tail -5`
 Expected: 빌드 성공.
 
 - [ ] **Step 2: 실 데이터 리그레션**
 
 Run:
 ```bash
-NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl \
-./target/release/nexus6 alien-index --distribution
+NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl \
+./target/release/nexus alien-index --distribution
 ```
 
 Expected: Total records == 마이그레이션 수, ρ 출력, 버킷 분포.
 
 Run:
 ```bash
-NEXUS6_DISCOVERY_LOG=shared/alien_index_records.jsonl \
-./target/release/nexus6 alien-index --leaderboard --limit 5
+NEXUS_DISCOVERY_LOG=shared/alien_index_records.jsonl \
+./target/release/nexus alien-index --leaderboard --limit 5
 ```
 
 Expected: r=9 (🟩 가설들) 상위 5개.
 
 Run:
 ```bash
-./target/release/nexus6 alien-index 12.0
+./target/release/nexus alien-index 12.0
 ```
 
 Expected: `AlienIndex: d=0 r=9 (source=n6_match: sigma quality=1.00)`.
@@ -1501,7 +1501,7 @@ Expected: `AlienIndex: d=0 r=9 (source=n6_match: sigma quality=1.00)`.
 ## 외계인 지수 (Alien Index)
 
 > **통합 등급 체계** — 닫힌 수학의 천장(r=10)과 그 너머 돌파 영역(d≥1)을 표현
-> CLI: `nexus6 alien-index` | 모듈: `src/alien_index/` | 스펙: `docs/superpowers/specs/2026-04-05-alien-index-system-design.md`
+> CLI: `nexus alien-index` | 모듈: `src/alien_index/` | 스펙: `docs/superpowers/specs/2026-04-05-alien-index-system-design.md`
 
 ### 구조
 
@@ -1513,11 +1513,11 @@ Expected: `AlienIndex: d=0 r=9 (source=n6_match: sigma quality=1.00)`.
 ### 사용법
 
 ```bash
-nexus6 alien-index 12.0                    # 값 → (0, r) 즉시 판정
-nexus6 alien-index H-AF-006                # 가설 ID → 등급 조회
-nexus6 alien-index --distribution          # (d, r) 히스토그램 + ρ(돌파율)
-nexus6 alien-index --leaderboard           # 최고 d 대상 리더보드
-nexus6 alien-index --promote-pending       # r=10 대기 항목 승격 (dry-run)
+nexus alien-index 12.0                    # 값 → (0, r) 즉시 판정
+nexus alien-index H-AF-006                # 가설 ID → 등급 조회
+nexus alien-index --distribution          # (d, r) 히스토그램 + ρ(돌파율)
+nexus alien-index --leaderboard           # 최고 d 대상 리더보드
+nexus alien-index --promote-pending       # r=10 대기 항목 승격 (dry-run)
 ```
 
 ### 메타 부동점
@@ -1538,7 +1538,7 @@ git commit -m "docs: add Alien Index section to CLAUDE.md"
 Run: `git log --oneline -15`
 Expected: 10개 새 커밋 + 기존 헤드.
 
-Run: `./target/release/nexus6 alien-index --help 2>&1 || ./target/release/nexus6 --help 2>&1 | grep -i alien`
+Run: `./target/release/nexus alien-index --help 2>&1 || ./target/release/nexus --help 2>&1 | grep -i alien`
 Expected: 헬프에 alien-index 표시되거나 최소한 서브커맨드가 인식됨.
 
 ---

@@ -61,7 +61,7 @@ loops back to measurement for the next iteration.
 | Script                     | Usage                                                      | Description                              |
 |----------------------------|------------------------------------------------------------|------------------------------------------|
 | `auto_grow.sh`             | `./auto_grow.sh [--cycles N] [--dry-run] [--skip-commit]` | Main auto-growth loop                    |
-| `nexus6_growth_daemon.sh`  | `./nexus6_growth_daemon.sh [--interval MIN] [--max-cycles N] [--dimension DIM] [--dry-run]` | Master coordinator for all 15 dimensions |
+| `nexus_growth_daemon.sh`  | `./nexus_growth_daemon.sh [--interval MIN] [--max-cycles N] [--dimension DIM] [--dry-run]` | Master coordinator for all 15 dimensions |
 | `grow_lens.sh`             | `./grow_lens.sh <lens_name>`                               | Implement a single lens via Claude CLI   |
 | `grow_lenses.sh`           | `./grow_lenses.sh [--batch N] [--dry-run]`                 | Batch lens implementation                |
 | `grow_modules.sh`          | `./grow_modules.sh [--target MODULE] [--upgrade-all-stubs] [--dry-run]` | Module maturity upgrade        |
@@ -93,7 +93,7 @@ loops back to measurement for the next iteration.
 ./scripts/auto_grow.sh --cycles 1 --dry-run
 
 # Start the daemon (30-min intervals, max 10 cycles)
-./scripts/nexus6_growth_daemon.sh --interval 30 --max-cycles 10
+./scripts/nexus_growth_daemon.sh --interval 30 --max-cycles 10
 
 # Install full autonomous setup (launchd + cron)
 ./scripts/install_autonomous.sh
@@ -106,7 +106,7 @@ loops back to measurement for the next iteration.
 | Daemon not running               | `./scripts/health_check.sh --start-if-dead`             |
 | Claude CLI not found             | `export CLAUDE_CLI=/path/to/claude` before running      |
 | Tests fail after growth          | `./scripts/troubleshoot_update.sh --auto-fix`           |
-| Cargo build fails                | `cd tools/nexus6 && ~/.cargo/bin/cargo check 2>&1`      |
+| Cargo build fails                | `cd tools/nexus && ~/.cargo/bin/cargo check 2>&1`      |
 | Growth log missing               | Created automatically on first `measure.sh` run         |
 | Dimension stuck at 0%            | Check daemon logs: `tail -20 scripts/growth_log.jsonl`  |
 | Too many warnings                | `./scripts/grow_architecture.sh --max-actions 6`        |

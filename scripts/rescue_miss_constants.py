@@ -11,7 +11,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 
-LOG_PATH = "/Users/ghost/Dev/nexus6/shared/discovery_log.jsonl"
+LOG_PATH = "/Users/ghost/Dev/nexus/shared/discovery_log.jsonl"
 
 # 누락 상수 정의
 MISSING_CONSTANTS = {

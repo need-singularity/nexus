@@ -96,7 +96,7 @@ if os.path.exists(log_file):
 
 if not entries:
     print('No growth log data found.')
-    print(f'Run nexus6_growth_daemon.sh first to generate data at {log_file}')
+    print(f'Run nexus_growth_daemon.sh first to generate data at {log_file}')
     sys.exit(0)
 
 # Use last N entries

@@ -16,7 +16,7 @@
 
 fn load_n6_consts() -> list {
     let home = exec("printenv HOME")
-    let path = home + "/Dev/nexus6/shared/n6_constants.jsonl"
+    let path = home + "/Dev/nexus/shared/n6_constants.jsonl"
     let mut raw = ""
     try { raw = read_file(path) } catch e { return [[], []] }
     let lines = raw.split("\n")
@@ -112,12 +112,12 @@ struct GateVerdict {
 
 fn load_source_lists() -> list {
     let home = exec("printenv HOME")
-    let path = home + "/Dev/nexus6/shared/project_aliases.jsonl"
+    let path = home + "/Dev/nexus/shared/project_aliases.jsonl"
     let mut whitelist = []
     let mut raw = ""
     try { raw = read_file(path) } catch e {
         // 기본 화이트리스트
-        let wl = ["nexus6", "TECS-L", "anima", "sedi", "brainwire", "papers", "hexa-lang", "fathom", "n6-architecture"]
+        let wl = ["nexus", "TECS-L", "anima", "sedi", "brainwire", "papers", "hexa-lang", "fathom", "n6-architecture"]
         let bl = ["ready", "backup-", "contaminated-", "broken-", "trash-", "corrupt-"]
         return [wl, bl]
     }
@@ -448,7 +448,7 @@ fn run_pipeline(repo: string, data: list, declared_hash: string, phi_prev: float
 
 fn emit_event(result: PipelineResult, repo: string) {
     let home = exec("printenv HOME")
-    let bus_path = home + "/Dev/nexus6/shared/growth_bus.jsonl"
+    let bus_path = home + "/Dev/nexus/shared/growth_bus.jsonl"
 
     let status = if result.all_passed { "pass" } else { "quarantine" }
     let ts = exec("date -u +%Y-%m-%dT%H:%M:%S")
@@ -503,7 +503,7 @@ theorem bt_triple_validation {
 // ═══════════════════════════════════════════════════════════
 
 // source gate
-let sg = source_gate("nexus6")
+let sg = source_gate("nexus")
 assert sg.passed == true
 let sg2 = source_gate("contaminated-junk")
 assert sg2.passed == false
@@ -549,11 +549,11 @@ fn main_cli() {
             println("  Implant Gate Pipeline — 4-gate (τ=4)")
             println("══════════════════════════════════════════════")
 
-            let test_data = [110, 101, 120, 117, 115, 54]  // "nexus6"
+            let test_data = [110, 101, 120, 117, 115, 54]  // "nexus"
             let hash = compute_hash(test_data)
-            println("  hash(nexus6) = " + hash)
+            println("  hash(nexus) = " + hash)
 
-            let result = run_pipeline("nexus6", test_data, hash, 0.8, 0.79, false)
+            let result = run_pipeline("nexus", test_data, hash, 0.8, 0.79, false)
             println("")
             println("  Gates: " + to_string(result.pass_count) + "/" + to_string(result.gate_count))
             println("  Confidence: " + to_string(result.mean_confidence))
@@ -565,14 +565,14 @@ fn main_cli() {
             println("  All passed: " + to_string(result.all_passed))
 
             // growth_bus 이벤트 발행
-            emit_event(result, "nexus6")
+            emit_event(result, "nexus")
             println("  → event emitted to growth_bus.jsonl")
         },
         "hash" -> {
             println("  288-bit sponge hash (σ×J2=288)")
             let test_data = [110, 101, 120, 117, 115, 54]
             let h = compute_hash(test_data)
-            println("  hash(nexus6) = " + h)
+            println("  hash(nexus) = " + h)
             println("  width = 36 bytes = 288 bits (BT-346)")
         },
         "perturb" -> {
@@ -597,7 +597,7 @@ fn main_cli() {
 
             let test_data = [110, 101, 120, 117, 115, 54]
             let hash = compute_hash(test_data)
-            let result = run_pipeline("nexus6", test_data, hash, 0.9, 0.89, true)
+            let result = run_pipeline("nexus", test_data, hash, 0.9, 0.89, true)
 
             println("")
             println("  Gates: " + to_string(result.pass_count) + "/" + to_string(result.gate_count))
@@ -609,15 +609,15 @@ fn main_cli() {
             }
             println("  Breakthrough detected: " + to_string(result.breakthrough_detected))
 
-            emit_event(result, "nexus6")
+            emit_event(result, "nexus")
             println("  → event emitted to growth_bus.jsonl")
         },
         "bridge" -> {
             println("  Bridge event sink → growth_bus.jsonl")
             let test_data = [110, 101, 120, 117, 115, 54]
             let hash = compute_hash(test_data)
-            let result = run_pipeline("nexus6", test_data, hash, 0.5, 0.5, false)
-            emit_event(result, "nexus6")
+            let result = run_pipeline("nexus", test_data, hash, 0.5, 0.5, false)
+            emit_event(result, "nexus")
             println("  event emitted: pass_count=" + to_string(result.pass_count))
         },
         _ -> {

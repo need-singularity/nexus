@@ -20,7 +20,7 @@
 
 HEXA 프로젝트 구조 (리포별):
 ```
-  nexus6:           mk2_hexa/native/*.hexa (hexa-native 런타임)
+  nexus:           mk2_hexa/native/*.hexa (hexa-native 런타임)
   TECS-L:           mk2_hexa/native/*.hexa
   n6-architecture:  mk2_hexa/native/*.hexa
   anima:            mk2_hexa/native/*.hexa
@@ -30,9 +30,9 @@ HEXA 프로젝트 구조 (리포별):
 실행 규칙:
 ```
   # HEXA 네이티브 (모든 리포 공통)
-  nexus6 mk2 run <module>              # mk2_hexa/native/ 실행
-  nexus6 mk2 classify <value>          # 분류 엔진
-  nexus6 mk2 scan <domain>             # 도메인 스캔
+  nexus mk2 run <module>              # mk2_hexa/native/ 실행
+  nexus mk2 classify <value>          # 분류 엔진
+  nexus mk2 scan <domain>             # 도메인 스캔
 ```
 
 ### 2순위: Python — 단순 검증, 시각화, 프로토타입
@@ -89,8 +89,8 @@ HEXA 파일은 모듈명이 계산기 이름이 됩니다:
 // ====================================================
 // Detailed description here.
 //
-// Run: nexus6 mk2 run <name>
-// Usage: nexus6 mk2 run <name> [--flag1] [--flag2]
+// Run: nexus mk2 run <name>
+// Usage: nexus mk2 run <name> [--flag1] [--flag2]
 
 module <name>
 
@@ -119,10 +119,10 @@ Usage:
 
 | 리포 | 이름 | 설명 |
 |------|------|------|
-| nexus6 | mk2_hexa/native/ | 통합 HEXA 엔진 (classify, pure_math, grading, cycle) |
-| nexus6 | constants.hexa | n=6 상수 테이블 + smooth-class 엔진 |
-| nexus6 | alien_index.hexa | 외계인 지수 (d, r) 판정 |
-| nexus6 | gate.hexa | 돌파 게이트 + 검증 파이프라인 |
-| nexus6 | effects.hexa | 이펙트 시스템 (블로업/수축/창발) |
-| nexus6 | cycle.hexa | 특이점 사이클 엔진 |
-| nexus6 | forge.hexa | 렌즈 포지 + 자동 생성 |
+| nexus | mk2_hexa/native/ | 통합 HEXA 엔진 (classify, pure_math, grading, cycle) |
+| nexus | constants.hexa | n=6 상수 테이블 + smooth-class 엔진 |
+| nexus | alien_index.hexa | 외계인 지수 (d, r) 판정 |
+| nexus | gate.hexa | 돌파 게이트 + 검증 파이프라인 |
+| nexus | effects.hexa | 이펙트 시스템 (블로업/수축/창발) |
+| nexus | cycle.hexa | 특이점 사이클 엔진 |
+| nexus | forge.hexa | 렌즈 포지 + 자동 생성 |

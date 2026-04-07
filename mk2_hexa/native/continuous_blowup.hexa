@@ -5,8 +5,8 @@
 
 let home = exec("printenv HOME")
 let hexa_bin = home + "/Dev/hexa-lang/target/release/hexa"
-let blowup_path = home + "/Dev/nexus6/mk2_hexa/native/blowup.hexa"
-let seed_engine_path = home + "/Dev/nexus6/mk2_hexa/native/seed_engine.hexa"
+let blowup_path = home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
+let seed_engine_path = home + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa"
 
 let a = args()
 let max_rounds: i64 = if a.len() >= 3 { to_int(a[2]) } else { 50 }
@@ -15,7 +15,7 @@ let mut depth: i64 = if a.len() >= 4 { to_int(a[3]) } else { 3 }
 // ─── 도메인 동적 로드 (shared/bt_domains.jsonl) ───
 let mut domains = ["math", "physics", "topology", "consciousness", "chemistry", "cosmology"]
 try {
-    let dom_raw = read_file(home + "/Dev/nexus6/shared/bt_domains.jsonl")
+    let dom_raw = read_file(home + "/Dev/nexus/shared/bt_domains.jsonl")
     let dom_lines = dom_raw.split("\n")
     let mut loaded_domains = []
     let mut di: i64 = 0
@@ -35,7 +35,7 @@ try {
 // ─── seed 동적 로드 (n6_constants.jsonl → 전체 상수값) ───
 let mut all_seeds = ""
 try {
-    let const_raw = read_file(home + "/Dev/nexus6/shared/n6_constants.jsonl")
+    let const_raw = read_file(home + "/Dev/nexus/shared/n6_constants.jsonl")
     let const_lines = const_raw.split("\n")
     let mut ci: i64 = 0
     while ci < const_lines.len() {
@@ -58,14 +58,14 @@ if all_seeds.len() == 0 {
 let seed_count = all_seeds.split("|").len()
 
 // ─── discovery_log 로테이션 (100k줄 초과 시 최근 50k만 유지) ───
-let log_path = home + "/Dev/nexus6/shared/discovery_log.jsonl"
+let log_path = home + "/Dev/nexus/shared/discovery_log.jsonl"
 try {
     let lc = exec("wc -l < " + log_path).trim()
     let line_count = to_int(to_float(lc))
     if line_count > 100000 {
         let keep = line_count - 50000
         println("  🔄 discovery_log 로테이션: " + to_string(line_count) + "줄 → 50000줄 유지")
-        let archive_path = home + "/Dev/nexus6/shared/discovery_archive_" + exec("date +%Y%m%d%H%M").trim() + ".jsonl"
+        let archive_path = home + "/Dev/nexus/shared/discovery_archive_" + exec("date +%Y%m%d%H%M").trim() + ".jsonl"
         exec("head -n " + to_string(keep) + " " + log_path + " > " + archive_path)
         exec("tail -n 50000 " + log_path + " > " + log_path + ".tmp && mv " + log_path + ".tmp " + log_path)
         println("  🔄 아카이브: " + archive_path + " (" + to_string(keep) + "줄)")
@@ -112,10 +112,10 @@ while round <= max_rounds && !exhausted {
 
     let t0 = exec("date +%s").trim()
 
-    // blowup --fast 실행 (cd nexus6 필수 — blowup이 상대경로 사용)
+    // blowup --fast 실행 (cd nexus 필수 — blowup이 상대경로 사용)
     let mut out = ""
-    let nexus6_dir = home + "/Dev/nexus6"
-    let cmd = "cd " + nexus6_dir + " && " + hexa_bin + " " + blowup_path + " " + domain + " " + to_string(depth) + " --no-graph --fast --seeds '" + all_seeds + "'"
+    let nexus_dir = home + "/Dev/nexus"
+    let cmd = "cd " + nexus_dir + " && " + hexa_bin + " " + blowup_path + " " + domain + " " + to_string(depth) + " --no-graph --fast --seeds '" + all_seeds + "'"
     try {
         out = exec(cmd)
     } catch e {

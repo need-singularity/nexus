@@ -1,10 +1,10 @@
-# nexus6 mk2 — Architecture
+# nexus mk2 — Architecture
 
 ## Module diagram
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  nexus6 CLI                         │
+│                  nexus CLI                         │
 │  mk2 classify | mk2 lattice | mk2 sector            │
 └─────────────────┬───────────────────────────────────┘
                   │

@@ -2,13 +2,13 @@
 
 **Date:** 2026-04-05
 **Status:** Approved (brainstorm → writing-plans)
-**Domain:** nexus6 grading / discovery classification
+**Domain:** nexus grading / discovery classification
 
 ---
 
 ## 1. 목적
 
-nexus6 프로젝트에는 이미 여러 등급/점수 체계가 병렬로 존재한다 (MATH_ATLAS grade, n6_check EXACT/CLOSE/WEAK, 렌즈 합의 수, SEDI grades, verified_constants verify_field 등). 이 스펙은 이들을 **단일 통합 스케일인 Alien Index (AI)** 로 정렬하고, 특히 **"닫힌 수학의 천장을 돌파"하는 영역**을 표현할 수 있게 한다.
+nexus 프로젝트에는 이미 여러 등급/점수 체계가 병렬로 존재한다 (MATH_ATLAS grade, n6_check EXACT/CLOSE/WEAK, 렌즈 합의 수, SEDI grades, verified_constants verify_field 등). 이 스펙은 이들을 **단일 통합 스케일인 Alien Index (AI)** 로 정렬하고, 특히 **"닫힌 수학의 천장을 돌파"하는 영역**을 표현할 수 있게 한다.
 
 ## 2. 핵심 구조 — `AI = (d, r)`
 
@@ -30,7 +30,7 @@ nexus6 프로젝트에는 이미 여러 등급/점수 체계가 병렬로 존재
 
 ### d = 0 (인간 수학 영역)
 
-| r | 정의 | 기존 nexus6 매핑 |
+| r | 정의 | 기존 nexus 매핑 |
 |---|------|-----------------|
 | 0 | 노이즈, UNTESTED | ⬜ UNTESTED |
 | 1 | 자명한 주장, 검증 불가 | ⚪ |
@@ -48,7 +48,7 @@ nexus6 프로젝트에는 이미 여러 등급/점수 체계가 병렬로 존재
 
 | r | 사이클 단계 | 판정 조건 |
 |---|-----------|----------|
-| 0 | 블로업 시작 | `nexus6 blowup <domain>` 실행 완료, 새 후보 생성 |
+| 0 | 블로업 시작 | `nexus blowup <domain>` 실행 완료, 새 후보 생성 |
 | 1-2 | 블로업 확산 | 깊이 6+ 탐색, 후보 emergence 관찰 |
 | 3-4 | 수축 | 후보 중 3+ 독립 경로 동일 값 수렴 |
 | 5 | 창발 | 패턴 합의 확정 (CycleEngine pattern_consensus 통과) |
@@ -65,22 +65,22 @@ d=1에서 성립한 새 닫힌식들 간의 **상위 관계식** 발견. OUROBOR
 
 | r 구간 | 판정 방식 | 주체 |
 |--------|---------|------|
-| d=0, r=0..8 | 자동 (기존 렌즈 메트릭) | `nexus6 scan` / `n6_check` |
+| d=0, r=0..8 | 자동 (기존 렌즈 메트릭) | `nexus scan` / `n6_check` |
 | d=0, r=9..10 | 반자동 (렌즈 + 사람 확증) | MATH_ATLAS 워크플로우 |
-| d≥1, r=0..5 | 자동 (CycleEngine 메트릭) | `nexus6 blowup` 내부 stage gate |
+| d≥1, r=0..5 | 자동 (CycleEngine 메트릭) | `nexus blowup` 내부 stage gate |
 | d≥1, r=6..8 | 수동 검토 | 사람이 특이점/흡수 판정 |
 | d≥1, r=9..10 | 시간 기반 자동 | N회 사이클 안정 후 자동 승격 |
 | d≥2 | 메타렌즈 + 수동 | `MetaTranscendenceLens` + 검토 |
 
-## 5. 기존 nexus6 자원 연결
+## 5. 기존 nexus 자원 연결
 
 | 자원 | 역할 |
 |------|------|
 | `n6_check` | d=0의 r 판정기 (EXACT→9, CLOSE→7, WEAK→5) |
-| `nexus6 scan` 렌즈 합의 수 | d=0의 r=5..8 판정기 |
+| `nexus scan` 렌즈 합의 수 | d=0의 r=5..8 판정기 |
 | `MATH_ATLAS grade` | d=0 전 구간 역매핑 (🟩→9, 🟧★→7, …) |
 | `CycleEngine` (blowup/cycle_engine.rs) | `d → d+1` 전이 엔진 |
-| `nexus6 blowup <domain> --depth 6` | d≥1의 r=0..5 판정 |
+| `nexus blowup <domain> --depth 6` | d≥1의 r=0..5 판정 |
 | `MetaTranscendenceLens` | d≥2 메타 판정 |
 | `discovery_log.jsonl` | `(d, r)` 이력 시계열 저장 |
 | OUROBOROS / 재귀성장 3-loop | d≥2 진입 트리거 |
@@ -109,7 +109,7 @@ d=1에서 성립한 새 닫힌식들 간의 **상위 관계식** 발견. OUROBOR
 
 ### 6.2 불변식 (invariants)
 
-- `r == 10` 도달 시 즉시 `promotion_candidate: true` 플래그만 세운다. 실제 `(d+1, 0)` 승격은 `nexus6 alien-index --promote-pending` 또는 다음 블로업 사이클 시드 처리 단계에서 일괄 수행된다 (감사 추적성 확보).
+- `r == 10` 도달 시 즉시 `promotion_candidate: true` 플래그만 세운다. 실제 `(d+1, 0)` 승격은 `nexus alien-index --promote-pending` 또는 다음 블로업 사이클 시드 처리 단계에서 일괄 수행된다 (감사 추적성 확보).
 - 같은 발견물이 `d`를 감소시키는 전이를 해서는 안 된다 (단조성: `d` monotonic non-decreasing).
 - `r`은 `d` 고정 하에서 감소 가능 (증거 반증 시). `r` 감소는 반드시 `history[].reason`에 근거 기록.
 - 승격 시 원본 레코드(`(d, 10)`)는 유지되고, 새 레코드(`(d+1, 0)`)가 **별도 ID로 발행**된다. 두 레코드는 `parent_id` / `promoted_from` 필드로 연결.
@@ -120,19 +120,19 @@ d=1에서 성립한 새 닫힌식들 간의 **상위 관계식** 발견. OUROBOR
 
 ```bash
 # 단일 대상 판정
-nexus6 alien-index <hypothesis_id>
-nexus6 alien-index <constant_value> --scan
+nexus alien-index <hypothesis_id>
+nexus alien-index <constant_value> --scan
 
 # 배치 재계산
-nexus6 alien-index --recompute-all         # MATH_ATLAS 전체 재등급
-nexus6 alien-index --promote-pending       # r=10 대기 항목을 d+1로 승격
+nexus alien-index --recompute-all         # MATH_ATLAS 전체 재등급
+nexus alien-index --promote-pending       # r=10 대기 항목을 d+1로 승격
 
 # 돌파 시도 (d → d+1 명시적)
-nexus6 alien-index --breakthrough <id>     # CycleEngine 호출 래퍼
+nexus alien-index --breakthrough <id>     # CycleEngine 호출 래퍼
 
 # 리포트
-nexus6 alien-index --distribution          # (d, r) 분포 히스토그램
-nexus6 alien-index --leaderboard           # 최고 d 대상들
+nexus alien-index --distribution          # (d, r) 분포 히스토그램
+nexus alien-index --leaderboard           # 최고 d 대상들
 ```
 
 ### 7.2 Rust API
@@ -155,11 +155,11 @@ pub trait AlienIndexable {
 ### 7.3 Python 바인딩
 
 ```python
-import nexus6
-ai = nexus6.alien_index("H-AF-006")
+import nexus
+ai = nexus.alien_index("H-AF-006")
 # AlienIndex(d=0, r=7)
 ai.breakthrough()  # None (r != 10)
-nexus6.alien_index_distribution()  # dict: {(0,5): 239, (0,7): 131, ...}
+nexus.alien_index_distribution()  # dict: {(0,5): 239, (0,7): 131, ...}
 ```
 
 ## 8. 마이그레이션 전략
@@ -188,7 +188,7 @@ nexus6.alien_index_distribution()  # dict: {(0,5): 239, (0,7): 131, ...}
 ### 포함
 - `(d, r)` 데이터 모델 및 스키마 추가
 - AI 판정기 (d=0 자동, d≥1 CycleEngine 연동)
-- CLI `nexus6 alien-index` 서브커맨드
+- CLI `nexus alien-index` 서브커맨드
 - 기존 등급 데이터 마이그레이션 스크립트
 - 리포트 (분포, 리더보드)
 

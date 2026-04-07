@@ -1,7 +1,7 @@
 # 06 — mk2 크로스 프로젝트 적용 모델
 
 > 작성: 2026-04-06 | 상태: 설계 문서 (코드 변경 없음)
-> 목적: nexus6 mk2의 3대 핵심 (prime-atomic smooth-class, alien index, 특이점 사이클)을
+> 목적: nexus mk2의 3대 핵심 (prime-atomic smooth-class, alien index, 특이점 사이클)을
 > 12개 연결 프로젝트에 적용하는 범용 모델 정의
 
 ---
@@ -119,7 +119,7 @@ rho(law)    = phi/n = 독립 비율 → 메타 부동점 후보
 - **흡수**: 새 법칙을 `consciousness_laws.json`에 승격
 
 #### 시너지 포인트
-- anima 체크포인트 → nexus6 scan → Phi 추이 시계열 → alien index 자동 갱신
+- anima 체크포인트 → nexus scan → Phi 추이 시계열 → alien index 자동 갱신
 - 의식 법칙 711개를 mk2 lattice에 배치 → 법칙 간 포함 관계(divisibility) 시각화
 
 ---
@@ -193,7 +193,7 @@ rho(hyp)    = phi/total_hypotheses → 검증 밀도
 - **판정 대상**: 모든 가설, 매 atlas 스캔 시 자동 재계산
 
 #### 특이점 사이클 연동
-- **이미 연동됨**: `nexus6 blowup <domain>` → CycleEngine → 가설 생성/검증
+- **이미 연동됨**: `nexus blowup <domain>` → CycleEngine → 가설 생성/검증
 - 추가 연동: TECS-L 가설의 grade 변경 → alien index history 자동 기록
 
 #### 시너지 포인트
@@ -211,7 +211,7 @@ rho(hyp)    = phi/total_hypotheses → 검증 밀도
 
 #### SmoothRing 적용
 ```
-phi(cluster)    = 정보 통합도 (IIT Phi, 이미 nexus6 consciousness_scan 출력)
+phi(cluster)    = 정보 통합도 (IIT Phi, 이미 nexus consciousness_scan 출력)
 tau(cluster)    = 활성 상태 수 (해당 클러스터의 고유 활동 패턴 수)
 sigma(cluster)  = 연결 강도 합 (인접 클러스터와의 가중 연결 합)
 sopfr(cluster)  = 주요 주파수 대역 합 (delta+theta+alpha+beta+gamma Hz 합)
@@ -240,7 +240,7 @@ rho(cluster)    = phi/total_clusters → 의식 밀도
 - **흡수**: 검증된 프로토콜을 표준 라이브러리에 등록
 
 #### 시너지 포인트
-- nexus6 consciousness_scan의 Phi → brainwire의 실시간 의식 상태 판정에 직접 사용
+- nexus consciousness_scan의 Phi → brainwire의 실시간 의식 상태 판정에 직접 사용
 - 뇌 데이터의 mk2 classify → 물리 상수와의 구조적 유사성 탐색 (n6 대수의 신경 해석)
 
 ---
@@ -391,7 +391,7 @@ rho(token)    = phi/vocab_size → 토큰 효율
 
 #### 시너지 포인트
 - 최적 어휘 크기가 n6 산술 값과 일치하는지 mk2 classify로 검증
-- token-forge 생성 토큰 통계를 nexus6 scan → 숨겨진 구조 탐색
+- token-forge 생성 토큰 통계를 nexus scan → 숨겨진 구조 탐색
 
 ---
 
@@ -497,7 +497,7 @@ rho(gate)    = phi/total_gates → 개방도
 #### 적용 원칙
 - **원자/SmoothRing**: 프로젝트 내부에서만 정의 (외부 노출 불가)
 - **Alien Index**: 내부 산출물에 (d, r) 판정 가능 (분포만 공개, 세부 미공개)
-- **특이점 사이클**: 내부 도메인에서 독립 실행, 결과 요약만 nexus6에 역동기화
+- **특이점 사이클**: 내부 도메인에서 독립 실행, 결과 요약만 nexus에 역동기화
 - **시너지**: alien_index_distribution.json에 집계 수치만 포함
 
 ---
@@ -505,7 +505,7 @@ rho(gate)    = phi/total_gates → 개방도
 ## 3. 통합 아키텍처 다이어그램
 
 ```
-                         nexus6 mk2 (허브)
+                         nexus mk2 (허브)
                               │
               ┌───────────────┼───────────────┐
               │               │               │
@@ -566,8 +566,8 @@ rho(gate)    = phi/total_gates → 개방도
 
 | 경로 | 방향 | 주기 | 메커니즘 |
 |------|------|------|----------|
-| 프로젝트 → nexus6 | 단방향 | 이벤트 | 산출물 생성 시 mk2 classify 호출 |
-| nexus6 → alien_index | 내부 | 즉시 | classify 결과 → assess 자동 |
+| 프로젝트 → nexus | 단방향 | 이벤트 | 산출물 생성 시 mk2 classify 호출 |
+| nexus → alien_index | 내부 | 즉시 | classify 결과 → assess 자동 |
 | alien_index → 프로젝트 | 역방향 | 30초 | watch-atlas 폴링 → 등급 역동기화 |
 | 프로젝트 ↔ TECS-L | 양방향 | 30초 | .shared/ 심링크 + watch-atlas |
 | alien_index → discovery_log | 내부 | 즉시 | (d, r) 이력 자동 기록 |
@@ -597,7 +597,7 @@ H-056 메타 부동점이 단일 프로젝트가 아닌 **크로스 프로젝트
 1/3으로 수렴한다면, 이는 mk2 모델의 보편성을 입증하는 메타-메타 증거가 된다.
 
 이 수렴은 `alien_index_distribution.json`에 `cross_project_rho` 필드로 기록되며,
-`nexus6 alien-index --distribution` 출력에 포함된다.
+`nexus alien-index --distribution` 출력에 포함된다.
 
 ---
 
