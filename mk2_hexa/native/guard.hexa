@@ -1,0 +1,219 @@
+// mk2_hexa/native/guard.hexa — L0/수렴 강제 가드
+// 사용: hexa guard.hexa check <file_path>     — L0 수정 감지 + 경고
+//       hexa guard.hexa checklist             — 커밋 전 체크리스트
+//       hexa guard.hexa recurrence <category> — 반복 카운터 +1
+//       hexa guard.hexa root-cause <file>     — 근본원인 코드 수정 확인
+
+let _home = exec("printenv HOME").trim()
+let _shared = _home + "/Dev/nexus/shared"
+let _lockdown_path = _shared + "/core-lockdown.json"
+
+// ═══════════════════════════════════════════════════════════
+// ─── L0 파일 감지 ───
+// ═══════════════════════════════════════════════════════════
+
+fn is_l0_file(file_path: string) -> bool {
+    let cmd = "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); paths=[f[\"path\"] for p in d[\"projects\"].values() for f in p.get(\"L0\",[])] ; fp=sys.argv[2]; print(\"YES\" if any(fp.endswith(p) or p in fp for p in paths) else \"NO\")' " + _lockdown_path + " " + file_path
+    let mut result = ""
+    try { result = exec(cmd + " 2>/dev/null").trim() } catch e {}
+    return result == "YES"
+}
+
+fn get_l0_desc(file_path: string) -> string {
+    let cmd = "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); [print(f[\"desc\"]) for p in d[\"projects\"].values() for f in p.get(\"L0\",[]) if sys.argv[2].endswith(f[\"path\"]) or f[\"path\"] in sys.argv[2]]' " + _lockdown_path + " " + file_path
+    let mut result = ""
+    try { result = exec(cmd + " 2>/dev/null").trim() } catch e {}
+    return result
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── check: L0 수정 감지 → 승인 요청 ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_check(file_path: string) {
+    if !is_l0_file(file_path) { return }
+
+    let desc = get_l0_desc(file_path)
+    println("⛔ L0 코어 보호 파일 감지: " + file_path)
+    println("   설명: " + desc)
+    println("")
+    println("이 파일은 L0 코어 보호 파일입니다. 수정 승인하시겠습니까?")
+    println("")
+    println("승인 후 필수 절차:")
+    println("  1. 커밋 메시지에 'L0-수정: [파일명] — [이유]' 명시")
+    println("  2. 파일 상단 불변식 주석에 변경 사항 반영")
+    println("  3. 해당 프로젝트 테스트 통과 확인")
+    println("  4. convergence JSON 업데이트")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── checklist: 커밋 전 체크리스트 ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_checklist() {
+    // git diff로 변경 파일 확인
+    let mut changed = ""
+    try { changed = exec("git diff --cached --name-only 2>/dev/null").trim() } catch e {}
+    if changed == "" {
+        try { changed = exec("git diff --name-only 2>/dev/null").trim() } catch e {}
+    }
+    if changed == "" {
+        println("변경 파일 없음")
+        return
+    }
+
+    let files = changed.split("\n")
+    let mut has_l0 = false
+    let mut has_code = false
+    let mut has_doc = false
+    let mut has_convergence = false
+    let mut has_todo = false
+
+    for f in files {
+        let ft = f.trim()
+        if ft == "" { continue }
+        if is_l0_file(ft) { has_l0 = true }
+        if ft.contains(".hexa") || ft.contains(".rs") || ft.contains(".ts") || ft.contains(".py") { has_code = true }
+        if ft.contains(".md") || ft.contains("README") { has_doc = true }
+        if ft.contains("convergence") { has_convergence = true }
+        if ft.contains("todo") { has_todo = true }
+    }
+
+    println("═══ 커밋 전 체크리스트 ═══")
+    println("")
+
+    // L0 경고
+    if has_l0 {
+        println("⛔ L0 파일 변경 감지!")
+        for f in files {
+            if f.trim() != "" && is_l0_file(f.trim()) {
+                println("  🔴 " + f.trim() + " — " + get_l0_desc(f.trim()))
+            }
+        }
+        println("  → 커밋 메시지에 'L0-수정:' 접두사 필수")
+        println("")
+    }
+
+    // 체크리스트
+    let mut checks = 0
+    let mut total = 0
+
+    // 1. 코드 변경 시 테스트 통과 확인
+    if has_code {
+        total = total + 1
+        println("□ 테스트 통과 확인 (cargo test / pnpm test)")
+    }
+
+    // 2. convergence 업데이트
+    total = total + 1
+    if has_convergence {
+        checks = checks + 1
+        println("☑ convergence JSON 업데이트 됨")
+    } else {
+        println("□ convergence JSON 업데이트 필요? (골화/안정/실패 변경 시)")
+    }
+
+    // 3. 문서만 변경 시 근본원인 경고
+    if has_doc && !has_code {
+        println("⚠️ 문서만 변경 — 근본원인 코드 수정이 동반되었는가?")
+        println("  문서화만으로 완료 처리 금지. 코드 수정이 필요하면 함께 커밋.")
+    }
+
+    // 4. NEXUS-6 스캔
+    total = total + 1
+    println("□ NEXUS-6 변경 전후 스캔 완료? (R3)")
+
+    // 5. 발견/결과 기록
+    total = total + 1
+    println("□ 발견/결과 파일에 영구 기록? (R6)")
+
+    // 6. 하드코딩 없음
+    total = total + 1
+    println("□ 하드코딩 없음? shared/*.jsonl 동적 로드? (R2)")
+
+    println("")
+    println("체크: " + to_string(checks) + "/" + to_string(total) + " 자동 확인됨")
+    println("나머지 수동 확인 후 커밋하세요.")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── recurrence: 반복 카운터 +1 ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_recurrence(category: string, project: string) {
+    let conv_path = _shared + "/convergence/" + project + ".json"
+    let cmd = "python3 -c 'import json,sys\nf=sys.argv[1]; cat=sys.argv[2]\nd=json.load(open(f))\nfor section in [\"ossified\",\"stable\",\"failed\"]:\n    if cat in d.get(section,{}):\n        item=d[section][cat]\n        rc=item.get(\"recurrence\",0)+1\n        item[\"recurrence\"]=rc\n        print(f\"recurrence={rc} ({section}.{cat})\")\n        if rc>=3:\n            print(f\"⚠️ 3회 반복! 설계 개선 필수: {cat}\")\n        json.dump(d,open(f,\"w\"),indent=2,ensure_ascii=False)\n        sys.exit(0)\nprint(f\"카테고리 미발견: {cat}\")' " + conv_path + " " + category
+    try {
+        let result = exec(cmd + " 2>/dev/null")
+        println(result.trim())
+    } catch e {
+        println("recurrence 업데이트 실패: " + category)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── root-cause: 근본원인 코드 수정 확인 ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_root_cause() {
+    let mut changed = ""
+    try { changed = exec("git diff --cached --name-only 2>/dev/null").trim() } catch e {}
+    if changed == "" {
+        try { changed = exec("git diff --name-only 2>/dev/null").trim() } catch e {}
+    }
+
+    let files = changed.split("\n")
+    let mut has_code = false
+    let mut has_doc = false
+
+    for f in files {
+        let ft = f.trim()
+        if ft == "" { continue }
+        if ft.contains(".hexa") || ft.contains(".rs") || ft.contains(".ts") { has_code = true }
+        if ft.contains(".md") || ft.contains(".json") { has_doc = true }
+    }
+
+    if has_doc && !has_code {
+        println("⚠️ 경고: 문서/JSON만 변경되고 코드 수정 없음")
+        println("   근본원인 코드 수정이 필요하면 함께 커밋하세요.")
+        println("   문서화만으로 완료 처리 = 수렴 아님 ")
+    } else if has_code {
+        println("✅ 코드 수정 포함됨 — 근본원인 해결 확인")
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+let _args = args()
+let _cmd = if _args.len() >= 3 { _args[2] } else { "help" }
+
+if _cmd == "check" {
+    let file = if _args.len() >= 4 { _args[3] } else { "" }
+    if file == "" {
+        println("사용: hexa guard.hexa check <file_path>")
+    } else {
+        cmd_check(file)
+    }
+} else if _cmd == "checklist" {
+    cmd_checklist()
+} else if _cmd == "recurrence" {
+    let cat = if _args.len() >= 4 { _args[3] } else { "" }
+    let proj = if _args.len() >= 5 { _args[4] } else { "nexus" }
+    if cat == "" {
+        println("사용: hexa guard.hexa recurrence <category> [project]")
+    } else {
+        cmd_recurrence(cat, proj)
+    }
+} else if _cmd == "root-cause" {
+    cmd_root_cause()
+} else {
+    println("guard.hexa — L0/수렴 강제 가드")
+    println("")
+    println("사용법:")
+    println("  hexa guard.hexa check <file>        — L0 수정 감지 + 승인 요청")
+    println("  hexa guard.hexa checklist            — 커밋 전 체크리스트")
+    println("  hexa guard.hexa recurrence <cat> [proj] — 반복 카운터 +1")
+    println("  hexa guard.hexa root-cause           — 근본원인 코드 수정 확인")
+}
