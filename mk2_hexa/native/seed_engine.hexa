@@ -221,6 +221,33 @@ fn merge_all() -> string {
         } catch e {}
     }
 
+    // domain_seeds.jsonl: 16 미탐색 도메인 상수 (지질/기상/경제/언어/음악/해양/세포/효소/단백질/양자중력/암흑물질/플라즈마/초전도/위상물질/복잡계)
+    let dom_path = _se_shared + "/domain_seeds.jsonl"
+    if file_exists(dom_path) {
+        try {
+            let dom_content = read_file(dom_path)
+            let dlines = dom_content.split("\n")
+            let mut dli = 0
+            while dli < dlines.len() && pipe_count(result) < 100 {
+                let dline = dlines[dli]
+                if dline.contains("\"value\":") {
+                    let vparts = dline.split("\"value\":")
+                    if vparts.len() > 1 {
+                        let vstr = vparts[1].split(",")[0].split("}")[0]
+                        let v = safe_float(vstr)
+                        if v > 0.001 && v < 100000.0 {
+                            let sv = to_string(v)
+                            if !pipe_contains(result, sv) {
+                                result = result + "|" + sv
+                            }
+                        }
+                    }
+                }
+                dli = dli + 1
+            }
+        } catch e {}
+    }
+
     return result
 }
 
