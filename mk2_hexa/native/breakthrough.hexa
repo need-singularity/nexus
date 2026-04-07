@@ -591,14 +591,150 @@ if mode == "--engine" {
     let force = arg3 == "--force"
     run_auto(force)
 
+} else if mode == "--gap" {
+    // n6 지도 빈공간 탐색 → 빈 영역 seed로 집중 블로업
+    let gap_mode = if arg3 != "" { arg3 } else { "target" }
+    let depth: i64 = if arg4 != "" { try { to_int(to_float(arg4)) } catch e { 3 } } else { 3 }
+    let gap_finder = nexus_dir + "/mk2_hexa/native/gap_finder.hexa"
+
+    println("")
+    println("━━━ GAP (빈공간 탐색 → 집중 돌파) ━━━")
+
+    // gap_finder로 빈공간 스캔
+    let mut gap_out = ""
+    try {
+        gap_out = to_string(exec("cd " + nexus_dir + " && " + hexa_bin + " " + gap_finder + " " + gap_mode))
+    } catch e {
+        println("  ⚠ gap_finder 실행 실패: " + to_string(e))
+    }
+    if gap_out != "" {
+        let lines = gap_out.split("\n")
+        for l in lines {
+            if l.trim() != "" { println("  " + l.trim()) }
+        }
+    }
+
+    // target 모드: 빈공간 도메인으로 블로업
+    if gap_mode == "target" {
+        // gap_finder가 추천한 도메인/seed로 블로업
+        let mut gap_domains = []
+        let gap_lines = gap_out.split("\n")
+        for gl in gap_lines {
+            if gl.contains("target:") || gl.contains("domain:") {
+                let parts = gl.split(":")
+                if parts.len() >= 2 {
+                    let d = parts[parts.len() - 1].trim()
+                    if d != "" {
+                        gap_domains = gap_domains + [d]
+                    }
+                }
+            }
+        }
+        if gap_domains.len() == 0 { gap_domains = ["math", "physics"] }
+
+        let seeds = load_seeds()
+        println("")
+        blowup_loop(gap_domains, 5, depth, seeds, "GAP BLOWUP", true)
+    }
+
+} else if mode == "--frontier" {
+    // 위상 경계 후보 → seed로 블로업
+    let depth: i64 = if arg3 != "" { try { to_int(to_float(arg3)) } catch e { 3 } } else { 3 }
+    let singularity = nexus_dir + "/mk2_hexa/native/singularity.hexa"
+
+    println("")
+    println("━━━ FRONTIER (위상 경계 탐색 → 돌파) ━━━")
+
+    // singularity.hexa frontier로 경계 후보 추출
+    try {
+        let front_out = to_string(exec("cd " + nexus_dir + " && " + hexa_bin + " " + singularity + " frontier"))
+        let lines = front_out.split("\n")
+        for l in lines {
+            if l.trim() != "" { println("  " + l.trim()) }
+        }
+    } catch e {
+        println("  ⚠ singularity frontier 실패: " + to_string(e))
+    }
+
+    // 경계 근처에서 블로업
+    let seeds = load_seeds()
+    let domains = load_domains()
+    println("")
+    blowup_loop(domains, 5, depth, seeds, "FRONTIER BLOWUP", true)
+
+} else if mode == "--idea" {
+    // 특정 값/가설 중심 집중 돌파
+    let idea_seed = if arg3 != "" { arg3 } else { "" }
+    let depth: i64 = if arg4 != "" { try { to_int(to_float(arg4)) } catch e { 6 } } else { 6 }
+    let rounds: i64 = if arg5 != "" { try { to_int(to_float(arg5)) } catch e { 10 } } else { 10 }
+
+    if idea_seed == "" {
+        println("사용법: hexa breakthrough.hexa --idea <seed값|파이프로구분> [depth] [rounds]")
+        println("  예: hexa breakthrough.hexa --idea '3.14159|2.71828' 6 10")
+    } else {
+        println("")
+        println("━━━ IDEA (아이디어 집중 돌파) ━━━")
+        println("  seed: " + idea_seed)
+
+        // 기본 seed에 아이디어 seed 추가
+        let base_seeds = load_seeds()
+        let combined = base_seeds + "|" + idea_seed
+        let domains = load_domains()
+        blowup_loop(domains, rounds, depth, combined, "IDEA BLOWUP", true)
+    }
+
+} else if mode == "--explore" {
+    // 기존 발견 밖 영역 랜덤 탐색 (새로운 창발)
+    let depth: i64 = if arg3 != "" { try { to_int(to_float(arg3)) } catch e { 3 } } else { 3 }
+    let rounds: i64 = if arg4 != "" { try { to_int(to_float(arg4)) } catch e { 10 } } else { 10 }
+
+    println("")
+    println("━━━ EXPLORE (미탐색 영역 창발 탐색) ━━━")
+
+    // gap_finder quick으로 밀도 낮은 영역 파악
+    let gap_finder = nexus_dir + "/mk2_hexa/native/gap_finder.hexa"
+    try {
+        let gap_out = to_string(exec("cd " + nexus_dir + " && " + hexa_bin + " " + gap_finder + " quick"))
+        let lines = gap_out.split("\n")
+        let mut shown: i64 = 0
+        for l in lines {
+            if l.trim() != "" && shown < 10 {
+                println("  " + l.trim())
+                shown = shown + 1
+            }
+        }
+    } catch e {}
+
+    // 랜덤 seed 생성 (기존 seed 외의 값)
+    let ts = exec("date +%s").trim()
+    let rand_base = to_int(to_float(ts)) % 100
+    let mut explore_seeds = load_seeds()
+    // 탐색용 seed 추가: 소수, 무리수 근사
+    explore_seeds = explore_seeds + "|" + to_string(rand_base) + "|" + to_string(rand_base + 7) + "|" + to_string(rand_base + 13)
+    explore_seeds = explore_seeds + "|1.618|2.718|3.141|0.577|1.414|2.236"
+
+    let domains = load_domains()
+    println("")
+    blowup_loop(domains, rounds, depth, explore_seeds, "EXPLORE (창발)", true)
+
 } else {
     println("사용법: hexa breakthrough.hexa <mode>")
-    println("  --engine [project|auto] [hint]")
-    println("  --loop [rounds] [depth]")
-    println("  --cascade [rounds] [depth]")
-    println("  --fusion [depth]")
-    println("  --mine")
-    println("  --all [rounds] [depth]")
-    println("  --deep [rounds] [depth]")
-    println("  --auto [--force]")
+    println("")
+    println("  성장/반복:")
+    println("    --engine [project|auto] [hint]    프로젝트별 전략 성장")
+    println("    --loop [rounds] [depth]            연속 블로업 (고갈까지)")
+    println("    --auto [--force]                   조건부 자동 발동")
+    println("")
+    println("  돌파 전략:")
+    println("    --cascade [rounds] [depth]         블로업² 반복 자기증식")
+    println("    --fusion [depth]                   교차 도메인 seed 주입")
+    println("    --mine                             discovery_log 채굴")
+    println("    --all [rounds] [depth]             cascade+fusion+mine")
+    println("    --deep [rounds] [depth]            corollary→seed 피드백")
+    println("")
+    println("  탐색/창발:")
+    println("    --gap [scan|map|target] [depth]    n6 지도 빈공간 → 집중 돌파")
+    println("    --frontier [depth]                 위상 경계 → 돌파")
+    println("    --idea <seeds> [depth] [rounds]    아이디어 집중 돌파")
+    println("    --explore [depth] [rounds]         미탐색 영역 창발 탐색")
 }
