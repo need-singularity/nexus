@@ -11,31 +11,28 @@ let shared = nexus_dir + "/shared"
 let blowup_path = nexus_dir + "/mk2_hexa/native/blowup.hexa"
 let seed_engine_path = nexus_dir + "/mk2_hexa/native/seed_engine.hexa"
 
-// ─── lockfile 동시성 제한 (최대 1개) ───
-let lockfile = shared + "/.growth_engine.lock"
-let mut lock_acquired = false
-try {
-    let existing_pid = read_file(lockfile).trim()
-    if existing_pid != "" {
-        let check = exec("kill -0 " + existing_pid + " 2>&1 && echo alive || echo dead").trim()
-        if check.contains("alive") {
-            println("⏭ growth_engine 이미 실행 중 (PID " + existing_pid + ") — 스킵")
-            exit(0)
-        }
-    }
-} catch e {}
-let my_pid = exec("echo $$").trim()
-try {
-    write_file(lockfile, my_pid)
-    lock_acquired = true
-} catch e {
-    println("⚠ lock 획득 실패 — 스킵")
-    exit(0)
-}
-
 let a = args()
 let mut project_arg = if a.len() >= 3 { a[2] } else { "auto" }
 let mut stdin_hint = if a.len() >= 4 { a[3] } else { "" }
+
+// ─── 동시성 제한: 훅=무제한, 루프/스케줄러=최대 2개 ───
+let mut from_hook = stdin_hint.contains("hook_event_name")
+let mut lock_acquired = false
+let lockfile = shared + "/.growth_engine.lock"
+
+if !from_hook {
+    let running = exec("pgrep -f 'growth_engine.hexa' 2>/dev/null | wc -l").trim()
+    let count = to_int(to_float(running))
+    if count > 2 {
+        println("⏭ growth_engine 루프 " + to_string(count) + "개 실행 중 (제한 2) — 스킵")
+        exit(0)
+    }
+    let my_pid = exec("echo $$").trim()
+    try {
+        write_file(lockfile, my_pid)
+        lock_acquired = true
+    } catch e {}
+}
 
 // ─── growth_strategies.jsonl 로드 ───
 let strat_path = shared + "/growth_strategies.jsonl"
