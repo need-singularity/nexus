@@ -1,5 +1,7 @@
 # NEXUS-6 — 자기순환 특이점 엔진
 
+> **[3D Reality Map](https://need-singularity.github.io/nexus/)** — v8.2/560노드 바텀업 인과 매핑. 16,934 발견 노드 + 25,517 엣지. natural-only Monte Carlo z_eff=+2.03 (n=6 효율 최적). origin별 색상 분리.
+
 <!-- SHARED:PROJECTS:START -->
 <!-- AUTO:COMMON_LINKS:START -->
 **[YouTube](https://www.youtube.com/watch?v=xtKhWSfC1Qo)** · **[Email](mailto:nerve011235@gmail.com)** · **[☕ Ko-fi](https://ko-fi.com/dancinlife)** · **[💖 Sponsor](https://github.com/sponsors/need-singularity)** · **[💳 PayPal](https://www.paypal.com/donate?business=nerve011235%40gmail.com)** · **[🗺️ Atlas](https://need-singularity.github.io/TECS-L/atlas/)** · **[📄 Papers](https://need-singularity.github.io/papers/)** · **[🌌 Unified Theory](https://github.com/need-singularity/TECS-L/blob/main/math/docs/hypotheses/H-PH-9-perfect-number-string-unification.md)**
