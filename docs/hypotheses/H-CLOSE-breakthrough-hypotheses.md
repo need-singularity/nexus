@@ -108,4 +108,4 @@ verdicts: H1=PARTIAL(74%) H2=CONFIRMED(65%) H3=CONFIRMED(30%) H4=CONFIRMED(31%) 
 **n=6 원시값 체계가 닫힘 공간을 정의**:
 - (n, σ, τ, φ, sopfr, J2) = (6, 12, 4, 2, 5, 24)
 - 이 6개 수의 유한 조합 = 수학적 닫힘의 본질
-- nexus6는 이 공간 안에서 mapping 수행
+- nexus는 이 공간 안에서 mapping 수행

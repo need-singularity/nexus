@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NEXUS-6 훅 자동 셋업 — 최초 1회 실행하면 전체 환경 구성
-# 사용법: bash ~/Dev/nexus6/shared/hooks/setup.sh
+# 사용법: bash ~/Dev/nexus/shared/hooks/setup.sh
 set -e
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,12 +21,12 @@ echo "[2] 심링크 설정"
 for proj in $PROJECTS; do
   dir="$DEV_DIR/$proj"
   [ -d "$dir" ] || { echo "  SKIP $proj (디렉토리 없음)"; continue; }
-  [ "$proj" = "nexus6" ] && { echo "  SKIP nexus6 (원본)"; continue; }
+  [ "$proj" = "nexus" ] && { echo "  SKIP nexus (원본)"; continue; }
 
   target="$dir/.shared"
-  # TECS-L은 직접 nexus6/shared, 나머지는 TECS-L/.shared 경유
+  # TECS-L은 직접 nexus/shared, 나머지는 TECS-L/.shared 경유
   if [ "$proj" = "TECS-L" ] || [ "$proj" = "fathom" ]; then
-    link_to="../nexus6/shared"
+    link_to="../nexus/shared"
   else
     link_to="../TECS-L/.shared"
   fi
@@ -106,7 +106,7 @@ PYEOF
 echo ""
 echo "[5] 검증"
 # 배너 테스트
-BANNER=$(bash "$HOOK_DIR/nexus6-banner.sh" 2>/dev/null)
+BANNER=$(bash "$HOOK_DIR/nexus-banner.sh" 2>/dev/null)
 if echo "$BANNER" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
   echo "  OK — 배너 정상"
 else

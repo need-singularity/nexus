@@ -42,7 +42,7 @@ mk2_hexa/native/
 ├── gate_daemon/
 │   ├── gated.hexa               # 관리 데몬 메인 루프
 │   ├── gate_config.toml         # 게이트별 설정
-│   └── com.nexus6.gated.plist   # LaunchDaemon
+│   └── com.nexus.gated.plist   # LaunchDaemon
 │
 └── gate_lens_fusion.hexa        # 기존 — gate_core가 호출
 ```
@@ -1612,7 +1612,7 @@ fn gate_names() -> [string] {
 fn hooks_dir() -> string {
     let a = args()
     // 실행 파일 기준으로 gate_hooks 경로 유추
-    return env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_hooks"
+    return env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_hooks"
 }
 
 fn cmd_status() {
@@ -1669,7 +1669,7 @@ fn cmd_bench() {
     // hexa 레퍼런스 벤치
     let home = env("HOME")
     let hexa = env("HOME") + "/Dev/hexa-lang/target/release/hexa"
-    let result = shell(hexa + " " + env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_injection/n6codec.hexa 2>&1")
+    let result = shell(hexa + " " + env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_injection/n6codec.hexa 2>&1")
     println(result)
 }
 
@@ -1715,7 +1715,7 @@ fn main() {
         println("Gates resumed")
     }
     else if cmd == "stats" {
-        let result = shell(env("HOME") + "/Dev/hexa-lang/target/release/hexa " + env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_injection/gate_stats.hexa 2>&1")
+        let result = shell(env("HOME") + "/Dev/hexa-lang/target/release/hexa " + env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_injection/gate_stats.hexa 2>&1")
         println(result)
     }
     else { cmd_help() }
@@ -2213,8 +2213,8 @@ fn check_stagnation() -> bool {
 fn trigger_blowup() {
     println("*** STAGNATION DETECTED — triggering blowup ***")
     let hexa = env("HOME") + "/Dev/hexa-lang/target/release/hexa"
-    let blowup = env("HOME") + "/Dev/nexus6/mk2_hexa/native/blowup.hexa"
-    let seeds = shell(hexa + " " + env("HOME") + "/Dev/nexus6/mk2_hexa/native/seed_engine.hexa merge 2>&1")
+    let blowup = env("HOME") + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
+    let seeds = shell(hexa + " " + env("HOME") + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa merge 2>&1")
     let result = shell(hexa + " " + blowup + " compression 3 --no-graph --seeds \"" + seeds + "\" 2>&1")
     println(result)
 }
@@ -2310,14 +2310,14 @@ fn cmd_experiment_e1() {
 
     // Step 1: 코드북 생성
     let hexa = env("HOME") + "/Dev/hexa-lang/target/release/hexa"
-    let codec_result = shell(hexa + " " + env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_injection/n6codec.hexa 2>&1")
+    let codec_result = shell(hexa + " " + env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_injection/n6codec.hexa 2>&1")
     println(codec_result)
 
     // Step 2: 실데이터 프로파일링
     println("\n--- Real Data Profiling ---")
 
     // discovery_log 분석 (n=6 상수 출현 빈도)
-    let log_path = env("HOME") + "/Dev/nexus6/shared/discovery_log.jsonl"
+    let log_path = env("HOME") + "/Dev/nexus/shared/discovery_log.jsonl"
     let line_count = shell("wc -l < " + log_path + " 2>/dev/null")
     println("  discovery_log entries: " + line_count)
 
@@ -2328,12 +2328,12 @@ fn cmd_experiment_e1() {
     println("  system: procs=" + procs + " load=" + load + " ncpu=" + ncpu)
 
     // Step 3: 렌즈 스캔
-    let lens_result = shell(hexa + " " + env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_injection/lens_array.hexa 2>&1")
+    let lens_result = shell(hexa + " " + env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_injection/lens_array.hexa 2>&1")
     println("\n--- Lens Scan ---")
     println(lens_result)
 
     // Step 4: C dylib 빌드 확인
-    let hooks_dir = env("HOME") + "/Dev/nexus6/mk2_hexa/native/gate_hooks"
+    let hooks_dir = env("HOME") + "/Dev/nexus/mk2_hexa/native/gate_hooks"
     if file_exists(hooks_dir + "/libgate_malloc.dylib") {
         println("\n--- dylib: BUILT ---")
         // Step 5: 간단한 프로세스에 주입 테스트

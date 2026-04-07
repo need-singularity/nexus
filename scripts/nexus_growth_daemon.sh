@@ -7,7 +7,7 @@ CLAUDE_CLI="${CLAUDE_CLI:-/Users/ghost/.local/bin/claude}"
 # Master coordinator that cycles through ALL 15 growth dimensions,
 # picking the weakest each cycle and executing targeted growth actions.
 #
-# Usage: ./nexus6_growth_daemon.sh [--interval MIN] [--max-cycles N] [--dimension DIM] [--dry-run]
+# Usage: ./nexus_growth_daemon.sh [--interval MIN] [--max-cycles N] [--dimension DIM] [--dry-run]
 #
 # Dimensions: performance, architecture, lenses, modules, tests, hypotheses,
 #             dse, experiments, calculators, cross_resonance, knowledge_graph,
@@ -313,13 +313,13 @@ grow_architecture() {
 grow_lenses() {
     log_info "  Action: Implement new lenses (batch of 6)"
     bash "$SCRIPT_DIR/grow_lenses.sh" --batch 6 2>/dev/null || \
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, implement 6 new telescope lenses. Check src/telescope/lenses/ for existing lenses and src/telescope/registry.rs for registered but unimplemented lenses. For each new lens: create the .rs file implementing the Lens trait with scan() method, add n=6 constants, add 2+ tests. Register all new lenses." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, implement 6 new telescope lenses. Check src/telescope/lenses/ for existing lenses and src/telescope/registry.rs for registered but unimplemented lenses. For each new lens: create the .rs file implementing the Lens trait with scan() method, add n=6 constants, add 2+ tests. Register all new lenses." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
 grow_modules() {
     log_info "  Action: Upgrade module maturity"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, find the module with lowest test-to-code ratio (fewest tests per line of code). Add at least 8 (sigma-tau=8) meaningful tests to it. Each test should verify a specific behavior. Use n=6 constants in test data. Run cargo test to verify." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, find the module with lowest test-to-code ratio (fewest tests per line of code). Add at least 8 (sigma-tau=8) meaningful tests to it. Each test should verify a specific behavior. Use n=6 constants in test data. Run cargo test to verify." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
@@ -361,13 +361,13 @@ grow_cross_resonance() {
 
 grow_knowledge_graph() {
     log_info "  Action: Expand knowledge graph"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, enhance src/graph/ by adding new discovery nodes from recent BTs (BT-118+) and experiments. Connect them via cross-domain edges. Add tests for new nodes." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, enhance src/graph/ by adding new discovery nodes from recent BTs (BT-118+) and experiments. Connect them via cross-domain edges. Add tests for new nodes." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
 grow_red_team() {
     log_info "  Action: Add adversarial challenges"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, enhance src/red_team/ by adding new adversarial challenges. Pick 3 BTs from docs/breakthrough-theorems.md and generate devil's advocate challenges. Implement challenge functions with tests." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, enhance src/red_team/ by adding new adversarial challenges. Pick 3 BTs from docs/breakthrough-theorems.md and generate devil's advocate challenges. Implement challenge functions with tests." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
@@ -379,13 +379,13 @@ grow_atlas() {
 
 grow_documentation() {
     log_info "  Action: Improve documentation"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/, find modules or features that lack documentation. Pick the most important undocumented feature and add clear documentation (README sections, inline comments, or doc files). Focus on tools/nexus6/ which is the most active." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/, find modules or features that lack documentation. Pick the most important undocumented feature and add clear documentation (README sections, inline comments, or doc files). Focus on tools/nexus/ which is the most active." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
 grow_integration() {
     log_info "  Action: Add integration tests"
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus6/, find two modules that should work together but have no integration tests. Create integration tests that verify cross-module functionality. Add them to a tests/ directory or as #[cfg(test)] in relevant modules." \
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/tools/nexus/, find two modules that should work together but have no integration tests. Create integration tests that verify cross-module functionality. Add them to a tests/ directory or as #[cfg(test)] in relevant modules." \
         --allowedTools Edit,Write,Read,Bash,Grep,Glob 2>/dev/null || return 1
 }
 
@@ -403,7 +403,7 @@ grow_connections() {
     fi
 
     log_info "  Found $total_gaps connection gaps — dispatching fix..."
-    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/, run: bash ~/Dev/nexus6/scripts/grow_connections.sh
+    $CLAUDE_CLI -p "In /Users/ghost/Dev/n6-architecture/, run: bash ~/Dev/nexus/scripts/grow_connections.sh
 Then fix ALL unlinked connections found:
 1. BTs not referenced in any domain hypotheses → add cross-reference in most relevant domain's hypotheses.md
 2. BTs not in atlas-constants.md → extract EXACT constants and add to atlas
@@ -530,7 +530,7 @@ echo "  +============================================+"
 echo ""
 
 # PID file management
-NEXUS_STATE="$HOME/.nexus6"
+NEXUS_STATE="$HOME/.nexus"
 mkdir -p "$NEXUS_STATE"
 echo $$ > "$NEXUS_STATE/daemon.pid"
 trap 'rm -f "$NEXUS_STATE/daemon.pid"' EXIT
@@ -552,8 +552,8 @@ for cycle in $(seq 1 "$MAX_CYCLES"); do
     bash "$SCRIPT_DIR/growth_bridge.sh" full 2>/dev/null || log_warn "Bridge sync failed (continuing)"
     python3 "$NEXUS_ROOT/nexus-bridge/bridge.py" sync 2>/dev/null || log_warn "Nexus-bridge sync failed (continuing)"
     # Sync shared resources if available
-    if [[ -f "$NEXUS_ROOT/.shared/sync-nexus6-lenses.sh" ]]; then
-        bash "$NEXUS_ROOT/.shared/sync-nexus6-lenses.sh" 2>/dev/null || true
+    if [[ -f "$NEXUS_ROOT/.shared/sync-nexus-lenses.sh" ]]; then
+        bash "$NEXUS_ROOT/.shared/sync-nexus-lenses.sh" 2>/dev/null || true
     fi
     log_info "  Sync complete."
 
@@ -645,7 +645,7 @@ print(json.dumps(d))
     # Revert on failure
     if ! $validate_ok; then
         log_warn "Reverting changes..."
-        (cd "$REPO_ROOT" && git checkout -- tools/nexus6/src/) 2>/dev/null || true
+        (cd "$REPO_ROOT" && git checkout -- tools/nexus/src/) 2>/dev/null || true
         CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
         log_warn "Consecutive failures: $CONSECUTIVE_FAILURES / $MAX_CONSECUTIVE_FAILURES"
 
@@ -670,8 +670,8 @@ print(json.dumps(d))
     # ── Step 5: Commit + Log ──────────────────────────────────────────
     if $validate_ok && ! $SKIP_COMMIT; then
         log_info "Step 5/6: Committing + logging..."
-        commit_msg="growth(nexus6): ${dimension} -- cycle ${cycle}"
-        (cd "$REPO_ROOT" && git add tools/nexus6/src/ && git commit -m "$commit_msg") 2>/dev/null || {
+        commit_msg="growth(nexus): ${dimension} -- cycle ${cycle}"
+        (cd "$REPO_ROOT" && git add tools/nexus/src/ && git commit -m "$commit_msg") 2>/dev/null || {
             log_warn "Nothing to commit or commit failed."
         }
 

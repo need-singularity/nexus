@@ -4,8 +4,8 @@
 # Safe to call repeatedly (idempotent)
 # Silent on success, silent on failure (never blocks caller)
 
-NEXUS_SCRIPTS="/Users/ghost/Dev/n6-architecture/tools/nexus6/scripts"
-NEXUS_STATE="$HOME/.nexus6"
+NEXUS_SCRIPTS="/Users/ghost/Dev/n6-architecture/tools/nexus/scripts"
+NEXUS_STATE="$HOME/.nexus"
 
 # Quick exit if scripts don't exist
 [[ -d "$NEXUS_SCRIPTS" ]] || exit 0
@@ -19,7 +19,7 @@ if [[ -f "$NEXUS_STATE/daemon.pid" ]]; then
 fi
 
 # Check if a daemon process exists (no PID file but running)
-if pgrep -f "nexus6_growth_daemon" >/dev/null 2>&1; then
+if pgrep -f "nexus_growth_daemon" >/dev/null 2>&1; then
     exit 0  # Running without PID file
 fi
 

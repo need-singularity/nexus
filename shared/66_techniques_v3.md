@@ -215,19 +215,19 @@ Promote:  (d=1, r=0)  — 첫 번째 돌파 달성, 새 사이클 시작
 
 ```bash
 # 개별 기법 조회
-nexus6 alien-index T-01                    # 기법 → (d, r) 등급
+nexus alien-index T-01                    # 기법 → (d, r) 등급
 
 # 전체 분포
-nexus6 alien-index --distribution          # 66기법 (d, r) 히스토그램
+nexus alien-index --distribution          # 66기법 (d, r) 히스토그램
 
 # 리더보드
-nexus6 alien-index --leaderboard           # 최고 등급 기법 순위
+nexus alien-index --leaderboard           # 최고 등급 기법 순위
 
 # 블로업 사이클로 기법 확장
-nexus6 blowup ai --depth 6                # AI 도메인 블로업 → 신규 기법 후보 생성
+nexus blowup ai --depth 6                # AI 도메인 블로업 → 신규 기법 후보 생성
 
 # 마이크로사이클 감지
-echo "새 실험 결과..." | nexus6 detect --min-matches 2 --adaptive --promote
+echo "새 실험 결과..." | nexus detect --min-matches 2 --adaptive --promote
 ```
 
 ---
@@ -242,5 +242,5 @@ echo "새 실험 결과..." | nexus6 detect --min-matches 2 --adaptive --promote
 
 ---
 
-*Generated from nexus6 knowledge graph — n=6 mathematical framework*
+*Generated from nexus knowledge graph — n=6 mathematical framework*
 *Alien Index target: (0,10) → (1,0) breakthrough*

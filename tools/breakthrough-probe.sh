@@ -2,7 +2,7 @@
 # Independent breakthrough probe — bypasses daemon loadavg gate.
 # Emits topology points from frontier of each domain every run.
 set -euo pipefail
-NEXUS6="${HOME}/Dev/nexus6"
+NEXUS="${HOME}/Dev/nexus"
 
 python3 << 'PYEOF'
 import json, os, random
@@ -10,7 +10,7 @@ from datetime import datetime
 from collections import Counter
 
 HOME = os.path.expanduser('~')
-NX = f'{HOME}/Dev/nexus6'
+NX = f'{HOME}/Dev/nexus'
 ts = datetime.now().isoformat()
 
 # Get domains from topology

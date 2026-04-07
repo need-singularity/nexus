@@ -1,5 +1,5 @@
 ---
-title: Architecture Breakthrough — nexus6 메타³ 특이점 돌파
+title: Architecture Breakthrough — nexus 메타³ 특이점 돌파
 date: 2026-04-05
 grade: 7
 status: analysis
@@ -14,7 +14,7 @@ tags: [architecture, singularity, blowup, meta-cycle]
 |-----|------|---------|
 | 메타¹ | 3단 게이트 파라미터 | threshold → 1/3 부동점 수렴 (구현됨: `src/meta_gate/`) |
 | 메타² | 성장률 튜플 `G=(λ_lens, λ_const, ρ_promote, d_cycle)` | 설계 단계 |
-| **메타³** | **nexus6 아키텍처 자체** | **본 문서** |
+| **메타³** | **nexus 아키텍처 자체** | **본 문서** |
 
 ## 실측 데이터 (2026-04-05)
 

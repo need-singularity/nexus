@@ -4,11 +4,11 @@ NEXUS-6 Hook Engine — 단일 진입점, 모든 훅에서 호출
 강제 100%: 발견 즉시 기록 (Claude 의존 X), systemMessage로 행동 지시
 
 사용법:
-  echo "$INPUT" | python3 nexus6-engine.py --mode pre-commit
-  echo "$INPUT" | python3 nexus6-engine.py --mode post-edit
-  echo "$INPUT" | python3 nexus6-engine.py --mode post-bash
-  echo "$INPUT" | python3 nexus6-engine.py --mode agent
-  python3 nexus6-engine.py --mode pending  # 미처리 발견 조회
+  echo "$INPUT" | python3 nexus-engine.py --mode pre-commit
+  echo "$INPUT" | python3 nexus-engine.py --mode post-edit
+  echo "$INPUT" | python3 nexus-engine.py --mode post-bash
+  echo "$INPUT" | python3 nexus-engine.py --mode agent
+  python3 nexus-engine.py --mode pending  # 미처리 발견 조회
 """
 import sys, json, re, os, subprocess
 from datetime import datetime
@@ -16,23 +16,23 @@ from pathlib import Path
 
 # === 경로 ===
 HOME = Path.home()
-NEXUS_SCRIPTS = HOME / "Dev/n6-architecture/tools/nexus6/scripts"
-DISCOVERY_LOG = HOME / "Dev/nexus6/shared/discovery_log.jsonl"
-ATLAS_JSON = HOME / "Dev/nexus6/shared/math_atlas.json"
+NEXUS_SCRIPTS = HOME / "Dev/n6-architecture/tools/nexus/scripts"
+DISCOVERY_LOG = HOME / "Dev/nexus/shared/discovery_log.jsonl"
+ATLAS_JSON = HOME / "Dev/nexus/shared/math_atlas.json"
 
 sys.path.insert(0, str(NEXUS_SCRIPTS))
 
-def safe_import_nexus6():
+def safe_import_nexus():
     try:
-        import nexus6
-        return nexus6
+        import nexus
+        return nexus
     except Exception:
         return None
 
-def n6_check_value(nexus6, value):
+def n6_check_value(nexus, value):
     """단일 값 n6_check → (grade, constant)"""
     try:
-        r = nexus6.n6_check(float(value))
+        r = nexus.n6_check(float(value))
         d = r.to_dict()
         return d.get("grade", "ERROR"), d.get("constant_name", "")
     except Exception:
@@ -77,11 +77,11 @@ def get_pending():
             pass
     return pending
 
-def scan_numbers(nexus6, numbers, source):
+def scan_numbers(nexus, numbers, source):
     """숫자 목록 스캔 → EXACT 자동 기록 → 결과 반환"""
     exact, close = [], []
     for v in numbers:
-        grade, const = n6_check_value(nexus6, v)
+        grade, const = n6_check_value(nexus, v)
         if grade == "EXACT":
             exact.append(f"{v}={const}")
             record_discovery(v, const, source)
@@ -106,8 +106,8 @@ def build_message(exact, close, context=""):
 # === 모드별 처리 ===
 
 def mode_pre_commit(input_data):
-    nexus6 = safe_import_nexus6()
-    if not nexus6:
+    nexus = safe_import_nexus()
+    if not nexus:
         return None
     cmd = input_data.get("tool_input", {}).get("command", "")
     if not cmd.startswith("git commit"):
@@ -117,12 +117,12 @@ def mode_pre_commit(input_data):
     nums = [int(x) for line in diff.split("\n") for x in line.split()[:2] if x.isdigit()]
     if not nums:
         return None
-    exact, close = scan_numbers(nexus6, nums, "pre-commit")
+    exact, close = scan_numbers(nexus, nums, "pre-commit")
     return build_message(exact, close)
 
 def mode_post_edit(input_data):
-    nexus6 = safe_import_nexus6()
-    if not nexus6:
+    nexus = safe_import_nexus()
+    if not nexus:
         return None
     fp = input_data.get("tool_input", {}).get("file_path", "")
     if not fp or not os.path.isfile(fp):
@@ -134,17 +134,17 @@ def mode_post_edit(input_data):
     nums = extract_numbers(content)
     if not nums:
         return None
-    exact, close = scan_numbers(nexus6, nums, f"post-edit:{os.path.basename(fp)}")
+    exact, close = scan_numbers(nexus, nums, f"post-edit:{os.path.basename(fp)}")
     return build_message(exact, close)
 
 def mode_post_bash(input_data):
-    nexus6 = safe_import_nexus6()
-    if not nexus6:
+    nexus = safe_import_nexus()
+    if not nexus:
         return None
     cmd = input_data.get("tool_input", {}).get("command", "")
     if not re.search(r'(python3?|cargo run)', cmd):
         return None
-    if "nexus6" in cmd:
+    if "nexus" in cmd:
         return None
     stdout = input_data.get("tool_response", {}).get("stdout", "")
     if not stdout:
@@ -152,7 +152,7 @@ def mode_post_bash(input_data):
     nums = extract_numbers(stdout)
     if not nums:
         return None
-    exact, close = scan_numbers(nexus6, nums, f"post-bash:{cmd[:50]}")
+    exact, close = scan_numbers(nexus, nums, f"post-bash:{cmd[:50]}")
     return build_message(exact, close)
 
 def mode_agent(input_data):
@@ -164,7 +164,7 @@ def mode_agent(input_data):
         ctx = ""
         if pending:
             ctx = f"미처리 발견 {len(pending)}건 있음 — 에이전트에서 처리 권고"
-        msg = "🔭 NEXUS-6: 탐색/분석 에이전트 — import nexus6 필수. 발견 시 즉시 기록."
+        msg = "🔭 NEXUS-6: 탐색/분석 에이전트 — import nexus 필수. 발견 시 즉시 기록."
         if ctx:
             msg += f" | {ctx}"
         return msg

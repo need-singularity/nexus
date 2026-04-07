@@ -236,7 +236,7 @@ impl Default for TaskSchedulerConfig {
 fn default_max_concurrent() -> usize { 2 }
 fn default_task_mem() -> usize { 2048 }
 fn default_task_log_dir() -> String {
-    format!("{}/Library/Logs/nexus6", std::env::var("HOME").unwrap_or_default())
+    format!("{}/Library/Logs/nexus", std::env::var("HOME").unwrap_or_default())
 }
 fn default_task_mode() -> String { "interval".into() }
 
@@ -262,7 +262,7 @@ fn default_dev_dir() -> String {
     std::env::var("HOME").map(|h| format!("{}/Dev", h)).unwrap_or_else(|_| "/tmp/Dev".into())
 }
 fn default_watch() -> Vec<String> {
-    vec!["nexus6".into(), "anima".into(), "sedi".into(),
+    vec!["nexus".into(), "anima".into(), "sedi".into(),
          "fathom".into(), "brainwire".into(), "hexa".into()]
 }
 fn default_history_path() -> String {
@@ -870,8 +870,8 @@ fn rotate_logs(cfg: &LogRotationConfig) {
         }
     }
 
-    // nexus6 logs
-    let n6_log_dir = format!("{}/.nexus6", home());
+    // nexus logs
+    let n6_log_dir = format!("{}/.nexus", home());
     rotate_dir_logs(&n6_log_dir, max_bytes, cfg.max_files);
 
     // Extra dirs
@@ -921,7 +921,7 @@ fn rotate_file(path: &str, max_files: usize) {
 // ════════════════════════════════════════════════════════════════
 
 fn reap_stale_pid_files() {
-    let dir = format!("{}/.nexus6", home());
+    let dir = format!("{}/.nexus", home());
     let entries = match fs::read_dir(&dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -980,7 +980,7 @@ impl TaskRunner {
             }
         }
         // discovery_log.jsonl에 최근 60초 내 새 발견이 있으면 burst
-        let sig_path = format!("{}/Dev/nexus6/shared/discovery_log.jsonl", home());
+        let sig_path = format!("{}/Dev/nexus/shared/discovery_log.jsonl", home());
         if let Ok(meta) = fs::metadata(&sig_path) {
             if let Ok(modified) = meta.modified() {
                 if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
@@ -1355,7 +1355,7 @@ max_cpu_percent = 400.0        # 4 cores (M3 = 8 cores)
 max_memory_mb = 16384          # 16GB total RSS cap
 min_free_memory_mb = 2048      # throttle if free < 2GB
 dev_dir = "~/Dev"
-watch = ["nexus6", "anima", "sedi", "fathom", "brainwire", "hexa"]
+watch = ["nexus", "anima", "sedi", "fathom", "brainwire", "hexa"]
 
 # ── Build Queue ──
 [build_queue]
@@ -1379,8 +1379,8 @@ cooldown_sec = 60              # 알림 간 최소 간격
 [auto_restart]
 enabled = true
 # services = [
-#   { name = "nexus6-daemon", pid_file = "~/.nexus6/daemon.pid", restart_cmd = "nexus6 daemon", max_restarts_per_hour = 3 },
-#   { name = "nexus6-loop",   pid_file = "~/.nexus6/loop.pid",   restart_cmd = "nexus6 loop",   max_restarts_per_hour = 3 },
+#   { name = "nexus-daemon", pid_file = "~/.nexus/daemon.pid", restart_cmd = "nexus daemon", max_restarts_per_hour = 3 },
+#   { name = "nexus-loop",   pid_file = "~/.nexus/loop.pid",   restart_cmd = "nexus loop",   max_restarts_per_hour = 3 },
 # ]
 
 # ── Usage History ──
@@ -1394,10 +1394,10 @@ record_every_n = 12            # 12 loops = 1분마다
 enabled = true
 max_size_mb = 10
 max_files = 3
-extra_log_dirs = ["~/.nexus6"]
+extra_log_dirs = ["~/.nexus"]
 
 # ── Per-process overrides ──
-# [process.nexus6]
+# [process.nexus]
 # max_cpu_percent = 200.0
 # max_memory_mb = 4096
 # priority = 3                 # lower = more protected

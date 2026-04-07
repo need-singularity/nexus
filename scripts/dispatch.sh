@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dispatch.sh — nexus6에서 각 프로젝트에 Claude Code CLI 명령 디스패치
+# dispatch.sh — nexus에서 각 프로젝트에 Claude Code CLI 명령 디스패치
 #
 # 사용법:
 #   ./scripts/dispatch.sh <project> <prompt>        # 단일 프로젝트
@@ -15,11 +15,11 @@
 set -euo pipefail
 
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
-LOG_DIR="$HOME/.nexus6/dispatch"
+LOG_DIR="$HOME/.nexus/dispatch"
 mkdir -p "$LOG_DIR"
 
 PROJECTS=(
-    "nexus6:/Users/ghost/Dev/nexus6"
+    "nexus:/Users/ghost/Dev/nexus"
     "anima:/Users/ghost/Dev/anima"
     "TECS-L:/Users/ghost/Dev/TECS-L"
     "n6-architecture:/Users/ghost/Dev/n6-architecture"
@@ -64,7 +64,7 @@ dispatch_one() {
     fi
 
     # 결과 요약을 growth_bus에 기록
-    local bus="$HOME/Dev/nexus6/shared/growth_bus.jsonl"
+    local bus="$HOME/Dev/nexus/shared/growth_bus.jsonl"
     printf '{"ts":"%s","repo":"%s","phase":"dispatch","status":"%s","detail":"%s"}\n' \
         "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$name" \
         "$([ $rc -eq 0 ] && echo ok || echo fail)" \

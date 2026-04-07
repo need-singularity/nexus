@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
 NEXUS-6 mk2 Hook Engine — mk2 classifier + alien_index 통합
-기존 nexus6-engine.py의 mk2 확장판.
+기존 nexus-engine.py의 mk2 확장판.
 
 발견 → mk2 classify (sector + prime_set + confidence) → alien_index 판정 → 기록
 
 사용법:
-  echo "$INPUT" | python3 nexus6-mk2-engine.py --mode post-edit
-  echo "$INPUT" | python3 nexus6-mk2-engine.py --mode post-bash
+  echo "$INPUT" | python3 nexus-mk2-engine.py --mode post-edit
+  echo "$INPUT" | python3 nexus-mk2-engine.py --mode post-bash
 """
 import sys, json, re, os
 from datetime import datetime
 from pathlib import Path
 
 HOME = Path.home()
-DISCOVERY_LOG = HOME / "Dev/nexus6/shared/discovery_log.jsonl"
+DISCOVERY_LOG = HOME / "Dev/nexus/shared/discovery_log.jsonl"
 
 # === n6_check 테이블 ===
 N6_CHECK = {
@@ -212,7 +212,7 @@ def mode_post_bash(input_data):
     cmd = input_data.get("tool_input", {}).get("command", "")
     if not cmd:
         return None
-    if "nexus6" in cmd and ("alien-index" in cmd or "blowup" in cmd):
+    if "nexus" in cmd and ("alien-index" in cmd or "blowup" in cmd):
         return None  # 자기참조 방지
     stdout = input_data.get("tool_response", {}).get("stdout", "")
     if not stdout:

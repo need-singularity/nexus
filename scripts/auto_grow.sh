@@ -265,7 +265,7 @@ print(json.dumps(d))
     # Revert on failure
     if ! $validate_ok; then
         log_warn "Reverting changes due to validation failure..."
-        (cd "$REPO_ROOT" && git checkout -- tools/nexus6/src/) 2>/dev/null || true
+        (cd "$REPO_ROOT" && git checkout -- tools/nexus/src/) 2>/dev/null || true
         log_info "Changes reverted."
     fi
 
@@ -277,9 +277,9 @@ print(json.dumps(d))
         after_metrics=$(collect_metrics)
         after_tests=$(echo "$after_metrics" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tests_pass',0))" 2>/dev/null || echo "0")
 
-        commit_msg="growth(nexus6): ${action_type} — cycle ${cycle}, tests ${before_tests}->${after_tests}"
+        commit_msg="growth(nexus): ${action_type} — cycle ${cycle}, tests ${before_tests}->${after_tests}"
 
-        (cd "$REPO_ROOT" && git add tools/nexus6/src/ && git commit -m "$commit_msg") 2>/dev/null || {
+        (cd "$REPO_ROOT" && git add tools/nexus/src/ && git commit -m "$commit_msg") 2>/dev/null || {
             log_warn "Nothing to commit or commit failed."
         }
     elif $validate_ok && $SKIP_COMMIT; then

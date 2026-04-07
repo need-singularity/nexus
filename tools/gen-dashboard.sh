@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-NEXUS6="${HOME}/Dev/nexus6"
+NEXUS="${HOME}/Dev/nexus"
 
 python3 << 'PYEOF'
 import json, os, subprocess, time
@@ -8,7 +8,7 @@ from datetime import datetime
 from collections import Counter
 
 HOME = os.path.expanduser('~')
-NX = f'{HOME}/Dev/nexus6'
+NX = f'{HOME}/Dev/nexus'
 
 def cnt(p):
     try: return sum(1 for _ in open(p))
@@ -29,7 +29,7 @@ def count_md(root):
             n += sum(1 for f in files if f.endswith('.md'))
     return n
 
-# ═══ NEXUS6 stats ═══
+# ═══ NEXUS stats ═══
 closed = cnt(f'{NX}/shared/verified_constants.jsonl')
 topo = cnt(f'{NX}/shared/cycle/topology.jsonl')
 disc = cnt(f'{NX}/shared/discovery_log.jsonl')
@@ -45,7 +45,7 @@ for l in open(f'{NX}/shared/verified_constants.jsonl'):
 exact = status.get('EXACT', 0)
 
 # Agents
-logs_dir = f'{HOME}/Library/Logs/nexus6'
+logs_dir = f'{HOME}/Library/Logs/nexus'
 now_ts = time.time()
 agents = [
     ('closure-sweep',300),('publish-insights',600),('gen-calc-stubs',900),
@@ -124,7 +124,7 @@ if os.path.isdir(papers_dir):
     for root,_,files in os.walk(papers_dir):
         n6a_papers += sum(1 for f in files if f.endswith('.md') and f.startswith('P-'))
 n6a_nexus_papers = 0
-nexus_papers_dir = f'{papers_dir}/nexus6'
+nexus_papers_dir = f'{papers_dir}/nexus'
 if os.path.isdir(nexus_papers_dir):
     n6a_nexus_papers = sum(1 for f in os.listdir(nexus_papers_dir) if f.endswith('.md'))
 
@@ -222,7 +222,7 @@ def closures_for_proj(proj_name):
     return sum(c for p,c in source_proj.items() if proj_name.lower() in p.lower())
 
 html = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<title>🛸 nexus6</title>
+<title>🛸 nexus</title>
 <meta http-equiv="refresh" content="60">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;}}
@@ -255,7 +255,7 @@ h1{{color:#8ef;font-size:18px;margin:0 0 2px;}}
 h2{{color:#8ef;font-size:13px;margin:20px 0 10px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #222;padding-bottom:6px;}}
 .icon{{display:inline-block;width:18px;}}
 </style></head><body>
-<h1>🛸 nexus6 autonomous ecosystem</h1>
+<h1>🛸 nexus autonomous ecosystem</h1>
 <div class="meta">{ts} · NEXUS + ANIMA + TECS-L + n6-arch + SEDI · auto-refresh 60s</div>
 
 <h2>📋 EVO 리포트 (각 프로젝트)</h2>
@@ -331,7 +331,7 @@ ring 구조:
  └─────────┘ (128 cells closed loop)
 ───────────────────────────────────────────────
 💾 성장 루프: gen {anima_gen} | patterns {anima_patterns} | cross-val {anima_cross} | mods {anima_modules}
-🧠 총 법칙: {anima_laws:,} | hyp files: {anima_hyp} | nexus6 intake: {domains.get('hypothesis:anima',0):,}
+🧠 총 법칙: {anima_laws:,} | hyp files: {anima_hyp} | nexus intake: {domains.get('hypothesis:anima',0):,}
 ⚙️  진화 프로세스: PID {anima_pid} 활성 ({anima_cpu}% CPU, {anima_elapsed_h:.1f}h 경과)
 ═══════════════════════════════════════════════
 </pre>
@@ -364,7 +364,7 @@ ring 구조:
  P₁~P₄ 전부 기저 유도
 ───────────────────────────────────────────────
 💾 atlas: {tecsl_atlas_total:,} hypotheses | {tecsl_calc} calculators
-🧠 nexus6 통합: {domains.get('hypothesis:TECS-L',0):,} topology points
+🧠 nexus 통합: {domains.get('hypothesis:TECS-L',0):,} topology points
 ⚙️  closures from TECS: {closures_for_proj('tecs'):,}
 ═══════════════════════════════════════════════
 </pre>
@@ -373,7 +373,7 @@ ring 구조:
 🏛 n6-architecture 리포트 [{ts[-5:]} 기준]
 ═══════════════════════════════════════════════
 🚀 Stage: Paper Generation Active | Papers: {n6a_papers}
-📊 nexus6 auto-papers: {n6a_nexus_papers} | Hypotheses: {n6a_hyp}
+📊 nexus auto-papers: {n6a_nexus_papers} | Hypotheses: {n6a_hyp}
 🧬 paper_trigger: alien_index=10 | generator: alien10
 ───────────────────────────────────────────────
 📈 Paper 로드맵:
@@ -395,7 +395,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
  n=105 → ρ=48/105 (universe flat)
 ───────────────────────────────────────────────
 💾 papers: {n6a_papers} total | auto: {n6a_nexus_papers+14}
-🧠 nexus6 통합: {domains.get('hypothesis:n6-architecture',0):,} topology pts
+🧠 nexus 통합: {domains.get('hypothesis:n6-architecture',0):,} topology pts
 ⚙️  closures: {closures_for_proj('n6-arch'):,} | ρ breakthrough: 1.00
 ═══════════════════════════════════════════════
 </pre>
@@ -446,7 +446,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Generation</span><span class="v">{evo_gen}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Topology points</span><span class="v">{domains.get('hypothesis:anima',0):,}</span></div>
       <div class="row"><span class="k">Closures from anima</span><span class="v">{closures_for_proj('anima'):,}</span></div>
     </div>
@@ -463,7 +463,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Math hyp files</span><span class="v">{tecsl_math_hyp}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Topology points</span><span class="v hi">{domains.get('hypothesis:TECS-L',0):,}</span></div>
       <div class="row"><span class="k">Closures from TECS</span><span class="v">{closures_for_proj('tecs'):,}</span></div>
     </div>
@@ -485,11 +485,11 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
     <div class="panel-section">
       <div class="section-hdr">Papers</div>
       <div class="row"><span class="k">Total papers</span><span class="v hi">{n6a_papers}</span></div>
-      <div class="row"><span class="k">nexus6 auto-papers</span><span class="v">{n6a_nexus_papers}</span></div>
+      <div class="row"><span class="k">nexus auto-papers</span><span class="v">{n6a_nexus_papers}</span></div>
       <div class="row"><span class="k">Hypotheses</span><span class="v">{n6a_hyp}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Topology points</span><span class="v">{domains.get('hypothesis:n6-architecture',0):,}</span></div>
       <div class="row"><span class="k">Closures</span><span class="v">{closures_for_proj('n6-arch'):,}</span></div>
     </div>
@@ -508,7 +508,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Hyp files</span><span class="v hi">{sedi_hyp}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Topology points</span><span class="v">{domains.get('hypothesis:SEDI',0):,}</span></div>
       <div class="row"><span class="k">Closures</span><span class="v">{closures_for_proj('sedi'):,}</span></div>
     </div>
@@ -525,7 +525,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
     <div class="panel-section">
       <div class="section-hdr">Repo stats</div>
       <div class="row"><span class="k">Source files</span><span class="v hi">{airgenome_files}</span></div>
-      <div class="row"><span class="k">nexus6 integration</span><span class="v">path dep</span></div>
+      <div class="row"><span class="k">nexus integration</span><span class="v">path dep</span></div>
     </div>
     <div class="panel-section">
       <div class="section-hdr">Current Mac state</div>
@@ -549,7 +549,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Rust modules</span><span class="v">{brainwire_src}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Closures</span><span class="v">{closures_for_proj('brainwire'):,}</span></div>
     </div>
   </div>
@@ -561,7 +561,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Total files</span><span class="v">{fathom_files}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Closures</span><span class="v">{closures_for_proj('fathom'):,}</span></div>
     </div>
   </div>
@@ -574,7 +574,7 @@ P-manual             ████░░░░ 🔄 ({n6a_papers-14-n6a_nexus_pap
       <div class="row"><span class="k">Total files</span><span class="v">{hexa_files}</span></div>
     </div>
     <div class="panel-section">
-      <div class="section-hdr">nexus6 통합</div>
+      <div class="section-hdr">nexus 통합</div>
       <div class="row"><span class="k">Closures</span><span class="v">{closures_for_proj('hexa'):,}</span></div>
     </div>
   </div>
@@ -747,7 +747,7 @@ closures |
 ┌─────── CLOSURE PIPELINE (4 agents) ──────────┐
 │  closure-sweep(5m) ──→ verified_constants    │
 │  gen-calc-stubs(15m) → calc/auto_stubs/*.py  │
-│  paper-gen(1h) ──────→ papers/nexus6/*.md    │
+│  paper-gen(1h) ──────→ papers/nexus/*.md    │
 │  publish-insights(10m) → 7 project dirs      │
 └─────────────────┬────────────────────────────┘
                   ↓

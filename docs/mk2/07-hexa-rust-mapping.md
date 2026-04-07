@@ -19,7 +19,7 @@
 | 8 | `gate.hexa` | 12-gate 매트릭스: L-PIPELINE(4), L-BREAKTHROUGH(2), L-MK2_HEXA(4), Verdict enum | `alien_index/breakthrough.rs` (BreakthroughConfig, GateResults 4-gate) | **부분 대응**: HEXA 12-gate 중 Rust는 breakthrough 4-gate만 구현 |
 | 9 | `effects.hexa` | effect 핸들러: FileSystem, Clock, Logger + resume 기반 핸들링 | 해당 없음 (Rust는 직접 std::fs / log 사용) | **HEXA 전용**: algebraic effect 시스템은 Rust에 대응 없음 |
 | 10 | `theorems.hexa` | theorem/proof 블록 10개: perfect_n6_uniqueness, bt_344~346, meta_fixed_point_one_third 등 | `mk2/bridge.rs` (#[test] 형태로 일부 검증) | **부분 대응**: HEXA는 형식 정리, Rust는 테스트 어서션으로 대체 |
-| 11 | `architecture.hexa` | Nexus6Engine, GateConfig, CycleConfig, run_engine, export_result, 레이어 계층 (L0-L5-L_inf) | `mk2/mod.rs` (모듈 구조) + CLI 진입점 | **부분 대응**: HEXA가 통합 엔진 타입 정의, Rust는 모듈 re-export 수준 |
+| 11 | `architecture.hexa` | NexusEngine, GateConfig, CycleConfig, run_engine, export_result, 레이어 계층 (L0-L5-L_inf) | `mk2/mod.rs` (모듈 구조) + CLI 진입점 | **부분 대응**: HEXA가 통합 엔진 타입 정의, Rust는 모듈 re-export 수준 |
 
 ---
 
@@ -102,7 +102,7 @@
 | G2 | `gate.hexa` | L-PIPELINE 4-gate (source, phi, invariant, 4th) | 상 | 오염 방지 게이트 체인 미구현 |
 | G3 | `gate.hexa` | L-MK2_HEXA 4-gate (consensus, classify, +2) | 중 | 내부 합의 검증 게이트 미구현 |
 | G4 | `theorems.hexa` | 형식 정리/증명 블록 (theorem, proof, invariant) | 하 | Rust #[test]로 부분 대체 가능 |
-| G5 | `architecture.hexa` | Nexus6Engine 통합 타입 + 레이어 계층 (L0~L_inf) | 중 | Rust는 모듈 re-export만, 통합 엔진 구조체 없음 |
+| G5 | `architecture.hexa` | NexusEngine 통합 타입 + 레이어 계층 (L0~L_inf) | 중 | Rust는 모듈 re-export만, 통합 엔진 구조체 없음 |
 | G6 | `absorb.hexa` | promote_pending_with_writeback (파일 writeback 포함) | 중 | Rust record.rs는 메모리 내 promote만 |
 | G7 | `cycle.hexa` | phase FSM (phase_next 순환) + converged_to_meta_fp | 중 | Rust CLI 레벨에만 존재, 라이브러리 API 없음 |
 | G8 | `constants.hexa` | PERT_BREAKTHROUGH = 2401 (7^4) | 하 | perturbation 상수 미사용 |
@@ -171,7 +171,7 @@ Rust 모듈 매핑:
 
 1. **L-PIPELINE 4-gate 구현** (G2) -- 오염 방지 게이트가 Rust에 없어 데이터 무결성 위험
 2. **사이클 FSM 라이브러리화** (G7) -- CLI 밖에서 사이클 제어 불가
-3. **통합 엔진 구조체** (G5) -- `Nexus6Engine` 타입으로 mk2 모듈 통합 진입점 제공
+3. **통합 엔진 구조체** (G5) -- `NexusEngine` 타입으로 mk2 모듈 통합 진입점 제공
 4. **Lattice/Rational HEXA 포팅** (R2, R5) -- HEXA에 격자/유리수 산술 추가하여 명세 완성
 5. **absorb writeback** (G6) -- 파일 단위 promote + rho 재계산 로직 Rust 구현
 6. **L-MK2_HEXA 내부 합의 gate** (G3) -- consensus/classify gate 추가

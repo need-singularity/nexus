@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Install/uninstall/status for com.nexus6.cycle-tick LaunchAgent.
+# Install/uninstall/status for com.nexus.cycle-tick LaunchAgent.
 set -euo pipefail
 
-LABEL="com.nexus6.cycle-tick"
+LABEL="com.nexus.cycle-tick"
 SRC_PLIST="$(cd "$(dirname "$0")/.." && pwd)/launchd/${LABEL}.plist"
 DST_PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 UID_SELF="$(id -u)"
 
 case "${1:-status}" in
   install)
-    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/nexus6"
+    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/nexus"
     cp "$SRC_PLIST" "$DST_PLIST"
     launchctl bootstrap "gui/${UID_SELF}" "$DST_PLIST" 2>/dev/null || \
       launchctl load -w "$DST_PLIST"

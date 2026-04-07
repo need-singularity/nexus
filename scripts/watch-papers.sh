@@ -7,7 +7,7 @@
 #   - 새 파일 생성 시 로그 + 알림
 #
 # 각 프로젝트는 자기만의 완성 기준을 generator 스크립트로 정의.
-# generator 경로는 projects.json의 `paper_trigger.generator` (NEXUS6_ROOT 상대경로).
+# generator 경로는 projects.json의 `paper_trigger.generator` (NEXUS_ROOT 상대경로).
 #
 # Usage:
 #   ./scripts/watch-papers.sh                # 기본 300초 (5분) 간격
@@ -16,13 +16,13 @@
 set -euo pipefail
 
 INTERVAL="${INTERVAL:-300}"
-NEXUS6_ROOT="${NEXUS6_ROOT:-$HOME/Dev/nexus6}"
-PROJECTS_JSON="${PROJECTS_JSON:-$NEXUS6_ROOT/shared/projects.json}"
+NEXUS_ROOT="${NEXUS_ROOT:-$HOME/Dev/nexus}"
+PROJECTS_JSON="${PROJECTS_JSON:-$NEXUS_ROOT/shared/projects.json}"
 PAPERS_REPO="${PAPERS_REPO:-$HOME/Dev/papers}"
-REGISTER_SCRIPT="$NEXUS6_ROOT/scripts/paper-gen/register_paper.py"
+REGISTER_SCRIPT="$NEXUS_ROOT/scripts/paper-gen/register_paper.py"
 AUTO_COMMIT="${AUTO_COMMIT:-1}"           # 1=자동 commit+push, 0=생성만
 AUTO_REGISTER="${AUTO_REGISTER:-1}"       # 1=manifest.json 자동 등록
-LOG="$HOME/Library/Logs/nexus6/watch-papers.log"
+LOG="$HOME/Library/Logs/nexus/watch-papers.log"
 mkdir -p "$(dirname "$LOG")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
@@ -50,7 +50,7 @@ while true; do
     # generator 목록 추출 (프로젝트명 + 스크립트 상대경로)
     while IFS=$'\t' read -r proj_name gen_rel; do
         [ -z "$proj_name" ] && continue
-        gen_path="$NEXUS6_ROOT/$gen_rel"
+        gen_path="$NEXUS_ROOT/$gen_rel"
 
         if [ ! -f "$gen_path" ]; then
             log "⚠️ [$proj_name] generator not found: $gen_path"

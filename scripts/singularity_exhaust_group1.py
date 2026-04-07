@@ -40,7 +40,7 @@ def pct_error(actual, expected):
         return 0.0 if actual == 0 else 999.0
     return abs(actual - expected) / abs(expected) * 100.0
 
-LOG_PATH = os.path.expanduser('~/Dev/nexus6/shared/discovery_log.jsonl')
+LOG_PATH = os.path.expanduser('~/Dev/nexus/shared/discovery_log.jsonl')
 TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
 
 # ═══════════════════════════════════════════════════════

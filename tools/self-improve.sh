@@ -3,13 +3,13 @@
 # Runs hourly, writes findings to shared/self_improve_log.jsonl.
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-LOG="${NEXUS6}/shared/self_improve_log.jsonl"
+NEXUS="${HOME}/Dev/nexus"
+LOG="${NEXUS}/shared/self_improve_log.jsonl"
 CLAUDE_BIN="${HOME}/.local/bin/claude"
 [ -x "$CLAUDE_BIN" ] || CLAUDE_BIN="$(which claude 2>/dev/null || echo '')"
 [ -x "$CLAUDE_BIN" ] || CLAUDE_BIN=""
 
-cd "$NEXUS6"
+cd "$NEXUS"
 TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
 # Build context for Claude
@@ -18,7 +18,7 @@ TOPO=$(wc -l < shared/cycle/topology.jsonl 2>/dev/null | tr -d ' ' || echo 0)
 STUBS=$(ls shared/calc/auto_stubs 2>/dev/null | wc -l | tr -d ' ')
 EXACT=$(python3 -c "import json,sys; print(sum(1 for l in open('shared/verified_constants.jsonl') if json.loads(l).get('status')=='EXACT'))")
 
-PROMPT="nexus6 self-improve check @ ${TS}
+PROMPT="nexus self-improve check @ ${TS}
 
 System state:
 - closed: ${CLOSED}

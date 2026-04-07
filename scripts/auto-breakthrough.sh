@@ -12,8 +12,8 @@ set -e
 
 HEXA="$HOME/Dev/hexa-lang/target/release/hexa"
 STATE_FILE="/tmp/n6_auto_breakthrough_state.json"
-LOG="$HOME/Dev/nexus6/shared/discovery_log.jsonl"
-ATLAS="$HOME/Dev/nexus6/shared/math_atlas.json"
+LOG="$HOME/Dev/nexus/shared/discovery_log.jsonl"
+ATLAS="$HOME/Dev/nexus/shared/math_atlas.json"
 
 # 상태 파일 초기화
 if [ ! -f "$STATE_FILE" ]; then
@@ -58,15 +58,15 @@ echo "  log: $PREV_LOG_COUNT → $CUR_LOG_COUNT (+$LOG_DELTA)"
 echo "  time since last: ${TIME_DELTA}s"
 
 # 시스템 메트릭 수집
-bash "$HOME/Dev/nexus6/scripts/collect-live.sh" 2>/dev/null
+bash "$HOME/Dev/nexus/scripts/collect-live.sh" 2>/dev/null
 
 # real_breakthrough surprise 스캔 (경량)
 echo ""
-RESULT=$("$HEXA" "$HOME/Dev/nexus6/mk2_hexa/native/real_breakthrough.hexa" surprise 2>&1 | tail -20) || true
+RESULT=$("$HEXA" "$HOME/Dev/nexus/mk2_hexa/native/real_breakthrough.hexa" surprise 2>&1 | tail -20) || true
 echo "$RESULT"
 
 # seed_engine으로 동적 seed 확인
-SEEDS=$("$HEXA" "$HOME/Dev/nexus6/mk2_hexa/native/seed_engine.hexa" merge 2>/dev/null) || true
+SEEDS=$("$HEXA" "$HOME/Dev/nexus/mk2_hexa/native/seed_engine.hexa" merge 2>/dev/null) || true
 SEED_COUNT=$(echo "$SEEDS" | tr '|' '\n' | wc -l | tr -d ' ')
 echo "  dynamic seeds: $SEED_COUNT"
 

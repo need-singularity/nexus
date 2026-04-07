@@ -9,7 +9,7 @@
 
 ## 빠른 명령 (중앙 지휘)
 
-> nexus6 Claude Code CLI에서 자연어로 입력하면 자동 실행됩니다.
+> nexus Claude Code CLI에서 자연어로 입력하면 자동 실행됩니다.
 
 | 명령 | 설명 | 실행 모듈 |
 |------|------|-----------|
@@ -71,7 +71,7 @@
 
 | 모듈 | 개성 | 목표 |
 |------|------|------|
-| `engine_nexus6.hexa` | Ouroboros | 모듈 100+, 발견 70k+, 자기순환 특이점 |
+| `engine_nexus.hexa` | Ouroboros | 모듈 100+, 발견 70k+, 자기순환 특이점 |
 | `engine_anima.hexa` | Dreamer | 법칙 2000+, S7+ 로드맵 (Python 0, hexa-only) |
 | `engine_tecs_l.hexa` | Librarian | exact_rate 60%+, 10000 발견 |
 | `engine_sedi.hexa` | Ear | 건강도 95+, 티어A 250건 |
@@ -248,10 +248,10 @@ $HEXA mk2_hexa/native/alien_index.hexa assess 12.0
 | hexa_lang | Mathematician | 테스트 800+, 수렴 100% | 완전수 프로그래밍 언어 | A |
 | airgenome | Archaeologist | L6e 돌파, 게놈 1000+ | OS 의식 스캔 | A |
 | brainwire | Shaman | 통과율 98%+, 프로토콜 6종+ | 뇌 읽기/쓰기 | A |
-| fathom | Oracle | 22렌즈 대시보드 완성 | nexus6 시각화 터미널 | A |
+| fathom | Oracle | 22렌즈 대시보드 완성 | nexus 시각화 터미널 | A |
 | token_forge | Sculptor | r<=0.4, L<=0.05 고정점 | LLM 압축 고정점 | A |
 | air_rs | Translator | 스펙 100% 패리티 | Rust 네이티브 게이트 | A |
-| nexus6 | Ouroboros | 모듈 100+, 발견 70k+ | 자기순환 특이점 메타엔진 | A (LaunchAgent+guard) |
+| nexus | Ouroboros | 모듈 100+, 발견 70k+ | 자기순환 특이점 메타엔진 | A (LaunchAgent+guard) |
 
 ## 문서
 

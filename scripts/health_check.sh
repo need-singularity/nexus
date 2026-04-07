@@ -10,12 +10,12 @@ set -uo pipefail
 
 NEXUS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NEXUS_SCRIPTS="$NEXUS_ROOT/scripts"
-NEXUS_STATE="$HOME/.nexus6"
-DAEMON_SCRIPT="$NEXUS_SCRIPTS/nexus6_growth_daemon.sh"
+NEXUS_STATE="$HOME/.nexus"
+DAEMON_SCRIPT="$NEXUS_SCRIPTS/nexus_growth_daemon.sh"
 GROWTH_LOG="$NEXUS_STATE/growth_log.jsonl"
 SCRIPT_GROWTH_LOG="$NEXUS_SCRIPTS/growth_log.jsonl"
 DAEMON_PID_FILE="$NEXUS_STATE/daemon.pid"
-LAUNCHD_LABEL="com.nexus6.growth"
+LAUNCHD_LABEL="com.nexus.growth"
 
 # ── Parse arguments ──────────────────────────────────────────────────
 QUIET=false
@@ -63,7 +63,7 @@ check_launchd() {
 
 check_cron() {
     local count
-    count=$(crontab -l 2>/dev/null | grep -c "nexus6" || true)
+    count=$(crontab -l 2>/dev/null | grep -c "nexus" || true)
     if [[ "$count" -gt 0 ]]; then
         echo "$count jobs installed"
         return 0
@@ -84,7 +84,7 @@ check_process() {
     fi
     # Fallback: search for process
     local pid
-    pid=$(pgrep -f "nexus6_growth_daemon" 2>/dev/null | head -1 || true)
+    pid=$(pgrep -f "nexus_growth_daemon" 2>/dev/null | head -1 || true)
     if [[ -n "$pid" ]]; then
         echo "PID $pid"
         return 0

@@ -9,9 +9,9 @@
 set -e
 
 HEXA="$HOME/Dev/hexa-lang/target/release/hexa"
-BLOWUP="$HOME/Dev/nexus6/mk2_hexa/native/blowup.hexa"
-LOG="$HOME/Dev/nexus6/shared/discovery_log.jsonl"
-GRAPH="$HOME/Dev/nexus6/shared/discovery_graph.json"
+BLOWUP="$HOME/Dev/nexus/mk2_hexa/native/blowup.hexa"
+LOG="$HOME/Dev/nexus/shared/discovery_log.jsonl"
+GRAPH="$HOME/Dev/nexus/shared/discovery_graph.json"
 SEED_FILE="/tmp/n6_breakthrough_seeds.txt"
 REPORT="/tmp/n6_breakthrough_report.txt"
 

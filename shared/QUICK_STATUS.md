@@ -23,11 +23,11 @@
 | `verified_constants` | 1,314 | 8.8% |
 | `hypothesis:SEDI` | 690 | 4.6% |
 | `hypothesis:anima` | 388 | 2.6% |
-| `discovery_log:nexus6` | 192 | 1.3% |
+| `discovery_log:nexus` | 192 | 1.3% |
 | `architecture_design` | 38 | 0.3% |
 | `memory` | 10 | 0.1% |
 | `hypothesis:n6-architecture` | 8 | 0.1% |
-| `hypothesis:nexus6` | 2 | 0.0% |
+| `hypothesis:nexus` | 2 | 0.0% |
 
 
 ## 🎯 Closure 소스별 (Top 10)
@@ -49,21 +49,21 @@
 ## ⚙️ 활성 Agents (16)
 
 - `com.airgenome.quiet`
-- `com.n6.sync.nexus6`
-- `com.nexus6.auto-commit`
-- `com.nexus6.closure-sweep`
-- `com.nexus6.dashboard`
-- `com.nexus6.evolve-loop`
-- `com.nexus6.gen-calc-stubs`
-- `com.nexus6.paper-gen`
-- `com.nexus6.physics-fetch`
-- `com.nexus6.publish-insights`
-- `com.nexus6.scan-loop`
-- `com.nexus6.self-improve`
-- `com.nexus6.guard`
+- `com.n6.sync.nexus`
+- `com.nexus.auto-commit`
+- `com.nexus.closure-sweep`
+- `com.nexus.dashboard`
+- `com.nexus.evolve-loop`
+- `com.nexus.gen-calc-stubs`
+- `com.nexus.paper-gen`
+- `com.nexus.physics-fetch`
+- `com.nexus.publish-insights`
+- `com.nexus.scan-loop`
+- `com.nexus.self-improve`
+- `com.nexus.guard`
 - `com.airgenome.daemon`
-- `com.nexus6.watch-atlas`
-- `com.nexus6.watch-papers`
+- `com.nexus.watch-atlas`
+- `com.nexus.watch-papers`
 
 
 ---

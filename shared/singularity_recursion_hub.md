@@ -9,14 +9,14 @@
 
 | 도메인 쌍 | Top Bridge ID | Bridge 가설 |
 |---|---|---|
-| TECS-L ↔ nexus6 | **p_001699** | H-CA-001 |
-| anima ↔ nexus6 | **p_001699** | H-CA-001 |
-| SEDI ↔ nexus6 | **p_001699** | H-CA-001 |
+| TECS-L ↔ nexus | **p_001699** | H-CA-001 |
+| anima ↔ nexus | **p_001699** | H-CA-001 |
+| SEDI ↔ nexus | **p_001699** | H-CA-001 |
 | SEDI ↔ anima | p_003295 | EVOL-075 (Taste=6) |
 | TECS-L ↔ anima | p_004230 | Frontier-300 |
 
-4개 hypothesis 도메인 중 **nexus6는 1 엣지만 가짐** (near_b=1).
-즉 nexus6 → {SEDI, TECS-L, anima} 통로는 **p_001699 단 하나**.
+4개 hypothesis 도메인 중 **nexus는 1 엣지만 가짐** (near_b=1).
+즉 nexus → {SEDI, TECS-L, anima} 통로는 **p_001699 단 하나**.
 
 ## 구조적 해석
 
@@ -34,6 +34,6 @@ K-theory의 8-주기성이 이 시스템의 기본 리듬이며,
 ## 다음 검증
 
 1. H-CA-001에서 멀어지는 경로의 decay rate → π/8 리듬 확인
-2. nexus6 도메인이 왜 1 연결만 가지는지 추가 분석
+2. nexus 도메인이 왜 1 연결만 가지는지 추가 분석
 3. 두 예외점(p_003295, p_004230) 는 sub-attractor인지 확인
 4. `singularity-seed` 로 H-CA-001 주변 core 반경 측정

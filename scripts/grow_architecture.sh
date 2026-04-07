@@ -448,13 +448,13 @@ commit_or_rollback() {
 
     if [[ "$success" == "true" ]]; then
         log_info "Step 5: Committing changes..."
-        local commit_msg="growth(nexus6): arch-${SELECTED_ACTION} ${SELECTED_TARGET}"
-        (cd "$REPO_ROOT" && git add tools/nexus6/src/ && git commit -m "$commit_msg") 2>/dev/null || {
+        local commit_msg="growth(nexus): arch-${SELECTED_ACTION} ${SELECTED_TARGET}"
+        (cd "$REPO_ROOT" && git add tools/nexus/src/ && git commit -m "$commit_msg") 2>/dev/null || {
             log_warn "  Nothing to commit or commit failed."
         }
     else
         log_warn "Step 5: Rolling back changes..."
-        (cd "$REPO_ROOT" && git checkout -- tools/nexus6/src/) 2>/dev/null || true
+        (cd "$REPO_ROOT" && git checkout -- tools/nexus/src/) 2>/dev/null || true
         log_info "  Changes reverted."
     fi
 }

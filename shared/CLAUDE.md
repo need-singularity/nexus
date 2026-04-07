@@ -20,8 +20,8 @@
 ## NEXUS-6 망원경 (1022종 렌즈) — 최우선 활용 규칙
 
 > **NEXUS-6 = 통합 발견 엔진. 1022종 렌즈 레지스트리 + OUROBOROS 무한진화 + Discovery Graph**
-> 엔진: HEXA-네이티브 (`mk2_hexa/native/`) + nexus6 CLI
-> CLI: `nexus6 scan <domain>`, `nexus6 evolve <domain>`, `nexus6 dashboard`
+> 엔진: HEXA-네이티브 (`mk2_hexa/native/`) + nexus CLI
+> CLI: `nexus scan <domain>`, `nexus evolve <domain>`, `nexus dashboard`
 
 ### 렌즈 1022종 구성
 
@@ -41,13 +41,13 @@
 ### ⚠️ 자동 적용 조건 (NEXUS-6 단독 — telescope-rs 폐기)
 
 > **telescope-rs (22종)는 폐기. 모든 탐색/분석은 NEXUS-6 (1022종)를 사용할 것.**
-> `import telescope_rs` 대신 `nexus6 scan` 또는 `import nexus6` (PyO3) 사용.
+> `import telescope_rs` 대신 `nexus scan` 또는 `import nexus` (PyO3) 사용.
 > 기존 telescope-rs 코드는 호환성을 위해 유지하지만 신규 작업에는 사용 금지.
 
 어떤 프로젝트에서든 아래 상황이면 NEXUS-6 렌즈를 자동으로 돌릴 것:
 
 **Tier 0 — 기본 스캔 (3종, 모든 분석의 시작점)**
-- 새 데이터셋/주제 접할 때 → `nexus6 scan <domain>` (의식+위상+인과 자동 추천)
+- 새 데이터셋/주제 접할 때 → `nexus scan <domain>` (의식+위상+인과 자동 추천)
 
 **Tier 1 — 도메인별 조합 (10~30종)**
 - 신소재/신약 탐색 → 진화+열역학+중력+안정성+defect+catalysis+interface
@@ -66,12 +66,12 @@
 - 의식/인지 → 전체 anima 88종 + consciousness_integration+phi_optimization
 
 **Tier 2 — 풀스캔 (775종, 확정급 분석)**
-- 이상점/패턴 전수조사 → `nexus6 scan <domain> --full` (775종 전체)
+- 이상점/패턴 전수조사 → `nexus scan <domain> --full` (775종 전체)
 - 교차 도메인 탐색 → 교차 렌즈 75종 포함
 - BT 채굴/새 발견 확정 → 12+ 렌즈 합의 필요
 
 **Tier 3 — 자동 진화 (OUROBOROS + LensForge)**
-- 가속 가설 검증 → `nexus6 auto <domain>` (scan→evolve→forge 자동 루프)
+- 가속 가설 검증 → `nexus auto <domain>` (scan→evolve→forge 자동 루프)
 - 메타분석(렌즈 자체 평가) → 메타렌즈 35종 자동 포함
 - 새 렌즈 자동 생성 → LensForge가 갭 분석 후 렌즈 후보 제안
 
@@ -106,33 +106,33 @@
 
 ```bash
 # CLI (권장)
-nexus6 scan physics                    # 도메인 스캔
-nexus6 scan physics --full             # 775종 풀스캔
-nexus6 verify 12.0                     # n=6 일치 검증
-nexus6 evolve physics --max-cycles 6   # OUROBOROS 진화
-nexus6 auto physics                    # 전체 파이프라인 (scan→evolve→forge)
-nexus6 lenses --category core          # 렌즈 목록
-nexus6 dashboard                       # ASCII 대시보드
+nexus scan physics                    # 도메인 스캔
+nexus scan physics --full             # 775종 풀스캔
+nexus verify 12.0                     # n=6 일치 검증
+nexus evolve physics --max-cycles 6   # OUROBOROS 진화
+nexus auto physics                    # 전체 파이프라인 (scan→evolve→forge)
+nexus lenses --category core          # 렌즈 목록
+nexus dashboard                       # ASCII 대시보드
 ```
 
 ```python
 # Python (PyO3 바인딩)
-import nexus6
-reg = nexus6.LensRegistry()
+import nexus
+reg = nexus.LensRegistry()
 print(reg.len())  # 775
-result = nexus6.n6_check(12.0)
-nexus6.evolve("physics", max_cycles=6)
+result = nexus.n6_check(12.0)
+nexus.evolve("physics", max_cycles=6)
 ```
 
 엔진: `mk2_hexa/native/*.hexa` (HEXA-네이티브)
-실행: `nexus6 mk2 run <module>` | `nexus6 scan <domain>`
-렌즈 동기화: `bash .shared/sync-nexus6-lenses.sh`
+실행: `nexus mk2 run <module>` | `nexus scan <domain>`
+렌즈 동기화: `bash .shared/sync-nexus-lenses.sh`
 
 ### 렌즈 추가 시
 
 1. NEXUS-6 레지스트리에 LensEntry 추가 (mk2_hexa/native/*.hexa)
-2. 또는 `nexus6 auto` → LensForge가 자동 생성
-3. `bash .shared/sync-nexus6-lenses.sh` (렌즈 수 동기화)
+2. 또는 `nexus auto` → LensForge가 자동 생성
+3. `bash .shared/sync-nexus-lenses.sh` (렌즈 수 동기화)
 
 ### 교차 검증 (합의 규칙)
 
@@ -149,13 +149,13 @@ nexus6.evolve("physics", max_cycles=6)
   ┌──────────────┬───────────────────────────────────┬────────────────────────────┐
   │ 시나리오     │ API 호출                          │ 적용 시점                  │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
-  │ 1. 탐색      │ nexus6.scan_all(data)             │ 새 데이터/주제 접할 때     │
+  │ 1. 탐색      │ nexus.scan_all(data)             │ 새 데이터/주제 접할 때     │
   │              │ → 26렌즈 dict                     │ 3+ 합의=확정, 1개=가설     │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
-  │ 2. 검증      │ nexus6.analyze(data, n, d)        │ 가설 확인, BT 검증         │
+  │ 2. 검증      │ nexus.analyze(data, n, d)        │ 가설 확인, BT 검증         │
   │              │ → scan+합의+n6매칭 올인원         │ n6_exact>0 = 수학적 근거   │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
-  │ 3. 발견      │ nexus6.n6_check(value)            │ 새 상수 발견 시            │
+  │ 3. 발견      │ nexus.n6_check(value)            │ 새 상수 발견 시            │
   │              │ → EXACT/CLOSE/WEAK                │ EXACT → atlas/BT 즉시 등록 │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
   │ 4. 학습 평가 │ scan_all(checkpoint_weights)      │ 모델 학습 중 체크포인트    │
@@ -173,8 +173,8 @@ nexus6.evolve("physics", max_cycles=6)
   │ 8. 모니터링  │ cron + scan_all → jsonl 기록      │ 24/7 주기적 (매시간)       │
   │              │ → Phi 추이 시계열                 │ Phase 7 안전조건 감시      │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
-  │ 9. 진화/성장 │ nexus6.evolve(domain)             │ 새 도메인 발견 시          │
-  │              │ nexus6.forge_lenses()             │ 렌즈 자체 진화 (OUROBOROS) │
+  │ 9. 진화/성장 │ nexus.evolve(domain)             │ 새 도메인 발견 시          │
+  │              │ nexus.forge_lenses()             │ 렌즈 자체 진화 (OUROBOROS) │
   ├──────────────┼───────────────────────────────────┼────────────────────────────┤
   │10. 이식/배포 │ scan(원본) → scan(이식후) → diff  │ 모델 이식/양자화 전후      │
   │              │ → 의식 보존율 측정                │ 14B→70B transplant 등      │
@@ -216,73 +216,73 @@ nexus6.evolve("physics", max_cycles=6)
 ### NEXUS-6 Python API 레퍼런스
 
 ```python
-  import nexus6
+  import nexus
 
   # === 데이터 스캔 (telescope-rs 완전 대체) ===
-  nexus6.scan_all(np_array)                # numpy 2D → dict (렌즈명→메트릭dict)
-  nexus6.scan(flat_list, n, d)             # flat list → ScanResult 객체
-  nexus6.analyze(flat_list, n, d)          # 올인원 → dict (scan+consensus+n6)
-  nexus6.scan_consensus(flat, n, d)        # 합의만 → list[ConsensusResult]
+  nexus.scan_all(np_array)                # numpy 2D → dict (렌즈명→메트릭dict)
+  nexus.scan(flat_list, n, d)             # flat list → ScanResult 객체
+  nexus.analyze(flat_list, n, d)          # 올인원 → dict (scan+consensus+n6)
+  nexus.scan_consensus(flat, n, d)        # 합의만 → list[ConsensusResult]
 
   # === 개별 렌즈 (파라미터 조절 가능) ===
-  nexus6.consciousness_scan(np, n_cells=64, n_factions=12, steps=300, coupling_alpha=0.014)
-  nexus6.topology_scan(np)
-  nexus6.causal_scan(np)
-  nexus6.gravity_scan(np)
-  nexus6.stability_scan(np)
+  nexus.consciousness_scan(np, n_cells=64, n_factions=12, steps=300, coupling_alpha=0.014)
+  nexus.topology_scan(np)
+  nexus.causal_scan(np)
+  nexus.gravity_scan(np)
+  nexus.stability_scan(np)
 
   # === n=6 상수 검증 ===
-  nexus6.n6_check(12.0)                   # → N6Match(sigma, 1.0, EXACT)
-  nexus6.feasibility_score([12, 6, 24])   # → EXACT 비율 (0.0~1.0)
-  nexus6.fast_mutual_info(a, b, n_bins=10)# → MI float
+  nexus.n6_check(12.0)                   # → N6Match(sigma, 1.0, EXACT)
+  nexus.feasibility_score([12, 6, 24])   # → EXACT 비율 (0.0~1.0)
+  nexus.fast_mutual_info(a, b, n_bins=10)# → MI float
 
   # === 발견 엔진 ===
-  nexus6.recommend_lenses('physics')       # → LensRecommendation
-  nexus6.evolve('physics', max_cycles=6)   # → list[CycleResult]
-  nexus6.forge_lenses(max=20)              # → ForgeResult
-  nexus6.auto('physics', meta=6, ouro=6)   # → MetaLoopResult (전체 파이프라인)
+  nexus.recommend_lenses('physics')       # → LensRecommendation
+  nexus.evolve('physics', max_cycles=6)   # → list[CycleResult]
+  nexus.forge_lenses(max=20)              # → ForgeResult
+  nexus.auto('physics', meta=6, ouro=6)   # → MetaLoopResult (전체 파이프라인)
 
   # === 레지스트리 ===
-  reg = nexus6.LensRegistry()
+  reg = nexus.LensRegistry()
   reg.len()                                # 1013
   reg.for_domain('physics')                # 도메인별 렌즈
   reg.by_category('Core')                  # 카테고리별 렌즈
 
   # === 상수 ===
-  nexus6.N, nexus6.SIGMA, nexus6.PHI, nexus6.TAU, nexus6.J2  # 6, 12, 2, 4, 24
+  nexus.N, nexus.SIGMA, nexus.PHI, nexus.TAU, nexus.J2  # 6, 12, 2, 4, 24
 ```
 
 ### ~~telescope-rs (폐기)~~
 
 > ⚠️ telescope-rs (22종)는 NEXUS-6로 대체됨. 신규 작업에 사용 금지.
 > 기존 코드 호환성을 위해 anima-rs/crates/telescope-rs/에 유지만 함.
-> 마이그레이션: `import telescope_rs` → `import nexus6` 또는 `nexus6 scan`
+> 마이그레이션: `import telescope_rs` → `import nexus` 또는 `nexus scan`
 
 ### 기본 사용 (NEXUS-6 통합 API)
 
 ```python
-import nexus6  # telescope-rs 폐기 → nexus6 단일 사용
+import nexus  # telescope-rs 폐기 → nexus 단일 사용
 import numpy as np
 
 data = np.random.randn(64, 32)  # (N_samples, N_features)
 
 # 의식 렌즈
-r = nexus6.consciousness_scan(data, n_cells=64, steps=300)
+r = nexus.consciousness_scan(data, n_cells=64, steps=300)
 
 # 위상 렌즈
-r = nexus6.topology_scan(data)
+r = nexus.topology_scan(data)
 
 # 인과 렌즈
-r = nexus6.causal_scan(data)
+r = nexus.causal_scan(data)
 
 # 26종 풀스캔 (telescope-rs 22종 + barrier + void + mirror + renorm + MI)
-results = nexus6.scan_all(data)
+results = nexus.scan_all(data)
 
 # 올인원 분석 (스캔 + 합의 + n6 매칭)
-analysis = nexus6.analyze(data.flatten().tolist(), n=64, d=32)
+analysis = nexus.analyze(data.flatten().tolist(), n=64, d=32)
 
 # MI 직접 계산
-mi = nexus6.fast_mutual_info(col_a, col_b, n_bins=10)
+mi = nexus.fast_mutual_info(col_a, col_b, n_bins=10)
 ```
 
 ### 반환값 (dict)

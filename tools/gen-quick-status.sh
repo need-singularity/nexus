@@ -2,8 +2,8 @@
 # Generate concise markdown status report with clean tables.
 set -euo pipefail
 
-NEXUS6="${HOME}/Dev/nexus6"
-OUT="${NEXUS6}/shared/QUICK_STATUS.md"
+NEXUS="${HOME}/Dev/nexus"
+OUT="${NEXUS}/shared/QUICK_STATUS.md"
 
 python3 << 'PYEOF'
 import json, os
@@ -11,7 +11,7 @@ from datetime import datetime
 from collections import Counter
 
 HOME = os.path.expanduser('~')
-NX = f'{HOME}/Dev/nexus6'
+NX = f'{HOME}/Dev/nexus'
 ts = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 # Load data
@@ -52,7 +52,7 @@ pct_ms = closed * 100 / next_ms
 # LaunchAgents count
 import subprocess
 agents = subprocess.run(['launchctl','list'], capture_output=True, text=True).stdout
-agent_lines = [l for l in agents.split('\n') if 'nexus6' in l or 'airgenome' in l]
+agent_lines = [l for l in agents.split('\n') if 'nexus' in l or 'airgenome' in l]
 
 md = f"""# 🛸 NEXUS-6 Quick Status — {ts}
 

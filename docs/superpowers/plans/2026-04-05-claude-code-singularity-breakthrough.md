@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Claude Code CLI 세션 로그를 nexus6 특이점 사이클 메타 도메인 `claude_efficiency`에 돌려, 입력 토큰 절감 + 세션간 지식 공유 돌파 패턴을 CLAUDE.md 규칙 후보로 번역하는 로컬 파이프라인 구축.
+**Goal:** Claude Code CLI 세션 로그를 nexus 특이점 사이클 메타 도메인 `claude_efficiency`에 돌려, 입력 토큰 절감 + 세션간 지식 공유 돌파 패턴을 CLAUDE.md 규칙 후보로 번역하는 로컬 파이프라인 구축.
 
-**Architecture:** 5개 컴포넌트 단방향 파이프라인. Python 마이너가 세션 JSONL → 지표/가설 `.md` 생성 → watch-atlas 자동 스캔 → nexus6 auto 사이클 → 해석기가 규칙 후보 `.md` 출력 → 사람이 CLAUDE.md에 수동 병합. 외부 API 호출 0건, 표준 라이브러리만 사용.
+**Architecture:** 5개 컴포넌트 단방향 파이프라인. Python 마이너가 세션 JSONL → 지표/가설 `.md` 생성 → watch-atlas 자동 스캔 → nexus auto 사이클 → 해석기가 규칙 후보 `.md` 출력 → 사람이 CLAUDE.md에 수동 병합. 외부 API 호출 0건, 표준 라이브러리만 사용.
 
-**Tech Stack:** Python 3 (stdlib만: `json`, `pathlib`, `hashlib`, `argparse`, `collections`), Bash, 기존 nexus6 CLI, 기존 watch-atlas 인프라.
+**Tech Stack:** Python 3 (stdlib만: `json`, `pathlib`, `hashlib`, `argparse`, `collections`), Bash, 기존 nexus CLI, 기존 watch-atlas 인프라.
 
 **Spec**: `docs/superpowers/specs/2026-04-05-claude-code-singularity-breakthrough-design.md`
 
@@ -544,7 +544,7 @@ def _cli():
     import argparse, datetime, os
     ap = argparse.ArgumentParser(description="Claude Code session log miner")
     default_proj = os.path.expanduser(
-        "~/.claude-claude9/projects/-Users-ghost-Dev-nexus6"
+        "~/.claude-claude9/projects/-Users-ghost-Dev-nexus"
     )
     ap.add_argument("--project", default=default_proj, help="session dir")
     ap.add_argument("--sessions", type=int, default=20, help="recent N sessions")
@@ -615,7 +615,7 @@ git commit -m "feat(miner): add CLI entry point with session glob + output write
 `shared/projects.json`의 `"projects": { ... }` 블록 끝에 추가할 내용:
 ```json
     "claude_efficiency": {
-      "root": "nexus6",
+      "root": "nexus",
       "role": "meta-harness-optimizer",
       "hypothesis_dirs": [
         "shared/hypotheses/claude_efficiency"
@@ -637,7 +637,7 @@ Expected: `OK: True`
 - [ ] **Step 3: watch-atlas kickstart**
 
 ```bash
-launchctl kickstart -k "gui/$(id -u)/com.nexus6.watch-atlas" 2>/dev/null || echo "watch-atlas not running (OK for dev)"
+launchctl kickstart -k "gui/$(id -u)/com.nexus.watch-atlas" 2>/dev/null || echo "watch-atlas not running (OK for dev)"
 ```
 
 - [ ] **Step 4: Commit**
@@ -1042,8 +1042,8 @@ else
   echo "WARN: shared/sync-math-atlas.sh not found or not executable, skipping" >&2
 fi
 
-echo "[3/4] running nexus6 auto (claude_efficiency) with 30min timeout..."
-NEXUS_BIN="${NEXUS_BIN:-nexus6}"
+echo "[3/4] running nexus auto (claude_efficiency) with 30min timeout..."
+NEXUS_BIN="${NEXUS_BIN:-nexus}"
 CYCLE_OUT="$OUT_DIR/claude_efficiency_$DATE.json"
 if timeout 1800 "$NEXUS_BIN" auto claude_efficiency \
      --meta-cycles 5 --ouroboros-cycles 3 > "$CYCLE_OUT"; then
@@ -1097,7 +1097,7 @@ git commit -m "feat: add pipeline wrapper for claude_efficiency breakthrough cyc
 bash tools/run_cc_breakthrough.sh 2>&1 | tee /tmp/cc_breakthrough_run.log
 ```
 
-(`nexus6 auto`가 수 분~수십 분 걸릴 수 있으므로 사용자가 `run_in_background: true`로 호출 권장. 이 플랜에서는 포그라운드로 1회 수동 확인)
+(`nexus auto`가 수 분~수십 분 걸릴 수 있으므로 사용자가 `run_in_background: true`로 호출 권장. 이 플랜에서는 포그라운드로 1회 수동 확인)
 
 - [ ] **Step 2: 산출물 확인**
 

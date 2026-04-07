@@ -14,14 +14,14 @@ fi
 GROWTH_DIR="${PROJECT_ROOT}/.growth"
 GROWTH_STATE="${GROWTH_DIR}/growth_state.json"
 GROWTH_LOG="${GROWTH_DIR}/growth.log"
-GROWTH_BUS="$HOME/Dev/nexus6/shared/growth_bus.jsonl"
+GROWTH_BUS="$HOME/Dev/nexus/shared/growth_bus.jsonl"
 LOCKFILE="/tmp/n6-growth-${GROWTH_NAME}.lock"
-NEXUS6_BIN="${HOME}/.cargo/bin/nexus6"
-if [ ! -f "$NEXUS6_BIN" ]; then
-    NEXUS6_BIN="${HOME}/Dev/nexus6/target/release/nexus6"
+NEXUS_BIN="${HOME}/.cargo/bin/nexus"
+if [ ! -f "$NEXUS_BIN" ]; then
+    NEXUS_BIN="${HOME}/Dev/nexus/target/release/nexus"
 fi
-if [ ! -f "$NEXUS6_BIN" ]; then
-    NEXUS6_BIN="${HOME}/Dev/nexus6/target/debug/nexus6"
+if [ ! -f "$NEXUS_BIN" ]; then
+    NEXUS_BIN="${HOME}/Dev/nexus/target/debug/nexus"
 fi
 
 mkdir -p "$GROWTH_DIR"
@@ -97,27 +97,27 @@ check_load() {
 }
 
 # ── 공통 Phase: NEXUS-6 스캔 ──
-common_nexus6_scan() {
+common_nexus_scan() {
     log_info "📡 NEXUS-6 scan"
-    if [ -f "$NEXUS6_BIN" ]; then
+    if [ -f "$NEXUS_BIN" ]; then
         local domain="${1:-number_theory}"
-        NEXUS6_ROOT="$HOME/Dev/nexus6" "$NEXUS6_BIN" scan "$domain" 2>/dev/null | tail -3 | while IFS= read -r line; do
+        NEXUS_ROOT="$HOME/Dev/nexus" "$NEXUS_BIN" scan "$domain" 2>/dev/null | tail -3 | while IFS= read -r line; do
             log_info "  $line"
         done
-        write_growth_bus "nexus6_scan" "ok" "domain=$domain"
+        write_growth_bus "nexus_scan" "ok" "domain=$domain"
     else
-        log_warn "nexus6 바이너리 없음"
-        write_growth_bus "nexus6_scan" "skip" "no_binary"
+        log_warn "nexus 바이너리 없음"
+        write_growth_bus "nexus_scan" "skip" "no_binary"
     fi
 }
 
 # ── 공통 Phase: Blowup (창발) ──
 common_blowup() {
     log_info "💥 Blowup (창발)"
-    if [ -f "$NEXUS6_BIN" ]; then
+    if [ -f "$NEXUS_BIN" ]; then
         local domain="${1:-number_theory}"
         # 30초 타임아웃 (macOS 호환: bash 백그라운드 + wait)
-        (NEXUS6_ROOT="$HOME/Dev/nexus6" "$NEXUS6_BIN" blowup "$domain" --depth 6 2>/dev/null | grep -E "따름정리|공리 후보|총 창발|깊이" | while IFS= read -r line; do
+        (NEXUS_ROOT="$HOME/Dev/nexus" "$NEXUS_BIN" blowup "$domain" --depth 6 2>/dev/null | grep -E "따름정리|공리 후보|총 창발|깊이" | while IFS= read -r line; do
             log_info "  $line"
         done) &
         local blowup_pid=$!
@@ -135,7 +135,7 @@ common_blowup() {
 # ── 공통 Phase: 특이점 캐스케이드 ──
 common_singularity_cascade() {
     log_info "⚡ Singularity Cascade"
-    local scan_file="$HOME/.nexus6/last_scan.txt"
+    local scan_file="$HOME/.nexus/last_scan.txt"
     [ ! -f "$scan_file" ] && return
 
     local reached=$(grep "singularity=" "$scan_file" | cut -d= -f2)
@@ -188,7 +188,7 @@ print(f'Cascade: axioms seeded to siblings')
 # ── 공통 Phase: 크로스폴리네이션 ──
 common_cross_pollinate() {
     log_info "🌸 Cross-Pollination (프로젝트간 창발)"
-    local blowup_file="$HOME/.nexus6/last_blowup.txt"
+    local blowup_file="$HOME/.nexus/last_blowup.txt"
     if [ -f "$blowup_file" ]; then
         local emergences
         emergences=$(grep "total_emergences=" "$blowup_file" | cut -d= -f2)
@@ -218,7 +218,7 @@ common_cross_pollinate() {
 # ── 공통 Phase: 동기화 ──
 common_sync() {
     log_info "🔄 Sync"
-    local sync_script="$HOME/Dev/nexus6/sync/sync-all.sh"
+    local sync_script="$HOME/Dev/nexus/sync/sync-all.sh"
     if [ -f "$sync_script" ]; then
         bash "$sync_script" 2>/dev/null | tail -3 | while IFS= read -r line; do
             log_info "  $line"
@@ -272,7 +272,7 @@ common_auto_commit() {
 
 # ── 공통 Phase: growth_bridge 호출 ──
 common_growth_bridge() {
-    local bridge_script="$HOME/Dev/nexus6/scripts/growth_bridge.sh"
+    local bridge_script="$HOME/Dev/nexus/scripts/growth_bridge.sh"
     if [ -f "$bridge_script" ]; then
         bash "$bridge_script" full 2>/dev/null | tail -3 | while IFS= read -r line; do
             log_info "  $line"
@@ -284,7 +284,7 @@ common_growth_bridge() {
 # ── 공통 Phase: 공유 Discovery Graph ──
 common_shared_graph() {
     log_info "🕸️ Shared Discovery Graph"
-    local graph_dir="$HOME/.nexus6/shared_graph"
+    local graph_dir="$HOME/.nexus/shared_graph"
     mkdir -p "$graph_dir"
 
     # 현재 프로젝트의 발견을 공유 그래프에 추가
@@ -311,7 +311,7 @@ else:
     graph['nodes'].append(project_node)
 
 # scan 결과에서 발견 노드 추가
-scan_file = os.path.expanduser('~/.nexus6/last_scan.txt')
+scan_file = os.path.expanduser('~/.nexus/last_scan.txt')
 if os.path.exists(scan_file):
     scan = {}
     with open(scan_file) as f:
@@ -367,7 +367,7 @@ print(f'Graph: {len(graph[\"nodes\"])} nodes, {len(graph[\"edges\"])} edges')
 # ── 공통 Phase: 프로젝트간 렌즈 추천 ──
 common_lens_recommend() {
     log_info "🔮 Lens recommendation"
-    local scan_file="$HOME/.nexus6/last_scan.txt"
+    local scan_file="$HOME/.nexus/last_scan.txt"
     [ ! -f "$scan_file" ] && return
 
     # 현재 프로젝트의 top 렌즈를 형제에게 추천
@@ -404,9 +404,9 @@ print('Recommended to siblings')
 # ── 공통 Phase: 양방향 렌즈 동기화 ──
 common_reverse_lens_sync() {
     log_info "🔄 Reverse lens sync"
-    # 프로젝트 고유 렌즈 파일을 nexus6에 역동기화
+    # 프로젝트 고유 렌즈 파일을 nexus에 역동기화
     local lens_dir="$PROJECT_ROOT/src"
-    local n6_lens_dir="$HOME/Dev/nexus6/src/telescope/lenses"
+    local n6_lens_dir="$HOME/Dev/nexus/src/telescope/lenses"
 
     [ ! -d "$lens_dir" ] && return
     [ ! -d "$n6_lens_dir" ] && return
@@ -462,9 +462,9 @@ common_seed_dormant() {
 # ── 공통 Phase: 대시보드 HTML 갱신 ──
 common_update_dashboard() {
     local cycle="$1"
-    local dash_file="$HOME/.nexus6/dashboard.html"
-    local status_file="$HOME/.nexus6/daemon_status.txt"
-    local loop_report="$HOME/.nexus6/last_loop_report.txt"
+    local dash_file="$HOME/.nexus/dashboard.html"
+    local status_file="$HOME/.nexus/daemon_status.txt"
+    local loop_report="$HOME/.nexus/last_loop_report.txt"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -479,7 +479,7 @@ h1{color:#0ff}h2{color:#ff0}.ts{color:#888}</style></head>
 <p class="ts">Updated: ${ts} | Project: ${GROWTH_NAME} | Cycle: ${cycle}</p>
 <h2>Daemon Status</h2><pre>$(cat "$status_file" 2>/dev/null || echo "No daemon running")</pre>
 <h2>Last Loop Report</h2><pre>$(cat "$loop_report" 2>/dev/null || echo "No report yet")</pre>
-<h2>Growth Bus (last 10)</h2><pre>$(tail -10 "$HOME/Dev/nexus6/shared/growth_bus.jsonl" 2>/dev/null || echo "Empty")</pre>
+<h2>Growth Bus (last 10)</h2><pre>$(tail -10 "$HOME/Dev/nexus/shared/growth_bus.jsonl" 2>/dev/null || echo "Empty")</pre>
 </body></html>
 DASH
 }
@@ -519,8 +519,8 @@ common_cycle_report() {
     local cycle="$1"
     local elapsed=""
     local report_file="$GROWTH_DIR/last_cycle_report.txt"
-    local shared_report="$HOME/.nexus6/project_reports/${GROWTH_NAME}.txt"
-    mkdir -p "$HOME/.nexus6/project_reports"
+    local shared_report="$HOME/.nexus/project_reports/${GROWTH_NAME}.txt"
+    mkdir -p "$HOME/.nexus/project_reports"
 
     # growth_state에서 정보 수집
     local state_info
@@ -538,13 +538,13 @@ if os.path.exists(state_file):
 hb = '$PROJECT_ROOT/.growth/heartbeat'
 info['heartbeat'] = open(hb).read().strip()[:16] if os.path.exists(hb) else '?'
 # blowup
-bf = os.path.expanduser('~/.nexus6/last_blowup.txt')
+bf = os.path.expanduser('~/.nexus/last_blowup.txt')
 if os.path.exists(bf):
     for line in open(bf):
         if 'total_emergences=' in line:
             info['emergences'] = line.strip().split('=',1)[1]
 # scan
-sf = os.path.expanduser('~/.nexus6/last_scan.txt')
+sf = os.path.expanduser('~/.nexus/last_scan.txt')
 if os.path.exists(sf):
     for line in open(sf):
         if 'singularity=' in line:
@@ -582,7 +582,7 @@ print(f'  │ {\"EXACT ratio: \" + info.get(\"exact_ratio\",\"?\"):<{w}}│')
 # ── 공통 Phase: Project DNA 메타데이터 수집 ──
 common_project_dna() {
     log_info "🧬 Project DNA scan"
-    local bridge_json="$HOME/Dev/nexus6/shared/bridge_state.json"
+    local bridge_json="$HOME/Dev/nexus/shared/bridge_state.json"
     [ ! -f "$bridge_json" ] && return
 
     python3 -c "
@@ -720,11 +720,11 @@ with open(f, 'w') as fh: json.dump(s, fh, indent=2); fh.write('\n')
 # ── 공통 Phase: Affinity 기반 자동 라우팅 ──
 common_auto_route() {
     log_info "🔀 Auto-routing (affinity 기반)"
-    local bridge_state="$HOME/Dev/nexus6/shared/bridge_state.json"
+    local bridge_state="$HOME/Dev/nexus/shared/bridge_state.json"
     [ ! -f "$bridge_state" ] && return
 
     # blowup 결과가 있으면 최적 프로젝트로 라우팅
-    local blowup_file="$HOME/.nexus6/last_blowup.txt"
+    local blowup_file="$HOME/.nexus/last_blowup.txt"
     [ ! -f "$blowup_file" ] && return
 
     python3 -c "
@@ -789,7 +789,7 @@ run_growth_loop() {
         log_info "━━━ Cycle $cycle/$max_cycles ━━━"
 
         # bridge_state 백업
-        local bridge_json="$HOME/Dev/nexus6/shared/bridge_state.json"
+        local bridge_json="$HOME/Dev/nexus/shared/bridge_state.json"
         if [ -f "$bridge_json" ]; then
             cp "$bridge_json" "${bridge_json}.bak" 2>/dev/null || true
         fi
@@ -817,7 +817,7 @@ run_growth_loop() {
         $domain_phases "$cycle" "$load_status"
 
         # 공통 phases (매 사이클)
-        common_nexus6_scan "$domain"
+        common_nexus_scan "$domain"
         common_blowup "$domain"
         common_singularity_cascade
         common_cross_pollinate

@@ -1,4 +1,4 @@
-# nexus6 mk2 — Phases & Progress
+# nexus mk2 — Phases & Progress
 
 ## Timeline: 4 weeks from Phase 5 start
 
@@ -51,11 +51,11 @@
 
 **Subcommands**:
 ```
-nexus6 mk2 classify <value> [--text <str>]
-nexus6 mk2 lattice --layer <n>
-nexus6 mk2 sector <name>
-nexus6 mk2 migrate --from topology.jsonl
-nexus6 mk2 verify <n> --against physics_db.yaml
+nexus mk2 classify <value> [--text <str>]
+nexus mk2 lattice --layer <n>
+nexus mk2 sector <name>
+nexus mk2 migrate --from topology.jsonl
+nexus mk2 verify <n> --against physics_db.yaml
 ```
 
 ### Phase 7 — alien-index integration 📋
@@ -108,7 +108,7 @@ Phase 7 requires 6 complete.
 
 **Phase 5**:
 - All Phase 1-5 Rust tests pass
-- `nexus6 mk2 classify` CLI binary works
+- `nexus mk2 classify` CLI binary works
 - Python→Rust results match on 1000-point sample
 
 **Phase 7 (mk2 production-ready)**:

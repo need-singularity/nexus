@@ -55,7 +55,7 @@
 | papers | (bridge 합산) | ✅ 완료 |
 | sedi | (bridge 합산) | ✅ 완료 |
 | brainwire | (bridge 합산) | ✅ 완료 |
-| nexus6 | 기존 포함 | ✅ 완료 |
+| nexus | 기존 포함 | ✅ 완료 |
 | fathom | 0 | ⚠️ 미연결 |
 | hexa-lang | 0 | ⚠️ 미연결 |
 | airgenome | 0 | stub만 완료 |
@@ -176,7 +176,7 @@ topology 대량 유입으로 ρ가 0.55 → 0.21로 하강. 1/3 밴드(0.30-0.36
 | `src/mk2/*.rs` | Rust CLI (레거시) | ⚠️ fallback |
 | `src/alien_index/*.rs` | Rust alien index | ⚠️ fallback |
 | `tools/mk2_full_absorb.py` | Python 일괄 흡수 | ⚠️ fallback |
-| `hooks/nexus6-mk2-engine.py` | Python 훅 | ⚠️ fallback |
+| `hooks/nexus-mk2-engine.py` | Python 훅 | ⚠️ fallback |
 
 ---
 

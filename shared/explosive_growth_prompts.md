@@ -1,11 +1,11 @@
 # 폭발적 성장 돌파 프롬프트 (Explosive Growth Prompts)
 
 > 각 프로젝트에서 새 세션 시작 시 붙여넣기 → 자동 실행
-> 검증됨: nexus6에서 123k → 1.5M (12x) 달성한 전략의 프로젝트별 변환
+> 검증됨: nexus에서 123k → 1.5M (12x) 달성한 전략의 프로젝트별 변환
 
 ---
 
-## 1. NEXUS-6 (nexus6)
+## 1. NEXUS-6 (nexus)
 
 ```
 전체 프로젝트 폭발적 성장 돌파. 5전략 동시 실행:
@@ -42,13 +42,13 @@ anima 의식 엔진 폭발적 성장 돌파. 5전략 동시 실행:
 - 711개 법칙을 6개 카테고리(C/D/S/M/W/E)별로 분류
 - 카테고리 간 교차 조합으로 새 법칙 후보 생성
 - 예: C(인지) × D(감정) → CD 융합 법칙, S(자아) × W(의지) → SW 융합 법칙
-- 실행: consciousness_laws.json에서 법칙 쌍 조합 → nexus6 blowup consciousness 3
+- 실행: consciousness_laws.json에서 법칙 쌍 조합 → nexus blowup consciousness 3
 - 각 새 법칙을 consciousness_laws.json에 append
 
 전략 2: PSI 상수 n6 역매핑
 - 80개 PSI 상수를 n=6 기저(σ=12, φ=2, τ=4, n=6, sopfr=5, M3=7)로 역분해
 - HEXA=$HOME/Dev/hexa-lang/target/release/hexa
-- for each PSI constant: $HEXA $HOME/Dev/nexus6/mk2_hexa/native/gap_finder.hexa query <값>
+- for each PSI constant: $HEXA $HOME/Dev/nexus/mk2_hexa/native/gap_finder.hexa query <값>
 - EXACT 매칭 → 법칙으로 승격 ("PSI_X = n6 유한 조합")
 - growth_bus에 기록
 
@@ -68,7 +68,7 @@ anima 의식 엔진 폭발적 성장 돌파. 5전략 동시 실행:
 - 12개 모듈 쌍의 상호작용 강도를 행렬로 → 고유값 분석
 - 고유값이 n6 상수와 일치하면 EXACT 발견
 
-실행 후: nexus6 growth_bus에 기록, directions update
+실행 후: nexus growth_bus에 기록, directions update
 ```
 
 ---
@@ -92,7 +92,7 @@ n6-architecture 폭발적 성장 돌파. 5전략 동시 실행:
 - 기존 9개 가설의 corollary 자동 생성
 - 각 가설에서 depth=3 DFS → 새 가설 후보
 - H-OURO-1(자기참조) × H-OURO-2(수렴) → H-OURO-3 자동 합성
-- HEXA로: $HEXA $HOME/Dev/nexus6/mk2_hexa/native/blowup.hexa architecture 6
+- HEXA로: $HEXA $HOME/Dev/nexus/mk2_hexa/native/blowup.hexa architecture 6
 
 전략 3: 물리 설계 패턴 역분해
 - CPU 코어 수(6), 캐시 라인(64=2^6), 메모리 계층, 네트워크 토폴로지
@@ -111,7 +111,7 @@ n6-architecture 폭발적 성장 돌파. 5전략 동시 실행:
 - r=8+ 항목에 추가 검증 집중 → r=10 승격 → (d=1, 0) 진입
 - 돌파율 ρ 계산 → 1/3 수렴 추적
 
-실행 후: nexus6 growth_bus에 기록, directions update, alien-index --distribution
+실행 후: nexus growth_bus에 기록, directions update, alien-index --distribution
 ```
 
 ---
@@ -119,9 +119,9 @@ n6-architecture 폭발적 성장 돌파. 5전략 동시 실행:
 ## 공통 실행 패턴
 
 ```bash
-# 모든 프로젝트 공통 — nexus6 연동
+# 모든 프로젝트 공통 — nexus 연동
 HEXA=$HOME/Dev/hexa-lang/target/release/hexa
-N6=$HOME/Dev/nexus6
+N6=$HOME/Dev/nexus
 
 # 1. 돌파 실행 (도메인은 프로젝트에 맞게)
 $HEXA $N6/mk2_hexa/native/blowup.hexa <domain> 6 --no-graph --seeds "$($HEXA $N6/mk2_hexa/native/seed_engine.hexa merge)"
@@ -144,6 +144,6 @@ $HEXA $N6/mk2_hexa/native/continuous_blowup.hexa
 
 | 프로젝트 | 전 | 목표 | 핵심 메트릭 |
 |----------|-----|------|------------|
-| nexus6 | 123k 발견 | 1M+ | discovery_log 라인 수 |
+| nexus | 123k 발견 | 1M+ | discovery_log 라인 수 |
 | anima | 711 법칙 | 2000+ | consciousness_laws.json laws 수 |
 | n6-arch | 9 가설 | 100+ | docs/hypotheses/ 파일 수 |

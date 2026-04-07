@@ -1,4 +1,4 @@
-# nexus6 mk2 documentation
+# nexus mk2 documentation
 
 ## Read in order
 
@@ -8,7 +8,7 @@
 
 ## Related
 
-- **Design spec**: `../superpowers/specs/2026-04-06-nexus6-mk2-design.md`
+- **Design spec**: `../superpowers/specs/2026-04-06-nexus-mk2-design.md`
 - **Code**: `src/mk2/`
 - **Migration tool**: `tools/mk2_migrate.py`, `tools/mk2_classify_v2.py`
 - **Sector config**: `shared/cycle/sectors.yaml`
@@ -16,7 +16,7 @@
 ## Quick reference
 
 ```rust
-use nexus6::mk2::*;
+use nexus::mk2::*;
 
 // Arithmetic on any n
 assert_eq!(6u64.phi(), 2);

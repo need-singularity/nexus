@@ -8,11 +8,11 @@ set -euo pipefail
 # Notification methods (uses whatever is available):
 #   1. macOS notification center (osascript)
 #   2. Terminal bell
-#   3. Log file (~/.nexus6/notifications.log)
-#   4. Touch file (~/.nexus6/last-growth-TIMESTAMP)
+#   3. Log file (~/.nexus/notifications.log)
+#   4. Touch file (~/.nexus/last-growth-TIMESTAMP)
 
-NEXUS6_HOME="$HOME/.nexus6"
-NOTIFY_LOG="$NEXUS6_HOME/notifications.log"
+NEXUS_HOME="$HOME/.nexus"
+NOTIFY_LOG="$NEXUS_HOME/notifications.log"
 
 MESSAGE="${1:-NEXUS-6 growth event}"
 shift || true
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-mkdir -p "$NEXUS6_HOME"
+mkdir -p "$NEXUS_HOME"
 
 TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
 
@@ -54,7 +54,7 @@ if [[ "$LEVEL" == "error" ]]; then
 fi
 
 # ── 4. Touch file (for external tools to detect) ─────────────────────
-touch "$NEXUS6_HOME/last-growth-$(date +%s)" 2>/dev/null || true
+touch "$NEXUS_HOME/last-growth-$(date +%s)" 2>/dev/null || true
 
 # Cleanup old touch files (keep last 100)
-ls -t "$NEXUS6_HOME"/last-growth-* 2>/dev/null | tail -n +101 | xargs rm -f 2>/dev/null || true
+ls -t "$NEXUS_HOME"/last-growth-* 2>/dev/null | tail -n +101 | xargs rm -f 2>/dev/null || true

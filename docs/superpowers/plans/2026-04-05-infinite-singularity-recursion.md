@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a crash-safe, infinite-running Rust one-shot binary `nexus6 singularity-tick` that discovers the topology of architecture-design methodology by probing boundary points and running the CycleEngine at each probe.
+**Goal:** Build a crash-safe, infinite-running Rust one-shot binary `nexus singularity-tick` that discovers the topology of architecture-design methodology by probing boundary points and running the CycleEngine at each probe.
 
 **Architecture:** Topological graph (points + edges) persisted append-only. Each invocation performs exactly one boundary probe, then exits. launchd `KeepAlive=true, ThrottleInterval=60s` provides infinite execution. WAL + atomic renames + fsync guarantee zero data loss on crash.
 
@@ -24,7 +24,7 @@
 - `src/singularity_recursion/preflight.rs` — flock + loadavg/mem/halt gates
 - `src/singularity_recursion/tick.rs` — tick orchestrator
 - `tests/singularity_recursion_integration.rs` — 100-tick fake-cycle integration
-- `launchd/com.nexus6.cycle-tick.plist` — launchd agent definition
+- `launchd/com.nexus.cycle-tick.plist` — launchd agent definition
 - `tools/install-cycle-tick.sh` — launchctl bootstrap/bootout
 
 **Modified files:**
@@ -290,7 +290,7 @@ mod tests {
 
     fn tmp_path(name: &str) -> std::path::PathBuf {
         let mut p = temp_dir();
-        p.push(format!("nexus6_wal_test_{}_{}.jsonl", name, std::process::id()));
+        p.push(format!("nexus_wal_test_{}_{}.jsonl", name, std::process::id()));
         let _ = std::fs::remove_file(&p);
         p
     }
@@ -650,7 +650,7 @@ mod tests {
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
         let mut p = temp_dir();
-        p.push(format!("nexus6_topo_{}_{}", name, std::process::id()));
+        p.push(format!("nexus_topo_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -1034,7 +1034,7 @@ mod tests {
 
     fn tmp(name: &str) -> PathBuf {
         let mut p = temp_dir();
-        p.push(format!("nexus6_preflight_{}_{}", name, std::process::id()));
+        p.push(format!("nexus_preflight_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_file(&p);
         p
     }
@@ -1395,7 +1395,7 @@ mod tests {
 
     fn tmp_base(name: &str) -> PathBuf {
         let mut p = temp_dir();
-        p.push(format!("nexus6_tick_{}_{}", name, std::process::id()));
+        p.push(format!("nexus_tick_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -1502,7 +1502,7 @@ git commit -m "feat(singularity_recursion): tick orchestrator + config"
 
 ---
 
-## Task 9: CLI integration (`nexus6 singularity-tick`)
+## Task 9: CLI integration (`nexus singularity-tick`)
 
 **Files:**
 - Modify: `src/cli/parser.rs`
@@ -1542,9 +1542,9 @@ In `src/cli/runner.rs`, find the match on `CliCommand` (near line 117) and add:
 Add the handler function at the end of `src/cli/runner.rs`:
 ```rust
 fn run_singularity_tick(base_dir: Option<String>) -> Result<(), String> {
-    use nexus6::singularity_recursion::tick::{run_tick, CycleRunner, TickPaths};
-    use nexus6::singularity_recursion::topology::{Point, Singularity};
-    use nexus6::config::SingularityRecursionConfig;
+    use nexus::singularity_recursion::tick::{run_tick, CycleRunner, TickPaths};
+    use nexus::singularity_recursion::topology::{Point, Singularity};
+    use nexus::config::SingularityRecursionConfig;
 
     // Placeholder runner: deterministic fake until CycleEngine wiring lands.
     struct ShimRunner;
@@ -1572,7 +1572,7 @@ fn run_singularity_tick(base_dir: Option<String>) -> Result<(), String> {
 }
 ```
 
-Note: `nexus6::` prefix because runner.rs uses library crate. Verify import style by checking one existing handler.
+Note: `nexus::` prefix because runner.rs uses library crate. Verify import style by checking one existing handler.
 
 - [ ] **Step 3: Build**
 
@@ -1581,19 +1581,19 @@ Expected: compiles without errors.
 
 - [ ] **Step 4: Smoke test**
 
-Run: `cargo run --quiet -- singularity-tick --base-dir /tmp/nexus6_smoke 2>&1 | tail -5 && ls /tmp/nexus6_smoke/`
+Run: `cargo run --quiet -- singularity-tick --base-dir /tmp/nexus_smoke 2>&1 | tail -5 && ls /tmp/nexus_smoke/`
 Expected: `tick exit=0 point=Some("p_000000") elapsed=Ns` and files `topology.jsonl budget.json wal.jsonl state.lock` present.
 
 - [ ] **Step 5: Second tick test**
 
-Run: `cargo run --quiet -- singularity-tick --base-dir /tmp/nexus6_smoke && wc -l /tmp/nexus6_smoke/topology.jsonl`
+Run: `cargo run --quiet -- singularity-tick --base-dir /tmp/nexus_smoke && wc -l /tmp/nexus_smoke/topology.jsonl`
 Expected: `2` lines.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/cli/parser.rs src/cli/runner.rs
-git commit -m "feat(cli): add nexus6 singularity-tick subcommand"
+git commit -m "feat(cli): add nexus singularity-tick subcommand"
 ```
 
 ---
@@ -1601,34 +1601,34 @@ git commit -m "feat(cli): add nexus6 singularity-tick subcommand"
 ## Task 10: launchd plist + installer + help text
 
 **Files:**
-- Create: `launchd/com.nexus6.cycle-tick.plist`
+- Create: `launchd/com.nexus.cycle-tick.plist`
 - Create: `tools/install-cycle-tick.sh`
 
 - [ ] **Step 1: Write plist**
 
-Create `launchd/com.nexus6.cycle-tick.plist`:
+Create `launchd/com.nexus.cycle-tick.plist`:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nexus6.cycle-tick</string>
+    <string>com.nexus.cycle-tick</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/ghost/.cargo/bin/nexus6</string>
+        <string>/Users/ghost/.cargo/bin/nexus</string>
         <string>singularity-tick</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/ghost/Dev/nexus6</string>
+    <string>/Users/ghost/Dev/nexus</string>
     <key>KeepAlive</key>
     <true/>
     <key>ThrottleInterval</key>
     <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>/Users/ghost/Library/Logs/nexus6/cycle-tick.log</string>
+    <string>/Users/ghost/Library/Logs/nexus/cycle-tick.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/ghost/Library/Logs/nexus6/cycle-tick.err</string>
+    <string>/Users/ghost/Library/Logs/nexus/cycle-tick.err</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>RUST_LOG</key>
@@ -1643,17 +1643,17 @@ Create `launchd/com.nexus6.cycle-tick.plist`:
 Create `tools/install-cycle-tick.sh`:
 ```bash
 #!/usr/bin/env bash
-# Install/uninstall/status for com.nexus6.cycle-tick LaunchAgent.
+# Install/uninstall/status for com.nexus.cycle-tick LaunchAgent.
 set -euo pipefail
 
-LABEL="com.nexus6.cycle-tick"
+LABEL="com.nexus.cycle-tick"
 SRC_PLIST="$(cd "$(dirname "$0")/.." && pwd)/launchd/${LABEL}.plist"
 DST_PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 UID_SELF="$(id -u)"
 
 case "${1:-status}" in
   install)
-    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/nexus6"
+    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/nexus"
     cp "$SRC_PLIST" "$DST_PLIST"
     launchctl bootstrap "gui/${UID_SELF}" "$DST_PLIST" 2>/dev/null || \
       launchctl load -w "$DST_PLIST"
@@ -1666,14 +1666,14 @@ case "${1:-status}" in
     echo "uninstalled: ${LABEL}"
     ;;
   halt)
-    touch "$HOME/.nexus6/halt" 2>/dev/null || \
-      (mkdir -p "$HOME/.nexus6" && touch "$HOME/.nexus6/halt")
+    touch "$HOME/.nexus/halt" 2>/dev/null || \
+      (mkdir -p "$HOME/.nexus" && touch "$HOME/.nexus/halt")
     # Also touch shared/cycle/halt since that's where the tick actually checks
     mkdir -p "$(pwd)/shared/cycle" && touch "$(pwd)/shared/cycle/halt"
     echo "halt flag set"
     ;;
   resume)
-    rm -f "$(pwd)/shared/cycle/halt" "$HOME/.nexus6/halt"
+    rm -f "$(pwd)/shared/cycle/halt" "$HOME/.nexus/halt"
     echo "halt flag cleared"
     ;;
   status)
@@ -1718,9 +1718,9 @@ Create `tests/singularity_recursion_integration.rs`:
 
 use std::path::PathBuf;
 
-use nexus6::config::SingularityRecursionConfig;
-use nexus6::singularity_recursion::tick::{run_tick, CycleRunner, TickPaths, EXIT_OK};
-use nexus6::singularity_recursion::topology::{load, Point, Singularity};
+use nexus::config::SingularityRecursionConfig;
+use nexus::singularity_recursion::tick::{run_tick, CycleRunner, TickPaths, EXIT_OK};
+use nexus::singularity_recursion::topology::{load, Point, Singularity};
 
 struct DetRunner { n: usize }
 impl CycleRunner for DetRunner {
@@ -1750,7 +1750,7 @@ fn relaxed_cfg() -> SingularityRecursionConfig {
 
 fn tmp_base(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("nexus6_integ_{}_{}", name, std::process::id()));
+    p.push(format!("nexus_integ_{}_{}", name, std::process::id()));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p
@@ -1849,15 +1849,15 @@ Expected: `3 passed`
 - [ ] **Step 3: Build release**
 
 Run: `cargo build --release --quiet 2>&1 | tail -10`
-Expected: release binary at `target/release/nexus6`.
+Expected: release binary at `target/release/nexus`.
 
 - [ ] **Step 4: Install release binary**
 
-Run: `cp target/release/nexus6 ~/.cargo/bin/nexus6`
+Run: `cp target/release/nexus ~/.cargo/bin/nexus`
 
 - [ ] **Step 5: Manual smoke**
 
-Run: `~/.cargo/bin/nexus6 singularity-tick --base-dir /tmp/manual_smoke && ls /tmp/manual_smoke/`
+Run: `~/.cargo/bin/nexus singularity-tick --base-dir /tmp/manual_smoke && ls /tmp/manual_smoke/`
 Expected: exit 0, files created.
 
 - [ ] **Step 6: Final commit (if needed)**

@@ -1,8 +1,8 @@
 #!/bin/bash
-# sync-nexus6-lenses.sh — NEXUS-6 렌즈 수 동기화
-# Source of truth: nexus6 telescope_test.rs assertions
+# sync-nexus-lenses.sh — NEXUS-6 렌즈 수 동기화
+# Source of truth: nexus telescope_test.rs assertions
 #
-# Usage: cd ~/Dev/TECS-L && bash .shared/sync-nexus6-lenses.sh
+# Usage: cd ~/Dev/TECS-L && bash .shared/sync-nexus-lenses.sh
 # Run from TECS-L repo root (or anywhere — paths are absolute)
 
 set -e
@@ -11,7 +11,7 @@ SHARED_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE="$(cd "$SHARED_DIR/.." && pwd)"
 PARENT="$(cd "$BASE/.." && pwd)"
 N6_DIR="$PARENT/n6-architecture"
-NEXUS6_DIR="$N6_DIR/tools/nexus6"
+NEXUS_DIR="$N6_DIR/tools/nexus"
 
 echo "=== NEXUS-6 Lens Sync ==="
 echo ""
@@ -21,13 +21,13 @@ echo ""
 # ──────────────────────────────────────────
 echo "[1/5] Counting lenses from source..."
 
-if [ ! -d "$NEXUS6_DIR/src/telescope" ]; then
-  echo "Error: $NEXUS6_DIR/src/telescope not found"
+if [ ! -d "$NEXUS_DIR/src/telescope" ]; then
+  echo "Error: $NEXUS_DIR/src/telescope not found"
   exit 1
 fi
 
 # Primary method: extract from telescope_test.rs assertions (ground truth)
-TEST_FILE="$NEXUS6_DIR/tests/telescope_test.rs"
+TEST_FILE="$NEXUS_DIR/tests/telescope_test.rs"
 if [ -f "$TEST_FILE" ]; then
   # Extract total from: assert_eq!(reg.len(), NNN, "...");
   TOTAL=$(grep -oE 'reg\.len\(\),\s*[0-9]+' "$TEST_FILE" | head -1 | grep -oE '[0-9]+$')
@@ -40,7 +40,7 @@ fi
 # Fallback: grep entry functions and count vec! items
 if [ -z "$TOTAL" ] || [ "$TOTAL" = "0" ]; then
   echo "  Warning: Could not parse test file, counting from source..."
-  TOTAL=$(grep -c 'LensEntry {' "$NEXUS6_DIR"/src/telescope/*.rs 2>/dev/null || echo "0")
+  TOTAL=$(grep -c 'LensEntry {' "$NEXUS_DIR"/src/telescope/*.rs 2>/dev/null || echo "0")
   CORE=22
   EXTENDED=$((TOTAL - CORE))
 fi
@@ -69,7 +69,7 @@ grep 'entries\.len()' "$TEST_FILE" 2>/dev/null | while IFS= read -r line; do
 done
 
 # Also get the breakdown comment from registry.rs
-REG_COMMENT=$(grep -oE '22 Core.*total\)' "$NEXUS6_DIR/src/telescope/registry.rs" 2>/dev/null | head -1)
+REG_COMMENT=$(grep -oE '22 Core.*total\)' "$NEXUS_DIR/src/telescope/registry.rs" 2>/dev/null | head -1)
 if [ -n "$REG_COMMENT" ]; then
   echo "  Registry: $REG_COMMENT"
 fi
@@ -145,12 +145,12 @@ echo "[4/5] Updating installed_tools.json..."
 
 TOOLS_JSON="$SHARED_DIR/installed_tools.json"
 if [ -f "$TOOLS_JSON" ]; then
-  # Update the purpose field for nexus6
+  # Update the purpose field for nexus
   OLD_PURPOSE=$(python3 -c "
 import json
 with open('$TOOLS_JSON') as f:
     d = json.load(f)
-entry = d.get('cli_tools', {}).get('nexus6', {})
+entry = d.get('cli_tools', {}).get('nexus', {})
 print(entry.get('purpose', ''))
 " 2>/dev/null)
 
@@ -170,18 +170,18 @@ print(entry.get('purpose', ''))
 import json
 with open('$TOOLS_JSON') as f:
     d = json.load(f)
-if 'nexus6' in d.get('cli_tools', {}):
-    d['cli_tools']['nexus6']['purpose'] = '$NEW_PURPOSE'
+if 'nexus' in d.get('cli_tools', {}):
+    d['cli_tools']['nexus']['purpose'] = '$NEW_PURPOSE'
     with open('$TOOLS_JSON', 'w') as f:
         json.dump(d, f, indent=2, ensure_ascii=False)
     print('  Updated: $NEW_PURPOSE')
 else:
-    print('  SKIP: no nexus6 entry in cli_tools')
+    print('  SKIP: no nexus entry in cli_tools')
 " 2>/dev/null
       CHANGED=1
     fi
   else
-    echo "  SKIP: no nexus6 entry found"
+    echo "  SKIP: no nexus entry found"
   fi
 else
   echo "  SKIP: $TOOLS_JSON not found"
@@ -206,7 +206,7 @@ for repo_key in d:
     if not isinstance(d[repo_key], list):
         continue
     for entry in d[repo_key]:
-        if 'nexus6' in entry.get('path', ''):
+        if 'nexus' in entry.get('path', ''):
             old_desc = entry.get('description', '')
             new_desc = 'NEXUS-6 Discovery Engine — ${TOTAL} lenses telescope + OUROBOROS'
             if old_desc != new_desc:

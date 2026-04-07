@@ -1,4 +1,4 @@
-# nexus6 mk2 — Prime-Atomic Smooth-Class Engine Design
+# nexus mk2 — Prime-Atomic Smooth-Class Engine Design
 
 **Date**: 2026-04-06
 **Status**: Complete — all 8 phases implemented, 43 Rust + 50 Python tests pass
@@ -159,9 +159,9 @@ Layer 1 (1 prime):     n=2   n=3   n=5   n=7
 
 | 항목 | 권고 | 이유 |
 |---|---|---|
-| **mk1 → mk2 migration** | 1회 배치 스크립트 + idempotent | `nexus6 mk2 migrate --from topology.jsonl` |
+| **mk1 → mk2 migration** | 1회 배치 스크립트 + idempotent | `nexus mk2 migrate --from topology.jsonl` |
 | **Prime signature 추출** | 텍스트 scan + 값 감지 후 factorize | 17K point 전체 ~30초 예상 |
-| **mk1 CLI 유지** | 유지 (read-only wrapper) + mk2 네임스페이스 추가 | `nexus6 mk2 <subcommand>` 분리 |
+| **mk1 CLI 유지** | 유지 (read-only wrapper) + mk2 네임스페이스 추가 | `nexus mk2 <subcommand>` 분리 |
 
 ### 저장 형식
 
@@ -214,9 +214,9 @@ Layer 1 (1 prime):     n=2   n=3   n=5   n=7
 - **예상**: 3일
 
 ### Phase 5: CLI + visualization
-- `nexus6 mk2 classify <value>` — 자동 classify + sector
-- `nexus6 mk2 lattice --layer <n>` — 계층 조회
-- `nexus6 mk2 sector <sector>` — sector별 point 리스트
+- `nexus mk2 classify <value>` — 자동 classify + sector
+- `nexus mk2 lattice --layer <n>` — 계층 조회
+- `nexus mk2 sector <sector>` — sector별 point 리스트
 - **예상**: 3일
 
 **총**: 3~4주

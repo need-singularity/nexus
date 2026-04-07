@@ -8,8 +8,8 @@ INPUT=$(cat)
 bash "$HOOK_DIR/growth-tick.sh" pre-tool </dev/null >/dev/null 2>&1 &
 
 HEXA="${HOME}/Dev/hexa-lang/target/release/hexa"
-HEXA_JSON_FIELD="${HOME}/Dev/nexus6/mk2_hexa/native/json_field.hexa"
-HEXA_HOOK="${HOME}/Dev/nexus6/mk2_hexa/native/hook.hexa"
+HEXA_JSON_FIELD="${HOME}/Dev/nexus/mk2_hexa/native/json_field.hexa"
+HEXA_HOOK="${HOME}/Dev/nexus/mk2_hexa/native/hook.hexa"
 
 # tool_name 추출
 if [ -x "$HEXA" ] && [ -f "$HEXA_JSON_FIELD" ]; then

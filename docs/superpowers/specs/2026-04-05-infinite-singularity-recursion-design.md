@@ -7,7 +7,7 @@
 
 ## Goal
 
-Run nexus6 singularity cycles (블로업 → 창발 → 특이점) **infinitely and safely** on Mac to discover the **topology of architecture-design methodology**: the core (well-understood patterns) and periphery (frontier hypotheses) as a topological space.
+Run nexus singularity cycles (블로업 → 창발 → 특이점) **infinitely and safely** on Mac to discover the **topology of architecture-design methodology**: the core (well-understood patterns) and periphery (frontier hypotheses) as a topological space.
 
 If the periphery structure is captured, the interior becomes derivable by interpolation. Therefore the system prioritizes **boundary probing** over depth-first exploration.
 
@@ -20,7 +20,7 @@ If the periphery structure is captured, the interior becomes derivable by interp
 
 ## Background
 
-A prior attempt at infinite recursion used process-level fork chains (shell calling `nexus6 blowup` → reading output → calling itself again). Without a lock, slow cycles stacked up into a fork bomb and took down the Mac on 2026-04-05. The design here makes infinite execution safe by construction.
+A prior attempt at infinite recursion used process-level fork chains (shell calling `nexus blowup` → reading output → calling itself again). Without a lock, slow cycles stacked up into a fork bomb and took down the Mac on 2026-04-05. The design here makes infinite execution safe by construction.
 
 ## Model: Topological Space of Architectures
 
@@ -40,7 +40,7 @@ The discovery target is a **topological space**, not a tree:
 
 ### Execution model
 
-Rust one-shot binary `nexus6 singularity-tick` invoked by **launchd** with `KeepAlive=true` and `ThrottleInterval=60s`. Each tick:
+Rust one-shot binary `nexus singularity-tick` invoked by **launchd** with `KeepAlive=true` and `ThrottleInterval=60s`. Each tick:
 
 1. Acquires single-instance `flock` (stale-PID aware).
 2. Runs preflight gates (memory, loadavg, halt-file).
@@ -69,7 +69,7 @@ src/singularity_recursion/
 ```
 
 Binary: `src/bin/cycle_tick.rs` (thin wrapper → `CycleTick::run()`).
-CLI integration: `nexus6 singularity-tick` subcommand in `src/cli/parser.rs`.
+CLI integration: `nexus singularity-tick` subcommand in `src/cli/parser.rs`.
 
 ### File layout (`shared/cycle/`)
 
@@ -132,7 +132,7 @@ Upgradable to real embedding later; interface is `fn embed(&Singularity) -> Vec<
 
 ## Safety
 
-### Defaults (`[singularity_recursion]` in `~/.nexus6/config.toml`)
+### Defaults (`[singularity_recursion]` in `~/.nexus/config.toml`)
 
 ```toml
 domain = "architecture_design"
@@ -180,8 +180,8 @@ launchd treats all of these as normal exits (via `ExitTimeOut`/`ThrottleInterval
 ### Kill switch
 
 ```bash
-touch ~/.nexus6/halt    # pause
-rm   ~/.nexus6/halt     # resume
+touch ~/.nexus/halt    # pause
+rm   ~/.nexus/halt     # resume
 ```
 
 ## Crash Safety
@@ -235,19 +235,19 @@ Every 100 ticks and on n6_guard OOM-FALLBACK → gzip `topology.jsonl` into `bac
 - Optional: add `cycle_tick` to guard's `oom_fallback_protect` if user wants it prioritized.
 
 ### launchd plist
-`~/Library/LaunchAgents/com.nexus6.cycle-tick.plist`:
+`~/Library/LaunchAgents/com.nexus.cycle-tick.plist`:
 ```xml
 <dict>
-  <key>Label</key><string>com.nexus6.cycle-tick</string>
+  <key>Label</key><string>com.nexus.cycle-tick</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/ghost/.cargo/bin/nexus6</string>
+    <string>/Users/ghost/.cargo/bin/nexus</string>
     <string>singularity-tick</string>
   </array>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>60</integer>
-  <key>StandardOutPath</key><string>/Users/ghost/Library/Logs/nexus6/cycle-tick.log</string>
-  <key>StandardErrorPath</key><string>/Users/ghost/Library/Logs/nexus6/cycle-tick.err</string>
+  <key>StandardOutPath</key><string>/Users/ghost/Library/Logs/nexus/cycle-tick.log</string>
+  <key>StandardErrorPath</key><string>/Users/ghost/Library/Logs/nexus/cycle-tick.err</string>
 </dict>
 ```
 

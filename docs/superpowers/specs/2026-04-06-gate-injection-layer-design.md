@@ -221,7 +221,7 @@ mk2_hexa/native/
 ├── gate_daemon/                 # 관리 데몬
 │   ├── gated.hexa              # 메인 루프
 │   ├── gate_config.toml        # 게이트별 설정
-│   └── com.nexus6.gated.plist  # LaunchDaemon
+│   └── com.nexus.gated.plist  # LaunchDaemon
 │
 └── gate_lens_fusion.hexa        # 기존 — gate_core가 호출
 ```
@@ -231,7 +231,7 @@ mk2_hexa/native/
 | 컴포넌트 | 언어 | 이유 |
 |----------|------|------|
 | 훅 dylib | C | DYLD_INSERT 필수, 최소 오버헤드 |
-| 엔진 전체 | hexa | nexus6 생태계 통합 |
+| 엔진 전체 | hexa | nexus 생태계 통합 |
 | C ↔ hexa 브릿지 | C + hexa FFI | dylib → hexa 런타임 호출 |
 | Network Extension | Swift | Apple 프레임워크 필수 |
 | 관리 데몬 | hexa | n6-guard 패턴 |

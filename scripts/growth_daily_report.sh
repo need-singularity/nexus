@@ -8,13 +8,13 @@ set -euo pipefail
 #
 # Usage: ./growth_daily_report.sh [--days N] [--output FILE]
 #
-# Output: ~/.nexus6/reports/daily-YYYY-MM-DD.txt
+# Output: ~/.nexus/reports/daily-YYYY-MM-DD.txt
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-NEXUS6_HOME="$HOME/.nexus6"
+NEXUS_HOME="$HOME/.nexus"
 LOG_FILE="$SCRIPT_DIR/growth_log.jsonl"
 DAYS=1
-OUTPUT_DIR="$NEXUS6_HOME/reports"
+OUTPUT_DIR="$NEXUS_HOME/reports"
 OUTPUT_FILE=""
 
 while [[ $# -gt 0 ]]; do

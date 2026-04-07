@@ -16,7 +16,7 @@
 
 ## 구현체 비교
 
-| | hexa-lang (원본) | nexus6 (하이브리드) |
+| | hexa-lang (원본) | nexus (하이브리드) |
 |---|---|---|
 | 파일 | `src/singularity.rs` | `src/blowup/cycle_engine.rs` |
 | 입력 | 메트릭 (key-value) | 메트릭 + 공리 |
@@ -35,10 +35,10 @@
 
 ## 사용법
 
-### Rust (nexus6)
+### Rust (nexus)
 
 ```rust
-use nexus6::blowup::CycleEngine;
+use nexus::blowup::CycleEngine;
 
 let mut engine = CycleEngine::new("number_theory");
 
@@ -61,8 +61,8 @@ println!("EXACT: {}/{} = {:.1}%", result.exact_count, result.blowup_count, resul
 ### CLI
 
 ```bash
-nexus6 blowup <domain> [--depth N]
-# 예: nexus6 blowup number_theory --depth 6
+nexus blowup <domain> [--depth N]
+# 예: nexus blowup number_theory --depth 6
 ```
 
 ### Python (hexa-lang)
@@ -105,7 +105,7 @@ print(f"Singularity: {'★' if result.singularity_reached else '·'}")
 
 | 프로젝트 | 도메인 | 기대 메트릭 |
 |---------|--------|------------|
-| nexus6 | number_theory | discoveries, harmony, eigenvalue, lenses |
+| nexus | number_theory | discoveries, harmony, eigenvalue, lenses |
 | anima | consciousness | phi, integration, binding |
 | TECS-L | number_theory | atlas_count, calculators, constants |
 | sedi | signal_detection | hypotheses, signals, grades |

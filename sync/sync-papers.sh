@@ -15,7 +15,7 @@ if [ -d "$PAPERS_DIR" ]; then
   echo "  논문 수: $PAPER_COUNT"
 
   # Sync paper references to all repos
-  for repo in TECS-L n6-architecture anima sedi brainwire nexus6; do
+  for repo in TECS-L n6-architecture anima sedi brainwire nexus; do
     README="$DEV/$repo/README.md"
     [ -f "$README" ] || continue
     # Update paper count if marker exists

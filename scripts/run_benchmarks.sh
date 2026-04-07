@@ -2,7 +2,7 @@
 # NEXUS-6 Performance Benchmark Suite
 # ====================================
 # Measures scan, evolve, verify, test, and build speeds.
-# Outputs JSON results to ~/.nexus6/benchmark-results.json
+# Outputs JSON results to ~/.nexus/benchmark-results.json
 #
 # Usage: ./run_benchmarks.sh [--quick] [--no-build]
 set -euo pipefail
@@ -11,8 +11,8 @@ NEXUS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$NEXUS_ROOT"
 
 CARGO="$HOME/.cargo/bin/cargo"
-BINARY="$NEXUS_ROOT/target/release/nexus6"
-RESULTS_DIR="$HOME/.nexus6"
+BINARY="$NEXUS_ROOT/target/release/nexus"
+RESULTS_DIR="$HOME/.nexus"
 RESULTS_FILE="$RESULTS_DIR/benchmark-results.json"
 
 mkdir -p "$RESULTS_DIR"
@@ -64,7 +64,7 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 if [[ ! -x "$BINARY" ]]; then
-    echo "ERROR: Failed to build nexus6 binary."
+    echo "ERROR: Failed to build nexus binary."
     exit 1
 fi
 
@@ -235,6 +235,6 @@ if [[ "$build_ms" != "null" ]]; then
 printf "  ║   Build:       %6d ms                 ║\n" "$build_ms"
 fi
 echo "  ╠══════════════════════════════════════════╣"
-echo "  ║   Saved: ~/.nexus6/benchmark-results.json║"
+echo "  ║   Saved: ~/.nexus/benchmark-results.json║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""

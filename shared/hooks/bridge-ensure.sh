@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # bridge-ensure.sh — 세션 시작 시 nexus-bridge 연결 보장
-# nexus6-banner.sh에서 호출됨 (SessionStart 시점)
+# nexus-banner.sh에서 호출됨 (SessionStart 시점)
 # 조건: 프로젝트가 bridge_state.json에 없으면 자동 connect
 # 1세션 1회만 실행 (lockfile 사용)
 set +e
 
-BRIDGE_PY="$HOME/Dev/nexus6/nexus-bridge.py"
-BRIDGE_STATE="$HOME/Dev/nexus6/shared/bridge_state.json"
+BRIDGE_PY="$HOME/Dev/nexus/nexus-bridge.py"
+BRIDGE_STATE="$HOME/Dev/nexus/shared/bridge_state.json"
 
 # 프로젝트명 결정 (bootstrap.sh가 이미 REPO_NAME 설정)
 PROJECT="${REPO_NAME:-$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")}"
 [ -z "$PROJECT" ] && return 0 2>/dev/null && exit 0
 
 # 세션 1회 lockfile — 같은 프로젝트에서 반복 실행 방지
-LOCKFILE="/tmp/nexus6-bridge-ensured-${PROJECT}"
+LOCKFILE="/tmp/nexus-bridge-ensured-${PROJECT}"
 if [ -f "$LOCKFILE" ]; then
   # lockfile이 6시간 이내면 스킵
   if [ "$(uname)" = "Darwin" ]; then
