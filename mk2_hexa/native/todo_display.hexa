@@ -10,40 +10,31 @@ let _project = if a.len() >= 3 { a[2] } else { "nexus" }
 let _output_mode = if a.len() >= 4 { a[3] } else { "hook" }
 
 // ─── JSON에서 tasks 배열 파싱 (split 기반) ───
+// JSON 문자열 필드 추출 — "key": "value" 또는 "key":"value" 모두 지원
+fn jstr(chunk: string, key: string) -> string {
+    // "key": " 또는 "key":" 패턴을 모두 시도
+    let patterns = ["\"" + key + "\":\"", "\"" + key + "\": \"", "\"" + key + "\":  \""]
+    for pat in patterns {
+        if chunk.contains(pat) {
+            return chunk.split(pat)[1].split("\"")[0]
+        }
+    }
+    ""
+}
+
 fn parse_tasks(raw: string) {
-    // 각 task 오브젝트를 분리
     let mut tasks = []
     let chunks = raw.split("\"id\":")
     let mut ci = 1
     while ci < chunks.len() {
         let chunk = chunks[ci]
-        // id
-        let id_str = chunk.split(",")[0].trim()
-        // pri
-        let mut pri = ""
-        if chunk.contains("\"pri\":\"") {
-            pri = chunk.split("\"pri\":\"")[1].split("\"")[0]
-        }
-        // cat
-        let mut cat = ""
-        if chunk.contains("\"cat\":\"") {
-            cat = chunk.split("\"cat\":\"")[1].split("\"")[0]
-        }
-        // task
-        let mut task = ""
-        if chunk.contains("\"task\":\"") {
-            task = chunk.split("\"task\":\"")[1].split("\"")[0]
-        }
-        // status
-        let mut status = "미시작"
-        if chunk.contains("\"status\":\"") {
-            status = chunk.split("\"status\":\"")[1].split("\"")[0]
-        }
-        // eff (effect는 예약어)
-        let mut eff = ""
-        if chunk.contains("\"effect\":\"") {
-            eff = chunk.split("\"effect\":\"")[1].split("\"")[0]
-        }
+        let id_str = chunk.trim().split(",")[0].trim()
+        let pri = jstr(chunk, "pri")
+        let cat = jstr(chunk, "cat")
+        let task = jstr(chunk, "task")
+        let mut status = jstr(chunk, "status")
+        if status == "" { status = "미시작" }
+        let eff = jstr(chunk, "effect")
         tasks = tasks + [[id_str, pri, cat, task, status, eff]]
         ci = ci + 1
     }
@@ -100,10 +91,7 @@ if todo_raw.trim() != "" {
     }
 
     // _meta에서 updated 추출
-    let mut updated = "?"
-    if todo_raw.contains("\"updated\":\"") {
-        updated = todo_raw.split("\"updated\":\"")[1].split("\"")[0]
-    }
+    let updated = if jstr(todo_raw, "updated") != "" { jstr(todo_raw, "updated") } else { "?" }
 
     // ─── 리포트 생성 ───
     let mut lines = []
