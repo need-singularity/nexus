@@ -11,6 +11,28 @@ let shared = nexus_dir + "/shared"
 let blowup_path = nexus_dir + "/mk2_hexa/native/blowup.hexa"
 let seed_engine_path = nexus_dir + "/mk2_hexa/native/seed_engine.hexa"
 
+// ─── lockfile 동시성 제한 (최대 1개) ───
+let lockfile = shared + "/.growth_engine.lock"
+let mut lock_acquired = false
+try {
+    let existing_pid = read_file(lockfile).trim()
+    if existing_pid != "" {
+        let check = exec("kill -0 " + existing_pid + " 2>&1 && echo alive || echo dead").trim()
+        if check.contains("alive") {
+            println("⏭ growth_engine 이미 실행 중 (PID " + existing_pid + ") — 스킵")
+            exit(0)
+        }
+    }
+} catch e {}
+let my_pid = exec("echo $$").trim()
+try {
+    write_file(lockfile, my_pid)
+    lock_acquired = true
+} catch e {
+    println("⚠ lock 획득 실패 — 스킵")
+    exit(0)
+}
+
 let a = args()
 let mut project_arg = if a.len() >= 3 { a[2] } else { "auto" }
 let mut stdin_hint = if a.len() >= 4 { a[3] } else { "" }
@@ -372,3 +394,8 @@ if exhausted {
     println("║  ⏱ max_rounds 도달 (" + to_string(matched_rounds) + ")")
 }
 println("╚═══════════════════════════════════════════════════════════════╝")
+
+// ─── lockfile 해제 ───
+if lock_acquired {
+    try { exec("rm -f " + lockfile) } catch e {}
+}
