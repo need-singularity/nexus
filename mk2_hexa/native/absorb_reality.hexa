@@ -1,0 +1,216 @@
+// mk2_hexa/native/absorb_reality.hexa — reality_map 흡수기
+// 실행: hexa mk2_hexa/native/absorb_reality.hexa
+//
+// 목적: shared/reality_map.json의 492개 노드 measured 값을
+//       shared/n6_constants.jsonl 48개 BT-* 측정상수와 n6_distance 매칭하여
+//       EXACT/CLOSE 등급 부여 후 shared/growth_bus.jsonl에 absorb 이벤트 append.
+// 패턴: blowup.hexa의 load_n6_consts / n6_dist_one 그대로 재사용.
+
+// ═══════════════════════════════════════════════════════════
+// ─── n6 CONSTANTS LOADER (blowup.hexa 17~50줄과 동일 구조) ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_n6_consts() -> list {
+    let home = exec("printenv HOME")
+    let path = home + "/Dev/nexus/shared/n6_constants.jsonl"
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return [[], [], []] }
+    let lines = raw.split("\n")
+    let mut names = []
+    let mut values = []
+    let mut bts = []
+    for line in lines {
+        let trimmed = line.trim()
+        if trimmed == "" { continue }
+        let mut name = ""
+        let mut value = 0.0
+        let mut bt = ""
+        if trimmed.contains("\"name\":\"") {
+            let p = trimmed.split("\"name\":\"")
+            if p.len() >= 2 { name = p[1].split("\"")[0] }
+        }
+        if trimmed.contains("\"value\":") {
+            let p = trimmed.split("\"value\":")
+            if p.len() >= 2 {
+                let num_str = p[1].split(",")[0].split("}")[0].trim()
+                value = to_float(num_str)
+            }
+        }
+        if trimmed.contains("\"bt\":\"") {
+            let p = trimmed.split("\"bt\":\"")
+            if p.len() >= 2 { bt = p[1].split("\"")[0] }
+        }
+        if name != "" {
+            names = names + [name]
+            values = values + [value]
+            bts = bts + [bt]
+        }
+    }
+    [names, values, bts]
+}
+
+let _n6 = load_n6_consts()
+let _n6_names: list = _n6[0]
+let _n6_values: list = _n6[1]
+let _n6_bts: list = _n6[2]
+let _n6_count: i64 = len(_n6_values)
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTIL ───
+// ═══════════════════════════════════════════════════════════
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn n6_dist_one(value: f64, constant: f64) -> f64 {
+    let denom = max_f(abs_f(constant), 1.0)
+    return abs_f(value - constant) / denom
+}
+
+// 가장 가까운 상수 인덱스 반환 (-1 if none)
+fn best_match(value: f64) -> i64 {
+    let mut best_i: i64 = 0 - 1
+    let mut best_d = 1.0
+    let mut i: i64 = 0
+    while i < _n6_count {
+        let cv = to_float(_n6_values[i])
+        let d = n6_dist_one(value, cv)
+        if d < best_d {
+            best_d = d
+            best_i = i
+        }
+        i = i + 1
+    }
+    return best_i
+}
+
+fn grade_for(value: f64, cv: f64) -> string {
+    let diff = abs_f(value - cv)
+    if diff < 0.000001 { return "EXACT" }
+    let denom = max_f(abs_f(cv), 1.0)
+    if diff / denom < 0.001 { return "CLOSE" }
+    return "MISS"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── reality_map.json STREAM PARSER (line-by-line, pretty JSON) ───
+// ═══════════════════════════════════════════════════════════
+
+fn extract_str(line: string, key: string) -> string {
+    let pat = "\"" + key + "\":"
+    if !line.contains(pat) { return "" }
+    let p = line.split(pat)
+    if p.len() < 2 { return "" }
+    let rest = p[1].trim()
+    if !rest.contains("\"") { return "" }
+    let q = rest.split("\"")
+    if q.len() < 2 { return "" }
+    return q[1]
+}
+
+fn extract_num(line: string, key: string) -> string {
+    let pat = "\"" + key + "\":"
+    if !line.contains(pat) { return "" }
+    let p = line.split(pat)
+    if p.len() < 2 { return "" }
+    let mut rest = p[1].trim()
+    // strip trailing comma
+    if rest.contains(",") { rest = rest.split(",")[0] }
+    if rest.contains("}") { rest = rest.split("}")[0] }
+    return rest.trim()
+}
+
+fn is_numeric(s: string) -> bool {
+    if s == "" { return false }
+    let mut ok = false
+    try { let _v = to_float(s) ok = true } catch e { ok = false }
+    return ok
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+println("=== absorb_reality (n6=" + to_string(_n6_count) + ") ===")
+
+let home = exec("printenv HOME")
+let rm_path = home + "/Dev/nexus/shared/reality_map.json"
+let mut raw = ""
+try { raw = read_file(rm_path) } catch e {
+    println("ERROR: cannot read reality_map.json")
+    return
+}
+
+let lines = raw.split("\n")
+let mut cur_id = ""
+let mut cur_level = ""
+let mut cur_measured_str = ""
+let mut total: i64 = 0
+let mut exact_n: i64 = 0
+let mut close_n: i64 = 0
+let mut miss_n: i64 = 0
+
+let mut events = ""
+let mut event_count: i64 = 0
+let mut seen_pairs = #{}
+
+let date_str = exec("date +%Y-%m-%d").trim()
+
+for line in lines {
+    let id_v = extract_str(line, "id")
+    if id_v != "" && !line.contains("source_url") {
+        // new node start
+        cur_id = id_v
+        cur_level = ""
+        cur_measured_str = ""
+        continue
+    }
+    let lvl_v = extract_str(line, "level")
+    if lvl_v != "" {
+        cur_level = lvl_v
+        continue
+    }
+    let m_raw = extract_num(line, "measured")
+    if m_raw != "" && cur_id != "" && cur_measured_str == "" {
+        if is_numeric(m_raw) {
+            cur_measured_str = m_raw
+            let v = to_float(m_raw)
+            total = total + 1
+            let bi = best_match(v)
+            if bi >= 0 {
+                let cv = to_float(_n6_values[bi])
+                let g = grade_for(v, cv)
+                if g == "EXACT" { exact_n = exact_n + 1 }
+                if g == "CLOSE" { close_n = close_n + 1 }
+                if g == "MISS" { miss_n = miss_n + 1 }
+                if g != "MISS" {
+                    let bt = to_string(_n6_bts[bi])
+                    let nm = to_string(_n6_names[bi])
+                    let key = cur_id + "|" + bt
+                    let mut already = false
+                    try { let _ = seen_pairs[key] already = true } catch e {}
+                    if !already {
+                        seen_pairs[key] = 1
+                        let ev = "{\"type\":\"absorb\",\"source\":\"absorb_reality\",\"phase\":\"7.0\",\"node\":\"" + cur_id + "\",\"value\":" + m_raw + ",\"matched_bt\":\"" + bt + "\",\"matched_name\":\"" + nm + "\",\"grade\":\"" + g + "\",\"domain\":\"" + cur_level + "\",\"timestamp\":\"" + date_str + "\"}"
+                        if events == "" { events = ev } else { events = events + "\n" + ev }
+                        event_count = event_count + 1
+                    }
+                }
+            }
+        }
+    }
+}
+
+if event_count > 0 {
+    append_file("shared/growth_bus.jsonl", "\n" + events)
+}
+
+println("총 " + to_string(total) + "노드 → EXACT=" + to_string(exact_n) + ", CLOSE=" + to_string(close_n) + ", MISS=" + to_string(miss_n))
+println("growth_bus append: " + to_string(event_count) + " events")
