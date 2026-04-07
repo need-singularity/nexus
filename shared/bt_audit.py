@@ -86,9 +86,49 @@ RESULT_FILE = os.path.expanduser(
 )
 
 
+# 유니코드 첨자 → ASCII
+SUB_MAP = str.maketrans({
+    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+    '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+})
+
+# 더 넓은 단위 패턴 (괄호 주석/배수/극성 포함)
+UNIT_RE = re.compile(
+    r'\s*(?:\([^)]*\))?\s*'
+    r'(±|~|≈)?\s*'
+    r'(ft|Hz|kHz|MHz|GHz|THz|nm|μm|um|mm|cm|m|km|eV|keV|MeV|GeV|TeV'
+    r'|W|kW|MW|GW|V|kV|MV|A|mA|T|mT|K|s|ms|us|μs|ns|ps|fs'
+    r'|MPa|GPa|Pa|bar|atm|J|kJ|MJ|Wh|kWh|MWh|°C|°F|°|deg|rad'
+    r'|bits?|bytes?|KB|MB|GB|TB|×|x|%'
+    r'|channels?|layers?|classes?|types?|conditions?|properties?'
+    r'|principles?|constraints?|factors?|methods?|values?|axes?|modes?'
+    r'|phases?|levels?|sizes?|rounds?|suites?|stages?|weightings?'
+    r'|rings?|syntaxes?|flanges?|atoms?|bonds?|bases?|nearest|fold)\b'
+    r'.*$', re.IGNORECASE
+)
+
+
+def strip_units(s):
+    """단위/주석/극성 표기 제거"""
+    s = s.strip()
+    s = re.sub(r'^[±~≈]+', '', s).strip()
+    # 괄호 주석 (A100), (Keepin model) 등 제거
+    s = re.sub(r'\s*\([^)]*\)\s*$', '', s).strip()
+    s = UNIT_RE.sub('', s).strip()
+    return s
+
+
 def normalize_expr(expr_str):
     """n=6 수식 문자열을 Python eval 가능한 형태로 정규화"""
     s = expr_str.strip()
+
+    # 마크다운 굵게 제거
+    s = re.sub(r'^\*\*(.*)\*\*$', r'\1', s).strip()
+
+    # 유니코드 첨자/지수 → ASCII
+    s = s.translate(SUB_MAP)
 
     # 빈 문자열이나 설명 텍스트 스킵
     if not s or len(s) > 120:
@@ -102,7 +142,7 @@ def normalize_expr(expr_str):
     ]):
         return None
 
-    # 등호 처리: "128 = 2^7" → 숫자면 숫자, 수식이면 수식
+    # 등호 처리: "128 = 2^7" → 숫자면 숫자, label이면 right side, 수식이면 left
     if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
         parts = s.split('=', 1)
         left, right = parts[0].strip(), parts[1].strip()
@@ -110,7 +150,11 @@ def normalize_expr(expr_str):
             float(left.replace(',', ''))
             s = left.replace(',', '')
         except ValueError:
-            s = left
+            # 좌변이 순수 라벨(식별자만)이면 우변을 사용
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', left):
+                s = right
+            else:
+                s = left
 
     # 유니코드 그리스 문자 → 영문 치환
     greek_map = {
@@ -148,8 +192,8 @@ def normalize_expr(expr_str):
 
     # 공백 연산: "sigma - tau" → "sigma-tau" (eval OK)
 
-    # 단위 제거 (ft, Hz, nm 등)
-    s = re.sub(r'\s*(ft|Hz|kHz|MHz|GHz|nm|mm|cm|m|km|eV|keV|MeV|GeV|W|kW|MW|V|kV|A|T|K|s|ms|us|ns|bits?|bytes?|channels?|layers?|classes?|types?|conditions?|properties?|principles?|constraints?|factors?|methods?|values?|axes?|modes?|phases?|levels?|sizes?|rounds?|suites?|stages?|weightings?|rings?|syntaxes?|flanges?)\b', '', s)
+    # 단위/주석 제거
+    s = strip_units(s)
 
     # "sigma ft" 같은 것에서 뒤에 단위가 남을 수 있음 -> strip
     s = s.strip()
@@ -168,6 +212,50 @@ def normalize_expr(expr_str):
         return None
 
     return s
+
+
+def split_list_expr(expr_str):
+    """리스트/래더 표현을 원소들로 분해. 분해 불가면 None."""
+    s = expr_str.strip()
+    s = re.sub(r'^\*\*(.*)\*\*$', r'\1', s).strip()
+    s = s.translate(SUB_MAP)
+    # {a, b, c} 또는 [a, b, c]
+    m = re.match(r'^[\[\{](.+)[\]\}]$', s)
+    if m:
+        body = m.group(1)
+    elif '\u2192' in s or '->' in s:
+        # 래더: a → b → c
+        body = re.sub(r'->|\u2192', ',', s)
+    elif ',' in s and '(' not in s:
+        body = s
+    else:
+        return None
+    parts = [p.strip() for p in body.split(',') if p.strip()]
+    return parts if len(parts) >= 2 else None
+
+
+def split_list_value(val_str):
+    """Predicted/Known 셀에서 리스트 추출"""
+    if not val_str:
+        return None
+    s = val_str.strip().translate(SUB_MAP)
+    m = re.match(r'^[\[\{](.+)[\]\}]$', s)
+    if m:
+        body = m.group(1)
+    elif '\u2192' in s or '->' in s:
+        body = re.sub(r'->|\u2192', ',', s)
+    elif ',' in s and '(' not in s:
+        body = s
+    else:
+        return None
+    nums = []
+    for p in body.split(','):
+        p = strip_units(p.strip())
+        try:
+            nums.append(float(p))
+        except ValueError:
+            return None
+    return nums if len(nums) >= 2 else None
 
 
 def safe_eval(expr_str):
@@ -380,13 +468,83 @@ def extract_evidence_tables(bt_num, section_text):
     return results
 
 
+_NON_FORMULA_RE = re.compile(
+    r'^(\*\*[^*]+\*\*'
+    r'|[A-Za-z_][A-Za-z0-9_]*'
+    r'|[A-Za-z_][A-Za-z0-9_]*\([^)]*\))$'
+)
+
+
+def is_non_formula(expr_str):
+    s = expr_str.strip().translate(SUB_MAP)
+    if not s:
+        return True
+    if _NON_FORMULA_RE.match(s) and s not in (
+        'sigma', 'tau', 'phi', 'sopfr', 'mu', 'n', 'J2', 'J_2', 'R',
+        'P1', 'P2', 'K_2', 'K_3'
+    ):
+        return True
+    return False
+
+
 def audit_row(bt_num, row):
     """단일 테이블 행 검산"""
     expr_str = row['expression']
     predicted_raw = row['predicted_raw']
     known_raw = row['known_raw']
 
-    # 수식 평가
+    # 0) 리스트/래더 비교 우선 시도
+    parts = split_list_expr(expr_str)
+    if parts is not None:
+        comp_list = []
+        ok = True
+        for p in parts:
+            v, _ = safe_eval(p)
+            if v is None:
+                ok = False
+                break
+            comp_list.append(v)
+        if ok:
+            tgt_list = (
+                split_list_value(predicted_raw)
+                or split_list_value(known_raw)
+            )
+            if tgt_list and len(tgt_list) == len(comp_list):
+                errs = [
+                    abs(c - t) / abs(t) * 100 if t else (0 if c == 0 else float('inf'))
+                    for c, t in zip(comp_list, tgt_list)
+                ]
+                max_err = max(errs)
+                return {
+                    'bt': bt_num,
+                    'expression': expr_str,
+                    'normalized': str(comp_list),
+                    'computed': comp_list,
+                    'target': tgt_list,
+                    'target_source': 'list',
+                    'error_pct': round(max_err, 4) if max_err != float('inf') else 'inf',
+                    'status': 'MATCH' if max_err < 0.01 else 'MISMATCH',
+                }
+            # 타겟 없음 → list NO_TARGET
+            return {
+                'bt': bt_num,
+                'expression': expr_str,
+                'computed': comp_list,
+                'normalized': str(comp_list),
+                'status': 'NO_TARGET',
+                'reason': f'리스트 비교 대상 없음 (predicted={predicted_raw}, known={known_raw})',
+            }
+
+    # 1) 비-수식 라벨 (마크다운, 식별자, 함수형 라벨)
+    if is_non_formula(expr_str):
+        return {
+            'bt': bt_num,
+            'expression': expr_str,
+            'status': 'NO_EXPR',
+            'reason': '수식이 아닌 라벨/이름',
+        }
+
+    # 2) 일반 수식 평가
     computed, normalized = safe_eval(expr_str)
 
     if computed is None:
@@ -464,6 +622,7 @@ def main():
     mismatch_count = 0
     skip_count = 0
     no_target_count = 0
+    no_expr_count = 0
 
     mismatches = []
 
@@ -495,6 +654,8 @@ def main():
                 skip_count += 1
             elif result['status'] == 'NO_TARGET':
                 no_target_count += 1
+            elif result['status'] == 'NO_EXPR':
+                no_expr_count += 1
 
     # 결과 출력
     print(f"\n{'─' * 70}")
@@ -507,6 +668,7 @@ def main():
     print(f"  MATCH (일치):    {match_count}")
     print(f"  MISMATCH (불일치): {mismatch_count}")
     print(f"  SKIP (평가불가):  {skip_count}")
+    print(f"  NO_EXPR (수식아님): {no_expr_count}")
     print(f"  NO_TARGET (비교대상없음): {no_target_count}")
     print(f"  검산 성공률:     {match_count}/{match_count + mismatch_count} "
           f"({match_count / max(1, match_count + mismatch_count) * 100:.1f}%)")
@@ -540,6 +702,7 @@ def main():
             'match': match_count,
             'mismatch': mismatch_count,
             'skip': skip_count,
+            'no_expr': no_expr_count,
             'no_target': no_target_count,
             'accuracy_pct': round(
                 match_count / max(1, match_count + mismatch_count) * 100, 2
