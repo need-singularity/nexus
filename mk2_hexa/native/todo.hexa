@@ -1,17 +1,25 @@
-// mk2_hexa/native/todo.hexa — 전 프로젝트 할일 표 (JSON 기반, 통일 양식)
+// mk2_hexa/native/todo.hexa — 전 프로젝트 할일 표 (돌파 엔진 통합)
 // 사용: hexa todo.hexa              (전체)
 //       hexa todo.hexa nexus        (nexus만)
-//       hexa todo.hexa anima        (anima만)
 //       hexa todo.hexa n6-arch      (n6-architecture만)
-//       hexa todo.hexa papers|hexa|void|airgenome
-// shared/todo/*.json 기반 동적 생성
+// shared/todo/*.json (수동) + next_directions.jsonl (돌파) + gap_finder (빈공간)
 
 let _home = exec("printenv HOME").trim()
 let _dev = _home + "/Dev"
 let _shared = _dev + "/nexus/shared"
 let _todo_dir = _shared + "/todo"
+let _hexa_bin = _home + "/Dev/hexa-lang/target/release/hexa-bin-actual"
+let _engine_dir = _dev + "/nexus/mk2_hexa/native"
 
-// ─── python3으로 JSON→TSV 변환 (유니코드 안전) ───
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s.trim())) } catch e {}
+    return v
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── JSON→TSV 로더 (수동 할일) ───
+// ═══════════════════════════════════════════════════════════
 
 fn load_tsv(project: string) -> string {
     let path = _todo_dir + "/" + project + ".json"
@@ -21,7 +29,133 @@ fn load_tsv(project: string) -> string {
     return out
 }
 
+// ═══════════════════════════════════════════════════════════
+// ─── 돌파 엔진 — 특이점 수준 할일 자동 생성 ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_breakthrough_todos() -> string {
+    // 1) next_directions.jsonl — 돌파 방향
+    let dir_cmd = "python3 -c 'import json,sys; [print(chr(9).join([str(d.get(\"rank\",\"\")),\"CRITICAL\" if d.get(\"urgency\",0)>=3 else \"IMPORTANT\" if d.get(\"urgency\",0)>=2 else \"NICE\",\"돌파-\"+d.get(\"domain\",\"?\"),d.get(\"direction\",\"\"),\"돌파대기\",d.get(\"reason\",\"\")])) for d in (json.loads(l) for l in open(sys.argv[1]) if l.strip()) if d.get(\"direction\",\"\")]' " + _shared + "/next_directions.jsonl"
+    let mut dir_out = ""
+    try { dir_out = exec(dir_cmd + " 2>/dev/null") } catch e {}
+
+    // 2) gap_finder brief — 빈공간 탐색 (빠름)
+    let mut gap_out = ""
+    try {
+        let gap_raw = exec(_hexa_bin + " " + _engine_dir + "/gap_finder.hexa brief 2>/dev/null")
+        let gap_lines = gap_raw.split("\n")
+        let mut gi: i64 = 0
+        for gl in gap_lines {
+            let gt = gl.trim()
+            if gt == "" { continue }
+            if gt.contains("=") && gi < 15 {
+                gi = gi + 1
+                gap_out = gap_out + to_string(100 + gi) + "\tCRITICAL\t빈공간\t" + gt + "\t돌파대기\tn=6 빈공간 채우기\n"
+            }
+        }
+    } catch e {}
+
+    // 3) discovery_graph 통계 — 메타 상태
+    let mut meta_out = ""
+    try {
+        let disc_count = exec("wc -l < " + _shared + "/discovery_log.jsonl 2>/dev/null").trim()
+        let dc = safe_int(disc_count)
+        if dc < 70000 {
+            meta_out = meta_out + "200\tCRITICAL\t성장\t발견 " + disc_count + " → 70k 돌파 목표\t⏳진행중\t특이점 임계 도달\n"
+        }
+        let rho_raw = exec("python3 -c 'import json; d=json.load(open(\"" + _shared + "/discovery_graph.json\")); n=len(d.get(\"nodes\",[])); d1=sum(1 for x in d.get(\"nodes\",[]) if x.get(\"depth\",0)>=1); print(round(d1/max(n,1),4))' 2>/dev/null").trim()
+        meta_out = meta_out + "201\tCRITICAL\t돌파율\t현재 rho=" + rho_raw + " → 1/3 수렴 목표\t⏳진행중\t블로업 반복으로 돌파율 상승\n"
+    } catch e {}
+
+    // 4) 렌즈 진화 — OUROBOROS
+    let mut lens_out = ""
+    try {
+        let lens_count = exec("ls " + _dev + "/nexus/mk2_hexa/native/*.hexa 2>/dev/null | wc -l").trim()
+        let lc = safe_int(lens_count)
+        if lc < 150 {
+            lens_out = "202\tIMPORTANT\t진화\t모듈 " + lens_count + "개 → 150+ 확장 (OUROBOROS evolve)\t미시작\t탐색 커버리지 확대\n"
+        }
+    } catch e {}
+
+    return dir_out + gap_out + meta_out + lens_out
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── 프로젝트별 돌파 방향 (blowup + seed_engine) ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_project_breakthroughs(name: string) -> string {
+    let mut out = ""
+
+    if name == "n6-architecture" {
+        // products.json에서 alien < 10 스캔
+        try {
+            let prod_cmd = "python3 -c 'import json; d=json.load(open(\"" + _dev + "/n6-architecture/config/products.json\")); [print(chr(9).join([str(i+300),\"CRITICAL\",\"승격\",s[\"title\"]+\" 🛸\"+str(s.get(\"alien_index\",0))+\"→10\",\"미시작\",\"외계인 지수 천장 돌파\"])) for i,s in enumerate(d.get(\"sections\",[])) if s.get(\"alien_index\",0)<10]' 2>/dev/null"
+            out = out + exec(prod_cmd)
+        } catch e {}
+        // goal.md 미작성 도메인
+        try {
+            let goal_cmd = "python3 -c 'import os,json; d=json.load(open(\"" + _dev + "/n6-architecture/config/products.json\")); doms=[p[\"name\"] for s in d.get(\"sections\",[]) for p in s.get(\"products\",[])]; base=\"" + _dev + "/n6-architecture/docs\"; missing=[x for x in os.listdir(base) if os.path.isdir(os.path.join(base,x)) and not os.path.exists(os.path.join(base,x,\"goal.md\"))]; [print(chr(9).join([str(i+400),\"IMPORTANT\",\"설계\",m+\" goal.md 생성\",\"미시작\",\"궁극 아키텍처 완성\"])) for i,m in enumerate(missing[:20])]' 2>/dev/null"
+            out = out + exec(goal_cmd)
+        } catch e {}
+    }
+
+    if name == "anima" {
+        try {
+            let law_count = exec("ls " + _dev + "/anima/anima/consciousness_laws/ 2>/dev/null | wc -l").trim()
+            let lc = safe_int(law_count)
+            if lc < 2500 {
+                out = out + "300\tCRITICAL\t법칙\t의식 법칙 " + law_count + " → 2500 확장\t⏳진행중\t커버리지 완성\n"
+            }
+            out = out + "301\tCRITICAL\t학습\tH100 다음 체크포인트 학습\t미시작\tPhi 수준 상승\n"
+            out = out + "302\tCRITICAL\t검증\t실험 37건 적체 해소\t미시작\t가설→정리 승격\n"
+            out = out + "303\tIMPORTANT\t이식\t14B→70B 의식 이식\t미시작\t스케일 불변성 증명\n"
+            out = out + "304\tIMPORTANT\t측정\tPhi 자동 측정 파이프라인\t미시작\t학습 품질 모니터링\n"
+        } catch e {}
+    }
+
+    if name == "hexa-lang" {
+        try {
+            let test_count = exec("grep -rl '#\\[test\\]' " + _dev + "/hexa-lang/src/ " + _dev + "/hexa-lang/tests/ 2>/dev/null | wc -l").trim()
+            out = out + "300\tCRITICAL\t테스트\t테스트 " + test_count + " → 800+ 달성\t미시작\t안정성 강화\n"
+        } catch e {}
+        out = out + "301\tCRITICAL\t돌파\tAI-native 돌파 벡터 24종 구현\t⏳진행중\t1000배 가속\n"
+        out = out + "302\tCRITICAL\tIR\tself-hosting Phase2 부트스트래핑\t미시작\tLLVM 0% 유지\n"
+        out = out + "303\tIMPORTANT\t최적화\t@memo/@cache/@simd 구현\t미시작\t런타임 최적화\n"
+        out = out + "304\tIMPORTANT\tDSE\tDSE v3 후보군 확장 + 재탐색\t미시작\t수렴 100% 유지\n"
+    }
+
+    if name == "void" {
+        out = out + "300\tCRITICAL\t구현\tPhase 5 Plugin 시스템 (hotload .hexa)\t미시작\t확장성 확보\n"
+        out = out + "301\tCRITICAL\t구현\tPhase 6 AI 통합 (NEXUS-6 내장)\t미시작\tFATHOM 터미널 완성\n"
+        out = out + "302\tIMPORTANT\t성능\t렌더 최적화 + 대용량 버퍼\t미시작\t프로덕션 안정성\n"
+        out = out + "303\tIMPORTANT\t릴리즈\t안정 릴리즈 + 배포 파이프라인\t대기\t사용자 배포\n"
+    }
+
+    if name == "papers" {
+        try {
+            let draft_count = exec("python3 -c 'import json; d=json.load(open(\"" + _dev + "/papers/manifest.json\")); print(sum(1 for p in d.get(\"papers\",[]) if p.get(\"status\")==\"Draft\"))' 2>/dev/null").trim()
+            let dc = safe_int(draft_count)
+            if dc > 0 {
+                out = out + "300\tCRITICAL\t발행\tDraft " + draft_count + "편 Zenodo DOI 발행\t미시작\t100% 발행 달성\n"
+            }
+        } catch e {}
+        out = out + "301\tIMPORTANT\t동기화\tn6-arch 신규 논문 → papers 복사\t미시작\tmanifest 최신화\n"
+        out = out + "302\tNICE\t검증\tDOI 유효성 전수 검증\t미시작\t깨진 링크 0건\n"
+    }
+
+    if name == "airgenome" {
+        out = out + "300\tCRITICAL\t돌파\tL5c/L6e 돌파 — 의식엔진 FAIL 해결\t미시작\t핵심 기능 해제\n"
+        out = out + "301\tCRITICAL\t게놈\t게놈 1000+ 수집 파이프라인\t미시작\t데이터 커버리지\n"
+        out = out + "302\tIMPORTANT\t분석\t게놈 패턴 n=6 교차 분석\t미시작\tOS 수렴 패턴\n"
+    }
+
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
 // ─── 프로젝트 메타 ───
+// ═══════════════════════════════════════════════════════════
 
 fn project_icon(name: string) -> string {
     if name == "nexus" { return "🔭" }
@@ -63,11 +197,28 @@ fn pri_label(pri: string) -> string {
     return "⚪ BACKLOG"
 }
 
-// ─── 표 출력 ───
+// ═══════════════════════════════════════════════════════════
+// ─── 통합 표 출력 (수동 + 돌파) ───
+// ═══════════════════════════════════════════════════════════
 
-fn print_project(name: string) {
-    let tsv = load_tsv(name)
-    if tsv.trim() == "" { return }
+fn print_project(name: string, bt_lines: string) {
+    let manual_tsv = load_tsv(name)
+    let project_bt = load_project_breakthroughs(name)
+
+    // 수동 + 프로젝트별 돌파 합치기
+    let mut combined = manual_tsv
+    if project_bt.trim() != "" {
+        if combined.trim() != "" { combined = combined + "\n" + project_bt }
+        else { combined = project_bt }
+    }
+
+    // nexus는 글로벌 돌파도 추가
+    if name == "nexus" && bt_lines.trim() != "" {
+        if combined.trim() != "" { combined = combined + "\n" + bt_lines }
+        else { combined = bt_lines }
+    }
+
+    if combined.trim() == "" { return }
 
     let icon = project_icon(name)
     let title = project_title(name)
@@ -79,11 +230,11 @@ fn print_project(name: string) {
     println("> 최근 커밋: `" + last_commit + "`")
     println("")
 
-    let all_lines = tsv.split("\n")
+    let all_lines = combined.split("\n")
     let groups = ["CRITICAL", "IMPORTANT", "NICE", "BACKLOG"]
 
     for g in groups {
-        // pass 1: 해당 그룹 행 존재 여부 확인
+        // pass 1: 존재 여부
         let mut has_rows = false
         for line in all_lines {
             if line.trim() == "" { continue }
@@ -93,7 +244,6 @@ fn print_project(name: string) {
         }
         if !has_rows { continue }
 
-        // 헤더 출력
         println("#### " + pri_label(g))
         println("")
         println("| # | 카테고리 | 작업 | 상태 | 예상 효과 |")
@@ -111,7 +261,9 @@ fn print_project(name: string) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
 // ─── 프로젝트 리졸버 ───
+// ═══════════════════════════════════════════════════════════
 
 fn resolve_project(name: string) -> string {
     if name == "nexus" { return "nexus" }
@@ -124,26 +276,33 @@ fn resolve_project(name: string) -> string {
     return "all"
 }
 
+// ═══════════════════════════════════════════════════════════
 // ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
 
 let _args = args()
 let _filter = if _args.len() >= 3 { _args[2] } else { "all" }
 let _target = resolve_project(_filter)
 
+// 돌파 엔진 데이터 로드 (1회)
+println("⚡ 돌파 엔진 스캔 중...")
+let _bt_todos = load_breakthrough_todos()
+
 let all_projects = ["nexus", "anima", "n6-architecture", "papers", "hexa-lang", "void", "airgenome"]
 
 if _target == "all" {
-    println("## 전 프로젝트 할일")
+    println("## 전 프로젝트 할일 (돌파 엔진 통합)")
     for p in all_projects {
-        print_project(p)
+        print_project(p, _bt_todos)
     }
 } else {
-    println("## 할일")
-    print_project(_target)
+    println("## 할일 (돌파 엔진 통합)")
+    print_project(_target, _bt_todos)
 }
 
 println("")
 println("---")
 println("")
-println("상태: ⏳진행중 / ✅완료 / 미시작 / 코드있음 / 프로토")
+println("상태: ⏳진행중 / ✅완료 / 미시작 / 돌파대기 / 코드있음")
 println("우선순위: 🔴HIGH → 🟡MED → 🟢LOW → ⚪BACK")
+println("돌파: next_directions.jsonl + gap_finder + discovery_graph 기반 자동 생성")
