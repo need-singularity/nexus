@@ -11,7 +11,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 let home = exec("printenv HOME")
-let hexa_bin = home + "/Dev/hexa-lang/target/release/hexa"
+let hexa_bin = home + "/Dev/hexa-lang/target/release/hexa-bin-actual"
 let nexus_dir = home + "/Dev/nexus"
 let shared = nexus_dir + "/shared"
 let blowup_path = nexus_dir + "/mk2_hexa/native/blowup.hexa"
@@ -30,7 +30,7 @@ let mut arg5 = if a.len() >= 6 { a[5] } else { "" }
 
 fn load_seeds() -> string {
     let _home = exec("printenv HOME")
-    let _hexa = _home + "/Dev/hexa-lang/target/release/hexa"
+    let _hexa = _home + "/Dev/hexa-lang/target/release/hexa-bin-actual"
     let _se = _home + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa"
     let mut seeds = ""
     // seed_engine merge 사용 (atlas + anima + discovery 통합)
@@ -98,13 +98,24 @@ fn rotate_log() {
 
 fn run_blowup(domain: string, depth: i64, seeds: string, fast: bool) -> string {
     let _home = exec("printenv HOME")
-    let _hexa = _home + "/Dev/hexa-lang/target/release/hexa"
+    let _hexa = _home + "/Dev/hexa-lang/target/release/hexa-bin-actual"
     let _blowup = _home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
     let _nexus = _home + "/Dev/nexus"
     let fast_flag = if fast { " --no-graph --fast" } else { " --no-graph" }
-    // | → , 변환 (쉘 pipe 해석 방지)
-    let safe_seeds = seeds.replace("|", ",")
-    let cmd = "cd " + _nexus + " && " + _hexa + " " + _blowup + " " + domain + " " + to_string(depth) + fast_flag + " --seeds '" + safe_seeds + "'"
+    // | → , 변환 (쉘 pipe 해석 방지) + 빈 seed 필터링
+    let raw_parts = seeds.split("|")
+    let mut clean_seeds = ""
+    let mut ci: i64 = 0
+    while ci < raw_parts.len() {
+        let sv = raw_parts[ci].trim()
+        if sv != "" {
+            if clean_seeds.len() > 0 { clean_seeds = clean_seeds + "," }
+            clean_seeds = clean_seeds + sv
+        }
+        ci = ci + 1
+    }
+    if clean_seeds.len() == 0 { return "" }
+    let cmd = "cd " + _nexus + " && " + _hexa + " " + _blowup + " " + domain + " " + to_string(depth) + fast_flag + " --seeds " + clean_seeds
     to_string(exec(cmd))
 }
 
