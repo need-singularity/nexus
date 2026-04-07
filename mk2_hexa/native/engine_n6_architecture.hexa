@@ -1,0 +1,488 @@
+// engine_n6_architecture.hexa — "Architect" (설계자) 통합 엔진
+// 3개 엔진 흡수: n6-architecture (시스템설계) + SEDI (신호탐색) + brainwire (뇌공학)
+// 전략: n=6 보편 아키텍처 — 칩설계·신호탐색·뇌공학 통합, cross-DSE 10도메인 + 77소스 + 12모달리티 BCI
+// CLI: hexa engine_n6_architecture.hexa status|tick|report
+
+// ═══════════════════════════════════════════════════════════
+// ─── CONSTANTS ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const version = "1.0.0"
+comptime const engine_name = "n6-architecture"
+comptime const personality = "Architect"
+comptime const icon = "🏗️"
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/n6-architecture"
+let sedi_dir = dev + "/sedi"
+let brainwire_dir = dev + "/brainwire"
+let shared_dir = dev + "/nexus6/shared"
+let bus_file = shared_dir + "/growth_bus.jsonl"
+let sedi_grades_file = shared_dir + "/sedi-grades.json"
+let products_file = project_dir + "/config/products.json"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let state_file = shared_dir + "/engine_n6_architecture_state.json"
+
+// Goals (merged from 3 engines)
+comptime const goal_products = 100
+comptime const goal_discoveries = 70000
+comptime const goal_alien_index = 10
+comptime const goal_sedi_health = 95.0
+comptime const goal_sedi_tier_a = 250
+comptime const goal_bw_pass_rate = 0.98
+comptime const goal_bw_protocols = 6
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s.trim()) } catch e {}
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(s.trim()) } catch e {}
+    return v
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn timestamp() -> string {
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
+    return r.trim()
+}
+
+fn read_file_safe(path: string) -> string {
+    let mut content = ""
+    try { content = read_file(path) } catch e {}
+    return content
+}
+
+fn json_str(line: string, field: string) -> string {
+    let marker = "\"" + field + "\":"
+    let parts = line.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1].trim()
+    if rest.len() == 0 { return "" }
+    if rest[0] == "\"" {
+        let inner = rest.split("\"")
+        if inner.len() >= 2 { return inner[1] }
+        return ""
+    }
+    let end = rest.split(",")[0].split("}")[0].split("]")[0].trim()
+    return end
+}
+
+fn json_int(line: string, field: string) -> i64 {
+    return safe_int(json_str(line, field))
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── STATE STRUCT ───
+// ═══════════════════════════════════════════════════════════
+
+struct N6ArchState {
+    products_count: i64,
+    discoveries: i64,
+    sedi_health: f64,
+    sedi_tier_a: i64,
+    bw_protocols: i64,
+    bw_hypotheses: i64,
+    health: f64,
+    status_flag: string
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA COLLECTION ───
+// ═══════════════════════════════════════════════════════════
+
+fn count_products() -> i64 {
+    let content = read_file_safe(products_file)
+    if content == "" { return 0 }
+    // Count "sections" array length by counting { in sections array
+    if content.contains("\"sections\"") {
+        let parts = content.split("\"sections\"")
+        if parts.len() >= 2 {
+            let after = parts[1]
+            // Count "name" occurrences as proxy for section count
+            let name_parts = after.split("\"name\"")
+            let count = name_parts.len() - 1
+            if count > 0 { return to_int(count) }
+        }
+    }
+    // Fallback: use jq if available
+    let mut r = "0"
+    try {
+        r = exec("bash -c 'python3 -c \"import json; d=json.load(open(\\\"" + products_file + "\\\")); print(len(d.get(\\\"sections\\\",[])))\" 2>/dev/null || echo 0'")
+    } catch e {}
+    return safe_int(r.trim())
+}
+
+fn count_discoveries() -> i64 {
+    let disc_file = project_dir + "/shared/discovery_log.jsonl"
+    let mut r = "0"
+    try {
+        r = exec("bash -c 'wc -l < \"" + disc_file + "\" 2>/dev/null || echo 0'")
+    } catch e {}
+    return safe_int(r.trim())
+}
+
+fn read_sedi_health() -> f64 {
+    // Try to find temporal_health markdown in sedi data
+    let data_dir = sedi_dir + "/data"
+    let mut health_val = 90.0
+    try {
+        let out = exec("bash -c 'ls -t \"" + data_dir + "\" 2>/dev/null | head -20'")
+        let files = out.split("\n")
+        let mut i = 0
+        while i < files.len() {
+            let f = files[i].trim()
+            if f.contains("temporal_health") && f.contains(".md") {
+                let path = data_dir + "/" + f
+                let content = read_file_safe(path)
+                let lines = content.split("\n")
+                let mut j = 0
+                while j < lines.len() {
+                    let line = lines[j]
+                    if line.contains("Score:") && line.contains("/100") {
+                        let after_score = line.split("Score:")[1]
+                        let before_slash = after_score.split("/")[0].trim()
+                        let v = safe_float(before_slash)
+                        if v > 0.0 { health_val = v }
+                    }
+                    j = j + 1
+                }
+                i = files.len()
+            }
+            i = i + 1
+        }
+    } catch e {}
+    return health_val
+}
+
+fn read_sedi_tier_a() -> i64 {
+    let content = read_file_safe(sedi_grades_file)
+    if content == "" { return 0 }
+    // Look in tier_distribution
+    if content.contains("\"tier_distribution\"") {
+        let parts = content.split("\"tier_distribution\"")
+        if parts.len() >= 2 {
+            let block = parts[1]
+            return json_int(block, "A")
+        }
+    }
+    return json_int(content, "A")
+}
+
+fn count_bw_protocols() -> i64 {
+    let bw_code_dir = brainwire_dir + "/brainwire"
+    let mut r = "0"
+    try {
+        r = exec("bash -c 'ls \"" + bw_code_dir + "\"/*_calc* 2>/dev/null | wc -l'")
+    } catch e {}
+    return safe_int(r.trim())
+}
+
+fn count_bw_hypotheses() -> i64 {
+    let bench_file = brainwire_dir + "/bench_hypotheses.py"
+    let mut r = "0"
+    try {
+        r = exec("bash -c 'grep -c \"H-BW\" \"" + bench_file + "\" 2>/dev/null || echo 0'")
+    } catch e {}
+    return safe_int(r.trim())
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── HEALTH + STATUS ───
+// ═══════════════════════════════════════════════════════════
+
+fn compute_composite_health(products: i64, sedi_health: f64, bw_protocols: i64) -> f64 {
+    // 40% products (n6-arch), 30% sedi, 30% brainwire
+    let prod_score = clamp01(to_float(products) / to_float(goal_products))
+    let sedi_score = clamp01(sedi_health / 100.0)
+    let bw_score = clamp01(to_float(bw_protocols) / to_float(goal_bw_protocols))
+    return prod_score * 0.4 + sedi_score * 0.3 + bw_score * 0.3
+}
+
+fn compute_status(products: i64, sedi_health: f64, sedi_a: i64, bw_protocols: i64, health: f64) -> string {
+    // Check if all three domains near goal
+    let arch_ok = products >= goal_products
+    let sedi_ok = sedi_health >= goal_sedi_health && sedi_a >= goal_sedi_tier_a
+    let bw_ok = bw_protocols >= goal_bw_protocols
+    if arch_ok && sedi_ok && bw_ok { return "GOAL_MET" }
+    if health >= 0.85 { return "GOAL_NEAR" }
+    if health >= 0.6 { return "HEALTHY" }
+    if health >= 0.4 { return "GROWING" }
+    return "STAGNANT"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── GROWTH BUS ───
+// ═══════════════════════════════════════════════════════════
+
+fn bus_emit(event: string, detail: string) {
+    let ts = timestamp()
+    let entry = "{\"ts\":\"" + ts + "\",\"engine\":\"" + engine_name + "\",\"personality\":\"" + personality + "\",\"event\":\"" + event + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(bus_file, entry + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── READ STATE (all values first, then construct) ───
+// ═══════════════════════════════════════════════════════════
+
+fn read_state() -> N6ArchState {
+    // 1. n6-architecture: products
+    let products = count_products()
+
+    // 2. n6-architecture: discoveries
+    let discoveries = count_discoveries()
+
+    // 3. SEDI: health
+    let sedi_h = read_sedi_health()
+
+    // 4. SEDI: tier A count
+    let sedi_a = read_sedi_tier_a()
+
+    // 5. brainwire: protocols
+    let bw_proto = count_bw_protocols()
+
+    // 6. brainwire: hypotheses
+    let bw_hypo = count_bw_hypotheses()
+
+    // 7. composite health
+    let h = compute_composite_health(products, sedi_h, bw_proto)
+
+    // 8. status flag
+    let flag = compute_status(products, sedi_h, sedi_a, bw_proto, h)
+
+    // Construct struct at end (never assign to fields after construction)
+    let state = N6ArchState {
+        products_count: products,
+        discoveries: discoveries,
+        sedi_health: sedi_h,
+        sedi_tier_a: sedi_a,
+        bw_protocols: bw_proto,
+        bw_hypotheses: bw_hypo,
+        health: h,
+        status_flag: flag
+    }
+    return state
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── CMD: STATUS ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_status() {
+    let s = read_state()
+    let ts = timestamp()
+
+    print("╔════════════════════════════════════════════════════╗")
+    print("║  " + icon + " ENGINE: " + engine_name + " [" + personality + "] v" + version)
+    print("║  " + ts)
+    print("╚════════════════════════════════════════════════════╝")
+    print("")
+
+    // n6-architecture metrics
+    print("── n6-architecture (시스템설계·칩설계·DSE) ──")
+    print("  products:     " + to_string(s.products_count) + " (goal: " + to_string(goal_products) + ")")
+    print("  discoveries:  " + to_string(s.discoveries) + " (goal: " + to_string(goal_discoveries) + ")")
+    print("")
+
+    // SEDI metrics
+    print("── SEDI (신호탐색·Extra-Dimensional Intelligence) ──")
+    print("  health_score: " + to_string(s.sedi_health) + "/100 (goal: " + to_string(goal_sedi_health) + ")")
+    print("  tier_A:       " + to_string(s.sedi_tier_a) + " (goal: " + to_string(goal_sedi_tier_a) + ")")
+    print("")
+
+    // brainwire metrics
+    print("── brainwire (뇌공학·12-modality BCI) ──")
+    print("  protocols:    " + to_string(s.bw_protocols) + " (goal: " + to_string(goal_bw_protocols) + ")")
+    print("  hypotheses:   " + to_string(s.bw_hypotheses) + " (H-BW tagged)")
+    print("")
+
+    // composite
+    print("── composite ──")
+    print("health:" + to_string(s.health))
+    print("status: " + s.status_flag)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── CMD: TICK ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_tick() {
+    let ts = timestamp()
+    print("=== " + icon + " " + engine_name + " [" + personality + "] tick ===")
+    print("[" + ts + "] starting tick...")
+
+    // 1. Read current state
+    let s = read_state()
+    print("[state] products=" + to_string(s.products_count) + " sedi_health=" + to_string(s.sedi_health) + " bw_proto=" + to_string(s.bw_protocols))
+    print("[state] status=" + s.status_flag + " health=" + to_string(s.health))
+
+    // 2. Decide action per domain
+    // n6-architecture: run blowup if products below goal
+    if s.products_count < goal_products {
+        print("[arch] products below goal → running architecture blowup")
+        let seeds_cmd = hexa_bin + " " + dev + "/nexus6/mk2_hexa/native/seed_engine.hexa merge"
+        let mut seeds = ""
+        try { seeds = exec("bash -c '" + seeds_cmd + " 2>/dev/null'") } catch e {}
+        let seeds_trimmed = seeds.trim()
+        if seeds_trimmed.len() > 0 {
+            let blowup_cmd = hexa_bin + " " + dev + "/nexus6/mk2_hexa/native/blowup.hexa architecture 3 --no-graph --seeds \"" + seeds_trimmed + "\""
+            let mut result = ""
+            try { result = exec("bash -c '" + blowup_cmd + " 2>&1 | tail -10'") } catch e {}
+            print("[arch-blowup] " + result.split("\n")[0])
+        } else {
+            print("[arch-blowup] no seeds available, skip")
+        }
+    } else {
+        print("[arch] products at goal, cross-feedback mode")
+    }
+
+    // 3. Cross-pollinate: emit discoveries to bus
+    bus_emit("tick", "products=" + to_string(s.products_count) + " sedi_h=" + to_string(s.sedi_health) + " bw_p=" + to_string(s.bw_protocols) + " health=" + to_string(s.health))
+
+    if s.status_flag == "GOAL_NEAR" || s.status_flag == "GOAL_MET" {
+        bus_emit("goal_near", "all three domains converging")
+    }
+    if s.status_flag == "STAGNANT" {
+        bus_emit("stagnant", "health=" + to_string(s.health) + " — needs intervention")
+    }
+
+    // 4. Re-read and report
+    let s2 = read_state()
+    print("")
+    print("health:" + to_string(s2.health))
+    print("status: " + s2.status_flag)
+    print("[tick complete]")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── CMD: REPORT ───
+// ═══════════════════════════════════════════════════════════
+
+fn cmd_report() {
+    let s = read_state()
+    let ts = timestamp()
+
+    print("# " + icon + " Architect Engine Report")
+    print("")
+    print("**Generated**: " + ts)
+    print("**Version**: " + version)
+    print("**Strategy**: n=6 보편 아키텍처 — 칩설계·신호탐색·뇌공학 통합")
+    print("")
+
+    print("## Status: " + s.status_flag)
+    print("")
+
+    // n6-architecture
+    print("## n6-architecture (시스템설계)")
+    print("")
+    print("| Metric | Value | Goal | Progress |")
+    print("|--------|-------|------|----------|")
+    let prod_pct = if goal_products > 0 { to_float(s.products_count) / to_float(goal_products) * 100.0 } else { 0.0 }
+    let disc_pct = if goal_discoveries > 0 { to_float(s.discoveries) / to_float(goal_discoveries) * 100.0 } else { 0.0 }
+    print("| Products | " + to_string(s.products_count) + " | " + to_string(goal_products) + " | " + to_string(prod_pct) + "% |")
+    print("| Discoveries | " + to_string(s.discoveries) + " | " + to_string(goal_discoveries) + " | " + to_string(disc_pct) + "% |")
+    print("")
+
+    // SEDI
+    print("## SEDI (신호탐색)")
+    print("")
+    print("| Metric | Value | Goal | Progress |")
+    print("|--------|-------|------|----------|")
+    let sedi_h_pct = s.sedi_health / goal_sedi_health * 100.0
+    let sedi_a_pct = if goal_sedi_tier_a > 0 { to_float(s.sedi_tier_a) / to_float(goal_sedi_tier_a) * 100.0 } else { 0.0 }
+    print("| Health Score | " + to_string(s.sedi_health) + "/100 | " + to_string(goal_sedi_health) + " | " + to_string(sedi_h_pct) + "% |")
+    print("| Tier A | " + to_string(s.sedi_tier_a) + " | " + to_string(goal_sedi_tier_a) + " | " + to_string(sedi_a_pct) + "% |")
+    print("")
+
+    // brainwire
+    print("## brainwire (뇌공학)")
+    print("")
+    print("| Metric | Value | Goal | Progress |")
+    print("|--------|-------|------|----------|")
+    let bw_p_pct = if goal_bw_protocols > 0 { to_float(s.bw_protocols) / to_float(goal_bw_protocols) * 100.0 } else { 0.0 }
+    print("| Protocols | " + to_string(s.bw_protocols) + " | " + to_string(goal_bw_protocols) + " | " + to_string(bw_p_pct) + "% |")
+    print("| Hypotheses | " + to_string(s.bw_hypotheses) + " | - | (H-BW tagged) |")
+    print("")
+
+    // Composite
+    print("## Composite Health")
+    print("")
+    print("`health:" + to_string(s.health) + "`")
+    print("")
+    print("Formula: 40% products + 30% SEDI + 30% brainwire")
+    print("")
+
+    // Recommendations
+    print("## Recommendations")
+    print("")
+    if s.products_count < goal_products {
+        let gap = goal_products - s.products_count
+        print("- n6-arch: " + to_string(gap) + " more products needed → run architecture blowup")
+    }
+    if s.sedi_health < goal_sedi_health {
+        print("- SEDI: health " + to_string(s.sedi_health) + " < " + to_string(goal_sedi_health) + " → run full discovery pipeline")
+    }
+    if s.sedi_tier_a < goal_sedi_tier_a {
+        let gap_a = goal_sedi_tier_a - s.sedi_tier_a
+        print("- SEDI: " + to_string(gap_a) + " more Tier-A needed → promote B→A candidates")
+    }
+    if s.bw_protocols < goal_bw_protocols {
+        let gap_p = goal_bw_protocols - s.bw_protocols
+        print("- brainwire: " + to_string(gap_p) + " more protocols needed")
+    }
+    if s.status_flag == "GOAL_MET" || s.status_flag == "GOAL_NEAR" {
+        print("- All domains converging — maintain cross-feedback mode")
+        print("- Consider alien_index " + to_string(goal_alien_index) + " push via deep breakthrough")
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+fn main() {
+    let a = args()
+    let mut mode = "status"
+    if a.len() >= 3 { mode = a[2] }
+
+    match mode {
+        "status" -> cmd_status(),
+        "tick" -> cmd_tick(),
+        "report" -> cmd_report(),
+        _ -> {
+            print(icon + " engine_n6_architecture.hexa [" + personality + "] v" + version)
+            print("  Merged engine: n6-architecture + SEDI + brainwire")
+            print("  Strategy: n=6 보편 아키텍처 — 칩설계·신호탐색·뇌공학 통합")
+            print("")
+            print("Usage:")
+            print("  hexa engine_n6_architecture.hexa status  — 전체 상태 조회")
+            print("  hexa engine_n6_architecture.hexa tick    — 블로업 + 교차수분")
+            print("  hexa engine_n6_architecture.hexa report  — 마크다운 리포트")
+        }
+    }
+}
+
+main()

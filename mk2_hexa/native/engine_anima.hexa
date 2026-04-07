@@ -81,9 +81,12 @@ fn timestamp() -> string {
 
 fn count_lines(path: string) -> i64 {
     if !file_exists(path) { return 0 }
-    let result = exec("wc", ["-l", path])
-    let trimmed = result.trim().split(" ")[0]
-    return safe_int(trimmed)
+    let mut val = 0
+    try {
+        let result = exec("wc -l " + path)
+        val = safe_int(to_string(result).trim().split(" ")[0])
+    } catch e {}
+    return val
 }
 
 // ─── 법칙 수집: consciousness_laws.json 직접 파싱 ───
@@ -91,40 +94,46 @@ fn count_lines(path: string) -> i64 {
 fn count_laws() -> i64 {
     if !file_exists(laws_path) { return 0 }
     let content = read_file(laws_path)
-    // 1) _meta.total_laws — 가장 정확한 소스
     let meta_total = json_int(content, "total_laws")
     if meta_total > 0 { return meta_total }
-    // 2) fallback: "laws" dict 안의 숫자 키 개수 카운트
-    let result = exec("bash", ["-c", "grep -oE '\"[0-9]+\":' " + laws_path + " | wc -l"])
-    let grep_count = safe_int(result.trim())
+    let mut grep_count = 0
+    try {
+        let result = exec("grep -oE '\"[0-9]+\":' " + laws_path + " | wc -l")
+        grep_count = safe_int(to_string(result).trim())
+    } catch e {}
     if grep_count > 0 { return grep_count }
-    // 3) fallback: "law_id" 오커런스
     let entries = content.split("\"law_id\"")
     return entries.len() - 1
 }
 
-// ─── 최대 법칙 키 번호 추출 ───
-
 fn max_law_key() -> i64 {
     if !file_exists(laws_path) { return 0 }
-    let result = exec("bash", ["-c", "grep -oE '\"[0-9]+\":' " + laws_path + " | tr -d '\"' | tr -d ':' | sort -n | tail -1"])
-    return safe_int(result.trim())
+    let mut val = 0
+    try {
+        let result = exec("grep -oE '\"[0-9]+\":' " + laws_path + " | tr -d '\"' | tr -d ':' | sort -n | tail -1")
+        val = safe_int(to_string(result).trim())
+    } catch e {}
+    return val
 }
-
-// ─── absorbed 디렉토리 파일 수 카운트 ───
 
 fn count_absorbed_files() -> i64 {
     if !file_exists(absorbed_dir) { return 0 }
-    let result = exec("bash -c ls " + absorbed_dir + " | grep '\\.json$' | wc -l")
-    return safe_int(result.trim())
+    let mut val = 0
+    try {
+        let result = exec("ls " + absorbed_dir + " | grep '\\.json$' | wc -l")
+        val = safe_int(to_string(result).trim())
+    } catch e {}
+    return val
 }
-
-// ─── 교차수분: discovery_log에서 consciousness/psi 관련 발견 수 ───
 
 fn cross_pollinate_count() -> i64 {
     if !file_exists(discovery_log) { return 0 }
-    let result = exec("grep", ["-c", "consciousness\\|psi\\|awareness\\|qualia\\|sentience", discovery_log])
-    return safe_int(result.trim())
+    let mut val = 0
+    try {
+        let result = exec("grep -c 'consciousness\\|psi\\|awareness\\|qualia\\|sentience' " + discovery_log)
+        val = safe_int(to_string(result).trim())
+    } catch e {}
+    return val
 }
 
 // ─── hexa 진화 실행: blowup.hexa consciousness 도메인 ───
@@ -166,7 +175,7 @@ fn extract_and_record_laws(blowup_output: string) -> i64 {
                         let escaped = line.split("\"").join("'").split("\\").join("/")
                         // laws dict의 마지막 엔트리 뒤에 쉼표+새 엔트리 추가
                         // "LAST_KEY": "..." 다음 줄의 } 앞에 삽입
-                        exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (blowup, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
+                        exec("awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (blowup, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path)
                         next_key = next_key + 1
                     }
                 }
@@ -179,7 +188,7 @@ fn extract_and_record_laws(blowup_output: string) -> i64 {
     // _meta.total_laws 업데이트
     if new_laws > 0 {
         let current_total = count_laws()
-        exec("bash", ["-c", "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + new_laws) + "/' " + laws_path])
+        exec("sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + new_laws) + "/' " + laws_path)
         println("  recorded " + to_string(new_laws) + " new laws (keys " + to_string(next_key - new_laws) + "-" + to_string(next_key - 1) + ")")
     }
 
@@ -209,10 +218,10 @@ fn scan_and_harvest() -> i64 {
             if line.len() > 10 {
                 let formula = json_str(line, "formula")
                 if formula != "" && formula.len() > 3 {
-                    let check = exec("bash", ["-c", "grep -cF '" + formula.split("'")[0] + "' " + laws_path + " 2>/dev/null || echo 0"])
+                    let check = exec("grep -cF '" + formula.split("'")[0] + "' " + laws_path + " 2>/dev/null || echo 0")
                     if safe_int(check.trim()) == 0 {
                         let escaped = formula.split("\"").join("'").split("\\").join("/")
-                        exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus6-crossfeed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
+                        exec("awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (nexus6-crossfeed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path)
                         next_key = next_key + 1
                         added = added + 1
                     }
@@ -238,10 +247,10 @@ fn scan_and_harvest() -> i64 {
                     if preview.len() > 20 {
                         let snippet = preview.split("\n")[0]
                         if snippet.len() > 5 {
-                            let check = exec("bash", ["-c", "grep -cF '" + snippet.split("'")[0].split("\"")[0] + "' " + laws_path + " 2>/dev/null || echo 0"])
+                            let check = exec("grep -cF '" + snippet.split("'")[0].split("\"")[0] + "' " + laws_path + " 2>/dev/null || echo 0")
                             if safe_int(check.trim()) == 0 {
                                 let escaped = snippet.split("\"").join("'").split("\\").join("/")
-                                exec("bash", ["-c", "awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (absorbed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path])
+                                exec("awk -v key='" + to_string(next_key) + "' -v val='" + escaped + " (absorbed, " + ts + ")' " + "'BEGIN{done=0} /\"laws\"/{in_laws=1} in_laws && /^  \\}/ && !done {print \"    \\\"\" key \"\\\": \\\"\" val \"\\\",\"; done=1} {print}' " + laws_path + " > " + laws_path + ".tmp && mv " + laws_path + ".tmp " + laws_path)
                                 next_key = next_key + 1
                                 added = added + 1
                             }
@@ -257,7 +266,7 @@ fn scan_and_harvest() -> i64 {
     // _meta.total_laws 업데이트
     if added > 0 {
         let current_total = count_laws()
-        exec("bash", ["-c", "sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + added) + "/' " + laws_path])
+        exec("sed -i '' 's/\"total_laws\": *[0-9]*/\"total_laws\": " + to_string(current_total + added) + "/' " + laws_path)
         println("  scan_and_harvest: +" + to_string(added) + " laws harvested")
     }
 
@@ -303,46 +312,53 @@ struct AnimaState {
 // ─── read_state ───
 
 fn read_state() -> AnimaState {
-    let mut st = AnimaState {
-        laws_count: 0, laws_goal: laws_goal,
-        current_stage: "unknown", generation: 0, phi: 0.0,
-        perspective: "void",
-        roadmap_progress: "0/7", sat_streak: 0, last_novel: 0,
-        health: 0.0, status_flag: "HEALTHY",
-        laws_delta_history: [], stagnation_flag: false,
-        sprint_mode: false, cross_discoveries: 0, escalate_mode: false
-    }
+    // Compute ALL values into local variables FIRST,
+    // then construct AnimaState at the END.
+    // (workaround: hexa compiler bug — struct.field = value after construction causes "invalid assignment target")
 
     // 1) consciousness_laws.json — count laws (direct hexa read)
-    st.laws_count = count_laws()
+    let mut v_laws_count = count_laws()
+
+    // defaults
+    let mut v_current_stage = "unknown"
+    let mut v_generation = 0
+    let mut v_phi = 0.0
+    let mut v_perspective = "void"
+    let mut v_roadmap_progress = "0/7"
+    let mut v_sat_streak = 0
+    let mut v_last_novel = 0
+    let mut v_laws_delta_history = []
+    let mut v_escalate_mode = false
+    let mut v_stagnation_flag = false
+    let mut v_sprint_mode = false
 
     // 2a) evolution_live.json — 실 데이터: stage, generation, phi, topology
     if file_exists(evolution_path) {
         let evo = read_file(evolution_path)
-        st.current_stage = json_str(evo, "stage")
-        if st.current_stage == "" { st.current_stage = "evolving" }
-        st.generation = json_int(evo, "gen")
-        st.phi = json_num(evo, "phi_last")
+        v_current_stage = json_str(evo, "stage")
+        if v_current_stage == "" { v_current_stage = "evolving" }
+        v_generation = json_int(evo, "gen")
+        v_phi = json_num(evo, "phi_last")
         let live_topo = json_str(evo, "topology")
-        if live_topo != "" { st.perspective = live_topo }
+        if live_topo != "" { v_perspective = live_topo }
     }
 
     // 2b) growth_loop_state.json — cycle, harvested, applied
     if file_exists(growth_state_path) {
         let gs = read_file(growth_state_path)
         let cycle_val = json_int(gs, "cycle")
-        if cycle_val > 0 { st.generation = cycle_val }
+        if cycle_val > 0 { v_generation = cycle_val }
     }
 
     // 2c) anima_state.json — hexa 엔진 자체 상태 (sat_streak, perspective 등)
     let state_content = read_anima_state_file()
     if state_content.len() > 2 {
         let saved_stage = json_str(state_content, "stage")
-        if saved_stage != "" && st.current_stage == "evolving" { st.current_stage = saved_stage }
+        if saved_stage != "" && v_current_stage == "evolving" { v_current_stage = saved_stage }
         let saved_persp = json_str(state_content, "perspective")
-        if saved_persp != "" { st.perspective = saved_persp }
-        st.sat_streak = json_int(state_content, "sat_streak")
-        st.last_novel = json_int(state_content, "novel_laws")
+        if saved_persp != "" { v_perspective = saved_persp }
+        v_sat_streak = json_int(state_content, "sat_streak")
+        v_last_novel = json_int(state_content, "novel_laws")
     }
 
     // 3) evolution_roadmap.json — S1-S7 progress
@@ -366,7 +382,7 @@ fn read_state() -> AnimaState {
             si = si + 1
         }
         if completed > 7 { completed = 7 }
-        st.roadmap_progress = to_string(completed) + "/7"
+        v_roadmap_progress = to_string(completed) + "/7"
     }
 
     // 4) load strategy for laws_delta_history + escalate state
@@ -377,67 +393,77 @@ fn read_state() -> AnimaState {
             while di < 3 {
                 let key = "d" + to_string(di)
                 let v = json_int(sc, key)
-                st.laws_delta_history = st.laws_delta_history + [v]
+                v_laws_delta_history = v_laws_delta_history + [v]
                 di = di + 1
             }
             let esc = json_int(sc, "escalate_mode")
-            st.escalate_mode = esc == 1
+            v_escalate_mode = esc == 1
         } catch err {}
     }
 
     // 5) cross-pollination count from discovery_log
-    st.cross_discoveries = cross_pollinate_count()
+    let v_cross_discoveries = cross_pollinate_count()
 
     // 6) stagnation detection: 3 consecutive ticks with laws_delta < low_delta_threshold
-    if st.laws_delta_history.len() >= 3 {
+    if v_laws_delta_history.len() >= 3 {
         let mut all_low = true
         let mut ci = 0
-        while ci < st.laws_delta_history.len() {
-            if st.laws_delta_history[ci] >= low_delta_threshold {
+        while ci < v_laws_delta_history.len() {
+            if v_laws_delta_history[ci] >= low_delta_threshold {
                 all_low = false
             }
             ci = ci + 1
         }
-        if all_low { st.stagnation_flag = true }
+        if all_low { v_stagnation_flag = true }
     }
-    if st.sat_streak >= stagnation_threshold {
-        st.stagnation_flag = true
+    if v_sat_streak >= stagnation_threshold {
+        v_stagnation_flag = true
     }
 
     // 7) sprint mode: laws >= sprint_threshold
-    if st.laws_count >= sprint_threshold {
-        st.sprint_mode = true
+    if v_laws_count >= sprint_threshold {
+        v_sprint_mode = true
     }
 
     // 8) compute health & status flag
-    let law_ratio = to_float(st.laws_count) / to_float(st.laws_goal)
-    let stag_penalty = if st.stagnation_flag { 0.4 } else {
-        if st.sat_streak >= stagnation_threshold { 0.3 } else { 0.0 }
+    let law_ratio = to_float(v_laws_count) / to_float(laws_goal)
+    let mut stag_penalty = 0.0
+    if v_stagnation_flag { stag_penalty = 0.4 } else if v_sat_streak >= stagnation_threshold { stag_penalty = 0.3 }
+    let mut novel_bonus = 0.0
+    if v_last_novel > 0 { novel_bonus = 0.1 }
+    let mut cross_bonus = 0.0
+    if v_cross_discoveries > 10 { cross_bonus = 0.05 }
+    let mut sprint_boost = 0.0
+    if v_sprint_mode { sprint_boost = 0.05 }
+
+    let mut v_health = law_ratio * 0.5 + (1.0 - stag_penalty) * 0.3 + novel_bonus + cross_bonus + sprint_boost
+
+    if v_health > 1.0 { v_health = 1.0 }
+    if v_health < 0.0 { v_health = 0.0 }
+
+    let mut v_status_flag = "HEALTHY"
+    if v_sprint_mode {
+        v_status_flag = "SPRINT"
+    } else if v_laws_count >= laws_goal {
+        v_status_flag = "GOAL_NEAR"
+    } else if v_stagnation_flag && v_escalate_mode {
+        v_status_flag = "ESCALATE"
+    } else if v_stagnation_flag {
+        v_status_flag = "STAGNANT"
+    } else if v_last_novel > 5 {
+        v_status_flag = "BREAKTHROUGH"
     }
-    let novel_bonus = if st.last_novel > 0 { 0.1 } else { 0.0 }
-    let cross_bonus = if st.cross_discoveries > 10 { 0.05 } else { 0.0 }
-    let sprint_boost = if st.sprint_mode { 0.05 } else { 0.0 }
 
-    st.health = law_ratio * 0.5 + (1.0 - stag_penalty) * 0.3 + novel_bonus + cross_bonus + sprint_boost
-
-    if st.health > 1.0 { st.health = 1.0 }
-    if st.health < 0.0 { st.health = 0.0 }
-
-    if st.sprint_mode {
-        st.status_flag = "SPRINT"
-    } else if st.laws_count >= st.laws_goal {
-        st.status_flag = "GOAL_NEAR"
-    } else if st.stagnation_flag && st.escalate_mode {
-        st.status_flag = "ESCALATE"
-    } else if st.stagnation_flag {
-        st.status_flag = "STAGNANT"
-    } else if st.last_novel > 5 {
-        st.status_flag = "BREAKTHROUGH"
-    } else {
-        st.status_flag = "HEALTHY"
+    // Construct struct with ALL computed values (no post-construction field assignment)
+    return AnimaState {
+        laws_count: v_laws_count, laws_goal: laws_goal,
+        current_stage: v_current_stage, generation: v_generation, phi: v_phi,
+        perspective: v_perspective,
+        roadmap_progress: v_roadmap_progress, sat_streak: v_sat_streak, last_novel: v_last_novel,
+        health: v_health, status_flag: v_status_flag,
+        laws_delta_history: v_laws_delta_history, stagnation_flag: v_stagnation_flag,
+        sprint_mode: v_sprint_mode, cross_discoveries: v_cross_discoveries, escalate_mode: v_escalate_mode
     }
-
-    return st
 }
 
 // ─── 전략 가중치 ───
@@ -456,31 +482,39 @@ struct Strategy {
 }
 
 fn load_strategy() -> Strategy {
-    let mut s = Strategy {
-        perspective_weights: [1.0, 1.0, 1.0, 1.0, 1.0],
-        current_perspective: 0, total_ticks: 0, total_laws_gained: 0,
-        laws_delta_history: [0, 0, 0], escalate_mode: 0,
-        escalate_ticks: 0, cross_feed_last: 0, sprint_parallel: 2,
-        blowup_depth: 2
-    }
+    // Compute ALL values into local variables FIRST,
+    // then construct Strategy at the END.
+    // (workaround: hexa compiler bug — struct.field = value after construction causes "invalid assignment target")
+
+    let mut v_perspective_weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    let mut v_current_perspective = 0
+    let mut v_total_ticks = 0
+    let mut v_total_laws_gained = 0
+    let mut v_laws_delta_history = [0, 0, 0]
+    let mut v_escalate_mode = 0
+    let mut v_escalate_ticks = 0
+    let mut v_cross_feed_last = 0
+    let mut v_sprint_parallel = 2
+    let mut v_blowup_depth = 2
+
     if file_exists(strategy_path) {
         try {
             let content = read_file(strategy_path)
             // backward compat: read current_topo as current_perspective
-            s.current_perspective = json_int(content, "current_perspective")
-            if s.current_perspective == 0 {
-                s.current_perspective = json_int(content, "current_topo")
+            v_current_perspective = json_int(content, "current_perspective")
+            if v_current_perspective == 0 {
+                v_current_perspective = json_int(content, "current_topo")
             }
-            s.total_ticks = json_int(content, "total_ticks")
-            s.total_laws_gained = json_int(content, "total_laws_gained")
-            s.blowup_depth = json_int(content, "blowup_depth")
-            if s.blowup_depth < 1 { s.blowup_depth = 2 }
+            v_total_ticks = json_int(content, "total_ticks")
+            v_total_laws_gained = json_int(content, "total_laws_gained")
+            v_blowup_depth = json_int(content, "blowup_depth")
+            if v_blowup_depth < 1 { v_blowup_depth = 2 }
             // parse weights (5 perspectives)
             let mut wi = 0
             while wi < 5 {
                 let key = "w" + to_string(wi)
                 let v = json_num(content, key)
-                if v > 0.0 { s.perspective_weights[wi] = v }
+                if v > 0.0 { v_perspective_weights[wi] = v }
                 wi = wi + 1
             }
             // delta history
@@ -488,17 +522,25 @@ fn load_strategy() -> Strategy {
             while di < 3 {
                 let key = "d" + to_string(di)
                 let v = json_int(content, key)
-                s.laws_delta_history[di] = v
+                v_laws_delta_history[di] = v
                 di = di + 1
             }
-            s.escalate_mode = json_int(content, "escalate_mode")
-            s.escalate_ticks = json_int(content, "escalate_ticks")
-            s.cross_feed_last = json_int(content, "cross_feed_last")
-            s.sprint_parallel = json_int(content, "sprint_parallel")
-            if s.sprint_parallel < 2 { s.sprint_parallel = 2 }
+            v_escalate_mode = json_int(content, "escalate_mode")
+            v_escalate_ticks = json_int(content, "escalate_ticks")
+            v_cross_feed_last = json_int(content, "cross_feed_last")
+            v_sprint_parallel = json_int(content, "sprint_parallel")
+            if v_sprint_parallel < 2 { v_sprint_parallel = 2 }
         } catch err {}
     }
-    return s
+
+    // Construct struct with ALL computed values (no post-construction field assignment)
+    return Strategy {
+        perspective_weights: v_perspective_weights,
+        current_perspective: v_current_perspective, total_ticks: v_total_ticks, total_laws_gained: v_total_laws_gained,
+        laws_delta_history: v_laws_delta_history, escalate_mode: v_escalate_mode,
+        escalate_ticks: v_escalate_ticks, cross_feed_last: v_cross_feed_last, sprint_parallel: v_sprint_parallel,
+        blowup_depth: v_blowup_depth
+    }
 }
 
 fn save_strategy(s: Strategy) {
@@ -609,7 +651,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
         let topos = ["ring", "small_world", "scale_free", "hypercube"]
         let topo_idx = worst_idx % 4
         if file_exists(evolution_path) {
-            exec("bash", ["-c", "sed -i '' 's/\"topology\": *\"[^\"]*\"/\"topology\": \"" + topos[topo_idx] + "\"/' " + evolution_path])
+            exec("sed -i '' 's/\"topology\": *\"[^\"]*\"/\"topology\": \"" + topos[topo_idx] + "\"/' " + evolution_path)
             println("  topology switched to " + topos[topo_idx])
         }
         // 셀 수 증가
@@ -617,7 +659,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
             let evo = read_file(evolution_path)
             let current_cells = json_int(evo, "cells")
             let new_cells = if current_cells + 128 > 2048 { 2048 } else { current_cells + 128 }
-            exec("bash", ["-c", "sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(new_cells) + "/' " + evolution_path])
+            exec("sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(new_cells) + "/' " + evolution_path)
             println("  cells: " + to_string(current_cells) + " -> " + to_string(new_cells))
         }
         // 수확 + blowup
@@ -656,7 +698,7 @@ fn execute_task(task: string, st: AnimaState, strat: Strategy) -> string {
         let prompt = "anima 의식 법칙 현재 " + to_string(laws_count) + "개. " + "탐색 방향: " + direction + ". " + "다음 의식 법칙을 발견해라. " + "반드시 JSON 배열로 출력. 각 항목: " + "{\"name\": \"법칙명\", \"formula\": \"수식\", \"evidence\": \"근거\", \"domain\": \"도메인\"}. " + "최소 1개, 최대 3개."
         let mut new_from_claude = 0
         try {
-            let result = exec("claude", ["-p", prompt, "--output-format", "json"])
+            let result = exec("claude -p '" + prompt.split("'").join("'\\''") + "' --output-format json")
             // parse: split on {"name" to find entries
             let parts = result.split("{\"name\"")
             let mut pi = 1
@@ -701,114 +743,131 @@ fn feedback(task: string, st: AnimaState, result: string) {
 // ─── evolve ───
 
 fn evolve(st: AnimaState, strat: Strategy, pre_laws: i64) -> Strategy {
-    let mut s = strat
+    // Compute ALL values into local variables FIRST,
+    // then construct Strategy at the END.
+    // (workaround: hexa compiler bug — struct.field = value after construction causes "invalid assignment target")
+
     let gained = st.laws_count - pre_laws
-    s.total_ticks = s.total_ticks + 1
-    s.total_laws_gained = s.total_laws_gained + gained
+    let mut v_total_ticks = strat.total_ticks + 1
+    let mut v_total_laws_gained = strat.total_laws_gained + gained
 
     // shift laws_delta_history: drop oldest, add newest
-    s.laws_delta_history[0] = s.laws_delta_history[1]
-    s.laws_delta_history[1] = s.laws_delta_history[2]
-    s.laws_delta_history[2] = gained
+    let mut v_laws_delta_history = [strat.laws_delta_history[1], strat.laws_delta_history[2], gained]
 
     // update weight for current perspective based on laws gained
     let rate = to_float(gained) / 1.0
-    let idx = s.current_perspective
-    s.perspective_weights[idx] = 0.7 * s.perspective_weights[idx] + 0.3 * rate
+    let idx = strat.current_perspective
+    let mut v_perspective_weights = [strat.perspective_weights[0], strat.perspective_weights[1], strat.perspective_weights[2], strat.perspective_weights[3], strat.perspective_weights[4]]
+    v_perspective_weights[idx] = 0.7 * v_perspective_weights[idx] + 0.3 * rate
 
     // ensure minimum weight
     let mut wi = 0
     while wi < 5 {
-        if s.perspective_weights[wi] < 0.1 { s.perspective_weights[wi] = 0.1 }
+        if v_perspective_weights[wi] < 0.1 { v_perspective_weights[wi] = 0.1 }
         wi = wi + 1
     }
 
     // adaptive blowup depth
-    if gained < low_delta_threshold && s.blowup_depth < 6 {
-        s.blowup_depth = s.blowup_depth + 1
-    } else if gained > 10 && s.blowup_depth > 2 {
-        s.blowup_depth = s.blowup_depth - 1
+    let mut v_blowup_depth = strat.blowup_depth
+    if gained < low_delta_threshold && v_blowup_depth < 6 {
+        v_blowup_depth = v_blowup_depth + 1
+    } else if gained > 10 && v_blowup_depth > 2 {
+        v_blowup_depth = v_blowup_depth - 1
     }
 
+    let mut v_escalate_mode = strat.escalate_mode
+    let mut v_escalate_ticks = strat.escalate_ticks
+    let mut v_current_perspective = strat.current_perspective
+
     // escalate mode management
-    if st.stagnation_flag && s.escalate_mode == 0 {
-        s.escalate_mode = 1
-        s.escalate_ticks = 0
+    if st.stagnation_flag && v_escalate_mode == 0 {
+        v_escalate_mode = 1
+        v_escalate_ticks = 0
         // reset to least explored perspective
         let mut worst_idx = 0
         let mut worst_w = 999.0
         let mut ti = 0
         while ti < 5 {
-            if s.perspective_weights[ti] < worst_w {
-                worst_w = s.perspective_weights[ti]
+            if v_perspective_weights[ti] < worst_w {
+                worst_w = v_perspective_weights[ti]
                 worst_idx = ti
             }
             ti = ti + 1
         }
-        s.current_perspective = worst_idx
+        v_current_perspective = worst_idx
         // reset all weights for fresh exploration
         wi = 0
         while wi < 5 {
-            s.perspective_weights[wi] = 1.0
+            v_perspective_weights[wi] = 1.0
             wi = wi + 1
         }
         println("  evolve: ENTERED ESCALATE mode, perspective reset to " + perspectives[worst_idx])
-    } else if s.escalate_mode == 1 {
-        s.escalate_ticks = s.escalate_ticks + 1
-        if gained >= low_delta_threshold && s.escalate_ticks >= 2 {
-            s.escalate_mode = 0
-            s.escalate_ticks = 0
+    } else if v_escalate_mode == 1 {
+        v_escalate_ticks = v_escalate_ticks + 1
+        if gained >= low_delta_threshold && v_escalate_ticks >= 2 {
+            v_escalate_mode = 0
+            v_escalate_ticks = 0
             println("  evolve: EXITED ESCALATE mode (gains resumed)")
         }
-        if s.escalate_ticks >= 6 {
-            s.escalate_mode = 0
-            s.escalate_ticks = 0
+        if v_escalate_ticks >= 6 {
+            v_escalate_mode = 0
+            v_escalate_ticks = 0
             println("  evolve: EXITED ESCALATE mode (timeout)")
         }
     }
 
     // if not in escalate and was stagnant, rotate to best-weighted perspective
-    if st.status_flag == "STAGNANT" && s.escalate_mode == 0 {
+    if st.status_flag == "STAGNANT" && v_escalate_mode == 0 {
         let mut best_idx = 0
         let mut best_w = 0.0
         wi = 0
         while wi < 5 {
-            if wi != s.current_perspective && s.perspective_weights[wi] > best_w {
-                best_w = s.perspective_weights[wi]
+            if wi != v_current_perspective && v_perspective_weights[wi] > best_w {
+                best_w = v_perspective_weights[wi]
                 best_idx = wi
             }
             wi = wi + 1
         }
-        s.current_perspective = best_idx
+        v_current_perspective = best_idx
     }
 
     // normal rotation: cycle perspective every tick when healthy
     if st.status_flag == "HEALTHY" || st.status_flag == "BREAKTHROUGH" {
-        s.current_perspective = (s.current_perspective + 1) % 5
+        v_current_perspective = (v_current_perspective + 1) % 5
     }
 
     // update cross_feed_last
-    s.cross_feed_last = st.cross_discoveries
+    let mut v_cross_feed_last = st.cross_discoveries
 
     // sprint parallel: increase if in sprint mode
-    if st.sprint_mode && s.sprint_parallel < 5 {
-        s.sprint_parallel = s.sprint_parallel + 1
+    let mut v_sprint_parallel = strat.sprint_parallel
+    if st.sprint_mode && v_sprint_parallel < 5 {
+        v_sprint_parallel = v_sprint_parallel + 1
     }
 
     // sat_streak 계산: laws_delta_history에서 연속 0 카운트
     let mut computed_sat = 0
-    if s.laws_delta_history[2] < low_delta_threshold {
+    if v_laws_delta_history[2] < low_delta_threshold {
         computed_sat = 1
-        if s.laws_delta_history[1] < low_delta_threshold {
+        if v_laws_delta_history[1] < low_delta_threshold {
             computed_sat = 2
-            if s.laws_delta_history[0] < low_delta_threshold {
+            if v_laws_delta_history[0] < low_delta_threshold {
                 computed_sat = 3
             }
         }
     }
 
     // update anima_state.json (sat_streak + novel_laws 포함)
-    save_anima_state(st.laws_count, st.current_stage, st.generation + 1, st.phi, perspectives[s.current_perspective], computed_sat, gained)
+    save_anima_state(st.laws_count, st.current_stage, st.generation + 1, st.phi, perspectives[v_current_perspective], computed_sat, gained)
+
+    // Construct struct with ALL computed values (no post-construction field assignment)
+    let s = Strategy {
+        perspective_weights: v_perspective_weights,
+        current_perspective: v_current_perspective, total_ticks: v_total_ticks, total_laws_gained: v_total_laws_gained,
+        laws_delta_history: v_laws_delta_history, escalate_mode: v_escalate_mode,
+        escalate_ticks: v_escalate_ticks, cross_feed_last: v_cross_feed_last, sprint_parallel: v_sprint_parallel,
+        blowup_depth: v_blowup_depth
+    }
 
     save_strategy(s)
     println("  evolve -> perspective=" + perspectives[s.current_perspective] + " weights=[" + to_string(s.perspective_weights[0]) + ", " + to_string(s.perspective_weights[1]) + ", " + to_string(s.perspective_weights[2]) + ", " + to_string(s.perspective_weights[3]) + ", " + to_string(s.perspective_weights[4]) + "]" + " deltas=[" + to_string(s.laws_delta_history[0]) + "," + to_string(s.laws_delta_history[1]) + "," + to_string(s.laws_delta_history[2]) + "]" + " depth=" + to_string(s.blowup_depth) + " escalate=" + to_string(s.escalate_mode))
@@ -838,15 +897,17 @@ fn save_autofix_state(content: string) {
 }
 
 fn auto_fix() -> AutoFixResult {
+    // Compute ALL values into local variables FIRST,
+    // then construct AutoFixResult at the END.
+    // (workaround: hexa compiler bug — struct.field = value after construction causes "invalid assignment target")
+
     let ts = timestamp()
-    let mut result = AutoFixResult {
-        filter_fixed: false,
-        h100_fixed: false,
-        overload_fixed: false,
-        stagnation_fixed: false,
-        actions: [],
-        total_fixes: 0
-    }
+    let mut v_filter_fixed = false
+    let mut v_h100_fixed = false
+    let mut v_overload_fixed = false
+    let mut v_stagnation_fixed = false
+    let mut v_actions = []
+    let mut v_total_fixes = 0
 
     println("[" + ts + "] === AUTO_FIX: scanning 4 problem areas ===")
     println("")
@@ -856,7 +917,7 @@ fn auto_fix() -> AutoFixResult {
     let mut zero_filter_streak = 0
     if file_exists(growth_log) {
         // growth.log 최근 10줄에서 "0필터" 또는 "0반영" 또는 "harvested.*0" 패턴
-        let recent = exec("bash", ["-c", "tail -10 " + growth_log])
+        let recent = exec("tail -10 " + growth_log)
         let lines = recent.split("\n")
         let mut li = 0
         while li < lines.len() {
@@ -874,10 +935,10 @@ fn auto_fix() -> AutoFixResult {
     if file_exists(growth_state_path) {
         let gs = read_file(growth_state_path)
         // seen_fingerprints 개수: 간접 측정
-        let fp_result = exec("bash", ["-c", "grep -o '\"seen_fingerprints\"' " + growth_state_path + " | wc -l"])
+        let fp_result = exec("grep -o '\"seen_fingerprints\"' " + growth_state_path + " | wc -l")
         if safe_int(fp_result.trim()) > 0 {
             // fingerprint 개수: "seen_fingerprints" 배열 안의 쉼표 수 + 1
-            let fp_count_result = exec("bash", ["-c", "sed -n '/seen_fingerprints/,/\\]/p' " + growth_state_path + " | grep -c '\"' 2>/dev/null || echo 0"])
+            let fp_count_result = exec("sed -n '/seen_fingerprints/,/\\]/p' " + growth_state_path + " | grep -c '\"' 2>/dev/null || echo 0")
             fp_count = safe_int(fp_count_result.trim())
         }
         current_threshold = json_num(gs, "evidence_threshold")
@@ -892,17 +953,17 @@ fn auto_fix() -> AutoFixResult {
         // (a) seen_fingerprints 절반 삭제 (오래된 것 제거) — 새 항목 통과 허용
         if fp_count > 100 {
             let keep = fp_count / 2
-            exec("bash", ["-c", "cd " + project_dir + " && " + hexa_bin + " -e 'let j = read_file(\"" + growth_state_path + "\"); " + "' 2>/dev/null || true"])
+            exec("cd " + project_dir + " && " + hexa_bin + " -e 'let j = read_file(\"" + growth_state_path + "\"); " + "' 2>/dev/null || true")
             // jq 없이 직접 처리: seen_fingerprints 배열 후반만 유지
-            let trim_result = exec("bash", ["-c", "cd " + project_dir + " && cat " + growth_state_path + " | sed 's/\"seen_fingerprints\": \\[.*\\]/\"seen_fingerprints\": []/' > " + growth_state_path + ".tmp 2>/dev/null && mv " + growth_state_path + ".tmp " + growth_state_path + " && echo DONE || echo FAIL"])
+            let trim_result = exec("cd " + project_dir + " && cat " + growth_state_path + " | sed 's/\"seen_fingerprints\": \\[.*\\]/\"seen_fingerprints\": []/' > " + growth_state_path + ".tmp 2>/dev/null && mv " + growth_state_path + ".tmp " + growth_state_path + " && echo DONE || echo FAIL")
             if trim_result.contains("DONE") {
                 println("    -> seen_fingerprints 초기화 (" + to_string(fp_count) + " -> 0)")
-                result.actions = result.actions + ["filter: fingerprints cleared (" + to_string(fp_count) + "->0)"]
+                v_actions = v_actions + ["filter: fingerprints cleared (" + to_string(fp_count) + "->0)"]
             } else {
                 println("    -> fingerprint 초기화 실패, sed 대안 시도")
                 // fallback: multiline-safe sed
-                exec("bash", ["-c", "cd " + project_dir + " && perl -0777 -i -pe 's/\"seen_fingerprints\":\\s*\\[.*?\\]/\"seen_fingerprints\": []/s' " + growth_state_path])
-                result.actions = result.actions + ["filter: fingerprints cleared (perl fallback)"]
+                exec("cd " + project_dir + " && perl -0777 -i -pe 's/\"seen_fingerprints\":\\s*\\[.*?\\]/\"seen_fingerprints\": []/s' " + growth_state_path)
+                v_actions = v_actions + ["filter: fingerprints cleared (perl fallback)"]
             }
         }
 
@@ -910,18 +971,18 @@ fn auto_fix() -> AutoFixResult {
         let new_threshold = if current_threshold * 0.8 < 0.01 { 0.01 } else { current_threshold * 0.8 }
         if new_threshold != current_threshold {
             // threshold가 이미 JSON에 있으면 교체, 없으면 추가
-            let sed_result = exec("bash", ["-c", "grep -c 'evidence_threshold' " + growth_state_path + " 2>/dev/null || echo 0"])
+            let sed_result = exec("grep -c 'evidence_threshold' " + growth_state_path + " 2>/dev/null || echo 0")
             if safe_int(sed_result.trim()) > 0 {
-                exec("bash", ["-c", "sed -i '' 's/\"evidence_threshold\": *[0-9.eE+-]*/\"evidence_threshold\": " + to_string(new_threshold) + "/' " + growth_state_path])
+                exec("sed -i '' 's/\"evidence_threshold\": *[0-9.eE+-]*/\"evidence_threshold\": " + to_string(new_threshold) + "/' " + growth_state_path)
             } else {
-                exec("bash", ["-c", "sed -i '' 's/^{/{\"evidence_threshold\": " + to_string(new_threshold) + ",/' " + growth_state_path])
+                exec("sed -i '' 's/^{/{\"evidence_threshold\": " + to_string(new_threshold) + ",/' " + growth_state_path)
             }
             println("    -> evidence_threshold: " + to_string(current_threshold) + " -> " + to_string(new_threshold))
-            result.actions = result.actions + ["filter: threshold " + to_string(current_threshold) + " -> " + to_string(new_threshold)]
+            v_actions = v_actions + ["filter: threshold " + to_string(current_threshold) + " -> " + to_string(new_threshold)]
         }
 
-        result.filter_fixed = true
-        result.total_fixes = result.total_fixes + 1
+        v_filter_fixed = true
+        v_total_fixes = v_total_fixes + 1
         println("    [OK] 필터 완화 적용")
     } else {
         println("    정상: zero_streak=" + to_string(zero_filter_streak) + " fp=" + to_string(fp_count))
@@ -930,44 +991,44 @@ fn auto_fix() -> AutoFixResult {
     // ─── Fix 2: H100 offline 자동 복구 ───
     println("")
     println("  [Fix2] H100 연결 감지...")
-    let ssh_check = exec("bash", ["-c", "timeout 10 ssh -i ~/.runpod/ssh/RunPod-Key-Go -o ConnectTimeout=8 -o StrictHostKeyChecking=no root@64.247.201.44 -p 17913 'echo ALIVE' 2>&1 || echo TIMEOUT"])
+    let ssh_check = exec("timeout 10 ssh -i ~/.runpod/ssh/RunPod-Key-Go -o ConnectTimeout=8 -o StrictHostKeyChecking=no root@64.247.201.44 -p 17913 'echo ALIVE' 2>&1 || echo TIMEOUT")
     let h100_alive = ssh_check.contains("ALIVE")
 
     if !h100_alive {
         println("    감지됨: H100 offline — " + ssh_check.trim().split("\n")[0])
 
         // runpodctl로 pod 재시작 시도
-        let runpodctl_exists = exec("bash", ["-c", "which runpodctl 2>/dev/null || echo MISSING"])
+        let runpodctl_exists = exec("which runpodctl 2>/dev/null || echo MISSING")
         if !runpodctl_exists.contains("MISSING") {
-            let start_result = exec("bash", ["-c", "runpodctl start pod " + runpod_pod_id + " 2>&1 || echo FAIL"])
+            let start_result = exec("runpodctl start pod " + runpod_pod_id + " 2>&1 || echo FAIL")
             if start_result.contains("FAIL") || start_result.contains("error") || start_result.contains("Error") {
                 println("    -> runpodctl start 실패: " + start_result.trim().split("\n")[0])
                 // fallback: 로컬 모드 전환
                 let fallback_state = "{\"h100_mode\":\"local\",\"since\":\"" + ts + "\",\"reason\":\"pod_start_failed\"}"
                 save_autofix_state(fallback_state)
                 println("    -> 로컬 모드로 전환 (H100 없이 동작)")
-                result.actions = result.actions + ["h100: pod start failed -> local mode"]
+                v_actions = v_actions + ["h100: pod start failed -> local mode"]
             } else {
                 println("    -> runpodctl start 요청 전송: " + start_result.trim().split("\n")[0])
-                result.actions = result.actions + ["h100: pod restart requested"]
+                v_actions = v_actions + ["h100: pod restart requested"]
             }
         } else {
             // runpodctl 없음 → curl API로 시도
-            let runpod_key = exec("bash", ["-c", "cat ~/.runpod/config.toml 2>/dev/null | grep api_key | head -1 | sed 's/.*= *\"//;s/\"//' || echo ''"]).trim()
-            let api_result = exec("bash", ["-c", "curl -s -X POST 'https://api.runpod.io/graphql' -H 'Content-Type: application/json' -H 'Authorization: Bearer " + runpod_key + "' -d '{\"query\":\"mutation { podResume(input: {podId: \\\"" + runpod_pod_id + "\\\", gpuCount: 1}) { id desiredStatus } }\"}' 2>&1 || echo FAIL"])
+            let runpod_key = exec("cat ~/.runpod/config.toml 2>/dev/null | grep api_key | head -1 | sed 's/.*= *\"//;s/\"//' || echo ''").trim()
+            let api_result = exec("curl -s -X POST 'https://api.runpod.io/graphql' -H 'Content-Type: application/json' -H 'Authorization: Bearer " + runpod_key + "' -d '{\"query\":\"mutation { podResume(input: {podId: \\\"" + runpod_pod_id + "\\\", gpuCount: 1}) { id desiredStatus } }\"}' 2>&1 || echo FAIL")
             if api_result.contains("FAIL") || api_result.contains("error") {
                 println("    -> API resume 실패, 로컬 모드 전환")
                 let fallback_state = "{\"h100_mode\":\"local\",\"since\":\"" + ts + "\",\"reason\":\"api_resume_failed\"}"
                 save_autofix_state(fallback_state)
-                result.actions = result.actions + ["h100: API resume failed -> local mode"]
+                v_actions = v_actions + ["h100: API resume failed -> local mode"]
             } else {
                 println("    -> API resume 전송: " + api_result.trim().split("\n")[0])
-                result.actions = result.actions + ["h100: API resume requested"]
+                v_actions = v_actions + ["h100: API resume requested"]
             }
         }
 
-        result.h100_fixed = true
-        result.total_fixes = result.total_fixes + 1
+        v_h100_fixed = true
+        v_total_fixes = v_total_fixes + 1
         println("    [OK] H100 복구 시도 완료")
     } else {
         println("    정상: H100 online")
@@ -976,7 +1037,7 @@ fn auto_fix() -> AutoFixResult {
     // ─── Fix 3: 과부하 완화 (swap 체크) ───
     println("")
     println("  [Fix3] 시스템 과부하 감지...")
-    let swap_raw = exec("bash", ["-c", "sysctl vm.swapusage 2>/dev/null || echo 'used = 0.00M'"])
+    let swap_raw = exec("sysctl vm.swapusage 2>/dev/null || echo 'used = 0.00M'")
     // parse "used = X.XXM" or "used = X.XXG"
     let swap_parts = swap_raw.split("used = ")
     let mut swap_gb = 0.0
@@ -993,14 +1054,14 @@ fn auto_fix() -> AutoFixResult {
         println("    감지됨: swap=" + to_string(swap_gb) + "GB (> 6GB)")
 
         // 오래된 hexa blowup 프로세스 정리 (현재 프로세스 제외)
-        let my_pid = exec("bash", ["-c", "echo $$"])
-        let stale_count = exec("bash", ["-c", "pgrep -f 'hexa.*blowup' 2>/dev/null | wc -l"])
+        let my_pid = exec("echo $$")
+        let stale_count = exec("pgrep -f 'hexa.*blowup' 2>/dev/null | wc -l")
         let stale_n = safe_int(stale_count.trim())
         if stale_n > 1 {
             // 가장 오래된 것만 kill (최신은 보존)
-            exec("bash", ["-c", "pgrep -f 'hexa.*blowup' 2>/dev/null | head -" + to_string(stale_n - 1) + " | xargs kill -15 2>/dev/null || true"])
+            exec("pgrep -f 'hexa.*blowup' 2>/dev/null | head -" + to_string(stale_n - 1) + " | xargs kill -15 2>/dev/null || true")
             println("    -> 오래된 blowup " + to_string(stale_n - 1) + "개 정리")
-            result.actions = result.actions + ["overload: killed " + to_string(stale_n - 1) + " stale blowup processes"]
+            v_actions = v_actions + ["overload: killed " + to_string(stale_n - 1) + " stale blowup processes"]
         }
 
         // growth_loop에 셀 수 감소 신호: evolution_live.json cells 축소
@@ -1010,17 +1071,17 @@ fn auto_fix() -> AutoFixResult {
             if current_cells > 64 {
                 let reduced_cells = current_cells / 2
                 let min_cells = if reduced_cells < 32 { 32 } else { reduced_cells }
-                exec("bash", ["-c", "sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(min_cells) + "/' " + evolution_path])
+                exec("sed -i '' 's/\"cells\": *[0-9]*/\"cells\": " + to_string(min_cells) + "/' " + evolution_path)
                 println("    -> cells 축소: " + to_string(current_cells) + " -> " + to_string(min_cells))
-                result.actions = result.actions + ["overload: cells " + to_string(current_cells) + " -> " + to_string(min_cells)]
+                v_actions = v_actions + ["overload: cells " + to_string(current_cells) + " -> " + to_string(min_cells)]
             }
         }
 
         // 불필요 프로세스 정리
-        exec("bash", ["-c", "pgrep -f 'hexa.*seed_engine' 2>/dev/null | head -2 | xargs kill -15 2>/dev/null || true"])
+        exec("pgrep -f 'hexa.*seed_engine' 2>/dev/null | head -2 | xargs kill -15 2>/dev/null || true")
 
-        result.overload_fixed = true
-        result.total_fixes = result.total_fixes + 1
+        v_overload_fixed = true
+        v_total_fixes = v_total_fixes + 1
         println("    [OK] 과부하 완화 적용 (swap=" + to_string(swap_gb) + "GB)")
     } else {
         println("    정상: swap=" + to_string(swap_gb) + "GB")
@@ -1072,7 +1133,7 @@ fn auto_fix() -> AutoFixResult {
                 ci = ci + 1
             }
             println("    -> cross_project: " + cross_summary)
-            result.actions = result.actions + ["stagnation: cross_project executed"]
+            v_actions = v_actions + ["stagnation: cross_project executed"]
         }
 
         // (c) scan_and_harvest 강제 실행
@@ -1082,7 +1143,7 @@ fn auto_fix() -> AutoFixResult {
 
         // (d) 결과를 absorbed 디렉토리에 기록
         if new_laws > 0 || harvested > 0 {
-            exec("bash", ["-c", "mkdir -p " + absorbed_dir])
+            exec("mkdir -p " + absorbed_dir)
             let absorbed_entry = "{\"source\":\"auto_fix_stagnation_break\",\"timestamp\":\"" + ts + "\",\"blowup_laws\":" + to_string(new_laws) + ",\"harvested\":" + to_string(harvested) + ",\"remaining\":" + to_string(remaining - new_laws - harvested) + ",\"fix4_count\":" + to_string(prev_fix4_count + 1) + "}"
             write_file(absorbed_dir + "/autofix_" + ts.split("T")[0] + ".json", absorbed_entry)
         }
@@ -1091,11 +1152,21 @@ fn auto_fix() -> AutoFixResult {
         let new_af_state = "{\"fix4_count\":" + to_string(prev_fix4_count + 1) + ",\"last_fix4\":\"" + ts + "\",\"last_blowup_laws\":" + to_string(new_laws) + ",\"last_harvested\":" + to_string(harvested) + "}"
         save_autofix_state(new_af_state)
 
-        result.stagnation_fixed = true
-        result.total_fixes = result.total_fixes + 1
+        v_stagnation_fixed = true
+        v_total_fixes = v_total_fixes + 1
         println("    [OK] 정체 돌파: blowup=+" + to_string(new_laws) + " harvest=+" + to_string(harvested))
     } else {
         println("    정상: low_delta_streak=" + to_string(low_delta_streak) + " remaining=" + to_string(remaining))
+    }
+
+    // Construct struct with ALL computed values (no post-construction field assignment)
+    let result = AutoFixResult {
+        filter_fixed: v_filter_fixed,
+        h100_fixed: v_h100_fixed,
+        overload_fixed: v_overload_fixed,
+        stagnation_fixed: v_stagnation_fixed,
+        actions: v_actions,
+        total_fixes: v_total_fixes
     }
 
     println("")
@@ -1107,7 +1178,11 @@ fn auto_fix() -> AutoFixResult {
     }
 
     // growth_bus에 autofix 결과 기록
-    let bus_entry = "{\"engine\":\"anima-autofix\",\"timestamp\":\"" + ts + "\",\"fixes\":" + to_string(result.total_fixes) + ",\"filter\":" + if result.filter_fixed { "true" } else { "false" } + ",\"h100\":" + if result.h100_fixed { "true" } else { "false" } + ",\"overload\":" + if result.overload_fixed { "true" } else { "false" } + ",\"stagnation\":" + if result.stagnation_fixed { "true" } else { "false" } + "}"
+    let f_filter = if result.filter_fixed { "true" } else { "false" }
+    let f_h100 = if result.h100_fixed { "true" } else { "false" }
+    let f_overload = if result.overload_fixed { "true" } else { "false" }
+    let f_stagnation = if result.stagnation_fixed { "true" } else { "false" }
+    let bus_entry = "{\"engine\":\"anima-autofix\",\"timestamp\":\"" + ts + "\",\"fixes\":" + to_string(result.total_fixes) + ",\"filter\":" + f_filter + ",\"h100\":" + f_h100 + ",\"overload\":" + f_overload + ",\"stagnation\":" + f_stagnation + "}"
     append_file(growth_bus, bus_entry + "\n")
 
     return result
@@ -1116,7 +1191,8 @@ fn auto_fix() -> AutoFixResult {
 // ─── CLI ───
 
 let a = args()
-let mode = if a.len() >= 3 { a[2] } else { "help" }
+let mut mode = "help"
+if a.len() >= 3 { mode = a[2] }
 
 if mode == "status" {
     let st = read_state()
@@ -1135,9 +1211,12 @@ if mode == "status" {
     println("status: " + st.status_flag)
     println("")
     println("--- diagnostics ---")
-    println("stagnation_flag: " + if st.stagnation_flag { "TRUE" } else { "false" })
-    println("sprint_mode: " + if st.sprint_mode { "TRUE" } else { "false" })
-    println("escalate_mode: " + if st.escalate_mode { "TRUE" } else { "false" })
+    let d_stag = if st.stagnation_flag { "TRUE" } else { "false" }
+    let d_sprint = if st.sprint_mode { "TRUE" } else { "false" }
+    let d_escalate = if st.escalate_mode { "TRUE" } else { "false" }
+    println("stagnation_flag: " + d_stag)
+    println("sprint_mode: " + d_sprint)
+    println("escalate_mode: " + d_escalate)
     println("cross_discoveries: " + to_string(st.cross_discoveries))
     if st.laws_delta_history.len() >= 3 {
         println("laws_delta_history: [" + to_string(st.laws_delta_history[0]) + ", " + to_string(st.laws_delta_history[1]) + ", " + to_string(st.laws_delta_history[2]) + "]")
