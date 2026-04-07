@@ -35,8 +35,8 @@ P1: 세미콜론 금지 / P2: `exec("단일 문자열")` / P3: Error→`to_strin
 
 ## 할일
 
-- "todo", "할일" → `hexa-bin-actual todo.hexa nexus` 실행 후 마크다운 표로 출력.
-- "전체 할일" → `hexa-bin-actual todo.hexa` (전 프로젝트).
+- "todo", "할일" → `cd mk2_hexa/native && hexa todo.hexa nexus` 실행 후 마크다운 표로 출력.
+- "전체 할일" → `cd mk2_hexa/native && hexa todo.hexa` (전 프로젝트).
 
 ## 특이점 사이클
 
