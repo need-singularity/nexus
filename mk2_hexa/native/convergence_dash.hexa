@@ -1,0 +1,84 @@
+// convergence_dash.hexa — 프로젝트별 골화 수렴진화 통합 대시보드
+// usage: hexa convergence_dash.hexa [filter]
+
+let _base = env("HOME") + "/Dev/nexus/shared/convergence"
+let filter = if args().len() > 2 { args()[2] } else { "" }
+let files = exec("ls " + _base).split("\n")
+let to = 0
+let ts = 0
+let tf = 0
+
+println("╔═══════════════════════════════════════════════════════════════╗")
+println("║  📊 수렴진화 통합 대시보드                                   ║")
+println("╚═══════════════════════════════════════════════════════════════╝")
+println("")
+
+let i = 0
+while i < files.len() {
+  let f = files[i]
+  i = i + 1
+  if f.ends_with(".json") {
+    let name = f.replace(".json", "")
+    if filter == "" || name.contains(filter) {
+      let raw = read_file(_base + "/" + f)
+      let d = json_parse(raw)
+      let dk = d.keys()
+
+      let oc = 0
+      let sc = 0
+      let fc = 0
+      let fails = ""
+
+      if dk.contains("ossified") {
+        let ks = d["ossified"].keys()
+        let j = 0
+        while j < ks.len() {
+          if !ks[j].starts_with("_") { oc = oc + 1 }
+          j = j + 1
+        }
+      }
+      if dk.contains("stable") {
+        let ks = d["stable"].keys()
+        let j = 0
+        while j < ks.len() {
+          if !ks[j].starts_with("_") { sc = sc + 1 }
+          j = j + 1
+        }
+      }
+      if dk.contains("failed") {
+        let fld = d["failed"]
+        let ks = fld.keys()
+        let j = 0
+        while j < ks.len() {
+          let k = ks[j]
+          j = j + 1
+          if !k.starts_with("_") {
+            fc = fc + 1
+            let e = fld[k]
+            let ek = e.keys()
+            let v = "?"
+            if ek.contains("value") { v = to_string(e["value"]) }
+            fails = fails + "\n│   ❌ " + k + ": " + v
+          }
+        }
+      }
+
+      to = to + oc
+      ts = ts + sc
+      tf = tf + fc
+
+      println("┌─ " + name + " ─────────────────────────────")
+      println("│ 골화=" + to_string(oc) + " 안정=" + to_string(sc) + " 실패=" + to_string(fc))
+      if fails != "" { println(fails) }
+      println("")
+    }
+  }
+}
+
+println("═══════════════════════════════════════════════════════════════")
+println("  TOTAL: 골화=" + to_string(to) + " 안정=" + to_string(ts) + " 실패=" + to_string(tf))
+let all = to + ts + tf
+if all > 0 {
+  println("  골화율: " + to_string(to * 100 / all) + "% (" + to_string(to) + "/" + to_string(all) + ")")
+}
+println("")
