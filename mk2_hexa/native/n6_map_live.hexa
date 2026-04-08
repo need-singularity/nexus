@@ -2,7 +2,7 @@
 //
 // ⛔ LOCKED 설계 (R5 SSOT, map3d_adapter.hexa 와 쌍)
 // 원본 입력: ~/Dev/n6-architecture/docs/atlas-constants.md (표 파서)
-//          ~/Dev/n6-architecture/docs/breakthrough-theorems.md (BT 파서, TODO)
+//          ~/Dev/n6-architecture/docs/breakthrough-theorems.md (BT 파서)
 //          ~/Dev/n6-architecture/docs/dse-map.toml (DSE 파서, TODO)
 // 기준 지도: ~/Dev/nexus/shared/reality_map.json (L0, 수정 금지)
 // 라이브 출력: ~/Dev/nexus/shared/reality_map_live.json (기준 + n6 merge)
@@ -105,6 +105,184 @@ fn slugify(s: string) -> string {
     out = out.replace("²", "2")
     out = out.replace("³", "3")
     return out
+}
+
+// ═══════════════════════════════════════════════════════════
+// breakthrough-theorems.md 파서 — BT 항목 추출
+// ═══════════════════════════════════════════════════════════
+//
+// 3가지 BT 패턴 처리:
+//   1) 표 행  : | **BT-N** | Name | Statement | Domains | Grade |  (BT-1~5)
+//   2) ## 헤더: ## BT-N: Title ...  + 이후 **Grade**: X stars 줄  (BT-6~)
+//   3) 볼드 항목: **BT-N — Title** 단락 스타일  (BT-381~400 그룹)
+// 각 항목 → id="n6-bt-<num>", level="L7_bt", claim=<title>
+
+fn parse_bt_md(path: string) -> list {
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return [] }
+    let lines = raw.split("\n")
+    let mut nodes = []
+    let mut cur_num = ""
+    let mut cur_title = ""
+    let mut cur_grade = "STRUCTURAL"
+    for line in lines {
+        let t = line.trim()
+        // --- 패턴 2: ## BT-N: Title 또는 ## BT-N — Title ---
+        if t.starts_with("## BT-") {
+            // 이전 항목 flush
+            if cur_num != "" {
+                let nid = "n6-bt-" + cur_num
+                let row = [nid, "bt", cur_title, cur_grade, "bt", "n6-architecture"]
+                nodes = nodes + [row]
+            }
+            cur_grade = "STRUCTURAL"
+            // 제목 파싱: "## BT-6: Golay..." 또는 "## BT-381 ~ BT-400: ..."
+            let no_prefix = t.replace("## BT-", "")
+            // num 은 첫 ':' 앞까지
+            let parts_colon = no_prefix.split(":")
+            let num_part = parts_colon[0].trim()
+            // 범위 표기 "381 ~ BT-400" → 첫 토큰(공백 앞)만
+            let num_space = num_part.split(" ")
+            cur_num = num_space[0].trim()
+            // title: ':' 이후 전체
+            if parts_colon.len() >= 2 {
+                cur_title = parts_colon[1].trim()
+            } else {
+                cur_title = num_part
+            }
+            // ' — ' 이전 핵심 제목만 추출
+            let dash_parts = cur_title.split(" — ")
+            cur_title = dash_parts[0].trim()
+            continue
+        }
+        // --- 패턴 1: 표 행 | **BT-N** | Name | Statement | Domains | Grade | ---
+        if t.starts_with("| **BT-") {
+            let cols = t.split("|")
+            if cols.len() >= 5 {
+                let id_col   = cols[1].trim()
+                let name_col = cols[2].trim()
+                let grade_col = cols[4].trim()
+                // "**BT-1**" → "1"
+                let stripped = id_col.replace("**BT-", "").replace("**", "").trim()
+                // 이전 ## 헤더 항목 flush (있다면)
+                if cur_num != "" {
+                    let nid = "n6-bt-" + cur_num
+                    let row = [nid, "bt", cur_title, cur_grade, "bt", "n6-architecture"]
+                    nodes = nodes + [row]
+                    cur_num = ""
+                    cur_title = ""
+                    cur_grade = "STRUCTURAL"
+                }
+                // 표 행은 grade 가 같은 줄 — 즉시 노드 생성
+                let g = if grade_col.contains("Three") { "THREE_STARS" } else { if grade_col.contains("Two") { "TWO_STARS" } else { "ONE_STAR" } }
+                let nid2 = "n6-bt-" + stripped
+                let row2 = [nid2, "bt", name_col, g, "bt", "n6-architecture"]
+                nodes = nodes + [row2]
+            }
+            continue
+        }
+        // --- 패턴 3: **BT-N — Title** 볼드 단락 ---
+        if t.starts_with("**BT-") {
+            // "**BT-381 — 음운 자질 n=6 완전 분류**"
+            // "**BT-26~41 highlights**" 같은 범위 요약은 ' — ' 미포함 → skip
+            let inner = t.replace("**BT-", "").replace("**", "")
+            let dash2 = inner.split(" — ")
+            if dash2.len() >= 2 {
+                // 이전 항목 flush
+                if cur_num != "" {
+                    let nid = "n6-bt-" + cur_num
+                    let row = [nid, "bt", cur_title, cur_grade, "bt", "n6-architecture"]
+                    nodes = nodes + [row]
+                }
+                cur_num = dash2[0].trim()
+                cur_title = dash2[1].trim()
+                cur_grade = "STRUCTURAL"
+            }
+            continue
+        }
+        // --- Grade 줄: **Grade**: X stars ---
+        if t.starts_with("**Grade**:") {
+            let g_raw = t.replace("**Grade**:", "").trim()
+            if g_raw.contains("Three") {
+                cur_grade = "THREE_STARS"
+            } else {
+                if g_raw.contains("Two") {
+                    cur_grade = "TWO_STARS"
+                } else {
+                    if g_raw.contains("CONJECTURE") {
+                        cur_grade = "CONJECTURE"
+                    } else {
+                        cur_grade = "ONE_STAR"
+                    }
+                }
+            }
+            continue
+        }
+    }
+    // 마지막 항목 flush
+    if cur_num != "" {
+        let nid = "n6-bt-" + cur_num
+        let row = [nid, "bt", cur_title, cur_grade, "bt", "n6-architecture"]
+        nodes = nodes + [row]
+    }
+    return nodes
+}
+
+// ═══════════════════════════════════════════════════════════
+// BT 노드 → reality_map_live.json 추가 merge
+// atlas+DSE merge 완료 후 live_map 에 BT 노드를 삽입
+// ═══════════════════════════════════════════════════════════
+
+fn merge_bt_and_write(live_path: string, bt_nodes: list) -> list {
+    let mut live_raw = ""
+    try { live_raw = read_file(live_path) } catch e { return ["0", "0", "live read fail (bt)"] }
+    let mut added = 0
+    let mut skipped = 0
+    let mut inject = ""
+    for row in bt_nodes {
+        let id    = row[0]
+        let claim = row[2]
+        let grade = row[3]
+        if live_raw.contains("\"" + id + "\"") {
+            skipped = skipped + 1
+            continue
+        }
+        let node_json = ",\n  {\"id\":\"" + json_esc(id) + "\",\"level\":\"L7_bt\",\"claim\":\"" + json_esc(claim) + "\",\"measured\":\"" + json_esc(grade) + "\",\"unit\":\"bt\",\"detail\":\"Breakthrough Theorem\",\"source\":\"n6-architecture/docs/breakthrough-theorems.md\",\"source_url\":\"https://github.com/need-singularity/n6-architecture/blob/main/docs/breakthrough-theorems.md\",\"grade\":\"STRUCTURAL\",\"causal\":\"STRUCTURAL\",\"thread\":\"bt\",\"origin\":\"derived\",\"domain\":\"n6-architecture\"}"
+        inject = inject + node_json
+        added = added + 1
+    }
+    if added == 0 {
+        return [to_string(added), to_string(skipped), "nochange"]
+    }
+    let close_marker = "\"thread_edges\""
+    let parts = live_raw.split(close_marker)
+    if parts.len() < 2 {
+        return ["0", "0", "no close marker (bt)"]
+    }
+    let head_raw = parts[0]
+    let hparts = head_raw.split("]")
+    if hparts.len() < 2 {
+        return ["0", "0", "no bracket (bt)"]
+    }
+    let mut head_rebuilt = ""
+    let last_idx = hparts.len() - 1
+    let mut k = 0
+    while k < last_idx {
+        if k > 0 { head_rebuilt = head_rebuilt + "]" }
+        head_rebuilt = head_rebuilt + hparts[k]
+        k = k + 1
+    }
+    let merged = head_rebuilt + inject + "\n  ]" + hparts[last_idx] + close_marker
+    let mut rest_raw = ""
+    let mut j = 1
+    while j < parts.len() {
+        if j > 1 { rest_raw = rest_raw + close_marker }
+        rest_raw = rest_raw + parts[j]
+        j = j + 1
+    }
+    let final_raw = merged + rest_raw
+    try { write_file(live_path, final_raw) } catch e { return [to_string(added), to_string(skipped), "live write fail (bt)"] }
+    return [to_string(added), to_string(skipped), "ok"]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -288,21 +466,32 @@ fn emit_event(bus_path: string, added: int, skipped: int, status: string) {
 fn cycle_once() -> list {
     let p = paths()
     let n6_atlas   = p[0]
+    let n6_bt      = p[1]
     let n6_dse     = p[2]
     let base_map   = p[3]
     let live_map   = p[4]
     let growth_bus = p[5]
+    // 1) atlas + DSE 파서 → 기준 지도에 merge → live_map 생성
     let atlas_nodes = parse_atlas_md(n6_atlas)
     let dse_nodes   = parse_dse_toml(n6_dse)
-    // atlas + DSE 합산 (동일 타입: list of list of string, 6 elements)
     let nodes = atlas_nodes + dse_nodes
     let result = merge_and_write(base_map, live_map, nodes)
-    let added   = to_int(result[0])
-    let skipped = to_int(result[1])
-    let status  = result[2]
-    emit_event(growth_bus, added, skipped, status)
-    println("[n6_map_live] atlas=" + to_string(atlas_nodes.len()) + " dse=" + to_string(dse_nodes.len()) + " total=" + to_string(nodes.len()))
-    return [to_string(nodes.len()), to_string(added), to_string(skipped), status]
+    let ad_added   = to_int(result[0])
+    let ad_skipped = to_int(result[1])
+    let ad_status  = result[2]
+    // 2) BT 파서 → live_map 에 추가 merge (atlas+DSE merge 완료 후)
+    let bt_nodes = parse_bt_md(n6_bt)
+    let bt_result = merge_bt_and_write(live_map, bt_nodes)
+    let bt_added   = to_int(bt_result[0])
+    let bt_skipped = to_int(bt_result[1])
+    let bt_status  = bt_result[2]
+    let total_added   = ad_added + bt_added
+    let total_skipped = ad_skipped + bt_skipped
+    let status = ad_status + "|bt:" + bt_status
+    emit_event(growth_bus, total_added, total_skipped, status)
+    let total_parsed = nodes.len() + bt_nodes.len()
+    println("[n6_map_live] atlas=" + to_string(atlas_nodes.len()) + " dse=" + to_string(dse_nodes.len()) + " bt=" + to_string(bt_nodes.len()) + " total=" + to_string(total_parsed))
+    return [to_string(total_parsed), to_string(total_added), to_string(total_skipped), status, to_string(nodes.len()), to_string(bt_nodes.len())]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -315,14 +504,14 @@ let mode = if a.len() >= 3 { a[2] } else { "once" }
 
 if mode == "once" {
     let r = cycle_once()
-    println("[n6_map_live] parsed=" + to_string(r[0]) + " added=" + to_string(r[1]) + " skipped=" + to_string(r[2]) + " status=" + to_string(r[3]))
+    println("[n6_map_live] parsed=" + r[0] + " (atlas+dse=" + r[4] + " bt=" + r[5] + ") added=" + r[1] + " skipped=" + r[2] + " status=" + r[3])
 } else if mode == "loop" {
     println("[n6_map_live] loop start (10s interval). Ctrl-C to stop.")
     let mut tick = 0
     while true {
         let r = cycle_once()
         tick = tick + 1
-        println("[n6_map_live] tick=" + to_string(tick) + " parsed=" + to_string(r[0]) + " added=" + to_string(r[1]) + " skipped=" + to_string(r[2]) + " status=" + to_string(r[3]))
+        println("[n6_map_live] tick=" + to_string(tick) + " parsed=" + r[0] + " (atlas+dse=" + r[4] + " bt=" + r[5] + ") added=" + r[1] + " skipped=" + r[2] + " status=" + r[3])
         exec("sleep 10")
     }
 } else if mode == "stats" {

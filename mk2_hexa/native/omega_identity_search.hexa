@@ -1,0 +1,329 @@
+// mk2_hexa/native/omega_identity_search.hexa
+// 포팅 원본: tecs-l/math/omega_identity_search.py (471 LOC)
+// Ω(n), ω(n) 기반 arithmetic identity 탐색
+// 범위: N=2000 (Python 100K → 인터프리터 속도)
+
+let LIMIT = 2000
+
+// ω(n) = distinct prime factors count
+fn omega_small(n: int) -> int {
+    let mut m = n
+    let mut cnt = 0
+    let mut d = 2
+    while d * d <= m {
+        if m % d == 0 {
+            cnt = cnt + 1
+            while m % d == 0 { m = m / d }
+        }
+        d = d + 1
+    }
+    if m > 1 { cnt = cnt + 1 }
+    cnt
+}
+
+// Ω(n) = prime factors with multiplicity
+fn omega_big(n: int) -> int {
+    let mut m = n
+    let mut cnt = 0
+    let mut d = 2
+    while d * d <= m {
+        while m % d == 0 {
+            cnt = cnt + 1
+            m = m / d
+        }
+        d = d + 1
+    }
+    if m > 1 { cnt = cnt + 1 }
+    cnt
+}
+
+fn factorize_str(n: int) -> string {
+    let mut m = n
+    let mut s = ""
+    let mut d = 2
+    while d * d <= m {
+        if m % d == 0 {
+            let mut e = 0
+            while m % d == 0 {
+                e = e + 1
+                m = m / d
+            }
+            if len(s) > 0 { s = s + " x " }
+            if e == 1 { s = s + to_string(d) }
+            else { s = s + to_string(d) + "^" + to_string(e) }
+        }
+        d = d + 1
+    }
+    if m > 1 {
+        if len(s) > 0 { s = s + " x " }
+        s = s + to_string(m)
+    }
+    s
+}
+
+fn pad(s: string, w: int) -> string {
+    let mut r = s
+    while len(r) < w { r = " " + r }
+    r
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("OMEGA IDENTITY SEARCH (n <= " + to_string(LIMIT) + ")")
+println("══════════════════════════════════════════════════════════════════════")
+
+// ─── 1. φ(n) = Ω(n) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("1. phi(n) = Omega(n)")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols1 = []
+let mut n = 2
+while n < LIMIT {
+    if phi(n) == omega_big(n) { sols1 = sols1 + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols1)) + " solutions")
+println("  Solutions: " + to_string(sols1))
+
+// ─── 2. τ(n) = Ω(n) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("2. tau(n) = Omega(n)")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols2 = []
+n = 2
+while n < LIMIT {
+    if tau(n) == omega_big(n) { sols2 = sols2 + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols2)) + " solutions")
+if len(sols2) <= 50 { println("  " + to_string(sols2)) }
+else { println("  First 50: " + to_string(sols2)) }
+
+// ─── 3. σ(n)/τ(n) = Ω(n) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("3. sigma/tau = Omega (exact)")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols3 = []
+n = 2
+while n < LIMIT {
+    let s = sigma(n)
+    let t = tau(n)
+    let ob = omega_big(n)
+    if s % t == 0 && s / t == ob { sols3 = sols3 + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols3)) + " solutions: " + to_string(sols3))
+
+// ─── 4a. σ·Ω = n·τ ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("4a. sigma * Omega = n * tau")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols4a = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * omega_big(n) == n * tau(n) { sols4a = sols4a + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols4a)) + " solutions: " + to_string(sols4a))
+
+// ─── 4b. φ·Ω = ω·τ ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("4b. phi * Omega = omega * tau")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols4b = []
+n = 2
+while n < LIMIT {
+    if phi(n) * omega_big(n) == omega_small(n) * tau(n) { sols4b = sols4b + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols4b)) + " solutions: " + to_string(sols4b))
+
+// ─── 4c. σ·φ·ω = n·τ·Ω ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("4c. sigma * phi * omega = n * tau * Omega")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols4c = []
+n = 2
+while n < LIMIT {
+    let s = sigma(n)
+    let p = phi(n)
+    let w = omega_small(n)
+    let t = tau(n)
+    let ob = omega_big(n)
+    if s * p * w == n * t * ob { sols4c = sols4c + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols4c)) + " solutions: " + to_string(sols4c))
+
+// ─── 5a. σ = τ·φ + ω ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("5a. sigma = tau*phi + omega")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols5a = []
+n = 2
+while n < LIMIT {
+    if sigma(n) == tau(n) * phi(n) + omega_small(n) { sols5a = sols5a + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols5a)) + " solutions: " + to_string(sols5a))
+
+// ─── 5b. σ·ω = φ·τ + n ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("5b. sigma*omega = phi*tau + n")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols5b = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * omega_small(n) == phi(n) * tau(n) + n { sols5b = sols5b + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols5b)) + " solutions: " + to_string(sols5b))
+
+// ─── 6a. σ + φ + τ = 2n ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("6a. sigma + phi + tau = 2n")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols6a = []
+n = 2
+while n < LIMIT {
+    if sigma(n) + phi(n) + tau(n) == 2 * n { sols6a = sols6a + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols6a)) + " solutions: " + to_string(sols6a))
+
+// ─── 6c. σ·φ = n·τ (master identity) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("6c. sigma*phi = n*tau (MASTER)")
+println("══════════════════════════════════════════════════════════════════════")
+let mut sols6c = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * phi(n) == n * tau(n) { sols6c = sols6c + [n] }
+    n = n + 1
+}
+println("  Found " + to_string(len(sols6c)) + " solutions: " + to_string(sols6c))
+
+// ─── 6d. σ·φ - n·τ = k (|k| <= 20) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("6d. sigma*phi - n*tau = k for |k| <= 20")
+println("══════════════════════════════════════════════════════════════════════")
+let mut k_vals = []
+let mut k_counts = []
+let ki_range = 41
+let mut ki = 0
+while ki < ki_range {
+    k_vals = k_vals + [ki - 20]
+    k_counts = k_counts + [0]
+    ki = ki + 1
+}
+n = 2
+while n < LIMIT {
+    let k = sigma(n) * phi(n) - n * tau(n)
+    if k >= -20 && k <= 20 {
+        k_counts[k + 20] = k_counts[k + 20] + 1
+    }
+    n = n + 1
+}
+println("    k  | count")
+println("  -----+------")
+ki = 0
+while ki < ki_range {
+    if k_counts[ki] > 0 {
+        println("  " + pad(to_string(k_vals[ki]), 4) + " | " + to_string(k_counts[ki]))
+    }
+    ki = ki + 1
+}
+
+// ─── BONUS: Perfect numbers ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("BONUS: Perfect numbers special properties")
+println("══════════════════════════════════════════════════════════════════════")
+let perfects = [6, 28, 496]
+let mut pi = 0
+while pi < len(perfects) {
+    let pn = perfects[pi]
+    let s = sigma(pn)
+    let t = tau(pn)
+    let p = phi(pn)
+    let w = omega_small(pn)
+    let ob = omega_big(pn)
+    println("  n=" + to_string(pn) + ": sigma=" + to_string(s) + " tau=" + to_string(t) + " phi=" + to_string(p) + " omega=" + to_string(w) + " Omega=" + to_string(ob))
+    println("    sigma*phi=" + to_string(s * p) + " n*tau=" + to_string(pn * t) + " diff=" + to_string(s * p - pn * t))
+    println("    sigma/n=" + to_string(s / pn) + " (perfect: 2)")
+    pi = pi + 1
+}
+
+// ─── Systematic Ω search ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SYSTEMATIC Omega IDENTITY SEARCH")
+println("══════════════════════════════════════════════════════════════════════")
+
+// σ·Ω = φ·τ
+let mut r1 = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * omega_big(n) == phi(n) * tau(n) { r1 = r1 + [n] }
+    n = n + 1
+}
+println("  sigma*Omega = phi*tau: " + to_string(len(r1)) + " sols " + to_string(r1))
+
+// σ·φ = n·τ·Ω
+let mut r2 = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * phi(n) == n * tau(n) * omega_big(n) { r2 = r2 + [n] }
+    n = n + 1
+}
+println("  sigma*phi = n*tau*Omega: " + to_string(len(r2)) + " sols " + to_string(r2))
+
+// σ·ω = n·Ω
+let mut r3 = []
+n = 2
+while n < LIMIT {
+    if sigma(n) * omega_small(n) == n * omega_big(n) { r3 = r3 + [n] }
+    n = n + 1
+}
+println("  sigma*omega = n*Omega: " + to_string(len(r3)) + " sols")
+if len(r3) <= 30 { println("  " + to_string(r3)) }
+
+// τ = Ω + 1
+let mut r4 = []
+n = 2
+while n < LIMIT {
+    if tau(n) == omega_big(n) + 1 { r4 = r4 + [n] }
+    n = n + 1
+}
+println("  tau = Omega + 1: " + to_string(len(r4)) + " sols (squarefree)")
+
+// σ - φ = τ·Ω
+let mut r5 = []
+n = 2
+while n < LIMIT {
+    if sigma(n) - phi(n) == tau(n) * omega_big(n) { r5 = r5 + [n] }
+    n = n + 1
+}
+println("  sigma - phi = tau*Omega: " + to_string(len(r5)) + " sols " + to_string(r5))
+
+// σ + φ = n·Ω
+let mut r6 = []
+n = 2
+while n < LIMIT {
+    if sigma(n) + phi(n) == n * omega_big(n) { r6 = r6 + [n] }
+    n = n + 1
+}
+println("  sigma + phi = n*Omega: " + to_string(len(r6)) + " sols " + to_string(r6))
+
+println("")
+println("DONE")

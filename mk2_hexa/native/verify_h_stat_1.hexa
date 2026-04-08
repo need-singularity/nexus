@@ -1,0 +1,105 @@
+// mk2_hexa/native/verify_h_stat_1.hexa
+// 포팅 원본: tecs-l/math/verify_h_stat_1.py (102 LOC)
+//
+// H-STAT-1: Chi^2(k) 4-모멘트 일치 — var=σ(k), mode=τ(k), kurt=φ(k)
+//   kurt 일치를 유리수 없이: 12/k == φ(k)  ⇔  12 == k·φ(k)
+//
+// AI-native 의도 (attr 구현 시 자동 적용 — todo #303):
+//   @pure @memoize: check_chi2_quadruple(k) — 재귀 아닌 k→bool, 메모화 이득 O(1)
+//   @parallel:      k 범위 스캔 (counter loop, 서로 독립)
+
+// @pure @memoize
+fn matches_var(k: int) -> bool  { sigma(k) == 2 * k }
+
+// @pure @memoize
+fn matches_mode(k: int) -> bool { tau(k) == k - 2 }
+
+// @pure @memoize  —  φ(k) == 12/k ⇔ k·φ(k) == 12
+fn matches_kurt(k: int) -> bool { k * phi(k) == 12 }
+
+// @pure
+fn all_match(k: int) -> bool {
+    if k < 2 { return false }
+    matches_var(k) && matches_mode(k) && matches_kurt(k)
+}
+
+// @pure
+fn yn(b: bool) -> string { if b { "YES" } else { "NO" } }
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-STAT-1 Verification: Chi-Squared Quadruple Moment Match (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// ─── 완전수 검증 ───
+println("")
+println("--- Perfect Numbers ---")
+let perfects = [6, 28, 496, 8128]
+let mut pi = 0
+while pi < len(perfects) {
+    let n = perfects[pi]
+    let s = sigma(n)
+    let t = tau(n)
+    let p = phi(n)
+    println("  k=" + to_string(n) + ": sigma=" + to_string(s) + " (need " + to_string(2*n) + "), tau=" + to_string(t) + " (need " + to_string(n-2) + "), phi=" + to_string(p) + " (need 12/" + to_string(n) + ")")
+    println("    var=" + yn(matches_var(n)) + ", mode=" + yn(matches_mode(n)) + ", kurt=" + yn(matches_kurt(n)))
+    println("    ALL MATCH: " + (if all_match(n) { "YES ***" } else { "NO" }))
+    pi = pi + 1
+}
+
+// ─── 전수조사 k=2..10000 (@parallel counter loop 후보) ───
+println("")
+println("--- Exhaustive search k=2..10000 ---")
+let mut solutions = []
+let mut k = 2
+while k <= 10000 {
+    if all_match(k) {
+        solutions = solutions + [k]
+        println("  FOUND: k=" + to_string(k))
+    }
+    k = k + 1
+}
+println("")
+println("Total solutions in [2, 10000]: " + to_string(len(solutions)))
+println("Solutions: " + to_string(solutions))
+
+// ─── 부분 일치 (2 of 3) k=2..1000 ───
+println("")
+println("--- Partial matches (2 of 3) in [2, 1000] ---")
+let mut k2 = 2
+while k2 <= 1000 {
+    let mv = matches_var(k2)
+    let mm = matches_mode(k2)
+    let mk = matches_kurt(k2)
+    let mut c = 0
+    if mv { c = c + 1 }
+    if mm { c = c + 1 }
+    if mk { c = c + 1 }
+    if c >= 2 {
+        println("  k=" + to_string(k2) + ": " + to_string(c) + "/3 matches (var=" + yn(mv) + ", mode=" + yn(mm) + ", kurt=" + yn(mk) + ")")
+    }
+    k2 = k2 + 1
+}
+
+// ─── 증명 논리 ───
+println("")
+println("--- Proof Argument ---")
+println("Condition (3): phi(k) = 12/k  ⇔  k·phi(k) = 12  →  k | 12")
+println("Divisors of 12: 1, 2, 3, 4, 6, 12")
+println("")
+let divs = [1, 2, 3, 4, 6, 12]
+let mut di = 0
+while di < len(divs) {
+    let d = divs[di]
+    let ap = phi(d)
+    let s = sigma(d)
+    let t = tau(d)
+    let kurt_ok = d * ap == 12
+    let var_ok = s == 2 * d
+    let tau_ok = t == d - 2
+    println("  k=" + to_string(d) + ": phi=" + to_string(ap) + " kurt=" + yn(kurt_ok) + "  |  sigma=" + to_string(s) + " var=" + yn(var_ok) + "  |  tau=" + to_string(t) + " mode=" + yn(tau_ok))
+    di = di + 1
+}
+
+println("")
+println("Condition (3) → k | 12. Condition (1) [perfect] → {6, 28, 496, ...}")
+println("Intersection = {6}. Therefore k=6 UNIQUE. QED.")

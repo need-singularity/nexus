@@ -1,0 +1,254 @@
+// 포팅 원본: tecs-l/math/task1_final.py (179 LOC)
+// pi_R(x) layered BFS computation — distinct R values level by level
+// NOTE: x_vals reduced for hexa interpreter speed (original: up to 100000)
+
+fn sieve(n) {
+  let mut is_prime = [true] * (n + 1)
+  is_prime[0] = false
+  is_prime[1] = false
+  let mut i = 2
+  while i * i <= n {
+    if is_prime[i] {
+      let mut j = i * i
+      while j <= n {
+        is_prime[j] = false
+        j = j + i
+      }
+    }
+    i = i + 1
+  }
+  let mut primes = []
+  let mut k = 2
+  while k <= n {
+    if is_prime[k] {
+      primes = primes.push(k)
+    }
+    k = k + 1
+  }
+  return primes
+}
+
+fn reduce_frac(n, d) {
+  let g = gcd(n, d)
+  return [n / g, d / g]
+}
+
+fn pi_R(x_int) {
+  let limit = 2 * x_int + 100
+  let primes = sieve(limit)
+
+  let mut prime_gen_lists = []
+  let mut prime_indices = []
+
+  for p in primes {
+    let mut gens = []
+    let mut a = 1
+    while a < 20 {
+      let mut num = 1
+      let mut exp = 0
+      while exp <= a {
+        num = num * p
+        exp = exp + 1
+      }
+      num = num - 1
+      let den = p * (a + 1)
+      if num > x_int * den {
+        break
+      }
+      let rf = reduce_frac(num, den)
+      gens = gens.push([rf[0], rf[1]])
+      a = a + 1
+    }
+    if gens.len() > 0 {
+      prime_gen_lists = prime_gen_lists.push(gens)
+      prime_indices = prime_indices.push(p)
+    }
+    if (p * p - 1) > x_int * 2 * p {
+      break
+    }
+  }
+
+  let n_primes = prime_gen_lists.len()
+
+  let mut all_values = #{}
+  all_values["1,1"] = true
+
+  let mut current_layer_states = [[1, 1, 0]]
+  let max_k = 10
+
+  let mut k = 1
+  while k <= max_k {
+    let mut next_layer_states = []
+    let mut new_values_this_layer = 0
+
+    let mut si = 0
+    while si < current_layer_states.len() {
+      let state = current_layer_states[si]
+      let cn = state[0]
+      let cd = state[1]
+      let start_idx = state[2]
+
+      let mut i = start_idx
+      while i < n_primes {
+        let gens = prime_gen_lists[i]
+        let mut gi = 0
+        while gi < gens.len() {
+          let gen = gens[gi]
+          let rn = gen[0]
+          let rd = gen[1]
+          let nn_raw = cn * rn
+          let nd_raw = cd * rd
+          let g = gcd(nn_raw, nd_raw)
+          let nn = nn_raw / g
+          let nd = nd_raw / g
+          if nn <= x_int * nd {
+            let key = to_string(nn) + "," + to_string(nd)
+            if !has_key(all_values, key) {
+              all_values[key] = true
+              new_values_this_layer = new_values_this_layer + 1
+            }
+            next_layer_states = next_layer_states.push([nn, nd, i + 1])
+          } else {
+            break
+          }
+          gi = gi + 1
+        }
+        i = i + 1
+      }
+      si = si + 1
+    }
+
+    if new_values_this_layer == 0 {
+      break
+    }
+    current_layer_states = next_layer_states
+    let msg = "  Layer k=" + to_string(k) + ": " + to_string(new_values_this_layer) + " new values, layer size=" + to_string(current_layer_states.len())
+    println(msg)
+    k = k + 1
+  }
+
+  return keys(all_values).len()
+}
+
+fn main() {
+  let sep = "======================================================================"
+  println(sep)
+  println("pi_R(x) LAYERED BFS COMPUTATION")
+  println(sep)
+
+  // Reduced for interpreter speed (original: sieve(210000), x up to 100000)
+  let primes_big = sieve(500)
+  let x_vals = [10, 50]
+
+  let mut all_results = []
+
+  let mut xi = 0
+  while xi < x_vals.len() {
+    let x = x_vals[xi]
+    println("")
+    println("x = " + to_string(x) + ":")
+    let pi = pi_R(x)
+    let mut p2x = 0
+    for p in primes_big {
+      if p <= 2 * x {
+        p2x = p2x + 1
+      }
+    }
+    let ratio = to_float(pi) / to_float(p2x)
+    let lnx_val = log(to_float(x))
+    let mut lnlnx_val = 1.0
+    if lnx_val > 1.0 {
+      lnlnx_val = log(lnx_val)
+    }
+    all_results = all_results.push([x, pi, p2x])
+    let msg = "  pi_R(" + to_string(x) + ") = " + to_string(pi) + ", pi(2x) = " + to_string(p2x) + ", ratio = " + to_string(ratio)
+    println(msg)
+    xi = xi + 1
+  }
+
+  println("")
+  println(sep)
+  println("SUMMARY TABLE")
+  println(sep)
+  println("       x     pi_R(x)   pi(2x)    ratio    lnlnx  ratio/lnlnx")
+  println("------------------------------------------------------------")
+
+  let mut ri = 0
+  while ri < all_results.len() {
+    let row = all_results[ri]
+    let x = row[0]
+    let pi = row[1]
+    let p2x = row[2]
+    let ratio = to_float(pi) / to_float(p2x)
+    let lnx_val = log(to_float(x))
+    let mut lnlnx_val = 1.0
+    if lnx_val > 1.0 {
+      lnlnx_val = log(lnx_val)
+    }
+    let ratio_over_lnlnx = ratio / lnlnx_val
+    let line = to_string(x) + "  " + to_string(pi) + "  " + to_string(p2x) + "  " + to_string(ratio) + "  " + to_string(lnlnx_val) + "  " + to_string(ratio_over_lnlnx)
+    println(line)
+    ri = ri + 1
+  }
+
+  println("")
+
+  // Log-log fit
+  let mut log_x = []
+  let mut log_pi = []
+  let mut fi = 0
+  while fi < all_results.len() {
+    let row = all_results[fi]
+    let x = row[0]
+    let pi = row[1]
+    if x >= 10 {
+      log_x = log_x.push(log(to_float(x)))
+      log_pi = log_pi.push(log(to_float(pi)))
+    }
+    fi = fi + 1
+  }
+
+  let n = log_x.len()
+  if n >= 2 {
+    let mut sx = 0.0
+    let mut sy = 0.0
+    let mut sxy = 0.0
+    let mut sx2 = 0.0
+    let mut li = 0
+    while li < n {
+      sx = sx + log_x[li]
+      sy = sy + log_pi[li]
+      sxy = sxy + log_x[li] * log_pi[li]
+      sx2 = sx2 + log_x[li] * log_x[li]
+      li = li + 1
+    }
+    let nf = to_float(n)
+    let slope = (nf * sxy - sx * sy) / (nf * sx2 - sx * sx)
+    let intercept = (sy - slope * sx) / nf
+    let coeff = pow(2.718281828459045, intercept)
+    let msg = "Log-log fit: pi_R(x) ~ " + to_string(coeff) + " * x^" + to_string(slope)
+    println(msg)
+  }
+
+  println("")
+  println("Checking form pi_R(x) ~ C * x * lnlnx / lnx:")
+  println("       x     pi_R(x)  x*lnlnx/lnx         C")
+  println("---------------------------------------------")
+  let mut ci = 0
+  while ci < all_results.len() {
+    let row = all_results[ci]
+    let x = row[0]
+    let pi = row[1]
+    if x >= 10 {
+      let lnx_val = log(to_float(x))
+      let lnlnx_val = log(lnx_val)
+      let form = to_float(x) * lnlnx_val / lnx_val
+      let c_val = to_float(pi) / form
+      let line = to_string(x) + "  " + to_string(pi) + "  " + to_string(form) + "  " + to_string(c_val)
+      println(line)
+    }
+    ci = ci + 1
+  }
+}
+
+main()

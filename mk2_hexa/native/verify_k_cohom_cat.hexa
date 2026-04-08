@@ -1,0 +1,244 @@
+// mk2_hexa/native/verify_k_cohom_cat.hexa
+// 포팅 원본: tecs-l/math/verify_k_cohom_cat.py (304 LOC)
+// Algebraic K-theory / Cohomology / Category theory vs n=6
+
+let n_val = 6
+let sig = sigma(6)       // 12
+let ph = phi(6)          // 2
+let tau_v = tau(6)       // 4
+let sp = sig * ph        // 24
+
+// @pure
+fn binom(n: int, k: int) -> int {
+    if k < 0 || k > n { return 0 }
+    let mut r = 1
+    let mut i = 0
+    while i < k {
+        r = r * (n - i) / (i + 1)
+        i = i + 1
+    }
+    r
+}
+
+// @pure
+fn ipow(b: int, e: int) -> int {
+    let mut r = 1
+    let mut i = 0
+    while i < e {
+        r = r * b
+        i = i + 1
+    }
+    r
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("K-theory / Cohomology / Category theory vs Perfect 6  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  n=6: σ=" + to_string(sig) + ", φ=" + to_string(ph) + ", τ=" + to_string(tau_v) + ", σ·φ=" + to_string(sp))
+assert sp == n_val * tau_v
+println("  σ·φ = n·τ: 24 = 24 ✓ (master identity)")
+
+// ─── TOPIC 1: Algebraic K-theory of Z ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TOPIC 1: Algebraic K-theory of Z")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  K_n(Z) groups (known):")
+println("    K_0(Z) = Z")
+println("    K_1(Z) = Z/2")
+println("    K_2(Z) = Z/2  (Milnor 1971)")
+println("    K_3(Z) = Z/48  (Lee-Szczarba 1976)  ★")
+println("    K_4(Z) = 0")
+println("    K_5(Z) = Z")
+println("    K_6(Z) = 0")
+println("    K_7(Z) = Z/240")
+
+println("")
+println("  KEY: K_3(Z) = Z/48 = Z/(2·σ·φ)")
+let check_48 = 2 * sp
+println("    2·σ·φ = " + to_string(check_48))
+assert check_48 == 48
+println("    48 = σ·τ = " + to_string(sig * tau_v) + " (alt)")
+assert sig * tau_v == 48
+println("    48 = (σ−τ)·n = " + to_string((sig - tau_v) * n_val))
+assert (sig - tau_v) * n_val == 48
+
+println("")
+println("  K_7(Z) = Z/240")
+println("    240 = 5·48 = σ_{-1}(6)·K_3")
+println("    240 = 10·σ·φ = 10·24")
+let k7 = 10 * sp
+assert k7 == 240
+
+// Periodicity: σ - τ = 8 = 2^3 = K-theory period
+println("")
+println("  K-theory Bott periodicity = 8")
+let period = sig - tau_v
+println("    σ(6) − τ(6) = " + to_string(period) + " = 8 = 2^3  ★")
+assert period == 8
+
+// ─── TOPIC 2: Cohomology / Euler ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TOPIC 2: Cohomology & Topological invariants")
+println("══════════════════════════════════════════════════════════════════════")
+
+// Euler formula V-E+F=2 for polyhedra
+println("")
+println("  Regular polyhedra (Euler V−E+F=2):")
+let poly_name = ["Tetrahedron", "Cube", "Octahedron", "Dodecahedron", "Icosahedron"]
+let poly_V = [4, 8, 6, 20, 12]
+let poly_E = [6, 12, 12, 30, 30]
+let poly_F = [4, 6, 8, 12, 20]
+let mut i = 0
+while i < len(poly_V) {
+    let V = poly_V[i]
+    let E = poly_E[i]
+    let F = poly_F[i]
+    let chi = V - E + F
+    let mut tag = ""
+    if E == sig { tag = tag + "E=σ " }
+    if F == sig { tag = tag + "F=σ " }
+    if V == n_val { tag = tag + "V=6 " }
+    if V == sig { tag = tag + "V=σ " }
+    if F == sig { tag = tag + "F=σ " }
+    println("    " + poly_name[i] + ": V=" + to_string(V) + " E=" + to_string(E) + " F=" + to_string(F) + " → χ=" + to_string(chi) + "  " + tag)
+    assert chi == 2
+    i = i + 1
+}
+
+// Cube/Octahedron: E=12=σ, F or V = 6 = n
+println("")
+println("  ★ Cube: E=12=σ(6), F=6=n  (dual Octahedron: V=6=n, E=12=σ(6))")
+println("  Both cube & octahedron have 12 edges + 6 faces/vertices = σ + n")
+assert poly_E[1] == sig
+assert poly_F[1] == n_val
+assert poly_V[2] == n_val
+
+// Betti of CP^n: non-zero count = n+1
+println("")
+println("  CP^n Betti (non-zero count = n+1):")
+let cp_dims = [1, 2, 3, 6]
+let mut j = 0
+while j < len(cp_dims) {
+    let d = cp_dims[j]
+    let nz = d + 1
+    let tag = if nz == tau_v { " = τ(6)" } else if nz == n_val + 1 { "" } else { "" }
+    println("    CP^" + to_string(d) + ": non-zero Betti = " + to_string(nz) + tag)
+    j = j + 1
+}
+
+// de Rham cohomology of T^n
+println("")
+println("  T^n (n-torus) de Rham cohomology: dim H^k = C(n,k)")
+let t_dims = [2, 3, 4, 6]
+let mut k = 0
+while k < len(t_dims) {
+    let d = t_dims[k]
+    let total = ipow(2, d)
+    println("    T^" + to_string(d) + ": total dim = 2^" + to_string(d) + " = " + to_string(total))
+    k = k + 1
+}
+
+// T^6 detailed
+println("")
+println("  T^6 cohomology details:")
+let mut kk = 0
+while kk <= 6 {
+    let c = binom(6, kk)
+    let mut tag = ""
+    if c == 1 { tag = " (generator)" }
+    else if c == n_val { tag = " = n" }
+    else if c == sig + 3 { tag = " = σ+3" }
+    else if c == 20 { tag = " (central)" }
+    println("    H^" + to_string(kk) + "(T^6) = R^" + to_string(c) + tag)
+    kk = kk + 1
+}
+let total_t6 = ipow(2, 6)
+println("    Total: 2^6 = " + to_string(total_t6))
+assert total_t6 == 64
+
+// χ(T^6) = (1-1)^6 = 0
+let mut chi_t6 = 0
+let mut si = 0
+let mut sign = 1
+while si <= 6 {
+    chi_t6 = chi_t6 + sign * binom(6, si)
+    sign = 0 - sign
+    si = si + 1
+}
+println("    χ(T^6) = Σ(−1)^k·C(6,k) = (1−1)^6 = " + to_string(chi_t6))
+assert chi_t6 == 0
+
+// ─── TOPIC 3: Category theory ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TOPIC 3: Category theory & Divisor poset of 6")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  Divisors(6) = {1, 2, 3, 6}   (τ=4 elements)")
+println("  Hasse diagram:   6")
+println("                  / \\")
+println("                 2   3")
+println("                  \\ /")
+println("                   1")
+println("  Edges in Hasse = 4 = τ(6)  ★")
+
+// 2·φ = τ for n=6
+println("")
+println("  Master identity σφ = nτ  +  perfect σ = 2n  ⇒  2φ = τ")
+println("  Check perfect numbers:")
+let perfects = [6, 28, 496, 8128]
+let mut pi = 0
+while pi < len(perfects) {
+    let pn = perfects[pi]
+    let tp = tau(pn)
+    let pp = phi(pn)
+    let holds = 2 * pp == tp
+    println("    n=" + to_string(pn) + ": τ=" + to_string(tp) + ", φ=" + to_string(pp) + ", 2φ=" + to_string(2 * pp) + "  " + (if holds { "✓" } else { "✗" }))
+    pi = pi + 1
+}
+println("  → 2φ=τ holds ONLY for n=6 among perfects!")
+
+// τ(σ(d)) for d | 6
+println("")
+println("  τ(σ(d)) for d | 6:")
+let divs6 = [1, 2, 3, 6]
+let mut di = 0
+while di < len(divs6) {
+    let d = divs6[di]
+    let sd = sigma(d)
+    let td = tau(sd)
+    let tag = if td == d { "  ★ FIXED POINT" } else { "" }
+    println("    d=" + to_string(d) + ": σ(" + to_string(d) + ")=" + to_string(sd) + ", τ(" + to_string(sd) + ")=" + to_string(td) + tag)
+    assert td == d  // All 4 divisors of 6 are fixed points! (cf. Seq D)
+    di = di + 1
+}
+println("  ALL 4 divisors of 6 are fixed points of n → τ(σ(n)) ★")
+
+// "Perfectness ratio" = 2
+println("")
+println("  Yoneda-like: n=6 characterized by all ratios = 2")
+println("    σ/n = " + to_string(sig / n_val) + " (perfect)")
+println("    τ/φ = " + to_string(tau_v / ph))
+println("    φ/1 = " + to_string(ph))
+assert sig / n_val == 2
+assert tau_v / ph == 2
+assert ph == 2
+
+// ─── Summary ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SUMMARY — All assertions PASS")
+println("══════════════════════════════════════════════════════════════════════")
+println("  K_3(Z) = Z/48 = Z/(σ·τ) = Z/(2σφ)        ✓")
+println("  K_7(Z) = Z/240 = Z/(10·σφ)               ✓")
+println("  Bott period = σ−τ = 8                    ✓")
+println("  All 5 regular polyhedra χ = 2            ✓")
+println("  Cube: E=σ(6), F=n  dual Octa: V=n, E=σ(6) ✓")
+println("  T^6 total cohom dim = 2^6 = 64, χ = 0    ✓")
+println("  Div(6) Hasse edges = 4 = τ(6)            ✓")
+println("  τ(σ(d)) = d for all d | 6 (fixed points) ✓")
+println("  Yoneda ratios σ/n = τ/φ = φ = 2          ✓")

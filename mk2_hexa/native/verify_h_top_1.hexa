@@ -1,0 +1,108 @@
+// mk2_hexa/native/verify_h_top_1.hexa
+// 포팅 원본: tecs-l/math/verify_h_top_1.py (227 LOC)
+// H-TOP-1: Calabi-Yau 3-fold Betti numbers vs σ(6), τ(6)
+//
+// AI-native: @pure 전역 — 정수 산술만
+
+let sigma_6 = sigma(6)      // 12
+let tau_6 = tau(6)          // 4
+let phi_6 = phi(6)          // 2
+
+// 알려진 CY3 병렬 배열 (h11, h21, name)
+let cy_h11 = [1, 2, 2, 1, 1, 11, 3, 19, 1, 2, 3, 1, 1, 27, 5, 491, 251, 4, 6, 7, 4, 5, 2, 14, 15, 20]
+let cy_h21 = [101, 86, 128, 149, 89, 11, 3, 19, 1, 2, 243, 73, 65, 27, 185, 11, 251, 68, 6, 4, 1, 2, 56, 14, 15, 20]
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-TOP-1: CY3 Betti vs σ(6)=12, τ(6)=4 (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("CY3 Betti:  b_0=b_6=1, b_1=b_5=0, b_2=b_4=h11, b_3=2(h21+1)")
+println("  Euler χ = 2(h11 − h21)")
+println("  Σ Betti = 4 + 2(h11 + h21)")
+
+// 타겟 값
+let targets_val = [6, 12, 4, 2, 0 - 6, 0 - 12, 0 - 4, 0]
+let targets_lbl = ["perfect", "σ(6)", "τ(6)", "φ(6)", "-perfect", "-σ(6)", "-τ(6)", "self-mirror"]
+
+fn in_targets(v: int) -> string {
+    let mut i = 0
+    while i < len(targets_val) {
+        if targets_val[i] == v { return targets_lbl[i] }
+        i = i + 1
+    }
+    ""
+}
+
+println("")
+println("## Matches in known CY3 list")
+println("  h11 |  h21 |   χ   | ΣBetti | Match")
+println("  ----+------+-------+--------+--------")
+
+let mut i = 0
+while i < len(cy_h11) {
+    let h11 = cy_h11[i]
+    let h21 = cy_h21[i]
+    let chi = 2 * (h11 - h21)
+    let sumb = 4 + 2 * (h11 + h21)
+    let tag1 = in_targets(chi)
+    let mut tag2 = ""
+    if sumb == 6 { tag2 = "ΣB=perfect" }
+    else if sumb == 12 { tag2 = "ΣB=σ(6)" }
+    else if sumb == 4 { tag2 = "ΣB=τ(6)" }
+    else if sumb == 2 { tag2 = "ΣB=φ(6)" }
+    let mtag = if tag1 != "" { "χ=" + tag1 + " " + tag2 } else { tag2 }
+    if mtag != "" {
+        println("  " + to_string(h11) + "\t|  " + to_string(h21) + "\t|  " + to_string(chi) + "\t|  " + to_string(sumb) + "\t| " + mtag)
+    }
+    i = i + 1
+}
+
+// ─── Key findings ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("KEY FINDING: CY3(h11=6, h21=6) self-mirror")
+println("══════════════════════════════════════════════════════════════════════")
+let h = 6
+let chi6 = 2 * (h - h)
+let sumb6 = 4 + 2 * (h + h)
+println("  h11 = h21 = 6  (perfect number)")
+println("  χ = " + to_string(chi6) + "  (self-mirror)")
+println("  Σ Betti = 4 + 2·(6+6) = " + to_string(sumb6) + "  = NEXT perfect number!")
+assert sumb6 == 28
+
+// ─── Verification: perfect P with (P-4)/4 also perfect ───
+println("")
+println("## Which perfect P satisfy (P−4)/4 = perfect?")
+let perfects = [6, 28, 496, 8128, 33550336]
+let mut j = 0
+while j < len(perfects) {
+    let P = perfects[j]
+    let num = P - 4
+    let is_int = num % 4 == 0
+    let hh = if is_int { num / 4 } else { 0 }
+    // Is hh perfect? (check membership in list)
+    let mut is_perf = false
+    if is_int {
+        let mut k = 0
+        while k < len(perfects) {
+            if perfects[k] == hh { is_perf = true }
+            k = k + 1
+        }
+    }
+    let int_tag = if is_int { "int" } else { "non-int" }
+    let perf_tag = if is_perf { "PERFECT" } else { "" }
+    let h_str = if is_int { to_string(hh) } else { "(P-4)/4 = " + to_string(num) + "/4" }
+    println("  P=" + to_string(P) + ": h = " + h_str + "  (" + int_tag + ")  " + perf_tag)
+    j = j + 1
+}
+println("")
+println("  ✓ P=28 is the UNIQUE perfect number where (P−4)/4 = 6 is also perfect.")
+println("  This makes CY3(6,6) → ΣBetti = 28 a non-trivial structural bridge:")
+println("    perfect 6 → perfect 28 via CY3 topology")
+
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("VERDICT: H-TOP-1 ORANGE-STAR 🟠★")
+println("══════════════════════════════════════════════════════════════════════")
+println("  CY3(6,6) → ΣBetti=28 구조적으로 진실 (존재성은 문헌 확인 필요).")
+println("  (P−4)/4 이 완전수인 유일 P=28 → small-number 일치 초월.")

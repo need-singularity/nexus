@@ -1,0 +1,147 @@
+// mk2_hexa/native/verify_h_cs_5.hexa
+// 포팅 원본: tecs-l/math/verify_h_cs_5.py (150 LOC)
+// H-CS-5: Graph coloring + Ramsey numbers vs perfect number 6
+// AI-native: @pure binomial/divisor — const-prop 대상
+
+// @pure — 이항계수 C(n,k)
+fn binom(n: int, k: int) -> int {
+    if k < 0 || k > n { return 0 }
+    let mut r = 1
+    let mut i = 0
+    while i < k {
+        r = r * (n - i) / (i + 1)
+        i = i + 1
+    }
+    r
+}
+
+// @pure
+fn pow_f(base: float, exp_: int) -> float {
+    let mut r = 1.0
+    let mut i = 0
+    while i < exp_ {
+        r = r * base
+        i = i + 1
+    }
+    r
+}
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-CS-5: Graph Coloring and the Number 6 (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+let sigma_6 = sigma(6)
+let tau_6 = tau(6)
+let sigma_over_tau = sigma_6 / tau_6
+
+println("")
+println("Perfect number 6: sigma(6)=" + to_string(sigma_6) + ", tau(6)=" + to_string(tau_6) + ", sigma/tau=" + to_string(sigma_over_tau))
+
+println("")
+println("--------------------------------------------------")
+println("CHECK 1: chi(K_n) = n (chromatic of complete graph)")
+println("--------------------------------------------------")
+println("chi(K_6) = 6 = first perfect (tautological).")
+println("chi(K_{tau(6)}) = chi(K_4) = 4 = tau(6).")
+
+println("")
+println("--------------------------------------------------")
+println("CHECK 2: Petersen graph chromatic")
+println("--------------------------------------------------")
+println("chi(Petersen) = 3 = sigma/tau(6). Common but matches.")
+
+println("")
+println("--------------------------------------------------")
+println("CHECK 3: Edge chromatic chi'(K_n)")
+println("--------------------------------------------------")
+println("Vizing: chi'(K_n) = n-1 if n even, else n")
+println("chi'(K_6) = 5 = 6-1 (trivial)")
+
+println("")
+println("--------------------------------------------------")
+println("CHECK 4-6: Ramsey numbers")
+println("--------------------------------------------------")
+// 병렬 배열: R(3, n)
+let ramsey_3n_n    = [3, 4, 5, 6, 7, 8, 9]
+let ramsey_3n_val  = [6, 9, 14, 18, 23, 28, 36]
+
+println("R(3,3)=6 (perfect), R(3,8)=28 (perfect!) — 2/7 hits")
+println("")
+println("  n | R(3,n) | Perfect? | sigma/n")
+println("  ---+--------+----------+--------")
+let mut i = 0
+while i < len(ramsey_3n_n) {
+    let n = ramsey_3n_n[i]
+    let r = ramsey_3n_val[i]
+    let sg = sigma(r)
+    let is_perf = if sg == 2 * r { "YES" } else { "no" }
+    let ratio = to_float(sg) / to_float(r)
+    println("  " + to_string(n) + " | " + to_string(r) + "\t | " + is_perf + "      | " + fmt4(ratio))
+    i = i + 1
+}
+
+// Probability: C(7,2) * (2/31)^2 * (29/31)^5
+let p_single = 2.0 / 31.0
+let p_2of7 = to_float(binom(7, 2)) * pow_f(p_single, 2) * pow_f(1.0 - p_single, 5)
+println("")
+println("p = C(7,2) * (2/31)^2 * (29/31)^5 = " + fmt4(p_2of7))
+println("≈ " + fmt4(p_2of7 * 100.0) + "% (notable but not highly significant)")
+
+// ─── K_n 테이블 ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("COMPREHENSIVE TABLE: K_n for n=2..20")
+println("══════════════════════════════════════════════════════════════════════")
+println("    n | chi(Kn) | chi_edge |   |E| | R(n,n) | Notes")
+println("  ----+---------+----------+-------+--------+----------")
+
+let r_nn_keys = [2, 3, 4]
+let r_nn_vals = [2, 6, 18]
+
+fn lookup_rnn(n: int) -> string {
+    let mut j = 0
+    while j < len(r_nn_keys) {
+        if r_nn_keys[j] == n { return to_string(r_nn_vals[j]) }
+        j = j + 1
+    }
+    if n == 5 { return "43-48" }
+    "unknown"
+}
+
+fn note_of(n: int) -> string {
+    if n == 6 { return "PERFECT #1" }
+    if n == 4 { return "tau(6)" }
+    if n == 12 { return "sigma(6)" }
+    if n == 3 { return "sigma/tau" }
+    if n == 28 { return "PERFECT #2" }
+    ""
+}
+
+let mut k = 2
+while k <= 20 {
+    let chi_e = if k % 2 == 0 { k - 1 } else { k }
+    let edges = k * (k - 1) / 2
+    println("  " + to_string(k) + "\t| " + to_string(k) + "\t | " + to_string(chi_e) + "\t| " + to_string(edges) + "\t| " + lookup_rnn(k) + "\t| " + note_of(k))
+    k = k + 1
+}
+
+// ─── Significance ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SIGNIFICANCE ASSESSMENT")
+println("══════════════════════════════════════════════════════════════════════")
+println("  chi(K_6) = 6                     | Tautological          | N/A    | ⚪")
+println("  chi(Petersen) = 3 = sigma/tau    | True, 3 common        | p~0.3  | ⚪")
+println("  chi'(K_6) = 5 = 6-1              | Trivial (Vizing)      | N/A    | ⚪")
+println("  R(3,3) = 6 (perfect)             | True but small        | p~0.15 | ⚪/🟡")
+println("  R(3,8) = 28 (perfect)            | Notable coincidence   | p~0.06 | 🟡")
+println("  Two R(3,n) = perfect             | Interesting pattern   | p~0.06 | 🟡")
+
+println("")
+println("OVERALL: Most tautological/trivial. R(3,3)=6, R(3,8)=28 coincidence mildly interesting.")
+println("No deep structural connection — Small Number effect likely.")

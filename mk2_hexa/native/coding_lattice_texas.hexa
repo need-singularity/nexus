@@ -1,0 +1,199 @@
+// mk2_hexa/native/coding_lattice_texas.hexa
+// 포팅 원본: tecs-l/math/coding_lattice_texas.py (265 LOC)
+// Texas Sharpshooter: coding/lattice identities for n=6
+//
+// AI-native: @pure 전역, hexa sigma/phi/tau/sopfr 빌트인
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+fn fact(k: int) -> int {
+    let mut r = 1
+    let mut i = 2
+    while i <= k {
+        r = r * i
+        i = i + 1
+    }
+    r
+}
+
+let n = 6
+let sig = sigma(n)       // 12
+let ph = phi(n)          // 2
+let tn = tau(n)          // 4
+let sopf = sopfr(n)      // 5
+
+println("══════════════════════════════════════════════════════════════")
+println("TEXAS SHARPSHOOTER: Coding/Lattice Identities for n=6 (hexa)")
+println("══════════════════════════════════════════════════════════════")
+println("  n=" + to_string(n) + ", σ=" + to_string(sig) + ", φ=" + to_string(ph) + ", τ=" + to_string(tn) + ", sopfr=" + to_string(sopf))
+
+let N_max = 1000
+
+// ─── Test 1: G24 [σ·φ, σ, σ−τ] = [24, 12, 8] ───
+println("")
+println("─── Test 1: G24 = [σ·φ, σ, σ−τ] = [24, 12, 8] ───")
+let mut m1 = []
+let mut k = 2
+while k <= N_max {
+    let s = sigma(k)
+    let p = phi(k)
+    let t = tau(k)
+    if s * p == 24 && s == 12 && s - t == 8 {
+        m1 = m1 + [k]
+    }
+    k = k + 1
+}
+println("  Matches in 2.." + to_string(N_max) + ": " + to_string(m1))
+let p1 = to_float(len(m1)) / to_float(N_max - 1)
+println("  p-value: " + fmt6(p1))
+
+// ─── Test 2: K12 kissing = σ·(2^n−1) = 756 ───
+println("")
+println("─── Test 2: K12 kissing = σ(n)·(2^n−1) = 756 ───")
+let mut m2 = []
+let mut kk = 2
+let mut pow2 = 4
+while kk <= 40 {
+    let v = sigma(kk) * (pow2 - 1)
+    if v == 756 { m2 = m2 + [kk] }
+    kk = kk + 1
+    pow2 = pow2 * 2
+}
+println("  Matches in 2..40: " + to_string(m2))
+
+// ─── Test 3: Ternary Golay [σ, n, n] ───
+println("")
+println("─── Test 3: Ternary Golay [σ(n), n, n] ───")
+println("  n=6: [" + to_string(sig) + ", 6, 6] = [12, 6, 6]  ← G12 ✓")
+let perfects = [6, 28, 496]
+let mut pi = 0
+while pi < len(perfects) {
+    let pn = perfects[pi]
+    println("  n=" + to_string(pn) + ": [" + to_string(sigma(pn)) + ", " + to_string(pn) + ", " + to_string(pn) + "]")
+    pi = pi + 1
+}
+
+// ─── Test 4: sopfr+phi = 7 ───
+println("")
+println("─── Test 4: sopfr(n) + φ(n) = 7 ───")
+let mut m4 = []
+let mut k4 = 2
+while k4 <= N_max {
+    if sopfr(k4) + phi(k4) == 7 {
+        if len(m4) < 20 { m4 = m4 + [k4] }
+    }
+    k4 = k4 + 1
+}
+println("  First 20 matches: " + to_string(m4))
+println("  → NOT unique (coincidence)")
+
+// ─── Test 5: E6 kissing = σ(n)·n = 72 ───
+println("")
+println("─── Test 5: E6 kissing = σ(n)·n = 72 ───")
+let mut m5 = []
+let mut k5 = 2
+while k5 <= N_max {
+    if sigma(k5) * k5 == 72 { m5 = m5 + [k5] }
+    k5 = k5 + 1
+}
+println("  Matches: " + to_string(m5) + "  " + (if len(m5) == 1 && m5[0] == 6 { "★ UNIQUE" } else { "" }))
+
+// ─── Test 6: E6 Weyl = n!·σ·n = 51840 ───
+println("")
+println("─── Test 6: E6 Weyl = n!·σ(n)·n = 51840 ───")
+let weyl = fact(n) * sig * n
+println("  n!·σ·n = " + to_string(fact(n)) + "·" + to_string(sig) + "·" + to_string(n) + " = " + to_string(weyl))
+println("  E6 Weyl order = 51840  " + (if weyl == 51840 { "✓ MATCH" } else { "✗" }))
+assert weyl == 51840
+let mut m6 = []
+let mut k6 = 2
+while k6 <= 12 {
+    if fact(k6) * sigma(k6) * k6 == 51840 { m6 = m6 + [k6] }
+    k6 = k6 + 1
+}
+println("  Unique check in 2..12: " + to_string(m6))
+
+// ─── Test 7: MOG τ(n)·n = 24 ───
+println("")
+println("─── Test 7: MOG = τ(n)·n = 24 = Leech dim ───")
+let mut m7 = []
+let mut k7 = 2
+while k7 <= N_max {
+    if tau(k7) * k7 == 24 { m7 = m7 + [k7] }
+    k7 = k7 + 1
+}
+println("  Matches: " + to_string(m7))
+
+// ─── Test 8: Joint — all four conditions ───
+println("")
+println("─── Test 8: JOINT σ·φ=24 ∧ σ−τ=8 ∧ σ=12 ∧ σ−n=n (perfect) ───")
+let mut m8 = []
+let mut k8 = 2
+while k8 <= N_max {
+    let s = sigma(k8)
+    let p = phi(k8)
+    let t = tau(k8)
+    let sk = s - k8
+    if s * p == 24 && s - t == 8 && s == 12 && sk == k8 {
+        m8 = m8 + [k8]
+    }
+    k8 = k8 + 1
+}
+println("  Joint matches: " + to_string(m8))
+if len(m8) == 1 && m8[0] == 6 {
+    println("  ★ n=6 UNIQUE — defining property of perfect number 6 in coding/lattice context")
+}
+
+// ─── Test 9: Self-dual rate = 1/φ(6) ───
+println("")
+println("─── Test 9: Self-dual rate = 1/φ(n) = 1/2 ───")
+println("  φ(n)=2 for n in {3, 4, 6}; only n=6 is also perfect ★")
+
+// ─── Test 10: Hamming [n+1, τ, σ/τ] = [7, 4, 3] ───
+println("")
+println("─── Test 10: Hamming [n+1, τ(n), σ(n)/τ(n)] = [7, 4, 3] ───")
+let rs = [2, 3, 4, 5]
+let mut ri = 0
+while ri < len(rs) {
+    let rr = rs[ri]
+    let mut pw = 1
+    let mut e = 0
+    while e < rr {
+        pw = pw * 2
+        e = e + 1
+    }
+    let n_r = pw - 2
+    if n_r >= 2 {
+        let t_n = tau(n_r)
+        let s_n = sigma(n_r)
+        let ham_k = pw - 1 - rr
+        let tau_ok = t_n == ham_k
+        let st_ok = t_n > 0 && s_n % t_n == 0 && s_n / t_n == 3
+        println("  r=" + to_string(rr) + ": n=" + to_string(n_r) + " [" + to_string(pw-1) + "," + to_string(ham_k) + ",3]  τ=" + to_string(t_n) + " " + (if tau_ok { "✓" } else { "✗" }) + "  σ/τ=" + (if t_n > 0 { to_string(s_n/t_n) } else { "?" }) + " " + (if st_ok { "✓" } else { "✗" }))
+    }
+    ri = ri + 1
+}
+
+// ─── Summary ───
+println("")
+println("══════════════════════════════════════════════════════════════")
+println("SUMMARY TABLE")
+println("══════════════════════════════════════════════════════════════")
+println("  # | Identity                                   | matches | grade")
+println("  --+--------------------------------------------+---------+------")
+println("  1 | G24 = [σφ, σ, σ−τ] = [24,12,8]             | " + to_string(m1) + " | 🟩★")
+println("  2 | K12 kissing = σ(2^n−1) = 756               | " + to_string(m2) + " | 🟧★")
+println("  3 | Ternary Golay [σ,n,n] = [12,6,6]           | n=6     | 🟩★")
+println("  4 | sopfr+φ = 7                                | many    | ⚪")
+println("  5 | E6 kissing σ·n = 72                        | " + to_string(m5) + " | 🟩★")
+println("  6 | E6 Weyl n!·σ·n = 51840                     | " + to_string(m6) + " | 🟩★")
+println("  7 | MOG τ·n = 24                               | " + to_string(m7) + " | 🟧")
+println("  8 | JOINT (σφ=24 & σ−τ=8 & σ=12 & perfect)     | " + to_string(m8) + " | 🟩★")
+println("  9 | Self-dual rate 1/φ=1/2 ∩ perfect           | n=6     | 🟩★")
+println("  10| Hamming [n+1,τ,σ/τ] = [7,4,3]              | n=6 r=3 | 🟧★")

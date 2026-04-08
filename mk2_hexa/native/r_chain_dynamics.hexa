@@ -1,0 +1,284 @@
+// mk2_hexa/native/r_chain_dynamics.hexa
+// 포팅 원본: tecs-l/math/r_chain_dynamics.py (273 LOC)
+// R-chain dynamics: R(n) = σ(n)·φ(n)/(n·τ(n)), basin of attraction
+//
+// AI-native: @pure, hexa sigma/phi/tau 빌트인
+// 범위: N=2000 (Python 500k → 인터프리터 속도)
+
+let N = 500
+
+// 병렬 배열: R[n] = R(n) if integer, else -1 (sentinel)
+fn compute_R_map() -> list {
+    let mut R = []
+    let mut i = 0
+    while i <= N {
+        R = R + [0 - 1]  // placeholder
+        i = i + 1
+    }
+    let mut n = 2
+    while n <= N {
+        let num = sigma(n) * phi(n)
+        let den = n * tau(n)
+        if num % den == 0 { R[n] = num / den }
+        n = n + 1
+    }
+    R[1] = 1
+    R
+}
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("R-CHAIN DYNAMICS: R(n) = σφ/(nτ) basin analysis (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("  Range: n = 1.." + to_string(N))
+
+let R_map = compute_R_map()
+
+// ─── Seq A: R integer ───
+let mut seq_A = []
+let mut i = 1
+while i <= N {
+    if R_map[i] >= 0 { seq_A = seq_A + [i] }
+    i = i + 1
+}
+println("")
+println("  Seq A (integer R): " + to_string(len(seq_A)) + " terms")
+let mut head_A = seq_A
+if len(seq_A) > 20 {
+    let mut h = []
+    let mut k = 0
+    while k < 20 {
+        h = h + [seq_A[k]]
+        k = k + 1
+    }
+    head_A = h
+}
+println("  First 20: " + to_string(head_A))
+
+// ─── TASK 1: Basins ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 1: BASINS OF ATTRACTION (preimages)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// R^{-1}(target): {n : R(n) = target}
+fn preimage_of(target: int, R_map: list) -> list {
+    let mut out = []
+    let mut n = 1
+    while n <= N {
+        if R_map[n] == target { out = out + [n] }
+        n = n + 1
+    }
+    out
+}
+
+let targets = [1, 6, 120, 6048, 6552]
+let mut ti = 0
+while ti < len(targets) {
+    let t = targets[ti]
+    let pre = preimage_of(t, R_map)
+    println("")
+    println("  R^-1(" + to_string(t) + "): " + to_string(len(pre)) + " elements")
+    if len(pre) > 0 && len(pre) <= 30 {
+        println("    Values: " + to_string(pre))
+    }
+    ti = ti + 1
+}
+
+// ─── Basin tree BFS from 1 ───
+println("")
+println("── Basin tree BFS from 1 ──")
+let mut level = [1]
+let mut depth = 0
+let mut all_in_basin = [1]
+while depth < 6 && len(level) > 0 {
+    println("  Depth " + to_string(depth) + ": " + to_string(len(level)) + " nodes = " + to_string(level))
+    let mut next_level = []
+    let mut v = 0
+    while v < len(level) {
+        let pre = preimage_of(level[v], R_map)
+        let mut p = 0
+        while p < len(pre) {
+            let x = pre[p]
+            // Avoid re-adding self at depth 0 (1→1)
+            if depth > 0 || x != 1 {
+                next_level = next_level + [x]
+                all_in_basin = all_in_basin + [x]
+            }
+            p = p + 1
+        }
+        v = v + 1
+    }
+    level = next_level
+    depth = depth + 1
+}
+println("  Total nodes in basin of 1 (N=" + to_string(N) + "): " + to_string(len(all_in_basin)))
+
+// ─── TASK 2: Branching distribution ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 2: BRANCHING DISTRIBUTION")
+println("══════════════════════════════════════════════════════════════════════")
+
+// For each value appearing in R, count preimage size
+// 수집: 고유한 target values
+let mut target_vals = []
+let mut ci = 0
+while ci < len(seq_A) {
+    let v = R_map[seq_A[ci]]
+    // add if not already in target_vals
+    let mut found = false
+    let mut tk = 0
+    while tk < len(target_vals) {
+        if target_vals[tk] == v { found = true }
+        tk = tk + 1
+    }
+    if !found { target_vals = target_vals + [v] }
+    ci = ci + 1
+}
+println("  Distinct R values in range: " + to_string(len(target_vals)))
+
+// Branching histogram (1, 2, 3+)
+let mut b1 = 0
+let mut b2 = 0
+let mut b3plus = 0
+let mut max_branch = 0
+let mut max_v = 0
+let mut tv = 0
+while tv < len(target_vals) {
+    let v = target_vals[tv]
+    let cnt = len(preimage_of(v, R_map))
+    if cnt == 1 { b1 = b1 + 1 }
+    else if cnt == 2 { b2 = b2 + 1 }
+    else { b3plus = b3plus + 1 }
+    if cnt > max_branch {
+        max_branch = cnt
+        max_v = v
+    }
+    tv = tv + 1
+}
+println("  Branching 1: " + to_string(b1))
+println("  Branching 2: " + to_string(b2))
+println("  Branching ≥3: " + to_string(b3plus))
+println("  Max branching: " + to_string(max_branch) + " at value " + to_string(max_v))
+
+// ─── TASK 3: Density ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 3: Density of integer R(n)")
+println("══════════════════════════════════════════════════════════════════════")
+println("        N | count | density  | N·density")
+println("  --------+-------+----------+----------")
+let checkpoints = [50, 100, 250, 500]
+let mut cp_i = 0
+while cp_i < len(checkpoints) {
+    let cp = checkpoints[cp_i]
+    if cp <= N {
+        let mut c = 0
+        let mut k = 1
+        while k <= cp {
+            if R_map[k] >= 0 { c = c + 1 }
+            k = k + 1
+        }
+        let d = to_float(c) / to_float(cp)
+        println("  " + to_string(cp) + "\t| " + to_string(c) + "\t| " + fmt4(d) + "   | " + fmt4(to_float(cp) * d))
+    }
+    cp_i = cp_i + 1
+}
+
+// ─── TASK 4: Chain length to 1 (recursive via memoization table) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 4: R-chain length to 1")
+println("══════════════════════════════════════════════════════════════════════")
+
+// chain_len[n]: -1 = not computed yet, -2 = diverges (R not int or doesn't reach 1)
+let mut chain_len = []
+let mut ci2 = 0
+while ci2 <= N {
+    chain_len = chain_len + [if ci2 == 1 { 0 } else { 0 - 1 } ]
+    ci2 = ci2 + 1
+}
+
+// Iterative: follow chain from each n, record visited
+let mut nn = 2
+while nn <= N {
+    // 이미 계산된 경우 스킵
+    if chain_len[nn] == 0 - 1 {
+        let mut path = [nn]
+        let mut cur = nn
+        let mut steps = 0
+        let mut terminated = false
+        let mut reaches_1 = false
+        let mut final_len = 0
+
+        while !terminated && steps < 100 {
+            if cur == 1 {
+                terminated = true
+                reaches_1 = true
+                final_len = 0
+            } else if cur > N || R_map[cur] < 0 {
+                // diverges or R not integer
+                terminated = true
+                reaches_1 = false
+            } else if chain_len[cur] != 0 - 1 {
+                // already known
+                terminated = true
+                if chain_len[cur] >= 0 {
+                    reaches_1 = true
+                    final_len = chain_len[cur]
+                }
+            } else {
+                cur = R_map[cur]
+                path = path + [cur]
+            }
+            steps = steps + 1
+        }
+
+        // Assign lengths backwards
+        let mut j = len(path) - 1
+        let mut l = final_len
+        while j >= 0 {
+            let p = path[j]
+            if p <= N {
+                if reaches_1 {
+                    chain_len[p] = l
+                    l = l + 1
+                } else {
+                    chain_len[p] = 0 - 2
+                }
+            }
+            j = j - 1
+        }
+    }
+    nn = nn + 1
+}
+
+// Histogram
+let mut non_int = 0
+let mut reach1 = 0
+let mut no_reach = 0
+let mut len_hist = [0, 0, 0, 0, 0, 0, 0, 0]  // lengths 0..7
+let mut mi = 2
+while mi <= N {
+    if R_map[mi] < 0 { non_int = non_int + 1 }
+    else if chain_len[mi] == 0 - 2 { no_reach = no_reach + 1 }
+    else {
+        reach1 = reach1 + 1
+        let cl = chain_len[mi]
+        if cl < 8 { len_hist[cl] = len_hist[cl] + 1 }
+    }
+    mi = mi + 1
+}
+
+let total = N - 1
+println("  n in [2, " + to_string(N) + "]: " + to_string(total))
+println("  R(n) not integer:       " + to_string(non_int) + " (" + fmt4(100.0 * to_float(non_int) / to_float(total)) + "%)")
+println("  reaches 1:              " + to_string(reach1) + " (" + fmt4(100.0 * to_float(reach1) / to_float(total)) + "%)")
+println("  integer but no-reach:   " + to_string(no_reach))
+println("")
+println("  Chain length histogram [0..7]: " + to_string(len_hist))

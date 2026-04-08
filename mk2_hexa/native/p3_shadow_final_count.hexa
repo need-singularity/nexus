@@ -1,0 +1,137 @@
+// mk2_hexa/native/p3_shadow_final_count.hexa
+// 포팅 원본: tecs-l/math/p3_shadow_final_count.py (126 LOC)
+// P3=496 shadow density 보고서 — 데이터 테이블 + 구조적/약/중복 분류
+//
+// AI-native: @pure 분류 함수 — const-prop 완전 축약 가능
+
+// 병렬 배열: hits[i] = (doms[i], forms[i], notes[i], tags[i])
+// tags ∈ {"Yes","Weak","Dup","Tautology","Negative"}
+let doms  = ["Sequences", "Sequences", "Factorization", "Factorization", "Perfect Number", "Graph Theory", "Binomial", "Lie Algebra", "Lie Algebra", "Lie Algebra", "Consecutive Sum", "Exterior Power", "Exotic Spheres", "Exotic Spheres", "Odd Sums", "Odd Sums", "Sigma Chain"]
+let forms = ["T_31 = sum(1..31) = 496", "H_16 = 16*(2*16-1) = 496", "2^tau(6) * Phi_6(6) = 16*31 = 496", "2^4 * (2^5-1) = 496", "2^(p-1)*(2^p-1) for p=5", "C(32,2) = K_32 edges = 496", "C(32,2) = 496", "dim(SO(32)) = 32*31/2 = 496", "dim(E8 x E8) = 2*248 = 496", "dim(D_16) = dim(SO(32)) = 16*31", "sum(1..31) = 496", "Lambda^2(R^32) = C(32,2) = 496", "sigma(496) = 992 = |Theta_11|", "|Theta_11| = 2*496", "sum odd(55..69) = 496", "sum odd(121..127) = 496", "sigma^2(6)=sigma(12)=28=P2"]
+let notes = ["31st triangular number; 31=Mersenne prime", "16th hexagonal number", "tau(6)=4, Phi_6(6)=31; CONNECTS P1 to P3", "Mersenne perfect number form", "Definition of P3", "K_32 complete graph", "Same as K_32 (overlaps graph)", "Heterotic string gauge group", "Other anomaly-free gauge group in 10D", "D_n = SO(2n) series; n=16", "Same as T_31 (Triangular)", "2nd exterior power of R^32", "Perfect number sigma = Theta_11", "992 = 2*P3", "8 consecutive odds: 55,57,...,69", "4 consecutive odds: 121,123,125,127", "496 NOT in chain, but P2=28 IS at k=2"]
+let tags  = ["Yes", "Yes", "Yes", "Yes", "Tautology", "Yes", "Dup", "Yes", "Yes", "Dup", "Dup", "Yes", "Yes", "Yes", "Weak", "Weak", "Negative"]
+
+// @pure
+fn count_tag_of(tags: list, tag: string) -> int {
+    let mut n = 0
+    let mut i = 0
+    while i < len(tags) {
+        if tags[i] == tag { n = n + 1 }
+        i = i + 1
+    }
+    n
+}
+fn count_tag(tag: string) -> int { count_tag_of(tags, tag) }
+
+let total_all = len(tags)
+let total_structural = count_tag("Yes")
+let total_weak = count_tag("Weak")
+let total_other = total_all - total_structural - total_weak
+
+println("══════════════════════════════════════════════════════════════════════")
+println("P3=496 SHADOW REPORT — STRUCTURED (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  Total hits found: " + to_string(total_all))
+println("  Structural (independent, non-trivial): " + to_string(total_structural))
+println("  Weak (consecutive sum, not deep): " + to_string(total_weak))
+println("  Duplicates/tautologies: " + to_string(total_other))
+
+println("")
+println("--- STRUCTURAL HITS (count towards shadow density) ---")
+let mut i = 0
+let mut idx = 0
+while i < len(tags) {
+    if tags[i] == "Yes" {
+        idx = idx + 1
+        println("  " + to_string(idx) + ". [" + doms[i] + "] " + forms[i])
+        println("       → " + notes[i])
+    }
+    i = i + 1
+}
+
+println("")
+println("--- WEAK HITS (noted but not counted as structural) ---")
+let mut j = 0
+while j < len(tags) {
+    if tags[j] == "Weak" {
+        println("  [" + doms[j] + "] " + forms[j] + " → " + notes[j])
+    }
+    j = j + 1
+}
+
+println("")
+println("--- KEY NEGATIVE RESULTS ---")
+println("  sigma^k(6) chain: 6→12→28→56→... — 496 does NOT appear")
+println("  sigma_k(6) for k=0..4: 4,12,50,252,1394 — none equal 496")
+println("  No cyclotomic Phi_n(6) = 496 for n=1..20")
+println("  No Ramanujan tau(n) = ±496")
+println("  No partition number p(n) = 496")
+println("  No Bernoulli numerator/denominator = 496")
+println("  No classical Lie algebra A/B/C type has dim 496 (only D_16=SO(32))")
+
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("COMPARISON: P2=28 vs P3=496 SHADOW DENSITY")
+println("══════════════════════════════════════════════════════════════════════")
+println("  | Metric                    | P2=28          | P3=496            |")
+println("  |---------------------------|----------------|-------------------|")
+println("  | Total hits                | 26             | ~14 (all types)   |")
+println("  | Structural hits           | ~18 (est.)     | 8 (independent)   |")
+println("  | Shadow density            | 14.6%          | ~11% structural   |")
+println("  | String theory dim         | No             | YES (E8xE8,SO32)  |")
+println("  | Exotic sphere appearance  | |Theta_7|=28   | sigma(P3)=Theta11 |")
+println("  | n=6 arithmetic direct     | sigma^2(6)=28  | 2^tau(6)*Phi_6(6) |")
+println("  | Triangular number         | T_7=28         | T_31=496          |")
+println("  | Complete graph edges      | K_8 edges=28   | K_32 edges=496    |")
+println("  | Lie algebra dim           | dim(G2_adj)=28?| dim(SO32)=496     |")
+println("  | sigma chain               | sigma^2(6)=28  | NOT in chain      |")
+println("  | Perfect number rank       | P2             | P3                |")
+println("  | Texas p-value             | <0.001 (est)   | <0.001 (53σ)      |")
+
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("KEY STRUCTURAL IDENTITIES FOR P3=496")
+println("══════════════════════════════════════════════════════════════════════")
+println("  1. FACTORIZATION VIA n=6:")
+println("     496 = 2^tau(6) * Phi_6(6) = 2^4 * (6^2-6+1) = 16 * 31")
+println("     tau(6)=4, Phi_6(6)=31 (Mersenne prime)")
+println("")
+println("  2. PERFECT NUMBER CHAIN:")
+println("     P1=6, P2=28=sigma^2(6), P3=496 — P3 NOT in sigma^k(6)")
+println("     but: P3 = 2^tau(P1) * Phi_{P1}(P1) — NEW connection")
+println("")
+println("  3. STRING THEORY (UNIQUE TO P3):")
+println("     dim(E8 x E8) = 496 = dim(SO(32))")
+println("     ONLY anomaly-free gauge groups in 10D heterotic string.")
+println("     UNIQUE solution to Green-Schwarz anomaly cancellation.")
+println("")
+println("  4. TRIANGULAR / MERSENNE LINK:")
+println("     496 = T_31 = 31*32/2 = (2^5-1)*2^5/2 = 2^4*(2^5-1)")
+println("     31 = MP_3 (3rd Mersenne prime)")
+println("")
+println("  5. GRAPH THEORY:")
+println("     496 = C(32,2) = edges of K_32,  32=2^5")
+println("")
+println("  6. EXOTIC SPHERE CHAIN:")
+println("     |Theta_7|=28=P2 → sigma(P3)=992=|Theta_11|")
+println("")
+println("  7. SIGMA CHAIN ABSENCE:")
+println("     496 NOT in sigma^k(6): 6→12→28→56→120→360→...")
+println("")
+println("  VERDICT: P3=496 = fewer sigma-chain hits than P2=28,")
+println("  but STRONGER external (string theory, exotic spheres).")
+println("  n=6 → P3 via 2^tau(6)*Phi_6(6) = NEW identity.")
+
+// ─── 대조 검증: hexa sigma/tau 빌트인으로 공식 직접 확인 ───
+println("")
+println("--- Inline verification (hexa sigma/tau builtins) ---")
+let p1 = 6
+let tau6 = tau(p1)
+let phi6_at_6 = 6 * 6 - 6 + 1  // 6th cyclotomic at x=6 = x^2-x+1 = 31
+let formula = pow(2, tau6) * phi6_at_6
+println("  tau(6) = " + to_string(tau6))
+println("  Phi_6(6) = 6^2 - 6 + 1 = " + to_string(phi6_at_6))
+println("  2^tau(6) * Phi_6(6) = " + to_string(formula))
+assert formula == 496
+println("  ✓ 496 identity verified")

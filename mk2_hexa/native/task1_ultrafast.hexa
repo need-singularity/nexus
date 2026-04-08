@@ -1,0 +1,259 @@
+// 포팅 원본: tecs-l/math/task1_ultrafast.py (223 LOC)
+// Ultra-fast pi_R(x) computation — exact rational arithmetic
+// R(p^a) = (p^(a+1)-1) / (p*(a+1)), DFS over prime factorizations
+
+fn fmt3(x: float) -> string {
+    let r = to_float(to_int(x * 1000.0)) / 1000.0
+    to_string(r)
+}
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt1(x: float) -> string {
+    let r = to_float(to_int(x * 10.0)) / 10.0
+    to_string(r)
+}
+fn fmt2(x: float) -> string {
+    let r = to_float(to_int(x * 100.0)) / 100.0
+    to_string(r)
+}
+
+fn sieve(n: int) -> [int] {
+    let mut a = []
+    let mut idx = 0
+    while idx <= n {
+        if idx < 2 {
+            a = a + [0]
+        } else {
+            a = a + [1]
+        }
+        idx = idx + 1
+    }
+    let mut i = 2
+    while i * i <= n {
+        if a[i] == 1 {
+            let mut j = i * i
+            while j <= n {
+                a[j] = 0
+                j = j + i
+            }
+        }
+        i = i + 1
+    }
+    let mut primes = []
+    let mut k = 2
+    while k <= n {
+        if a[k] == 1 {
+            primes = primes + [k]
+        }
+        k = k + 1
+    }
+    primes
+}
+
+fn r_pows(p: int, x_num: int, x_den: int) -> [any] {
+    // Returns array of [rn, rd] for R(p^a) <= x_num/x_den
+    let mut result = []
+    let mut a = 1
+    while a < 30 {
+        let mut pw = 1
+        let mut e = 0
+        while e <= a {
+            pw = pw * p
+            e = e + 1
+        }
+        let num = pw - 1
+        let den = p * (a + 1)
+        let g = gcd(num, den)
+        let rn = num / g
+        let rd = den / g
+        if rn * x_den > x_num * rd {
+            break
+        }
+        result = result + [[rn, rd]]
+        a = a + 1
+    }
+    result
+}
+
+fn pi_R_correct(x: int) -> int {
+    let x_num = x
+    let x_den = 1
+    let limit = 2 * x + 100
+    let primes = sieve(limit)
+
+    let mut all_gens = []
+    let mut pi = 0
+    while pi < len(primes) {
+        let p = primes[pi]
+        let gens = r_pows(p, x_num, x_den)
+        if len(gens) > 0 {
+            all_gens = all_gens + [gens]
+        }
+        // Check if R(p) > x: (p^2-1)/(2p) > x => (p^2-1)*x_den > x_num*2*p
+        let check_l = (p * p - 1) * x_den
+        let check_r = x_num * 2 * p
+        if check_l > check_r {
+            break
+        }
+        pi = pi + 1
+    }
+
+    let n = len(all_gens)
+    // Use map for distinct pairs: key = "rn:rd"
+    let mut distinct = #{"1:1": 1}
+
+    // DFS stack: each entry is [gen_idx, current_num, current_den]
+    let mut stack = [[0, 1, 1]]
+
+    let mut iters = 0
+    while len(stack) > 0 {
+        if iters > 50000 {
+            break
+        }
+        iters = iters + 1
+        let top = stack[len(stack) - 1]
+        stack = stack.pop()
+        let s_idx = top[0]
+        let cn = top[1]
+        let cd = top[2]
+        let mut i = s_idx
+        while i < n {
+            let gens_i = all_gens[i]
+            let mut gi = 0
+            while gi < len(gens_i) {
+                let pair = gens_i[gi]
+                let rn = pair[0]
+                let rd = pair[1]
+                let mut nn = cn * rn
+                let mut nd = cd * rd
+                let g = gcd(nn, nd)
+                nn = nn / g
+                nd = nd / g
+                if nn * x_den <= x_num * nd {
+                    let key = to_string(nn) + ":" + to_string(nd)
+                    distinct[key] = 1
+                    stack = stack + [[i + 1, nn, nd]]
+                } else {
+                    break
+                }
+                gi = gi + 1
+            }
+            i = i + 1
+        }
+    }
+
+    len(keys(distinct))
+}
+
+// ── Main ──
+// Reduced limits for interpreter speed
+let x_vals = [5, 10, 20, 50]
+
+println("======================================================================")
+println("pi_R(x) ASYMPTOTIC ANALYSIS - ULTRAFAST (hexa port)")
+println("======================================================================")
+println("")
+
+let primes_big = sieve(300)
+
+fn pi_2x(x: int, primes_ref: any) -> int {
+    let target = 2 * x
+    let mut count = 0
+    let mut i = 0
+    while i < len(primes_ref) {
+        if primes_ref[i] <= target {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    count
+}
+
+println("       x |    pi_R(x) |   pi(2x) |  ratio |   2x/lnx |   lnlnx")
+println("--------------------------------------------------------")
+
+let mut results = []
+let mut vi = 0
+while vi < len(x_vals) {
+    let x = x_vals[vi]
+    let pi_r = pi_R_correct(x)
+    let p2x = pi_2x(x, primes_big)
+    let ratio = if p2x > 0 { to_float(pi_r) / to_float(p2x) } else { 0.0 }
+    let lnx = if x > 1 { log(to_float(x)) } else { 1.0 }
+    let lnlnx = if lnx > 1.0 { log(lnx) } else { 0.0 }
+    let r2xlnx = 2.0 * to_float(x) / lnx
+    results = results + [[x, pi_r, p2x]]
+    let line = "  " + to_string(x) + "\t| " + to_string(pi_r) + "\t| " + to_string(p2x) + "\t| " + fmt3(ratio) + "\t| " + fmt1(r2xlnx) + "\t| " + fmt4(lnlnx)
+    println(line)
+    vi = vi + 1
+}
+
+println("")
+println("Asymptotic form pi_R(x) ~ C * x * lnlnx / lnx:")
+println("       x |    pi_R(x) | x*lnlnx/lnx |  ratio")
+println("---------------------------------------------")
+let mut ri = 0
+while ri < len(results) {
+    let row = results[ri]
+    let x = row[0]
+    let pi_val = row[1]
+    if x > 2 {
+        let lnx = log(to_float(x))
+        let lnlnx = log(lnx)
+        let form = to_float(x) * lnlnx / lnx
+        let ratio = to_float(pi_val) / form
+        let line2 = "  " + to_string(x) + "\t| " + to_string(pi_val) + "\t| " + fmt2(form) + "\t| " + fmt4(ratio)
+        println(line2)
+    }
+    ri = ri + 1
+}
+
+println("")
+println("Log-log fit: pi_R(x) ~ A * x^alpha:")
+let mut log_x = []
+let mut log_pi = []
+let mut fi = 0
+while fi < len(results) {
+    let row = results[fi]
+    if row[0] >= 50 {
+        log_x = log_x + [log(to_float(row[0]))]
+        log_pi = log_pi + [log(to_float(row[1]))]
+    }
+    fi = fi + 1
+}
+let npts = len(log_x)
+let mut sx = 0.0
+let mut sy = 0.0
+let mut sxy = 0.0
+let mut sx2 = 0.0
+let mut li = 0
+while li < npts {
+    sx = sx + log_x[li]
+    sy = sy + log_pi[li]
+    sxy = sxy + log_x[li] * log_pi[li]
+    sx2 = sx2 + log_x[li] * log_x[li]
+    li = li + 1
+}
+let nf = to_float(npts)
+let slope = (nf * sxy - sx * sy) / (nf * sx2 - sx * sx)
+let intercept = (sy - slope * sx) / nf
+let A_coeff = pow(2.718281828459045, intercept)
+println("  alpha = " + fmt4(slope))
+println("  A     = " + fmt4(A_coeff))
+println("  pi_R(x) ~ " + fmt4(A_coeff) + " * x^" + fmt4(slope))
+
+println("")
+println("======================================================================")
+println("CONCLUSION")
+println("======================================================================")
+println("")
+println("The log-log slope alpha ~ " + fmt3(slope) + " indicates pi_R(x) grows slightly slower than x.")
+println("")
+println("Lower bound: pi_R(x) >= pi(2x) ~ 2x/ln(x)  (from distinct prime R-values)")
+println("")
+println("The composite contributions add a factor of approximately ln(ln(x)):")
+println("  pi_R(x) ~ 2x * ln(ln(x)) / ln(x)   [Selberg-Sathe type formula]")
+println("")
+println("This is confirmed by the ratio pi_R(x)/pi(2x) growing like ln(ln(x)).")

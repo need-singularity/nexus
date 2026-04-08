@@ -1,0 +1,120 @@
+// mk2_hexa/native/verify_h_ph_2.hexa
+// 포팅 원본: tecs-l/math/verify_h_ph_2.py (254 LOC)
+// H-PH-2: Standard Model gauge group dimensions ↔ σ(6)=12, τ(6)=4
+
+let sigma_6 = sigma(6)
+let tau_6 = tau(6)
+let sot = sigma_6 / tau_6
+
+fn fmt2(x: float) -> string {
+    let r = to_float(to_int(x * 100.0)) / 100.0
+    to_string(r)
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-PH-2: Standard Model Gauge Groups ↔ Perfect Number 6  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  σ(6)=" + to_string(sigma_6) + ", τ(6)=" + to_string(tau_6) + ", σ/τ=" + to_string(sot))
+
+// ─── Check 1: Gauge groups ───
+println("")
+println("──────────────────────────────────────────────────────────────────────")
+println("CHECK 1: SU(3)×SU(2)×U(1) dimensions and ranks")
+println("──────────────────────────────────────────────────────────────────────")
+let g_name = ["SU(3)", "SU(2)", "U(1)"]
+let g_force = ["strong", "weak", "EM"]
+let g_n = [3, 2, 1]
+let g_dim = [8, 3, 1]  // dim SU(n) = n²-1, dim U(1) = 1
+let g_rank = [2, 1, 1]
+
+println("  Group   | Force  | n | dim | rank")
+println("  --------+--------+---+-----+------")
+let mut total_dim = 0
+let mut total_rank = 0
+let mut i = 0
+while i < len(g_name) {
+    // Verify
+    let exp_dim = if g_name[i] == "U(1)" { 1 } else { g_n[i] * g_n[i] - 1 }
+    let exp_rank = if g_name[i] == "U(1)" { 1 } else { g_n[i] - 1 }
+    let ok_d = if exp_dim == g_dim[i] { "✓" } else { "✗" }
+    let ok_r = if exp_rank == g_rank[i] { "✓" } else { "✗" }
+    println("  " + g_name[i] + "\t| " + g_force[i] + "\t| " + to_string(g_n[i]) + " | " + to_string(g_dim[i]) + " " + ok_d + "  | " + to_string(g_rank[i]) + " " + ok_r)
+    total_dim = total_dim + g_dim[i]
+    total_rank = total_rank + g_rank[i]
+    i = i + 1
+}
+println("  --------+--------+---+-----+------")
+println("  TOTAL                 | " + to_string(total_dim) + "   | " + to_string(total_rank))
+println("")
+println("  Total dimension = " + to_string(total_dim) + " = σ(6)=" + to_string(sigma_6) + "?  " + (if total_dim == sigma_6 { "YES ★" } else { "NO" }))
+println("  Total rank      = " + to_string(total_rank) + " = τ(6)=" + to_string(tau_6) + "?  " + (if total_rank == tau_6 { "YES ★" } else { "NO" }))
+println("  # groups        = " + to_string(len(g_name)) + " = σ/τ=" + to_string(sot) + "?  " + (if len(g_name) == sot { "YES ★" } else { "NO" }))
+assert total_dim == sigma_6
+assert total_rank == tau_6
+
+// ─── Check 2: Fermions ───
+println("")
+println("──────────────────────────────────────────────────────────────────────")
+println("CHECK 2: Fundamental fermions (simplest enumeration)")
+println("──────────────────────────────────────────────────────────────────────")
+let n_quarks = 6
+let n_leptons = 6
+let total_fermions = n_quarks + n_leptons
+println("  6 quarks + 6 leptons = " + to_string(total_fermions) + " = σ(6)?  " + (if total_fermions == sigma_6 { "YES" } else { "NO" }))
+println("  3 gen × 4 fermions/gen = " + to_string(3 * 4) + " = σ(6) = (σ/τ)·τ")
+assert 3 * 4 == sigma_6
+
+// ─── Check 3: Texas Sharpshooter ───
+println("")
+println("──────────────────────────────────────────────────────────────────────")
+println("CHECK 3: Texas Sharpshooter match count")
+println("──────────────────────────────────────────────────────────────────────")
+let phys_val = [3, 12, 6, 6, 3, 4, 12, 3, 2, 4, 3, 4, 19, 5, 3, 4, 8, 3, 3, 3, 3, 2, 3, 12, 1, 13, 3]
+let target_v = [4, 12, 3, 6, 2, 2, 5, 7]  // tau, sigma, sot, n, sigma_-1, phi, n-1, n+1
+let mut matches = 0
+let mut j = 0
+while j < len(phys_val) {
+    let mut k = 0
+    while k < len(target_v) {
+        if phys_val[j] == target_v[k] {
+            matches = matches + 1
+            k = len(target_v)  // break
+        }
+        k = k + 1
+    }
+    j = j + 1
+}
+let n_phys = len(phys_val)
+let p_match = 7.0 / 20.0
+let expected = to_float(n_phys) * p_match
+println("  Physics counts examined: " + to_string(n_phys))
+println("  Target values: {2,3,4,5,6,7,12}")
+println("  Actual matches: " + to_string(matches))
+println("  Expected (n·p): " + fmt2(expected))
+println("  Ratio actual/expected: " + fmt2(to_float(matches) / expected))
+println("  → 높은 multiple testing burden; 3이 지배적.")
+
+// ─── GUT alternatives ───
+println("")
+println("──────────────────────────────────────────────────────────────────────")
+println("CHECK 4: GUT embeddings — does σ(6)=12 connection survive?")
+println("──────────────────────────────────────────────────────────────────────")
+println("  SU(5):  dim=24=2σ(6), rank=4=τ(6)")
+println("  SO(10): dim=45, rank=5 (no obvious 6 link)")
+println("  E(6):   dim=78=6·13, rank=6 = perfect ★")
+println("")
+println("  → 12=σ(6)는 SM 분해에만 유효. GUT 레벨에서는 일반화 안 됨.")
+
+// ─── Verdict ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("VERDICT: H-PH-2")
+println("══════════════════════════════════════════════════════════════════════")
+println("  dim(SM) = 8+3+1 = 12 = σ(6)             Arithmetic correct ✓")
+println("  rank(SM) = 2+1+1 = 4 = τ(6)             Arithmetic correct ✓")
+println("  #groups = 3 = σ/τ                       Common small number")
+println("  3 gen × 4 ferm/gen = 12 = σ(6)          Elegant decomposition ★")
+println("")
+println("  Grade: 🟡-weak (흥미롭지만 small-number coincidence 가능성)")
+println("  미해결: 왜 정확히 3 generations인가? (이는 물리학의 열린 문제)")

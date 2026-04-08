@@ -1,0 +1,280 @@
+// mk2_hexa/native/game_theory_n6_texas.hexa
+// 포팅 원본: tecs-l/math/game_theory_n6_texas.py (290 LOC)
+// Texas Sharpshooter: Shapley value / XOR / Nash for n=6 divisor game
+//
+// AI-native: @pure, hexa σ/φ/τ/sopfr 빌트인
+
+let PI = 3.141592653589793
+let sig_6 = sigma(6)        // 12
+let tau_6 = tau(6)          // 4
+let phi_6 = phi(6)          // 2
+let sopf_6 = sopfr(6)       // 5
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+
+// @pure — factorial
+fn fact(k: int) -> int {
+    let mut r = 1
+    let mut i = 2
+    while i <= k {
+        r = r * i
+        i = i + 1
+    }
+    r
+}
+
+// @pure — integer XOR (hexa `^` parse error, manual bit-by-bit)
+fn ixor(a: int, b: int) -> int {
+    let mut result = 0
+    let mut bit = 1
+    let mut aa = a
+    let mut bb = b
+    while aa > 0 || bb > 0 {
+        let ar = aa % 2
+        let br = bb % 2
+        if ar != br { result = result + bit }
+        bit = bit * 2
+        aa = aa / 2
+        bb = bb / 2
+    }
+    result
+}
+
+// @pure — divisors (sorted asc)
+fn divisors(n: int) -> list {
+    let mut d = []
+    let mut i = 1
+    while i * i <= n {
+        if n % i == 0 {
+            d = d + [i]
+            if i * i != n { d = d + [n / i] }
+        }
+        i = i + 1
+    }
+    // Selection sort
+    let mut a = d
+    let sz = len(a)
+    let mut p = 0
+    while p < sz - 1 {
+        let mut mn = p
+        let mut q = p + 1
+        while q < sz {
+            if a[q] < a[mn] { mn = q }
+            q = q + 1
+        }
+        if mn != p {
+            let t = a[p]
+            a[p] = a[mn]
+            a[mn] = t
+        }
+        p = p + 1
+    }
+    a
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("Texas Sharpshooter: Game Theory n=6  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// ─── TEST 1: Shapley(weak) = 1/(τ·(τ−1)) for [n; divs(n)] ───
+println("")
+println("══ TEST 1: Shapley(weak player) in [n; divs(n)] ══")
+println("")
+println("  Claim: Shapley(largest = n)   = (τ−1)/τ")
+println("         Shapley(other divisor) = 1/(τ·(τ−1))")
+
+// n=6: τ=4, Shapley(n)=3/4, Shapley(other)=1/12
+let sh_large_6 = to_float(tau_6 - 1) / to_float(tau_6)
+let sh_small_6 = 1.0 / to_float(tau_6 * (tau_6 - 1))
+println("")
+println("  n=6: τ=4")
+println("    Shapley(6)     = 3/4 = " + fmt4(sh_large_6))
+println("    Shapley(other) = 1/12 = " + fmt6(sh_small_6))
+println("    1/(τ·(τ−1)) = 1/12 = 1/σ(6)  ← coincidence: σ(6) = τ(6)·(τ(6)−1) = 12")
+let check = tau_6 * (tau_6 - 1)
+assert check == sig_6
+println("    ✓ Unique to n=6: σ = τ(τ−1)")
+
+// n=28: τ=6, σ=56, but τ(τ−1) = 30 ≠ 56
+let tau_28 = tau(28)
+let sig_28 = sigma(28)
+let tt28 = tau_28 * (tau_28 - 1)
+let sh_small_28 = 1.0 / to_float(tt28)
+println("")
+println("  n=28: τ=" + to_string(tau_28) + ", σ=" + to_string(sig_28))
+println("    τ·(τ−1) = " + to_string(tt28) + "  ≠  σ(28)")
+assert tt28 != sig_28
+println("    Shapley(small) = 1/30 ≠ 1/56 = 1/σ(28)")
+println("    → Formula holds as 1/(τ·(τ−1)), NOT 1/σ")
+
+// Brute-force verify n=6 Shapley (4 players)
+println("")
+println("  Brute-force Shapley for n=6 (enumerate 4! permutations):")
+let divs_6 = [1, 2, 3, 6]
+let quota = 6
+let n_players = 4
+let n_perms = fact(n_players)  // 24
+
+// Count marginal contribution: player j is pivotal in permutation p
+// if cumulative weight before j < quota, cumulative weight after >= quota
+// We use nested loops to enumerate permutations of [0,1,2,3]
+
+// Shapley via hardcoded 4! = 24 permutations
+// Each row = permutation of [0,1,2,3] (player indices → divs_6 values 1,2,3,6)
+let perms_flat = [0,1,2,3, 0,1,3,2, 0,2,1,3, 0,2,3,1, 0,3,1,2, 0,3,2,1, 1,0,2,3, 1,0,3,2, 1,2,0,3, 1,2,3,0, 1,3,0,2, 1,3,2,0, 2,0,1,3, 2,0,3,1, 2,1,0,3, 2,1,3,0, 2,3,0,1, 2,3,1,0, 3,0,1,2, 3,0,2,1, 3,1,0,2, 3,1,2,0, 3,2,0,1, 3,2,1,0]
+
+let mut sh_num = [0, 0, 0, 0]
+let mut pk = 0
+while pk < 24 {
+    let base = pk * 4
+    let mut cumul = 0
+    let mut kk = 0
+    while kk < 4 {
+        let player = perms_flat[base + kk]
+        let prev = cumul
+        cumul = cumul + divs_6[player]
+        if prev < quota && cumul >= quota {
+            sh_num[player] = sh_num[player] + 1
+            kk = 4
+        }
+        kk = kk + 1
+    }
+    pk = pk + 1
+}
+
+println("")
+println("  Marginal pivot counts (out of " + to_string(n_perms) + " permutations):")
+let mut pi = 0
+while pi < 4 {
+    let v = to_float(sh_num[pi]) / to_float(n_perms)
+    println("    Player d=" + to_string(divs_6[pi]) + ":  " + to_string(sh_num[pi]) + "/" + to_string(n_perms) + " = " + fmt6(v))
+    pi = pi + 1
+}
+// Expected: Shapley(6) = 3/4 = 18/24, Shapley(others) = 1/12 = 2/24
+assert sh_num[3] == 18
+assert sh_num[0] == 2
+assert sh_num[1] == 2
+assert sh_num[2] == 2
+println("")
+println("  ✓ Shapley(6)=18/24=3/4,  Shapley(1)=Shapley(2)=Shapley(3)=2/24=1/12")
+println("  ✓ Formula verified: Shapley(largest)=(τ−1)/τ, Shapley(other)=1/(τ(τ−1))")
+
+// ─── TEST 2: XOR(divisors(n)) = n uniqueness ───
+println("")
+println("══ TEST 2: XOR(divisors(n)) = n ══")
+println("")
+let mut xor_matches = []
+let mut nn = 1
+while nn <= 200 {
+    let ds = divisors(nn)
+    let mut x = 0
+    let mut di = 0
+    while di < len(ds) {
+        x = ixor(x, ds[di])
+        di = di + 1
+    }
+    if x == nn { xor_matches = xor_matches + [nn] }
+    nn = nn + 1
+}
+println("  n in [1, 200] with XOR(divs) = n: " + to_string(xor_matches))
+println("  Count: " + to_string(len(xor_matches)))
+
+let mut has_6 = false
+let mut xi = 0
+while xi < len(xor_matches) {
+    if xor_matches[xi] == 6 { has_6 = true }
+    xi = xi + 1
+}
+println("  n=6 in matches? " + (if has_6 { "YES" } else { "NO" }))
+assert has_6
+
+// Base rate
+let base_rate = to_float(len(xor_matches)) / 200.0
+println("  Base rate: " + fmt4(base_rate))
+
+// ─── TEST 3: Nash sqrt(3π) ≈ σ/τ = 3 ───
+println("")
+println("══ TEST 3: σ/τ ≈ √(π·n/2) approximation ══")
+println("")
+let sqrt_pi_n = sqrt(3.0 * PI)
+let st_ratio = to_float(sig_6) / to_float(tau_6)
+println("  σ(6)/τ(6) = 3.0")
+println("  √(3π)     = " + fmt6(sqrt_pi_n))
+let err_pct = abs_f(sqrt_pi_n - st_ratio) / st_ratio * 100.0
+println("  error: " + fmt4(err_pct) + "%")
+
+// Root cause: n ≈ 2π
+let two_pi = 2.0 * PI
+let n_err = abs_f(6.0 - two_pi) / 6.0 * 100.0
+println("")
+println("  Root cause: n=6 ≈ 2π = " + fmt6(two_pi))
+println("  6 vs 2π error: " + fmt4(n_err) + "%")
+println("  → Near-match, but coincidence (does not generalize to n=28, 496)")
+
+// Check n=28 generalization
+let sig_28_v = sig_28
+let tau_28_v = tau_28
+let ratio_28 = to_float(sig_28_v) / to_float(tau_28_v)
+let target_28 = sqrt(PI * 28.0 / 2.0)
+let err_28 = abs_f(target_28 - ratio_28) / ratio_28 * 100.0
+println("  n=28: σ/τ = " + fmt4(ratio_28) + ", √(14π) = " + fmt4(target_28) + ", err = " + fmt4(err_28) + "%")
+println("  → does NOT generalize (n=6 only)")
+
+// ─── TEST 4: Winning coalitions enumeration ───
+println("")
+println("══ TEST 4: Winning coalitions in [6; 1,2,3,6] (quota=6) ══")
+println("")
+let mut win_count = 0
+let mut b2 = 1
+while b2 < 16 {
+    let mut w = 0
+    let mut coalition = []
+    if b2 % 2 == 1 {
+        w = w + 1
+        coalition = coalition + [1]
+    }
+    if (b2 / 2) % 2 == 1 {
+        w = w + 2
+        coalition = coalition + [2]
+    }
+    if (b2 / 4) % 2 == 1 {
+        w = w + 3
+        coalition = coalition + [3]
+    }
+    if (b2 / 8) % 2 == 1 {
+        w = w + 6
+        coalition = coalition + [6]
+    }
+    if w >= 6 {
+        win_count = win_count + 1
+        println("    " + to_string(coalition) + "  (weight=" + to_string(w) + ")")
+    }
+    b2 = b2 + 1
+}
+println("")
+println("  Total winning coalitions: " + to_string(win_count))
+
+// ─── SUMMARY ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("FINAL GRADED RESULTS")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  | # | Grade | Finding                                              |")
+println("  |---|-------|------------------------------------------------------|")
+println("  | 1 | 🟩    | Shapley: (τ−1)/τ and 1/(τ(τ−1)) for [n; divs(n)]    |")
+println("  |   |       | n=6: σ = τ(τ−1) = 12  COINCIDENCE unique to n=6      |")
+println("  |   |       | Brute-force verified 4!=24 permutations              |")
+println("  | 2 | 🟩    | XOR(divs(6)) = 6 (also n=1; rare in [1,200])         |")
+println("  | 3 | ⚪    | σ/τ ≈ √(3π): 2.3% error, does not generalize          |")
+println("  | 4 | 🟩    | Winning coalitions in [6; divs(6)] enumerated         |")
+println("")
+println("  Assertions ALL PASS")

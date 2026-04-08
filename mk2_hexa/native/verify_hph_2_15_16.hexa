@@ -1,0 +1,173 @@
+// mk2_hexa/native/verify_hph_2_15_16.hexa
+// 포팅 원본: tecs-l/math/verify_hph_2_15_16.py (316 LOC)
+// H-PH-2 / H-PH-15 / H-PH-16 — Gauge groups, Anomaly, Self-reference cycle
+
+let N_val = 6
+let sig = sigma(6)    // 12
+let tau_v = tau(6)    // 4
+let phi_v = phi(6)    // 2
+
+// @pure — dim SO(n) = n(n−1)/2
+fn dim_SO(n: int) -> int { n * (n - 1) / 2 }
+
+// @pure — even perfect P_k = 2^(p-1)·(2^p−1)
+fn perfect_num(p: int) -> int {
+    let mut pw_pm1 = 1
+    let mut i = 0
+    while i < p - 1 {
+        pw_pm1 = pw_pm1 * 2
+        i = i + 1
+    }
+    pw_pm1 * (2 * pw_pm1 - 1)
+}
+
+// @pure — is 2^p − 1 Mersenne prime (Lucas-Lehmer)
+fn is_mersenne_prime(p: int) -> bool {
+    if p == 2 { return true }
+    let mut m = 1
+    let mut ii = 0
+    while ii < p {
+        m = m * 2
+        ii = ii + 1
+    }
+    m = m - 1
+    let mut s = 4
+    let mut k = 0
+    while k < p - 2 {
+        s = (s * s - 2) % m
+        k = k + 1
+    }
+    s == 0
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-PH-2, H-PH-15, H-PH-16 Physics Hypothesis Verification  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// ─── H-PH-2: Gauge groups from σ(6) = 8 + 3 + 1 ───
+println("")
+println("══ H-PH-2: SU(3)×SU(2)×U(1) from σ(6) via three operations ══")
+println("")
+println("  σ(6)=" + to_string(sig) + ", τ(6)=" + to_string(tau_v) + ", φ(6)=" + to_string(phi_v))
+
+let sigma_minus_tau = sig - tau_v       // 12 - 4 = 8
+let sigma_over_tau = sig / tau_v         // 12 / 4 = 3
+let R6 = sig * phi_v / (N_val * tau_v)  // 24 / 24 = 1
+
+println("  SU(3) dim = 8 = σ − τ = " + to_string(sigma_minus_tau) + "  " + (if sigma_minus_tau == 8 { "PASS" } else { "FAIL" }))
+println("  SU(2) dim = 3 = σ / τ = " + to_string(sigma_over_tau) + "  " + (if sigma_over_tau == 3 { "PASS" } else { "FAIL" }))
+println("  U(1)  dim = 1 = σφ/(nτ) = " + to_string(R6) + "  " + (if R6 == 1 { "PASS" } else { "FAIL" }))
+println("  Total = 12 = σ(6)")
+assert sigma_minus_tau == 8
+assert sigma_over_tau == 3
+assert R6 == 1
+
+// ─── H-PH-15: dim(SO(2^p)) = P_k for Mersenne p ───
+println("")
+println("══ H-PH-15: dim(SO(2^p)) = P_k  (algebraic identity) ══")
+println("")
+println("   p |    2^p | P_k              | dim(SO(2^p)) | Match")
+println("  ---+--------+------------------+--------------+-------")
+
+let mersenne_exps = [2, 3, 5, 7, 13, 17, 19]
+let mut all_match = true
+let mut mi = 0
+while mi < len(mersenne_exps) {
+    let p = mersenne_exps[mi]
+    let mut two_p = 1
+    let mut e = 0
+    while e < p {
+        two_p = two_p * 2
+        e = e + 1
+    }
+    let Pk = perfect_num(p)
+    let dim_so = dim_SO(two_p)
+    let match_ok = Pk == dim_so
+    if !match_ok { all_match = false }
+    let tag = if match_ok { "PASS" } else { "FAIL" }
+    println("  " + to_string(p) + "\t| " + to_string(two_p) + "\t| " + to_string(Pk) + "\t| " + to_string(dim_so) + "\t| " + tag)
+    mi = mi + 1
+}
+assert all_match
+
+println("")
+println("  Algebraic proof: dim(SO(2^p)) = 2^p·(2^p−1)/2 = 2^(p−1)·(2^p−1) = P_k ✓")
+
+// String theory special case: p=5
+println("")
+println("  String theory D=10 (p=5):")
+let P3 = perfect_num(5)
+let so32 = dim_SO(32)
+let e8 = 248
+let e8_x_e8 = 2 * e8
+println("    P3 = " + to_string(P3))
+println("    dim(SO(32)) = 32·31/2 = " + to_string(so32) + "  " + (if so32 == P3 { "= P3 ✓" } else { "✗" }))
+println("    dim(E8 × E8) = 2·248 = " + to_string(e8_x_e8) + "  " + (if e8_x_e8 == P3 { "= P3 ✓" } else { "✗" }))
+assert so32 == P3
+assert e8_x_e8 == P3
+println("  → Both anomaly-free 10D string gauge groups have dim = P3 = 496 ★")
+
+// ─── H-PH-16: Self-reference cycle 6 → 12 → 28 → 6 ───
+println("")
+println("══ H-PH-16: Cycle σ → σ → τ returns to 6 ══")
+println("")
+let s1 = sigma(6)
+let s2 = sigma(s1)
+let t3 = tau(s2)
+println("  6 → σ(6) = " + to_string(s1))
+println("  " + to_string(s1) + " → σ(" + to_string(s1) + ") = " + to_string(s2) + "  (= P_2 = 28)")
+println("  " + to_string(s2) + " → τ(" + to_string(s2) + ") = " + to_string(t3) + "  (returns to 6 ★)")
+assert s1 == 12
+assert s2 == 28
+assert t3 == 6
+println("  ✓ Cycle: 6 → 12 → 28 → 6")
+
+// Uniqueness check: n with τ(σ(σ(n))) = n in [1, 2000]
+println("")
+println("  Exhaustive search n where τ(σ(σ(n))) = n, [1, 2000]:")
+let mut solutions = []
+let mut n = 1
+while n <= 2000 {
+    let a = sigma(n)
+    let b = sigma(a)
+    let c = tau(b)
+    if c == n { solutions = solutions + [n] }
+    n = n + 1
+}
+println("  Solutions: " + to_string(solutions))
+
+// Near-misses (|diff| ≤ 2, not equal)
+println("")
+println("  Near-misses |τ(σ(σ(n))) − n| ≤ 2 in [1, 500]:")
+let mut near = 0
+let mut nn = 1
+while nn <= 500 {
+    let a = sigma(nn)
+    let b = sigma(a)
+    let c = tau(b)
+    let diff = c - nn
+    let adiff = if diff < 0 { 0 - diff } else { diff }
+    if adiff <= 2 && c != nn && c > 0 {
+        if near < 10 {
+            println("    n=" + to_string(nn) + ": τ(σ(σ(n)))=" + to_string(c) + ", diff=" + to_string(diff))
+        }
+        near = near + 1
+    }
+    nn = nn + 1
+}
+println("  Total near-misses in [1, 500]: " + to_string(near))
+
+// ─── FINAL SUMMARY ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("FINAL SUMMARY")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  | # | Claim                                            | Verdict |")
+println("  |---|--------------------------------------------------|---------|")
+println("  | H-PH-2  | σ(6)=12=8+3+1 via σ−τ, σ/τ, σφ/nτ         | PASS ✓  |")
+println("  | H-PH-15 | dim(SO(2^p))=P_k algebraic (p=2..19)       | PASS ✓  |")
+println("  | H-PH-15 | SO(32) & E8×E8 both dim=496=P_3            | PASS ✓  |")
+println("  | H-PH-16 | 6 → σ → 12 → σ → 28 → τ → 6 (cycle)        | PASS ✓  |")
+println("")
+println("  ALL assertions PASS.")

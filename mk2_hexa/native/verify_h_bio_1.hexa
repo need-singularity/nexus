@@ -1,0 +1,179 @@
+// mk2_hexa/native/verify_h_bio_1.hexa
+// 포팅 원본: tecs-l/math/verify_h_bio_1.py (185 LOC)
+// H-BIO-1: DNA (4 bases, 3/codon) = (tau(6), sigma(6)/tau(6))
+//
+// AI-native: @pure 전역, log2 = log(x)/log(2)
+
+let LN2 = log(2.0)
+// @pure
+fn log2(x: float) -> float { log(x) / LN2 }
+
+fn fmt1(x: float) -> string {
+    let r = to_float(to_int(x * 10.0)) / 10.0
+    to_string(r)
+}
+fn abs_i(x: int) -> int { if x < 0 { 0 - x } else { x } }
+
+// @pure
+fn ipow(b: int, k: int) -> int {
+    let mut r = 1
+    let mut i = 0
+    while i < k {
+        r = r * b
+        i = i + 1
+    }
+    r
+}
+
+let sigma_6 = sigma(6)
+let tau_6 = tau(6)
+let sot = sigma_6 / tau_6
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-BIO-1: DNA Codons = (tau(6), sigma(6)/tau(6)) = (" + to_string(tau_6) + ", " + to_string(sot) + ")  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("Perfect 6: sigma=" + to_string(sigma_6) + ", tau=" + to_string(tau_6) + ", sigma/tau=" + to_string(sot))
+println("DNA: 4 bases (A,T,G,C), 3 bases per codon")
+
+// CHECK 1
+println("")
+println("--------------------------------------------------")
+println("CHECK 1: Information content")
+println("--------------------------------------------------")
+let bases = 4
+let codon_len = 3
+let total_codons = ipow(bases, codon_len)
+let bits_per_pos = log2(to_float(bases))
+let total_bits = to_float(codon_len) * bits_per_pos
+println("  Bases=" + to_string(bases) + "  codon_len=" + to_string(codon_len))
+println("  Total codons = " + to_string(bases) + "^" + to_string(codon_len) + " = " + to_string(total_codons))
+println("  Bits/pos = log2(" + to_string(bases) + ") = " + fmt1(bits_per_pos))
+println("  Total bits = " + fmt1(total_bits) + " = sigma(6)/2 = " + to_string(sigma_6 / 2) + " (coincidence)")
+
+// CHECK 2: alternative encodings
+println("")
+println("--------------------------------------------------")
+println("CHECK 2: Alternative encodings for ~64 codons")
+println("--------------------------------------------------")
+println("     b |   k  |  b^k  | |b-k| | bits  | Assessment")
+println("  -----+------+-------+-------+-------+---------------")
+let alt_b = [2, 4, 8, 64, 3, 5, 6, 3]
+let alt_k = [6, 3, 2, 1,  4, 3, 3, 3]
+let alt_lbl = ["binary", "DNA (actual)", "octal", "direct", "ternary alt", "pentary", "hexary", "ternary short"]
+let mut i = 0
+while i < len(alt_b) {
+    let b = alt_b[i]
+    let k = alt_k[i]
+    let c = ipow(b, k)
+    let bal = abs_i(b - k)
+    let bits = to_float(k) * log2(to_float(b))
+    let mut assess = ""
+    if c < 20 { assess = "Only " + to_string(c) + " codons, too few" }
+    else if c > 200 { assess = "Wasteful: " + to_string(c) }
+    else { assess = to_string(c) + " codons, bal=" + to_string(bal) }
+    if alt_lbl[i] == "DNA (actual)" { assess = assess + " <-- ACTUAL" }
+    println("   " + to_string(b) + "\t|  " + to_string(k) + "\t|  " + to_string(c) + "\t|   " + to_string(bal) + "\t| " + fmt1(bits) + "   | " + assess)
+    i = i + 1
+}
+
+// CHECK 3: balance scan (b^k ∈ [20, 256])
+println("")
+println("--------------------------------------------------")
+println("CHECK 3: Balance scan (b^k in [20, 256], top 15)")
+println("--------------------------------------------------")
+// 병렬 배열로 결과 수집 → balance 오름차순 정렬
+let mut cb = []
+let mut ck = []
+let mut cn = []
+let mut cbal = []
+let mut b = 2
+while b <= 64 {
+    let mut k = 1
+    while k <= 10 {
+        let codons = ipow(b, k)
+        if codons >= 20 && codons <= 256 {
+            cb = cb + [b]
+            ck = ck + [k]
+            cn = cn + [codons]
+            cbal = cbal + [abs_i(b - k)]
+        }
+        k = k + 1
+    }
+    b = b + 1
+}
+
+// 간이 selection sort (balance ↑, codons ↑)
+fn swap_at(arr: list, i: int, j: int) -> list {
+    let mut out = arr
+    let t = out[i]
+    out[i] = out[j]
+    out[j] = t
+    out
+}
+let mut nC = len(cbal)
+let mut ii = 0
+while ii < nC - 1 {
+    let mut mn = ii
+    let mut jj = ii + 1
+    while jj < nC {
+        if cbal[jj] < cbal[mn] || (cbal[jj] == cbal[mn] && cn[jj] < cn[mn]) {
+            mn = jj
+        }
+        jj = jj + 1
+    }
+    if mn != ii {
+        cb = swap_at(cb, ii, mn)
+        ck = swap_at(ck, ii, mn)
+        cn = swap_at(cn, ii, mn)
+        cbal = swap_at(cbal, ii, mn)
+    }
+    ii = ii + 1
+}
+
+println("     b |   k  |  b^k  | |b-k| | notes")
+println("  -----+------+-------+-------+---------------")
+let top = if nC < 15 { nC } else { 15 }
+let mut m = 0
+while m < top {
+    let mut note = ""
+    if cb[m] == 4 && ck[m] == 3 { note = "<-- DNA (tau, sigma/tau)" }
+    else if cb[m] == 3 && ck[m] == 4 { note = "(sigma/tau, tau) swapped" }
+    else if cb[m] == 3 && ck[m] == 3 { note = "27 codons" }
+    println("   " + to_string(cb[m]) + "\t|  " + to_string(ck[m]) + "\t|  " + to_string(cn[m]) + "\t|   " + to_string(cbal[m]) + "\t| " + note)
+    m = m + 1
+}
+
+// CHECK 4-5 요약
+println("")
+println("--------------------------------------------------")
+println("CHECK 4: Chemical constraints")
+println("--------------------------------------------------")
+println("  - Watson-Crick: b must be EVEN (H-bond pairs)")
+println("  - b=2: too little info; b=4: 2 pairs SWEET SPOT")
+println("  - b=6+: stereochemistry difficult, higher error rates")
+println("  → b=4 forced by chemistry, k=3 from need b^k ≥ 20")
+
+println("")
+println("--------------------------------------------------")
+println("CHECK 5: Is (tau, sigma/tau) meaningful?")
+println("--------------------------------------------------")
+println("  Counter: small-integer coincidence (Texas effect)")
+println("  Pro: (4,3) IS most balanced factorization of 64=2^6 (|b-k|=1)")
+println("       Total info = 6 bits = perfect number")
+
+// ─── Significance ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SIGNIFICANCE ASSESSMENT: H-BIO-1")
+println("══════════════════════════════════════════════════════════════════════")
+println("  (4,3) = (tau, sigma/tau)         | Trivial small numbers     | p>0.5  | ⚪")
+println("  4^3=64, 6 bits = perfect number  | Standard CS unit          | p~0.3  | ⚪")
+println("  (4,3) most balanced for 2^6      | TRUE and INTERESTING      | p~0.05 | 🟡")
+println("  b=4 chemistry, k=3 forced        | Correct causal            | N/A    | ✓")
+println("  Overall (tau,sigma/tau)          | Numerological coincidence | p>0.2  | ⚪")
+
+println("")
+println("OVERALL: Chemistry+combinatorics forces (4,3). (tau, sigma/tau) post-hoc.")
+println("Only mildly interesting: (4,3) minimizes |b-k| for b^k=64.")
+println("Grade: ⚪ (coincidence, known causal explanation)")

@@ -1,0 +1,204 @@
+// mk2_hexa/native/characterization_verifier.hexa
+// 포팅 원본: tecs-l/math/characterization_verifier.py (321 LOC)
+// Batch verify 17 known characterizations of n=6
+//
+// AI-native: @pure, hexa σ/φ/τ/sopfr 빌트인, Python eval 제거 — hardcoded checks
+
+let N_SEARCH = 500  // Python 10000 → hexa 500 for speed
+
+// @pure — radical (product of distinct prime factors)
+fn rad(n: int) -> int {
+    if n <= 1 { return n }
+    let mut m = n
+    let mut r = 1
+    let mut p = 2
+    while p * p <= m {
+        if m % p == 0 {
+            r = r * p
+            while m % p == 0 { m = m / p }
+        }
+        p = p + 1
+    }
+    if m > 1 { r = r * m }
+    r
+}
+
+// @pure — Ω(n)
+fn big_omega(n: int) -> int {
+    let mut m = n
+    let mut c = 0
+    let mut p = 2
+    while p * p <= m {
+        while m % p == 0 {
+            m = m / p
+            c = c + 1
+        }
+        p = p + 1
+    }
+    if m > 1 { c = c + 1 }
+    c
+}
+
+// @pure — ω(n) distinct primes
+fn omega_n(n: int) -> int {
+    let mut m = n
+    let mut c = 0
+    let mut p = 2
+    while p * p <= m {
+        if m % p == 0 {
+            c = c + 1
+            while m % p == 0 { m = m / p }
+        }
+        p = p + 1
+    }
+    if m > 1 { c = c + 1 }
+    c
+}
+
+// @pure — aliquot s(n) = σ(n) − n
+fn aliquot_n(n: int) -> int { sigma(n) - n }
+
+// ─── Test functions: each returns true if identity holds for n ───
+
+// 1. σ·φ = n·τ  (master identity)
+fn t1(n: int) -> bool { sigma(n) * phi(n) == n * tau(n) }
+// 33. φ² = τ
+fn t33(n: int) -> bool { phi(n) * phi(n) == tau(n) }
+// 34. σ = n·φ
+fn t34(n: int) -> bool { sigma(n) == n * phi(n) }
+// 42. sopfr = n−1
+fn t42(n: int) -> bool { sopfr(n) == n - 1 }
+// 44. s(n) = 3·φ
+fn t44(n: int) -> bool { aliquot_n(n) == 3 * phi(n) }
+// 45. σ + φ = 2τ + n
+fn t45(n: int) -> bool { sigma(n) + phi(n) == 2 * tau(n) + n }
+// 46. σ + n = 3(φ + τ)
+fn t46(n: int) -> bool { sigma(n) + n == 3 * (phi(n) + tau(n)) }
+// 47. σ·ω = n·τ
+fn t47(n: int) -> bool { sigma(n) * omega_n(n) == n * tau(n) }
+// 37. ω·(τ−1) = n
+fn t37(n: int) -> bool { omega_n(n) * (tau(n) - 1) == n }
+// 56. σ·τ − n·φ = n²
+fn t56(n: int) -> bool { sigma(n) * tau(n) - n * phi(n) == n * n }
+// 59. n − 2 = τ (Cayley)
+fn t59(n: int) -> bool { n - 2 == tau(n) }
+// 60. 2σ = n·τ
+fn t60(n: int) -> bool { 2 * sigma(n) == n * tau(n) }
+// τ = 2φ
+fn tau_2phi(n: int) -> bool { tau(n) == 2 * phi(n) }
+// 3σ + 3φ = 7n
+fn t_357(n: int) -> bool { 3 * sigma(n) + 3 * phi(n) == 7 * n }
+// σ² = n²·τ
+fn t_sq(n: int) -> bool { sigma(n) * sigma(n) == n * n * tau(n) }
+// 49. rad(σ(n)) = n
+fn t49(n: int) -> bool { rad(sigma(n)) == n }
+// φ² = τ (duplicate of 33, used for grade check)
+
+// @pure — batch test for a given identity index
+fn check_id(idx: int, n: int) -> bool {
+    if idx == 1 { return t1(n) }
+    if idx == 2 { return t33(n) }
+    if idx == 3 { return t34(n) }
+    if idx == 4 { return t42(n) }
+    if idx == 5 { return t44(n) }
+    if idx == 6 { return t45(n) }
+    if idx == 7 { return t46(n) }
+    if idx == 8 { return t47(n) }
+    if idx == 9 { return t37(n) }
+    if idx == 10 { return t56(n) }
+    if idx == 11 { return t59(n) }
+    if idx == 12 { return t60(n) }
+    if idx == 13 { return tau_2phi(n) }
+    if idx == 14 { return t_357(n) }
+    if idx == 15 { return t_sq(n) }
+    if idx == 16 { return t49(n) }
+    false
+}
+
+let id_labels = ["σ·φ = n·τ  (#1 master)", "φ² = τ  (#33)", "σ = n·φ  (#34)", "sopfr = n−1  (#42)", "s(n) = 3·φ  (#44)", "σ+φ = 2τ+n  (#45)", "σ+n = 3(φ+τ)  (#46)", "σ·ω = n·τ", "ω·(τ−1) = n  (#37)", "σ·τ − n·φ = n²  (#56)", "n−2 = τ  (#59 Cayley)", "2σ = n·τ  (#60)", "τ = 2φ", "3σ+3φ = 7n", "σ² = n²·τ", "rad(σ) = n  (#49)"]
+
+println("══════════════════════════════════════════════════════════════════════")
+println("CHARACTERIZATION VERIFIER for n=6  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("  Search range N = " + to_string(N_SEARCH))
+println("")
+
+// ─── Batch verify all identities ───
+println("  #  | Identity                     | n=6 | solutions in [2, N]       | grade")
+println("  ---+------------------------------+-----+---------------------------+-------")
+
+let mut identities_passing_n6 = 0
+let mut total = 0
+
+let mut id = 1
+while id <= 16 {
+    let at_6 = check_id(id, 6)
+    let mut sols = []
+    if at_6 {
+        let mut n = 2
+        while n <= N_SEARCH {
+            if check_id(id, n) { sols = sols + [n] }
+            n = n + 1
+        }
+    }
+    total = total + 1
+    if at_6 { identities_passing_n6 = identities_passing_n6 + 1 }
+
+    // Grade
+    let mut grade = "FAIL"
+    if at_6 {
+        if len(sols) == 1 && sols[0] == 6 { grade = "⭐ STAR" }
+        else if len(sols) <= 3 { grade = "🟩 GREEN" }
+        else if len(sols) <= 10 { grade = "🟩 weak" }
+        else { grade = "⚪ WHITE" }
+    }
+
+    let check_6 = if at_6 { "✓" } else { "✗" }
+    let sol_head = if len(sols) > 8 {
+        let mut h = []
+        let mut k = 0
+        while k < 8 {
+            h = h + [sols[k]]
+            k = k + 1
+        }
+        to_string(h) + "…(" + to_string(len(sols)) + ")"
+    } else {
+        to_string(sols)
+    }
+
+    println("  " + to_string(id) + "  | " + id_labels[id - 1] + "\t| " + check_6 + "   | " + sol_head + "\t| " + grade)
+    id = id + 1
+}
+
+// ─── Stars (identities unique to n=6) ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("STAR identities: unique to n=6 in [2, " + to_string(N_SEARCH) + "]")
+println("══════════════════════════════════════════════════════════════════════")
+
+let mut star_id = 1
+while star_id <= 16 {
+    if check_id(star_id, 6) {
+        let mut sols = []
+        let mut n = 2
+        while n <= N_SEARCH {
+            if check_id(star_id, n) { sols = sols + [n] }
+            n = n + 1
+        }
+        if len(sols) == 1 && sols[0] == 6 {
+            println("  ★ #" + to_string(star_id) + ": " + id_labels[star_id - 1])
+        }
+    }
+    star_id = star_id + 1
+}
+
+// ─── Summary ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SUMMARY")
+println("══════════════════════════════════════════════════════════════════════")
+println("  Identities verified at n=6:  " + to_string(identities_passing_n6) + "/" + to_string(total))
+println("  Each tested for uniqueness in [2, " + to_string(N_SEARCH) + "]")
+println("")
+println("  Note: Python eval() replaced with hardcoded hexa functions.")
+println("        Python range 10000 → hexa 500 for speed.")

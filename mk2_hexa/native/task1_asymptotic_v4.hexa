@@ -1,0 +1,306 @@
+// 포팅 원본: tecs-l/math/task1_asymptotic_v4.py (215 LOC)
+// Task 1: Asymptotic investigation for pi_R(x)
+// R(p) = (p^2 - 1) / (2p), products of R(p_i) for distinct primes
+// Reduced limits for hexa interpreter speed
+
+fn sqrt_f(x: float) -> float { if x <= 0.0 { return 0.0 } ; let mut g = x / 2.0 ; let mut i = 0 ; while i < 50 { g = (g + x / g) / 2.0 ; i = i + 1 } ; g }
+
+fn ln_f(x: float) -> float { if x <= 0.0 { return -999.0 } ; let mut v = x ; let mut adj = 0.0 ; while v > 2.0 { v = v / 2.718281828 ; adj = adj + 1.0 } ; while v < 0.5 { v = v * 2.718281828 ; adj = adj - 1.0 } ; let y = (v - 1.0) / (v + 1.0) ; let y2 = y * y ; let mut s = y ; let mut term = y ; let mut k = 1 ; while k < 30 { term = term * y2 ; s = s + term / to_float(2 * k + 1) ; k = k + 1 } ; 2.0 * s + adj }
+
+fn fmt6(x: float) -> string { let r = to_float(to_int(x * 1000000.0)) / 1000000.0 ; to_string(r) }
+
+fn fmt4(x: float) -> string { let r = to_float(to_int(x * 10000.0)) / 10000.0 ; to_string(r) }
+
+fn fmt2(x: float) -> string { let r = to_float(to_int(x * 100.0)) / 100.0 ; to_string(r) }
+
+fn exp_f(x: float) -> float {
+  let mut result = 1.0
+  let mut term = 1.0
+  let mut i = 1
+  while i < 40 {
+    term = term * x / to_float(i)
+    result = result + term
+    i = i + 1
+  }
+  result
+}
+
+fn sieve_primes(limit: int) -> [int] {
+  let mut is_p = [true] * (limit + 1)
+  is_p[0] = false
+  is_p[1] = false
+  let mut i = 2
+  let sq = to_int(sqrt_f(to_float(limit))) + 1
+  while i <= sq {
+    if is_p[i] {
+      let mut j = i * i
+      while j <= limit {
+        is_p[j] = false
+        j = j + i
+      }
+    }
+    i = i + 1
+  }
+  let mut primes = [0] * 0
+  let mut k = 2
+  while k <= limit {
+    if is_p[k] {
+      primes = primes.push(k)
+    }
+    k = k + 1
+  }
+  primes
+}
+
+// R(p) = (p^2 - 1) / (2p) as float
+fn r_prime_f(p: int) -> float {
+  to_float(p * p - 1) / to_float(2 * p)
+}
+
+// R(p^a) = (p^(a+1) - 1) / (p * (a+1)) as float
+fn r_prime_power_f(p: int, a: int) -> float {
+  let mut pa = 1
+  let mut i = 0
+  while i <= a {
+    pa = pa * p
+    i = i + 1
+  }
+  to_float(pa - 1) / to_float(p * (a + 1))
+}
+
+// Count distinct R values <= x_max
+// Uses sorted array + DFS. Since R(p) are strictly increasing for primes,
+// products with different prime sets are almost always distinct.
+// We collect all values, sort, then count unique via epsilon comparison.
+fn count_distinct_R(x_max: int, primes: any) -> int {
+  let x_f = to_float(x_max)
+
+  // Collect primes where R(p) <= x_max
+  let mut pr_p = [0] * 0
+  let mut pr_v = [0.0] * 0
+  let mut idx = 0
+  while idx < primes.len() {
+    let p = primes[idx]
+    let rp = r_prime_f(p)
+    if rp > x_f {
+      break
+    }
+    pr_p = pr_p.push(p)
+    pr_v = pr_v.push(rp)
+    idx = idx + 1
+  }
+  let np = pr_p.len()
+
+  // Collect all R-values into a flat array via iterative DFS
+  // Stack: (prime_index, product)
+  let mut vals = [1.0]
+  let mut stk_i = [0] * 0
+  let mut stk_p = [0.0] * 0
+
+  // Seed with single-prime R values
+  let mut si = 0
+  while si < np {
+    let v = pr_v[si]
+    if v <= x_f {
+      vals = vals.push(v)
+      stk_i = stk_i.push(si + 1)
+      stk_p = stk_p.push(v)
+    }
+    si = si + 1
+  }
+
+  // Also add prime-power R values (a>=2)
+  let mut pi2 = 0
+  while pi2 < np {
+    let p = pr_p[pi2]
+    let mut a = 2
+    while a <= 6 {
+      let rpa = r_prime_power_f(p, a)
+      if rpa > x_f {
+        break
+      }
+      vals = vals.push(rpa)
+      // These can also combine with other primes
+      stk_i = stk_i.push(pi2 + 1)
+      stk_p = stk_p.push(rpa)
+      a = a + 1
+    }
+    pi2 = pi2 + 1
+  }
+
+  // DFS: extend each product with next primes
+  let mut max_iter = 50000
+  while stk_i.len() > 0 {
+    if max_iter <= 0 {
+      break
+    }
+    max_iter = max_iter - 1
+    let last = stk_i.len() - 1
+    let ci = stk_i[last]
+    let cp = stk_p[last]
+    stk_i = stk_i.pop()
+    stk_p = stk_p.pop()
+
+    let mut ni = ci
+    while ni < np {
+      let new_p = cp * pr_v[ni]
+      if new_p > x_f {
+        break
+      }
+      vals = vals.push(new_p)
+      stk_i = stk_i.push(ni + 1)
+      stk_p = stk_p.push(new_p)
+      ni = ni + 1
+    }
+  }
+
+  // Sort and count distinct (epsilon = 1e-6)
+  vals = vals.sort()
+  let mut count = 1
+  let mut vi = 1
+  let eps = 0.000001
+  while vi < vals.len() {
+    let diff = vals[vi] - vals[vi - 1]
+    if diff > eps {
+      count = count + 1
+    }
+    vi = vi + 1
+  }
+  count
+}
+
+fn count_primes_up_to(primes: any, limit: int) -> int {
+  let mut c = 0
+  let mut i = 0
+  while i < primes.len() {
+    if primes[i] <= limit {
+      c = c + 1
+    } else {
+      break
+    }
+    i = i + 1
+  }
+  c
+}
+
+fn pad_left(s: string, w: int) -> string {
+  let mut r = s
+  while r.len() < w {
+    r = " " + r
+  }
+  r
+}
+
+fn main() {
+  let sep = "======================================================================"
+  println(sep)
+  println("TASK 1: FAST EXACT ASYMPTOTIC ANALYSIS v4 (hexa port)")
+  println(sep)
+
+  // Reduced sieve for interpreter speed (Python 2M -> hexa 2000)
+  let sieve_limit = 2000
+  let msg_sieve = "Sieving primes up to " + to_string(sieve_limit) + "..."
+  println(msg_sieve)
+  let primes = sieve_primes(sieve_limit)
+  let msg_found = "Found " + to_string(primes.len()) + " primes"
+  println(msg_found)
+
+  // Reduced x values for interpreter speed
+  let x_vals = [50, 100, 200, 500]
+
+  println("")
+  let hdr = pad_left("x", 8) + pad_left("pi_R(x)", 10) + pad_left("pi(2x)", 8) + pad_left("ratio", 10) + pad_left("pi_R*lnx/x", 12)
+  println(hdr)
+  println("--------------------------------------------------")
+
+  // Collect data
+  let mut data_x = [0] * 0
+  let mut data_pi = [0] * 0
+  let mut data_pi2x = [0] * 0
+
+  let mut di = 0
+  while di < x_vals.len() {
+    let x = x_vals[di]
+    let pi_x = count_distinct_R(x, primes)
+    let lim2 = 2 * x
+    let pi_2x = count_primes_up_to(primes, lim2)
+    let ratio = if pi_2x > 0 { to_float(pi_x) / to_float(pi_2x) } else { 0.0 }
+    let lnx = ln_f(to_float(x))
+    let r2 = to_float(pi_x) * lnx / to_float(x)
+
+    data_x = data_x.push(x)
+    data_pi = data_pi.push(pi_x)
+    data_pi2x = data_pi2x.push(pi_2x)
+
+    let row = pad_left(to_string(x), 8) + pad_left(to_string(pi_x), 10) + pad_left(to_string(pi_2x), 8) + pad_left(fmt4(ratio), 10) + pad_left(fmt4(r2), 12)
+    println(row)
+    di = di + 1
+  }
+
+  // Log-log regression
+  println("")
+  println("Log-log regression:")
+  let n = data_x.len()
+  let mut sx = 0.0
+  let mut sy = 0.0
+  let mut sxy = 0.0
+  let mut sx2 = 0.0
+  let mut ri = 0
+  while ri < n {
+    let lx = ln_f(to_float(data_x[ri]))
+    let ly = ln_f(to_float(data_pi[ri]))
+    sx = sx + lx
+    sy = sy + ly
+    sxy = sxy + lx * ly
+    sx2 = sx2 + lx * lx
+    ri = ri + 1
+  }
+  let nf = to_float(n)
+  let slope = (nf * sxy - sx * sy) / (nf * sx2 - sx * sx)
+  let intercept = (sy - slope * sx) / nf
+  let coeff = exp_f(intercept)
+  let reg_msg = "  pi_R(x) ~ " + fmt4(coeff) + " * x^" + fmt4(slope)
+  println(reg_msg)
+
+  // Detailed analysis
+  println("")
+  println("Detailed analysis:")
+  let hdr2 = pad_left("x", 8) + pad_left("prime", 10) + pad_left("composite", 12) + pad_left("comp/prime", 12)
+  println(hdr2)
+  println("--------------------------------------------------")
+  let mut ai = 0
+  while ai < n {
+    let x = data_x[ai]
+    let pi_x = data_pi[ai]
+    let pi_2x = data_pi2x[ai]
+    let comp = pi_x - pi_2x
+    let ratio2 = if pi_2x > 0 { to_float(comp) / to_float(pi_2x) } else { 0.0 }
+    let row2 = pad_left(to_string(x), 8) + pad_left(to_string(pi_2x), 10) + pad_left(to_string(comp), 12) + pad_left(fmt4(ratio2), 12)
+    println(row2)
+    ai = ai + 1
+  }
+
+  // Composite contribution analysis
+  println("")
+  println("Is composite contribution ~ C * x/ln(x)?")
+  let hdr3 = pad_left("x", 8) + pad_left("comp", 8) + pad_left("x/ln(x)", 10) + pad_left("ratio", 10)
+  println(hdr3)
+  println("------------------------------------------")
+  let mut bi = 0
+  while bi < n {
+    let x = data_x[bi]
+    let pi_x = data_pi[bi]
+    let pi_2x = data_pi2x[bi]
+    let comp = pi_x - pi_2x
+    let xlnx = to_float(x) / ln_f(to_float(x))
+    let ratio3 = if xlnx > 0.0 { to_float(comp) / xlnx } else { 0.0 }
+    let row3 = pad_left(to_string(x), 8) + pad_left(to_string(comp), 8) + pad_left(fmt2(xlnx), 10) + pad_left(fmt4(ratio3), 10)
+    println(row3)
+    bi = bi + 1
+  }
+
+  println("")
+  println("Done.")
+}
+
+main()

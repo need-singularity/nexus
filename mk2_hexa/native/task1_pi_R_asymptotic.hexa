@@ -1,0 +1,433 @@
+// 포팅 원본: tecs-l/math/task1_pi_R_asymptotic.py (311 LOC)
+//
+// Task 1: π_R(x) 점근선 분석
+// π_R(x) = x 이하 서로 다른 R(n) 값의 개수
+// R(n) = σ(n)·φ(n) / (n·τ(n))
+//
+// R은 곱셈적: R(p^a) = (p^(a+1)-1) / (p·(a+1))
+// 특수 경우: R(p) = (p²-1)/(2p)
+//
+// 범위: N=2500 (인터프리터 속도 감안, Python 50k → hexa 2500)
+
+// ── math helpers ──
+fn my_sqrt(x: float) -> float {
+    sqrt(x)
+}
+
+fn my_ln(x: float) -> float {
+    log(x)
+}
+
+fn my_abs(x: float) -> float {
+    if x < 0.0 { return 0.0 - x }
+    x
+}
+
+fn fmt(x: float, decimals: int) -> string {
+    // hexa에는 포맷 내장 없으므로 to_string 사용
+    to_string(x)
+}
+
+fn pad_left(s: string, width: int) -> string {
+    let mut result = s
+    while len(result) < width {
+        result = " " + result
+    }
+    result
+}
+
+fn repeat_str(s: string, n: int) -> string {
+    let mut result = ""
+    let mut i = 0
+    while i < n {
+        result = result + s
+        i = i + 1
+    }
+    result
+}
+
+// ── factorization ──
+fn factorize(n: int) -> [int] {
+    // 반환: [p1, a1, p2, a2, ...] 형태의 flat 배열
+    let mut result = []
+    let mut temp = n
+    let mut d = 2
+    while d * d <= temp {
+        let mut count = 0
+        while temp % d == 0 {
+            count = count + 1
+            temp = temp / d
+        }
+        if count > 0 {
+            result = result + [d, count]
+        }
+        d = d + 1
+    }
+    if temp > 1 {
+        result = result + [temp, 1]
+    }
+    result
+}
+
+// ── R(n) as float (σ(n)·φ(n) / (n·τ(n))) ──
+fn compute_R(n: int) -> float {
+    if n == 1 { return 1.0 }
+    let s = sigma(n)
+    let p = phi(n)
+    let t = tau(n)
+    to_float(s) * to_float(p) / (to_float(n) * to_float(t))
+}
+
+// ── R(p^a) exact as numerator/denominator pair ──
+// R(p^a) = (p^(a+1)-1) / (p·(a+1))
+fn R_prime_power_num(p: int, a: int) -> int {
+    pow(p, a + 1) - 1
+}
+
+fn R_prime_power_den(p: int, a: int) -> int {
+    p * (a + 1)
+}
+
+// ── R as rational (numerator, denominator) via factorization ──
+fn compute_R_rational(n: int) -> [int] {
+    if n == 1 { return [1, 1] }
+    let factors = factorize(n)
+    let mut num = 1
+    let mut den = 1
+    let mut i = 0
+    while i < len(factors) {
+        let p = factors[i]
+        let a = factors[i + 1]
+        num = num * R_prime_power_num(p, a)
+        den = den * R_prime_power_den(p, a)
+        i = i + 2
+    }
+    // simplify with gcd
+    let g = gcd(num, den)
+    [num / g, den / g]
+}
+
+// ── sieve of primes ──
+fn sieve_primes(limit: int) -> [int] {
+    let mut is_p = []
+    let mut i = 0
+    while i <= limit {
+        if i < 2 {
+            is_p = is_p + [false]
+        } else {
+            is_p = is_p + [true]
+        }
+        i = i + 1
+    }
+    let mut j = 2
+    while j * j <= limit {
+        if is_p[j] {
+            let mut k = j * j
+            while k <= limit {
+                is_p[k] = false
+                k = k + j
+            }
+        }
+        j = j + 1
+    }
+    let mut primes = []
+    let mut m = 2
+    while m <= limit {
+        if is_p[m] {
+            primes = primes + [m]
+        }
+        m = m + 1
+    }
+    primes
+}
+
+// ── count distinct R values up to x ──
+// 유리수를 문자열 키로 집합 관리 (#{} map 사용)
+fn count_distinct_R(n_max: int, x_limit: float) -> int {
+    let mut seen = #{}
+    let mut n = 1
+    while n <= n_max {
+        let rv = compute_R(n)
+        if rv <= x_limit + 0.0001 {
+            // 유리수로 정확한 키 생성
+            let rat = compute_R_rational(n)
+            let key = to_string(rat[0]) + "/" + to_string(rat[1])
+            seen[key] = true
+        }
+        n = n + 1
+    }
+    len(keys(seen))
+}
+
+// ══════════════════════════════════════════════════════
+// MAIN
+// ══════════════════════════════════════════════════════
+
+let N_MAX = 2500
+let sep60 = repeat_str("=", 60)
+let sep70 = repeat_str("-", 70)
+let sep50 = repeat_str("-", 50)
+
+println(sep60)
+println("TASK 1: pi_R(x) ASYMPTOTIC ANALYSIS")
+println(sep60)
+
+// ── Step 1: R(n) 전수 계산 ──
+println("")
+println("Computing R(n) for n=1.." + to_string(N_MAX) + "...")
+
+let mut r_values = []
+let mut r_min = 999999.0
+let mut r_max = 0.0
+let mut n = 1
+while n <= N_MAX {
+    let r = compute_R(n)
+    r_values = r_values + [r]
+    if r < r_min { r_min = r }
+    if r > r_max { r_max = r }
+    n = n + 1
+}
+
+println("R(n) range: [" + fmt(r_min, 4) + ", " + fmt(r_max, 4) + "]")
+
+// ── Step 2: asymptotic table ──
+let x_test = [10, 20, 50, 100, 200, 500, 1000]
+
+println("")
+println(sep70)
+let hdr = pad_left("x", 8) + pad_left("pi_R(x)", 10) + pad_left("x*sqrt(ln x)", 14) + pad_left("ratio", 10) + pad_left("x/ln(x)", 10) + pad_left("ratio2", 10)
+println(hdr)
+println(sep70)
+
+let mut results_x = []
+let mut results_pi = []
+let mut results_r1 = []
+let mut results_r2 = []
+
+let mut idx = 0
+while idx < len(x_test) {
+    let x = x_test[idx]
+    let xf = to_float(x)
+
+    // count distinct R values <= x
+    let pi_x = count_distinct_R(N_MAX, xf)
+
+    let lnx = my_ln(xf)
+    let x_sqrtlnx = xf * my_sqrt(lnx)
+    let ratio = to_float(pi_x) / x_sqrtlnx
+    let x_over_lnx = xf / lnx
+    let ratio2 = to_float(pi_x) / x_over_lnx
+
+    results_x = results_x + [x]
+    results_pi = results_pi + [pi_x]
+    results_r1 = results_r1 + [ratio]
+    results_r2 = results_r2 + [ratio2]
+
+    let line = pad_left(to_string(x), 8) + pad_left(to_string(pi_x), 10) + pad_left(fmt(x_sqrtlnx, 2), 14) + pad_left(fmt(ratio, 4), 10) + pad_left(fmt(x_over_lnx, 2), 10) + pad_left(fmt(ratio2, 4), 10)
+    println(line)
+
+    idx = idx + 1
+}
+println(sep70)
+
+// ── x/(ln x)^1.5 table ──
+println("")
+println(sep50)
+let hdr2 = pad_left("x", 8) + pad_left("pi_R(x)", 10) + pad_left("x/(lnx)^1.5", 14) + pad_left("ratio", 10)
+println(hdr2)
+println(sep50)
+
+let mut j = 0
+while j < len(results_x) {
+    let x = results_x[j]
+    let xf = to_float(x)
+    let pi_x = results_pi[j]
+    let lnx = my_ln(xf)
+    let denom = xf / (lnx * my_sqrt(lnx))
+    let r = to_float(pi_x) / denom
+    let line2 = pad_left(to_string(x), 8) + pad_left(to_string(pi_x), 10) + pad_left(fmt(denom, 2), 14) + pad_left(fmt(r, 4), 10)
+    println(line2)
+    j = j + 1
+}
+println(sep50)
+
+// ══════════════════════════════════════════════════════
+// PRIME CONTRIBUTION ANALYSIS
+// ══════════════════════════════════════════════════════
+
+println("")
+println(sep60)
+println("PRIME CONTRIBUTION ANALYSIS")
+println(sep60)
+
+let primes = sieve_primes(2000)
+
+println("")
+println("R(p) = (p^2-1)/(2p) values for small primes:")
+let phdr = pad_left("p", 6) + pad_left("R(p) float", 12) + pad_left("p/2", 8)
+println(phdr)
+
+let mut pi = 0
+while pi < 20 && pi < len(primes) {
+    let p = primes[pi]
+    let rp = to_float(p * p - 1) / to_float(2 * p)
+    let half = to_float(p) / 2.0
+    let pline = pad_left(to_string(p), 6) + pad_left(fmt(rp, 4), 12) + pad_left(fmt(half, 4), 8)
+    println(pline)
+    pi = pi + 1
+}
+
+println("")
+println("Prime-only pi_R(x) analysis:")
+println("R(p) <= x iff p ~ 2x (since R(p) ~ p/2)")
+println("")
+let phdr2 = pad_left("x", 8) + pad_left("primes R(p)<=x", 18) + pad_left("pi(2x)", 10) + pad_left("2x/ln(2x)", 12)
+println(phdr2)
+println(repeat_str("-", 55))
+
+let x_vals = [10, 50, 100, 500, 1000]
+let mut xi = 0
+while xi < len(x_vals) {
+    let x = x_vals[xi]
+    let xf = to_float(x)
+    // count primes with R(p) <= x
+    let mut count = 0
+    let mut pi2x = 0
+    let mut pk = 0
+    while pk < len(primes) {
+        let p = primes[pk]
+        let rp = to_float(p * p - 1) / to_float(2 * p)
+        if rp <= xf { count = count + 1 }
+        if p <= 2 * x { pi2x = pi2x + 1 }
+        pk = pk + 1
+    }
+    let asymp = 2.0 * xf / my_ln(2.0 * xf)
+    let pline2 = pad_left(to_string(x), 8) + pad_left(to_string(count), 18) + pad_left(to_string(pi2x), 10) + pad_left(fmt(asymp, 2), 12)
+    println(pline2)
+    xi = xi + 1
+}
+
+// ══════════════════════════════════════════════════════
+// SQUAREFREE ANALYSIS
+// ══════════════════════════════════════════════════════
+
+println("")
+println(sep60)
+println("SQUAREFREE ANALYSIS")
+println(sep60)
+
+println("")
+println("Squarefree 2-prime products R(pq):")
+let sqhdr = pad_left("p", 4) + pad_left("q", 4) + pad_left("R(p)", 10) + pad_left("R(q)", 10) + pad_left("R(pq)", 12)
+println(sqhdr)
+
+let mut si = 0
+while si < 8 && si < len(primes) {
+    let p = primes[si]
+    let rp = to_float(p * p - 1) / to_float(2 * p)
+    let mut sj = si + 1
+    let sj_end = si + 5
+    while sj < sj_end && sj < len(primes) {
+        let q = primes[sj]
+        let rq = to_float(q * q - 1) / to_float(2 * q)
+        let rpq = rp * rq
+        let sqline = pad_left(to_string(p), 4) + pad_left(to_string(q), 4) + pad_left(fmt(rp, 4), 10) + pad_left(fmt(rq, 4), 10) + pad_left(fmt(rpq, 4), 12)
+        println(sqline)
+        sj = sj + 1
+    }
+    si = si + 1
+}
+
+// ── R values by type (n <= 500) ──
+println("")
+println("R values by type (n <= 500):")
+
+let mut count_unit = 0
+let mut count_sq1 = 0
+let mut count_sq2 = 0
+let mut count_sq3 = 0
+let mut count_nonsq = 0
+
+let mut ni = 1
+while ni <= 500 {
+    let factors = factorize(ni)
+    let omega = len(factors) / 2
+    let mut max_exp = 0
+    let mut fi = 1
+    while fi < len(factors) {
+        if factors[fi] > max_exp { max_exp = factors[fi] }
+        fi = fi + 2
+    }
+    if ni == 1 {
+        count_unit = count_unit + 1
+    } else {
+        if max_exp == 1 {
+            if omega == 1 { count_sq1 = count_sq1 + 1 }
+            if omega == 2 { count_sq2 = count_sq2 + 1 }
+            if omega >= 3 { count_sq3 = count_sq3 + 1 }
+        } else {
+            count_nonsq = count_nonsq + 1
+        }
+    }
+    ni = ni + 1
+}
+
+println("  n=1:            " + to_string(count_unit) + " values")
+println("  squarefree-1:   " + to_string(count_sq1) + " values")
+println("  squarefree-2:   " + to_string(count_sq2) + " values")
+println("  squarefree-3+:  " + to_string(count_sq3) + " values")
+println("  non-squarefree: " + to_string(count_nonsq) + " values")
+
+// ══════════════════════════════════════════════════════
+// DICKMAN FUNCTION CONNECTION
+// ══════════════════════════════════════════════════════
+
+println("")
+println(sep60)
+println("DICKMAN FUNCTION CONNECTION")
+println(sep60)
+
+println("")
+println("Heuristic analysis for pi_R(x):")
+println("")
+println("The R values come from:")
+println("  - Primes p: R(p) = (p^2-1)/(2p) ~ p/2")
+println("  - Prime powers p^a: R(p^a) = (p^(a+1)-1)/(p(a+1))")
+println("  - Composites: R(n) = prod R(p_i^a_i)")
+println("")
+println("Key observation: R(p) ~ p/2, so distinct prime-R values")
+println("up to x come from primes p <= 2x.")
+println("")
+println("Dominant contribution: primes with R(p) <= x")
+println("  Count ~ pi(2x) ~ 2x/ln(x)")
+println("")
+println("Second contribution: products R(p)R(q) <= x, p < q")
+println("  ~ (2x/ln x) * (1/2)ln ln(2x)    [Mertens theorem]")
+println("  ~ x*ln ln(x) / ln(x)")
+
+// ══════════════════════════════════════════════════════
+// EMPIRICAL FIT SUMMARY
+// ══════════════════════════════════════════════════════
+
+println("")
+println(sep60)
+println("EMPIRICAL FIT SUMMARY")
+println(sep60)
+
+println("")
+println("Based on computation:")
+println("  pi_R(x) = number of distinct R(n) values <= x")
+println("")
+println("Tested forms:")
+println("  1. C*x*sqrt(ln x)   - empirically ratio -> ~4.3 (claimed)")
+println("  2. C*x/ln(x)        - from prime counting alone")
+println("  3. C*x/(ln x)^1.5   - intermediate")
+println("")
+println("The prime contribution alone gives O(x/ln x),")
+println("but composite R values (products) fill in many more values,")
+println("potentially giving the sqrt(ln x) enhancement.")
+println("")
+println("This resembles the count of smooth numbers or")
+println("numbers representable as products from a specific set.")
+println("")
+println("Done.")

@@ -1,0 +1,156 @@
+// mk2_hexa/native/consciousness_bridge_batch10.hexa
+// 포팅 원본: tecs-l/math/consciousness_bridge_batch10.py (209 LOC)
+// Batch 10: Dyson, Codes, Gauss sum, QR, Virasoro, Apéry
+//
+// AI-native: @pure, hexa sigma/phi/tau/sopfr 빌트인
+
+let PI = 3.141592653589793
+let n_val = 6
+let sig_v = sigma(6)     // 12
+let tau_v = tau(6)       // 4
+let phi_v = phi(6)       // 2
+let sopf_v = sopfr(6)    // 5
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+
+println("══════════════════════════════════════════════════════════════════════")
+println("BATCH 10: Dyson / Codes / Gauss / QR / Virasoro / Apéry  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+println("  n=6, σ=" + to_string(sig_v) + ", τ=" + to_string(tau_v) + ", φ=" + to_string(phi_v) + ", sopfr=" + to_string(sopf_v))
+
+// ─── UPGRADE 1: H-CX-85 Dyson φ²=τ ⟺ n=6 ───
+println("")
+println("── H-CX-85 Dyson: φ(n)² = τ(n) ──")
+let lhs_d = phi_v * phi_v
+println("  n=6: φ² = 4 = τ  " + (if lhs_d == tau_v { "✓" } else { "✗" }))
+assert lhs_d == tau_v
+
+let mut hits_d = []
+let mut m = 2
+while m <= 500 {
+    if phi(m) * phi(m) == tau(m) { hits_d = hits_d + [m] }
+    m = m + 1
+}
+println("  Hits n ≤ 500: " + to_string(hits_d))
+if len(hits_d) == 1 && hits_d[0] == 6 {
+    println("  ⭐⭐⭐ UPGRADE: φ² = τ ⟺ n=6 (for n ≤ 500)")
+}
+
+println("")
+println("  PROOF (semiprimes): n=pq, p<q primes")
+println("    φ = (p−1)(q−1), τ = 4")
+println("    φ² = τ ⇒ [(p−1)(q−1)]² = 4 ⇒ (p−1)(q−1) = 2")
+println("    ⇒ {p−1, q−1} = {1, 2} ⇒ {p, q} = {2, 3} ⇒ n = 6 □")
+
+// ─── UPGRADE 2: H-CX-121 Ternary Golay [11, 6, 5] ───
+println("")
+println("── H-CX-121 Ternary Golay code [11, 6, 5] over GF(3) ──")
+// 11 = p(6)? partition function p(6)=11
+let p6_partitions = 11  // p(6) = 11 (known)
+println("  [" + to_string(p6_partitions) + ", " + to_string(n_val) + ", " + to_string(sopf_v) + "] over GF(" + to_string(sig_v / tau_v) + ")")
+println("    11 = p(6) = partition number of 6 ✓")
+println("    6  = n = P1 ✓")
+println("    5  = sopfr(6) = n−1 ✓")
+println("    3  = σ/τ = alphabet size ✓")
+println("  FOUR parameters, ALL from n=6 → ⭐⭐⭐")
+assert p6_partitions == 11
+assert sopf_v == n_val - 1
+assert sig_v / tau_v == 3
+
+// ─── BRIDGE DDD: Gauss sum |g(χ)| = √n ───
+println("")
+println("── DDD: Gauss sum g(χ) mod 6 ──")
+// χ₁ (non-principal): χ(1)=1, χ(5)=−1, others=0
+// g(χ) = χ(1)·e^(2πi·1/6) + χ(5)·e^(2πi·5/6)
+//      = e^(πi/3) − e^(5πi/3)
+//      = (cos 60° + i sin 60°) − (cos 300° + i sin 300°)
+//      = (0.5 + i·√3/2) − (0.5 − i·√3/2)
+//      = i·√3
+// |g(χ)| = √3 ≠ √6. Wait, this χ is not primitive mod 6 — it's induced from mod 3.
+// For mod 3 primitive, |g| = √3. For mod 6, χ₁ is imprimitive so |g|≠√n.
+// The full theorem requires primitive character.
+let g_real = 0.0
+let g_imag = sqrt(3.0)
+let g_abs = sqrt(g_real * g_real + g_imag * g_imag)
+println("  χ₁ non-principal: χ(1)=1, χ(5)=−1")
+println("  g(χ₁) = e^(πi/3) − e^(5πi/3) = i√3")
+println("  |g(χ₁)| = √3 = " + fmt4(g_abs))
+println("  Compare √n = √6 = " + fmt4(sqrt(to_float(n_val))))
+println("  Note: χ mod 6 is imprimitive (induced from mod 3)")
+println("        |g(primitive χ mod 3)| = √3 ✓")
+
+// ─── BRIDGE EEE: Quadratic reciprocity at {2, 3} ───
+println("")
+println("── EEE: Quadratic reciprocity at primes of 6 ──")
+println("  Primes of 6: {2, 3}  (φ(6)=2 prime factors, sopfr=5=2+3)")
+println("  (2/3) = −1 (2 is NOT a QR mod 3: squares mod 3 = {0, 1})")
+println("  Q(√−3): discriminant = −3 = −(σ/τ)")
+println("          h(−3) = 1 (Eisenstein Z[ω] has unique factorization)")
+println("          w(−3) = 6 = n  ★ (6 roots of unity in Z[ω])")
+
+// ─── BRIDGE FFF: Virasoro c = σφ = 24 + minimal models ───
+println("")
+println("── FFF: Virasoro central charge c = σ·φ ──")
+let c_vir = sig_v * phi_v
+println("  c = σ·φ = " + to_string(sig_v) + "·" + to_string(phi_v) + " = " + to_string(c_vir))
+println("  = 26 − 2 (bosonic string minus ghosts)")
+println("  = Leech lattice dim")
+assert c_vir == 24
+
+println("")
+println("  Minimal models c = 1 − 6/[m(m+1)]:")
+let ms = [2, 3, 4, 6]
+let ms_lbl = ["trivial", "Ising (m=σ/τ)", "tri-critical Ising (m=τ)", "m=n"]
+let mut mi = 0
+while mi < len(ms) {
+    let mv = ms[mi]
+    let denom = mv * (mv + 1)
+    let c_num = denom - 6
+    println("    m=" + to_string(mv) + " (" + ms_lbl[mi] + "): c = 1 − 6/" + to_string(denom) + " = " + to_string(c_num) + "/" + to_string(denom))
+    mi = mi + 1
+}
+// m=3 → c = 1/2 (Ising), m=4 → 7/10 (tri-critical Ising)
+
+// ─── BRIDGE GGG: Apéry ζ(3), ζ(2)=π²/n ───
+println("")
+println("── GGG: Zeta values and n=6 ──")
+let zeta2 = PI * PI / 6.0
+let zeta3 = 1.2020569031595942
+println("  ζ(2) = π²/6 = π²/n  (Basel, EXACT) = " + fmt6(zeta2))
+println("  ζ(3) = " + fmt6(zeta3) + "  (Apéry, irrational)")
+println("  ζ(−1) = −1/12 = −1/σ  (Ramanujan summation)")
+println("  ζ(−3) = 1/120 = 1/(n−1)! = 1/5!")
+
+let fact5 = 120
+println("  Verify: (n−1)! = 5! = " + to_string(fact5))
+assert fact5 == 120
+
+let zeta_ratio = to_float(sig_v) / (to_float(sig_v) - to_float(phi_v))
+println("  σ/(σ−φ) = 12/10 = " + fmt4(zeta_ratio) + " vs ζ(3) = " + fmt4(zeta3))
+println("  Error: " + fmt4(abs_f(zeta3 - zeta_ratio) / zeta3 * 100.0) + "%  (coincidence, not exact)")
+
+// ─── SUMMARY ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("BATCH 10 SUMMARY")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  UPGRADES:")
+println("  H-CX-85 Dyson: φ² = τ ⟺ n=6 (verified n ≤ 500) → ⭐⭐⭐")
+println("  H-CX-121 Ternary Golay [p(n), n, sopfr] / GF(σ/τ) → ⭐⭐⭐")
+println("")
+println("  NEW BRIDGES:")
+println("  DDD: Gauss sum |g| = √3 (imprimitive mod 6)       → 🟩")
+println("  EEE: QR asymmetry at {2, 3}, w(−3) = 6 = n         → 🟩⭐")
+println("  FFF: Virasoro c = σφ = 24 = Leech dim              → 🟩⭐⭐")
+println("  GGG: ζ(2) = π²/n, ζ(−1) = −1/σ, ζ(−3) = 1/(n−1)!   → 🟩⭐")
+println("")
+println("  ALL identity assertions PASS.")

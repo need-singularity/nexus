@@ -1,0 +1,251 @@
+// mk2_hexa/native/investigate_R_distribution.hexa
+// 포팅 원본: tecs-l/math/investigate_R_distribution.py (347 LOC)
+// R(n) = σφ/(nτ) 분포 분석: 히스토그램, 통계, 정규성, 정수 R 밀도
+// 범위: N=3000 (Python 100K → 인터프리터 속도)
+
+let NMAX = 3000
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+fn fmt8(x: float) -> string {
+    let r = to_float(to_int(x * 100000000.0)) / 100000000.0
+    to_string(r)
+}
+fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+fn sqrt_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    let mut i = 0
+    while i < 50 {
+        g = (g + x / g) / 2.0
+        i = i + 1
+    }
+    g
+}
+fn ln_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 - 999.0 }
+    // ln via series: ln(x) = 2 * atanh((x-1)/(x+1))
+    let mut v = x
+    let mut adj = 0.0
+    while v > 2.0 { v = v / 2.718281828 ; adj = adj + 1.0 }
+    while v < 0.5 { v = v * 2.718281828 ; adj = adj - 1.0 }
+    let y = (v - 1.0) / (v + 1.0)
+    let y2 = y * y
+    let mut s = y
+    let mut term = y
+    let mut k = 1
+    while k < 30 {
+        term = term * y2
+        s = s + term / to_float(2 * k + 1)
+        k = k + 1
+    }
+    2.0 * s + adj
+}
+fn pad(s: string, w: int) -> string {
+    let mut r = s
+    while len(r) < w { r = " " + r }
+    r
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("R(n) DISTRIBUTION ANALYSIS  (N=" + to_string(NMAX) + ")")
+println("══════════════════════════════════════════════════════════════════════")
+
+// Compute R(n) and log(R(n))
+println("")
+println("Computing R(n) for n=2.." + to_string(NMAX) + "...")
+let mut r_vals = []
+let mut log_r = []
+let mut n = 2
+while n <= NMAX {
+    let r = to_float(sigma(n) * phi(n)) / to_float(n * tau(n))
+    r_vals = r_vals + [r]
+    log_r = log_r + [ln_f(r)]
+    n = n + 1
+}
+let count = len(r_vals)
+println("  Computed " + to_string(count) + " values")
+
+// ─── TASK 1: Histogram ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 1: Histogram of log(R(n))")
+println("══════════════════════════════════════════════════════════════════════")
+
+let mut vmin = log_r[0]
+let mut vmax = log_r[0]
+let mut i = 1
+while i < count {
+    if log_r[i] < vmin { vmin = log_r[i] }
+    if log_r[i] > vmax { vmax = log_r[i] }
+    i = i + 1
+}
+println("  min(log R) = " + fmt6(vmin))
+println("  max(log R) = " + fmt6(vmax))
+
+let NBINS = 25
+let bin_width = (vmax - vmin) / to_float(NBINS)
+let mut bins = []
+i = 0
+while i < NBINS { bins = bins + [0] ; i = i + 1 }
+
+i = 0
+while i < count {
+    let mut idx = to_int((log_r[i] - vmin) / bin_width)
+    if idx >= NBINS { idx = NBINS - 1 }
+    bins[idx] = bins[idx] + 1
+    i = i + 1
+}
+
+let mut max_cnt = 0
+i = 0
+while i < NBINS {
+    if bins[i] > max_cnt { max_cnt = bins[i] }
+    i = i + 1
+}
+
+println("")
+println("  log(R)     | count | bar")
+println("  -----------+-------+--------------------------------------------")
+i = 0
+while i < NBINS {
+    let lo = vmin + to_float(i) * bin_width
+    let bar_len = bins[i] * 40 / max_cnt
+    let mut bar = ""
+    let mut j = 0
+    while j < bar_len { bar = bar + "#" ; j = j + 1 }
+    println("  " + pad(fmt4(lo), 10) + " | " + pad(to_string(bins[i]), 5) + " | " + bar)
+    i = i + 1
+}
+
+// ─── TASK 2: Mean and Variance ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 2: Mean/Variance of log(R(n))")
+println("══════════════════════════════════════════════════════════════════════")
+
+let sizes = [500, 1000, 3000]
+let mut si = 0
+while si < len(sizes) {
+    let sz = sizes[si]
+    let actual = sz - 1
+    if actual > count { si = si + 1 ; continue }
+    let mut sum_v = 0.0
+    i = 0
+    while i < actual {
+        sum_v = sum_v + log_r[i]
+        i = i + 1
+    }
+    let mean = sum_v / to_float(actual)
+    let mut sum_sq = 0.0
+    i = 0
+    while i < actual {
+        let d = log_r[i] - mean
+        sum_sq = sum_sq + d * d
+        i = i + 1
+    }
+    let variance = sum_sq / to_float(actual)
+    let std = sqrt_f(variance)
+    println("  N=" + to_string(sz) + ": mean=" + fmt8(mean) + " var=" + fmt8(variance) + " std=" + fmt6(std))
+    si = si + 1
+}
+
+// ─── TASK 3: Skewness/Kurtosis ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 3: Skewness and Kurtosis")
+println("══════════════════════════════════════════════════════════════════════")
+
+let mut sum_all = 0.0
+i = 0
+while i < count { sum_all = sum_all + log_r[i] ; i = i + 1 }
+let mean_all = sum_all / to_float(count)
+
+let mut m2 = 0.0
+let mut m3 = 0.0
+let mut m4 = 0.0
+i = 0
+while i < count {
+    let d = log_r[i] - mean_all
+    let d2 = d * d
+    m2 = m2 + d2
+    m3 = m3 + d2 * d
+    m4 = m4 + d2 * d2
+    i = i + 1
+}
+m2 = m2 / to_float(count)
+m3 = m3 / to_float(count)
+m4 = m4 / to_float(count)
+let std_all = sqrt_f(m2)
+let skew = m3 / (std_all * std_all * std_all)
+let kurt = m4 / (m2 * m2)
+let excess = kurt - 3.0
+
+println("  Skewness     = " + fmt6(skew))
+println("  Kurtosis     = " + fmt6(kurt))
+println("  Excess kurt  = " + fmt6(excess))
+println("  (Normal: skew=0, kurt=3, excess=0)")
+
+// ─── TASK 4: Integer R(n) density ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("TASK 4: Density of integer R(n)")
+println("══════════════════════════════════════════════════════════════════════")
+
+let mut int_ns = []
+n = 2
+while n <= NMAX {
+    let num = sigma(n) * phi(n)
+    let den = n * tau(n)
+    if num % den == 0 { int_ns = int_ns + [n] }
+    n = n + 1
+}
+println("  Integer R count in [2," + to_string(NMAX) + "]: " + to_string(len(int_ns)))
+println("  Density: " + fmt6(to_float(len(int_ns)) / to_float(NMAX - 1)))
+
+// Show first 20
+println("  First 20 n with integer R:")
+let mut show = ""
+i = 0
+while i < 20 && i < len(int_ns) {
+    if i > 0 { show = show + ", " }
+    show = show + to_string(int_ns[i])
+    i = i + 1
+}
+println("    n = " + show)
+
+// ─── BONUS: R at primes and perfect numbers ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("BONUS: R(n) at special values")
+println("══════════════════════════════════════════════════════════════════════")
+
+println("  R at first primes (R(p) = (p+1)(p-1)/(2p)):")
+let primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+i = 0
+while i < len(primes) {
+    let p = primes[i]
+    let r = to_float(sigma(p) * phi(p)) / to_float(p * tau(p))
+    println("    R(" + to_string(p) + ") = " + fmt6(r) + "  log=" + fmt6(ln_f(r)))
+    i = i + 1
+}
+
+println("")
+println("  R at perfect numbers:")
+let perfs = [6, 28, 496]
+i = 0
+while i < len(perfs) {
+    let pn = perfs[i]
+    let r = to_float(sigma(pn) * phi(pn)) / to_float(pn * tau(pn))
+    println("    R(" + to_string(pn) + ") = " + fmt6(r) + "  log=" + fmt6(ln_f(r)))
+    i = i + 1
+}
+
+println("")
+println("DONE")

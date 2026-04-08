@@ -1,0 +1,183 @@
+// mk2_hexa/native/texas_verifier.hexa
+// 포팅 원본: tecs-l/math/texas_verifier.py (235 LOC)
+// Texas Sharpshooter statistical test — constants pool + expression enumeration
+//
+// AI-native: @pure 전부, Python eval 제거 (formula 내장 함수로 대체)
+
+let PI = 3.141592653589793
+let E  = 2.718281828459045
+
+// ─── Constants pool (n=6 constants + math constants) ───
+let const_names = ["sigma", "tau", "phi", "omega", "sopfr", "n", "P2", "sigma-tau", "sigma+tau", "sigma*tau", "sigma/tau", "sigma*phi", "sigma^2", "M3", "M5", "M7", "pi", "e", "ln2", "ln3", "sqrt2", "sqrt3", "golden"]
+let const_int = [12, 4, 2, 2, 5, 6, 28, 8, 16, 48, 3, 24, 144, 7, 31, 127, 0, 0, 0, 0, 0, 0, 0]
+let const_flt = [12.0, 4.0, 2.0, 2.0, 5.0, 6.0, 28.0, 8.0, 16.0, 48.0, 3.0, 24.0, 144.0, 7.0, 31.0, 127.0, PI, E, log(2.0), log(3.0), sqrt(2.0), sqrt(3.0), 1.6180339887]
+
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+
+// @pure — 단항 연산자 6개 (identity, inverse, square, cube, sqrt, log)
+fn unary_apply(op: int, x: float) -> float {
+    if op == 0 { return x }
+    if op == 1 {
+        if x == 0.0 { return 1.0e99 }  // NaN
+        return 1.0 / x
+    }
+    if op == 2 { return x * x }
+    if op == 3 { return x * x * x }
+    if op == 4 {
+        if x < 0.0 { return 1.0e99 }
+        return sqrt(x)
+    }
+    if op == 5 {
+        if x <= 0.0 { return 1.0e99 }
+        return log(x)
+    }
+    0.0
+}
+
+// @pure — 이항 연산자 5개 (+, -, *, /, pow)
+fn binary_apply(op: int, a: float, b: float) -> float {
+    if op == 0 { return a + b }
+    if op == 1 { return a - b }
+    if op == 2 { return a * b }
+    if op == 3 {
+        if b == 0.0 { return 1.0e99 }
+        return a / b
+    }
+    if op == 4 {
+        if abs_f(b) > 10.0 || abs_f(a) > 1000.0 { return 1.0e99 }
+        return pow(a, b)
+    }
+    0.0
+}
+
+fn is_nan(x: float) -> bool { x > 1.0e98 }
+
+// @pure — target에 tolerance 이내로 일치하는 (hit, total) 카운트
+fn count_expressible(target: float, tolerance: float) -> list {
+    let mut hits = 0
+    let mut total = 0
+    let N = len(const_flt)
+
+    // 단항
+    let mut i = 0
+    while i < N {
+        let v = const_flt[i]
+        let mut op = 0
+        while op < 6 {
+            let r = unary_apply(op, v)
+            if !is_nan(r) && abs_f(r) < 1e10 {
+                total = total + 1
+                let denom = if abs_f(target) < 1e-10 { 1e-10 } else { abs_f(target) }
+                if abs_f(r - target) / denom < tolerance { hits = hits + 1 }
+            }
+            op = op + 1
+        }
+        i = i + 1
+    }
+
+    // 이항
+    let mut a_i = 0
+    while a_i < N {
+        let mut b_i = 0
+        while b_i < N {
+            let a = const_flt[a_i]
+            let b = const_flt[b_i]
+            let mut op = 0
+            while op < 5 {
+                let r = binary_apply(op, a, b)
+                if !is_nan(r) && abs_f(r) < 1e10 {
+                    total = total + 1
+                    let denom = if abs_f(target) < 1e-10 { 1e-10 } else { abs_f(target) }
+                    if abs_f(r - target) / denom < tolerance { hits = hits + 1 }
+                }
+                op = op + 1
+            }
+            b_i = b_i + 1
+        }
+        a_i = a_i + 1
+    }
+
+    [hits, total]
+}
+
+fn texas_pvalue(target: float, tolerance: float) -> float {
+    let ht = count_expressible(target, tolerance)
+    let hits = ht[0]
+    let total = ht[1]
+    if total == 0 { return 1.0 }
+    to_float(hits) / to_float(total)
+}
+
+// @pure — 수식 평가 (hexa 빌트인 의존, Python eval 제거)
+// 여기서는 하드코딩 데모만 처리
+fn grade_of(exact: bool, ad_hoc: bool, p: float) -> string {
+    if exact {
+        if ad_hoc { return "GREEN (ad-hoc warning)" }
+        if p < 0.01 { return "ORANGE_STAR" }
+        if p < 0.05 { return "ORANGE" }
+        return "GREEN"
+    }
+    if p < 0.01 { return "ORANGE_STAR" }
+    if p < 0.05 { return "ORANGE" }
+    "WHITE"
+}
+
+fn verify_demo(target: float, formula: string, computed: float, tolerance: float, is_exact: bool, ad_hoc: bool) {
+    let denom = if abs_f(target) < 1e-10 { 1e-10 } else { abs_f(target) }
+    let err = abs_f(target - computed) / denom
+    let exact_match = if is_exact { target == computed } else { err < tolerance }
+    let p = texas_pvalue(target, tolerance)
+    let grade = grade_of(exact_match, ad_hoc, p)
+
+    println("")
+    println("════════════════════════════════════════════════════════════")
+    println("Texas Sharpshooter Verification")
+    println("════════════════════════════════════════════════════════════")
+    println("  Target:    " + fmt6(target))
+    println("  Formula:   " + formula)
+    println("  Computed:  " + fmt6(computed))
+    println("  Error:     " + fmt6(err))
+    println("  Exact:     " + (if exact_match { "YES" } else { "no" }))
+    println("  Ad-hoc:    " + (if ad_hoc { "YES (warning)" } else { "no" }))
+    println("  p-value:   " + fmt6(p))
+    println("  Grade:     " + grade)
+    if p < 0.01 { println("  → STRUCTURAL (p < 0.01)") }
+    else if p < 0.05 { println("  → WEAK EVIDENCE (p < 0.05)") }
+    else { println("  → LIKELY COINCIDENCE (p ≥ 0.05)") }
+}
+
+println("══════════════════════════════════════════════════════════════")
+println("TEXAS SHARPSHOOTER VERIFIER (hexa port)")
+println("══════════════════════════════════════════════════════════════")
+println("  Constants pool size: " + to_string(len(const_flt)))
+println("  Unary ops: 6, Binary ops: 5")
+
+// Demo 1: 137 = sigma^2 - 7  (ad-hoc warning: contains -7)
+verify_demo(137.0, "sigma^2 - 7 = 144 - 7", to_float(144 - 7), 0.001, true, true)
+
+// Demo 2: 24 = sigma * phi
+verify_demo(24.0, "sigma * phi = 12 * 2", to_float(12 * 2), 0.001, true, false)
+
+// Demo 3: Catalan ≈ 5/6 · ln 3
+let catalan_target = 0.9159655941
+let computed3 = (5.0 / 6.0) * log(3.0)
+verify_demo(catalan_target, "5/6 · ln(3)", computed3, 0.001, false, false)
+
+// Summary count for common targets
+println("")
+println("══════════════════════════════════════════════════════════════")
+println("Batch check on common integer targets")
+println("══════════════════════════════════════════════════════════════")
+let targets = [6.0, 12.0, 24.0, 28.0, 137.0, 496.0]
+let mut ti = 0
+while ti < len(targets) {
+    let t = targets[ti]
+    let ht = count_expressible(t, 0.001)
+    let p = if ht[1] == 0 { 1.0 } else { to_float(ht[0]) / to_float(ht[1]) }
+    println("  target=" + to_string(to_int(t)) + ": hits=" + to_string(ht[0]) + "/" + to_string(ht[1]) + ",  p=" + fmt6(p))
+    ti = ti + 1
+}

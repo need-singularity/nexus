@@ -1,0 +1,165 @@
+// mk2_hexa/native/verify_hcx65_j2_coincidence.hexa
+// 포팅 원본: tecs-l/math/verify_hcx65_j2_coincidence.py (232 LOC)
+//
+// H-CX-65: J_2(6) = σ(6)·φ(6) = τ(6)! = 24 = Leech lattice dim 검증
+//
+// J_2(n) = n²·Π{p|n} (1 − 1/p²)  (Jordan totient, k=2)
+//
+// AI-native: @pure @memoize (J_2, factorial) + @parallel scan
+// 전수 범위 N=2000 (인터프리터 속도; Python 10000)
+
+let N = 2000
+
+// @pure — trial division 소인수 목록
+fn prime_factors(n: int) -> list {
+    let mut m = n
+    let mut out = []
+    let mut p = 2
+    while p * p <= m {
+        if m % p == 0 {
+            out = out + [p]
+            while m % p == 0 { m = m / p }
+        }
+        p = p + 1
+    }
+    if m > 1 { out = out + [m] }
+    out
+}
+
+// @pure — Jordan J_2(n) = n² · Π(1 − 1/p²) = n² · Π((p²−1)/p²)
+fn jordan_j2(n: int) -> int {
+    let ps = prime_factors(n)
+    let mut r = n * n
+    let mut i = 0
+    while i < len(ps) {
+        let p = ps[i]
+        r = r * (p * p - 1) / (p * p)
+        i = i + 1
+    }
+    r
+}
+
+// @pure
+fn fact(k: int) -> int {
+    let mut r = 1
+    let mut i = 2
+    while i <= k {
+        r = r * i
+        i = i + 1
+    }
+    r
+}
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-CX-65: J_2(6)=24 Four-Way Coincidence (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// n=6 verification
+let j2_6 = jordan_j2(6)
+let sp_6 = sigma(6) * phi(6)
+let tf_6 = fact(tau(6))
+println("")
+println("=== n=6 verification ===")
+println("  J_2(6)          = " + to_string(j2_6))
+println("  σ(6)·φ(6)       = " + to_string(sigma(6)) + "·" + to_string(phi(6)) + " = " + to_string(sp_6))
+println("  τ(6)!           = " + to_string(tau(6)) + "! = " + to_string(tf_6))
+println("  Leech lat dim   = 24")
+let all_eq = j2_6 == 24 && sp_6 == 24 && tf_6 == 24
+println("  All = 24?       " + (if all_eq { "YES ✓" } else { "NO" }))
+assert all_eq
+
+// ─── 전수 스캔 n=1..N ───
+println("")
+println("Scanning n=1.." + to_string(N) + " ...")
+let mut eq1 = []  // J_2 = σ·φ
+let mut eq2 = []  // J_2 = τ!
+let mut eq4 = []  // σ·φ = τ!
+let mut four_way = []
+let mut n = 1
+while n <= N {
+    let j2 = jordan_j2(n)
+    let sp = sigma(n) * phi(n)
+    let tf = fact(tau(n))
+    if j2 == sp { eq1 = eq1 + [n] }
+    if j2 == tf { eq2 = eq2 + [n] }
+    if sp == tf { eq4 = eq4 + [n] }
+    if j2 == sp && j2 == tf {
+        four_way = four_way + [n]
+    }
+    n = n + 1
+}
+
+println("")
+println("--- Check 1: J_2(n) = σ(n)·φ(n) ---")
+println("  Count: " + to_string(len(eq1)))
+let mut head = []
+let mut k = 0
+while k < len(eq1) && k < 30 {
+    head = head + [eq1[k]]
+    k = k + 1
+}
+println("  First 30: " + to_string(head))
+
+println("")
+println("--- Check 2: J_2(n) = τ(n)! ---")
+println("  Count: " + to_string(len(eq2)))
+println("  All: " + to_string(eq2))
+
+println("")
+println("--- Check 4: σ(n)·φ(n) = τ(n)! ---")
+println("  Count: " + to_string(len(eq4)))
+println("  All: " + to_string(eq4))
+
+println("")
+println("--- Check 5: THREE-WAY (J_2 = σ·φ = τ!) ---")
+println("  Count: " + to_string(len(four_way)))
+println("  All: " + to_string(four_way))
+let mut j = 0
+while j < len(four_way) {
+    let m = four_way[j]
+    println("    n=" + to_string(m) + ": value=" + to_string(jordan_j2(m)) + ", τ=" + to_string(tau(m)))
+    j = j + 1
+}
+
+// ─── Check 7: any = 24 ───
+println("")
+println("--- Check 7: n where any quantity equals 24 ---")
+let mut j24 = []
+let mut s24 = []
+let mut t24 = []
+let mut nn = 1
+while nn <= N {
+    if jordan_j2(nn) == 24 { j24 = j24 + [nn] }
+    if sigma(nn) * phi(nn) == 24 { s24 = s24 + [nn] }
+    if fact(tau(nn)) == 24 {
+        // avoid exploding list: cap at 30
+        if len(t24) < 30 { t24 = t24 + [nn] }
+    }
+    nn = nn + 1
+}
+println("  J_2(n)=24:        " + to_string(j24))
+println("  σ·φ=24:           " + to_string(s24))
+println("  τ!=24 (τ=4, first 30): " + to_string(t24))
+
+// ─── CONCLUSION ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("CONCLUSION")
+println("══════════════════════════════════════════════════════════════════════")
+println("  n=6: J_2(6) = σ(6)·φ(6) = τ(6)! = Leech lat dim = 24")
+if len(four_way) == 1 && four_way[0] == 6 {
+    println("  ✓ CONFIRMED: n=6 is the UNIQUE three-way match in [1," + to_string(N) + "]")
+} else {
+    println("  Other three-way matches: " + to_string(four_way))
+}
+
+// 단순 Poisson 추정
+let p1 = to_float(len(eq1)) / to_float(N)
+let p2 = to_float(len(eq2)) / to_float(N)
+let lam = to_float(N) * p1 * p2
+println("")
+println("Texas Sharpshooter (rough):")
+println("  P(J2=σφ) = " + to_string(p1))
+println("  P(J2=τ!) = " + to_string(p2))
+println("  Expected (independent) = N·p1·p2 = " + to_string(lam))
+println("  Actual three-way = " + to_string(len(four_way)))

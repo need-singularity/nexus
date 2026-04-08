@@ -1,0 +1,171 @@
+// mk2_hexa/native/verify_h_top_2.hexa
+// 포팅 원본: tecs-l/math/verify_h_top_2.py (291 LOC)
+// H-TOP-2: Euler characteristic χ(M) = 6 realization
+//
+// AI-native: @pure, hexa σ/τ/φ 빌트인
+
+let sig = sigma(6)    // 12
+let tau_v = tau(6)    // 4
+let phi_v = phi(6)    // 2
+
+println("══════════════════════════════════════════════════════════════════════")
+println("H-TOP-2: Euler characteristic χ(M) = 6  (hexa port)")
+println("══════════════════════════════════════════════════════════════════════")
+
+// ─── Known Euler characteristics ───
+println("")
+println("## Known χ of standard spaces")
+println("  S^n (even n): 2,  (odd n): 0")
+println("  CP^n: n+1  (e.g. CP^1=2, CP^2=3, CP^5=6)")
+println("  RP^n (even n): 1,  (odd n): 0")
+println("  T^n: 0")
+println("  Σ_g (genus g): 2−2g")
+
+// ─── Factorizations of 6 ───
+println("")
+println("## Factorizations of 6 via χ multiplicativity")
+println("  χ(M × N) = χ(M) · χ(N)")
+println("  6 = 2 × 3 = χ(S²) · χ(CP²)  →  S² × CP² realizes χ=6 ✓")
+println("  6 = 1 × 6 = χ(pt) · χ(CP⁵)")
+
+// ─── CP^5 verification via Betti ───
+println("")
+println("## Verification: CP^5 Betti numbers")
+let cp5_betti = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]  // dim 10
+let mut chi_cp5 = 0
+let mut i = 0
+let mut sign = 1
+while i < len(cp5_betti) {
+    chi_cp5 = chi_cp5 + sign * cp5_betti[i]
+    sign = 0 - sign
+    i = i + 1
+}
+println("  CP⁵ Betti: " + to_string(cp5_betti))
+println("  χ(CP⁵) = Σ(−1)^k·b_k = " + to_string(chi_cp5))
+assert chi_cp5 == 6
+println("  ✓ χ(CP⁵) = 6")
+
+// ─── S² × CP² Künneth product ───
+println("")
+println("## Verification: S² × CP² (Künneth product)")
+let s2_betti = [1, 0, 1]         // dim 2
+let cp2_betti = [1, 0, 1, 0, 1]  // dim 4
+let dim_prod = len(s2_betti) + len(cp2_betti) - 2
+let mut prod_betti = []
+let mut z = 0
+while z <= dim_prod {
+    prod_betti = prod_betti + [0]
+    z = z + 1
+}
+let mut ii = 0
+while ii < len(s2_betti) {
+    let mut jj = 0
+    while jj < len(cp2_betti) {
+        prod_betti[ii + jj] = prod_betti[ii + jj] + s2_betti[ii] * cp2_betti[jj]
+        jj = jj + 1
+    }
+    ii = ii + 1
+}
+println("  S² Betti:  " + to_string(s2_betti))
+println("  CP² Betti: " + to_string(cp2_betti))
+println("  Product:   " + to_string(prod_betti))
+
+let mut chi_prod = 0
+let mut k = 0
+let mut sg = 1
+while k < len(prod_betti) {
+    chi_prod = chi_prod + sg * prod_betti[k]
+    sg = 0 - sg
+    k = k + 1
+}
+println("  χ(S² × CP²) = " + to_string(chi_prod))
+assert chi_prod == 6
+println("  ✓ χ = 6")
+
+// ─── Wedge sums: k copies of S² → χ = k+1 ───
+println("")
+println("## Wedge sums: χ(S² ∨ ... ∨ S², k copies) = 2k − (k−1) = k+1")
+let mut n_wedge = 1
+while n_wedge <= 7 {
+    let chi_w = 2 * n_wedge - (n_wedge - 1)
+    let mark = if chi_w == 6 { "  ← χ=6 ✓" } else { "" }
+    println("  k=" + to_string(n_wedge) + " copies: χ = " + to_string(chi_w) + mark)
+    n_wedge = n_wedge + 1
+}
+
+// ─── Non-orientable surfaces #k RP² ───
+println("")
+println("## Non-orientable surfaces: #k RP² has χ = 2 − k")
+let mut kk = 1
+while kk <= 8 {
+    let chi_k = 2 - kk
+    let note = if chi_k == 6 { " χ=6" } else if chi_k == 0 - 6 { " χ=−6" } else if chi_k == 2 { " φ(6)" } else if chi_k == 3 { " σ/τ" } else { "" }
+    println("  k=" + to_string(kk) + ": χ = " + to_string(chi_k) + note)
+    kk = kk + 1
+}
+
+// ─── Two-fold products with χ = 6 ───
+println("")
+println("## Two-fold products with χ = 6")
+let basic_names = ["S²", "S⁴", "CP¹", "CP²", "CP³", "CP⁴", "CP⁵", "T²", "RP²"]
+let basic_chi   = [2,    2,    2,     3,     4,     5,     6,     0,    1]
+let mut ai = 0
+while ai < len(basic_chi) {
+    let mut bi = ai
+    while bi < len(basic_chi) {
+        if basic_chi[ai] * basic_chi[bi] == 6 {
+            println("  " + basic_names[ai] + " × " + basic_names[bi] + ": χ = " + to_string(basic_chi[ai]) + " · " + to_string(basic_chi[bi]) + " = 6")
+        }
+        bi = bi + 1
+    }
+    ai = ai + 1
+}
+
+// ─── Divisor structure of 6 ───
+println("")
+println("## Divisor structure of 6 as χ")
+println("")
+println("  | Divisor | Space      | χ |")
+println("  |---------|------------|---|")
+println("  |    1    | point      | 1 |")
+println("  |    2    | S²  or CP¹ | 2 |")
+println("  |    3    | CP²        | 3 |")
+println("  |    6    | CP⁵ or S²×CP² | 6 |")
+println("")
+println("  ALL divisors of 6 are realized as χ of standard spaces!")
+println("  Product: χ(S² × CP²) = χ(S²) · χ(CP²) = 2 · 3 = 6 mirrors 6 = 2 · 3")
+
+// ─── χ = σ(6) = 12 realizations ───
+println("")
+println("## χ = σ(6) = 12 realizations?")
+let mut found_12 = []
+let mut ci = 0
+while ci < len(basic_chi) {
+    let mut cj = ci
+    while cj < len(basic_chi) {
+        if basic_chi[ci] * basic_chi[cj] == 12 {
+            found_12 = found_12 + [ci * 100 + cj]  // encoded pair
+        }
+        cj = cj + 1
+    }
+    ci = ci + 1
+}
+println("  Two-fold products with χ = 12: " + to_string(len(found_12)))
+// CP² × CP³ (3·4=12), CP¹ × CP⁵ (2·6=12), ...
+println("  e.g. CP² × CP³ = 3·4 = 12, CP¹ × CP⁵ = 2·6 = 12")
+
+// ─── SUMMARY ───
+println("")
+println("══════════════════════════════════════════════════════════════════════")
+println("SUMMARY: χ = 6")
+println("══════════════════════════════════════════════════════════════════════")
+println("")
+println("  Simplest realizations:")
+println("    • CP⁵          : Betti = [1,0,1,0,1,0,1,0,1,0,1] → χ = 6  ✓")
+println("    • S² × CP²     : 2·3 = 6 (Künneth)                    ✓")
+println("    • S² ∨ ... ∨ S² (5 copies): 5·2 − 4 = 6                ✓")
+println("")
+println("  ALL divisors of 6 {1,2,3,6} realized as χ of standard spaces.")
+println("  6 = 2·3 factorization matches χ(S²)·χ(CP²).")
+println("")
+println("  2 asserts PASS: χ(CP⁵) = 6,  χ(S² × CP²) = 6")

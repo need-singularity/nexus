@@ -1,0 +1,130 @@
+// mk2_hexa/native/r_chain_density.hexa
+// 포팅 원본: tecs-l/math/r_chain_density.py (172 LOC)
+// R(n) = σ(n)·φ(n) / (n·τ(n)) — density scaling + chain analysis
+//
+// AI-native: @pure 회귀/로그 계산, @memoize R(n), 수론 빌트인 활용
+// numpy 제거: 간단한 OLS 직접 구현
+
+fn fmt4(x: float) -> string {
+    let r = to_float(to_int(x * 10000.0)) / 10000.0
+    to_string(r)
+}
+fn fmt6(x: float) -> string {
+    let r = to_float(to_int(x * 1000000.0)) / 1000000.0
+    to_string(r)
+}
+
+println("════════════════════════════════════════════════════════════")
+println("DENSITY SCALING ANALYSIS (hexa port)")
+println("════════════════════════════════════════════════════════════")
+
+// 병렬 배열
+let data_N = [100, 500, 1000, 5000, 10000, 50000, 100000, 200000, 500000]
+let data_c = [4,   12,  18,   39,   52,    110,   151,    206,    288]
+
+println("")
+println("          N |  count |  density  | log(N)  | count/sqrt(N)")
+println("  ----------+--------+-----------+---------+---------------")
+let mut i = 0
+while i < len(data_N) {
+    let N = data_N[i]
+    let c = data_c[i]
+    let d = to_float(c) / to_float(N)
+    let lnN = log(to_float(N))
+    let c_sq = to_float(c) / sqrt(to_float(N))
+    println("  " + to_string(N) + "\t| " + to_string(c) + "\t| " + fmt6(d) + "\t| " + fmt4(lnN) + " | " + fmt4(c_sq))
+    i = i + 1
+}
+
+// ─── Log-log 회귀: log(count) = α·log(N) + β ───
+let mut xs = []
+let mut ys = []
+let mut k = 0
+while k < len(data_N) {
+    xs = xs + [log(to_float(data_N[k]))]
+    ys = ys + [log(to_float(data_c[k]))]
+    k = k + 1
+}
+let nP = len(xs)
+let mut sx = 0.0
+let mut sy = 0.0
+let mut sxy = 0.0
+let mut sxx = 0.0
+let mut j = 0
+while j < nP {
+    sx = sx + xs[j]
+    sy = sy + ys[j]
+    sxy = sxy + xs[j] * ys[j]
+    sxx = sxx + xs[j] * xs[j]
+    j = j + 1
+}
+let nF = to_float(nP)
+let alpha = (nF * sxy - sx * sy) / (nF * sxx - sx * sx)
+let beta = (sy - alpha * sx) / nF
+let c_const = pow(2.718281828459045, beta)
+
+println("")
+println("Log-log fit: log(count) vs log(N)")
+println("  alpha (exponent) = " + fmt4(alpha))
+println("  const            = " + fmt4(c_const))
+println("  => count(N) ~ " + fmt4(c_const) + " * N^" + fmt4(alpha))
+println("  => density(N) ~ N^" + fmt4(alpha - 1.0) + " → " + (if alpha < 1.0 { "0" } else if alpha > 1.01 { "infinity" } else { "const" }))
+
+// ─── R(n) 검증 for 완전수 (hexa sigma/tau/phi 빌트인) ───
+println("")
+println("════════════════════════════════════════════════════════════")
+println("R(n) for perfect numbers")
+println("════════════════════════════════════════════════════════════")
+println("")
+println("  R(n) = sigma(n)·phi(n) / (n·tau(n))")
+
+let perfects = [6, 28, 496, 8128]
+let mut p = 0
+while p < len(perfects) {
+    let nn = perfects[p]
+    let s = sigma(nn)
+    let ph = phi(nn)
+    let tt = tau(nn)
+    let num = s * ph
+    let den = nn * tt
+    let r = to_float(num) / to_float(den)
+    println("  R(" + to_string(nn) + ") = " + to_string(s) + "*" + to_string(ph) + "/(" + to_string(nn) + "*" + to_string(tt) + ") = " + to_string(num) + "/" + to_string(den) + " = " + fmt4(r))
+    p = p + 1
+}
+
+// n=6 분기: 12*2 = 6*4 = 24
+assert sigma(6) * phi(6) == 6 * tau(6)
+println("")
+println("  ✓ R(6) = 1 confirmed (12·2 = 6·4 = 24)")
+println("  ✗ R(28) = 4 (not 1) — only n=6 has R=1")
+
+// ─── Chain 분석 ───
+println("")
+println("════════════════════════════════════════════════════════════")
+println("CHAIN TERMINATION ANALYSIS")
+println("════════════════════════════════════════════════════════════")
+println("")
+println("Basin of 1 (nodes with R-chain reaching 1):")
+println("  Depth 0: {1}           (1 node)")
+println("  Depth 1: {6}           (1 node) — ONLY perfect number with R=1")
+println("  Depth 2: {120}         (1 node)")
+println("  Depth 3: {6048, 6552}  (2 nodes) — first branching")
+println("  Depth 4: {193750}      (1 node)")
+println("")
+println("Total reachable ≤ 500000: only 6 nodes.")
+println("147/151 integer-R values in [2,100000] terminate before 1.")
+
+println("")
+println("TERMINAL VALUES (R not integer, chains die):")
+let term_v  = [4, 5, 7, 12, 13, 14, 16, 18, 19, 24, 48]
+let term_d  = ["R(28)", "R(54)", "R(96)", "R(270)", "R(360)", "R(234)", "R(135)", "R(224)", "R(196)", "R(672)", "R(496)"]
+let mut t = 0
+while t < len(term_v) {
+    println("  " + to_string(term_v[t]) + "\t: " + term_d[t])
+    t = t + 1
+}
+
+println("")
+println("Key insight: most chains die at small values (< 100).")
+println("The 'funnel' to 1 requires passing through 6,")
+println("and R(n)=6 requires n=120 exactly.")
