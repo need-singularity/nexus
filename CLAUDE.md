@@ -1,3 +1,25 @@
+## ⛔ L0 CORE 보호 파일 (AI 수정 승인 필수)
+
+> 아래 파일은 수렴 완료된 코어 로직. 수정 시 반드시 유저에게 승인 질문.
+> 상세: `nexus/shared/core-lockdown.json` (L0 37개)
+
+```
+🔴 L0 (불변식 — 주요 파일만 표시, 전체는 core-lockdown.json 참조):
+  mk2_hexa/native/blowup.hexa        — 블로업 엔진 9-phase 특이점
+  mk2_hexa/native/seed_engine.hexa   — 시드 엔진 교차수분
+  mk2_hexa/native/hook.hexa          — HEXA-GATE 품질 게이트
+  mk2_hexa/native/command_router.hexa — 14종 명령 라우터
+  mk2_hexa/native/breakthrough.hexa  — 돌파 자동화 엔진
+  mk2_hexa/native/guard.hexa         — L0/수렴 강제 가드
+  shared/core-lockdown.json          — 전 프로젝트 L0 레지스트리
+  shared/absolute_rules.json         — 절대 규칙 R1~R8
+
+🟡 L1 (보호 — 리뷰 필요):
+  mk2_hexa/native/directions.hexa    — 돌파 방향 리포트
+  mk2_hexa/native/gap_finder.hexa    — 빈공간 탐색기
+  shared/growth_bus.jsonl             — 성장 이벤트 스트림
+```
+
 # CLAUDE.md — NEXUS-6 중앙 허브
 
 ## 🔴 절대 규칙
