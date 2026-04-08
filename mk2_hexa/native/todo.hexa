@@ -223,16 +223,20 @@ fn print_project(name: string, bt_lines: string) {
 
     let icon = project_icon(name)
     let title = project_title(name)
-    let last_commit = git_log1(repo_path(name))
 
     println("")
-    println("### " + icon + " " + title)
+    println(icon + " " + title + " 할일")
     println("")
-    println("> 최근 커밋: `" + last_commit + "`")
-    println("")
+    println("| # | 카테고리 | 작업 | 상태 | 예상 효과 |")
+    println("|---|---------|------|------|----------|")
 
     let all_lines = combined.split("\n")
     let groups = ["CRITICAL", "IMPORTANT", "NICE", "BACKLOG"]
+
+    // 통계
+    let mut total: i64 = 0
+    let mut done: i64 = 0
+    let mut wip: i64 = 0
 
     for g in groups {
         // pass 1: 존재 여부
@@ -245,10 +249,8 @@ fn print_project(name: string, bt_lines: string) {
         }
         if !has_rows { continue }
 
-        println("#### " + pri_label(g))
-        println("")
-        println("| # | 카테고리 | 작업 | 상태 | 예상 효과 |")
-        println("|---|---------|------|------|----------|")
+        // 우선순위 구분 행
+        println("| **" + pri_label(g) + "** | | | | |")
 
         // pass 2: 행 출력
         for line in all_lines {
@@ -257,9 +259,15 @@ fn print_project(name: string, bt_lines: string) {
             if cols.len() < 6 { continue }
             if cols[1] != g { continue }
             println("| " + cols[0] + " | " + cols[2] + " | " + cols[3] + " | " + cols[4] + " | " + cols[5] + " |")
+            total = total + 1
+            if cols[4].contains("완료") || cols[4].contains("done") { done = done + 1 }
+            if cols[4].contains("진행중") || cols[4].contains("wip") { wip = wip + 1 }
         }
-        println("")
     }
+
+    let pct = if total > 0 { (done * 100) / total } else { 0 }
+    println("")
+    println("> 진행률: " + to_string(done) + "/" + to_string(total) + " 완료 (" + to_string(pct) + "%), " + to_string(wip) + "건 진행중")
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -302,8 +310,3 @@ if _target == "all" {
 }
 
 println("")
-println("---")
-println("")
-println("상태: ⏳진행중 / ✅완료 / 미시작 / 돌파대기 / 코드있음")
-println("우선순위: 🔴HIGH → 🟡MED → 🟢LOW → ⚪BACK")
-println("돌파: next_directions.jsonl + gap_finder + discovery_graph 기반 자동 생성")
