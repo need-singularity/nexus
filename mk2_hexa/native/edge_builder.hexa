@@ -1,0 +1,116 @@
+// edge_builder.hexa — Automated edge discovery for reality_map
+// Current ratio ~0.36 edges/node. Finds missing connections between
+// nodes sharing n6 constants (lens overlap, level adjacency, shared formulas).
+//
+// Usage:
+//   hexa edge_builder.hexa              Discover + report missing edges
+//   hexa edge_builder.hexa --apply      Discover + write edges to reality_map.json
+//   hexa edge_builder.hexa --stats      Show current edge/node ratio only
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let shared = home + "/Dev/nexus/shared"
+    let map_path = shared + "/reality_map.json"
+    let bus_path = shared + "/growth_bus.jsonl"
+
+    let a = args()
+    let mode = if a.len() >= 3 { a[2] } else { "" }
+
+    if mode == "--help" {
+        println("edge_builder.hexa -- Automated edge discovery for reality_map")
+        println("")
+        println("Usage:")
+        println("  hexa edge_builder.hexa              Discover + report missing edges")
+        println("  hexa edge_builder.hexa --apply      Discover + write to reality_map.json")
+        println("  hexa edge_builder.hexa --stats      Show current edge/node ratio")
+        println("")
+        println("Finds missing connections between nodes sharing n6 constants.")
+        return
+    }
+
+    // Load reality_map
+    let mut raw = ""
+    try { raw = read_file(map_path) } catch e {
+        println("[ERROR] cannot read " + map_path + " -- " + to_string(e))
+        return
+    }
+
+    // Count current nodes and edges using python for reliable JSON parsing
+    let stats_cmd = "python3 -c \"import json; d=json.load(open('" + map_path + "')); nodes=d.get('nodes',[]); edges=d.get('edges',[]); print(str(len(nodes))+'|'+str(len(edges)))\""
+    let mut n_nodes: i64 = 0
+    let mut n_edges: i64 = 0
+    try {
+        let stats_raw = exec(stats_cmd).trim()
+        let sp = stats_raw.split("|")
+        n_nodes = to_int(sp[0])
+        n_edges = to_int(sp[1])
+    } catch e {
+        println("[ERROR] failed to parse reality_map: " + to_string(e))
+        return
+    }
+
+    let ratio = if n_nodes > 0 { to_float(n_edges) / to_float(n_nodes) } else { 0.0 }
+    let ratio_str = to_string(to_int(ratio * 100.0))
+
+    if mode == "--stats" {
+        println("[edge_builder] nodes=" + to_string(n_nodes) + " edges=" + to_string(n_edges) + " ratio=0." + ratio_str)
+        return
+    }
+
+    // Discover missing edges using python
+    // Strategy: nodes at same level or adjacent levels sharing constants/domain keywords
+    let discover_cmd = "python3 -c \"\nimport json\nd = json.load(open('" + map_path + "'))\nnodes = d.get('nodes', [])\nedges = d.get('edges', [])\nexisting = set()\nfor e in edges:\n    k = tuple(sorted([e.get('source',''), e.get('target','')]))\n    existing.add(k)\nnew_edges = []\nfor i, a in enumerate(nodes):\n    for j, b in enumerate(nodes):\n        if j <= i: continue\n        aid = a.get('id', '')\n        bid = b.get('id', '')\n        if not aid or not bid: continue\n        k = tuple(sorted([aid, bid]))\n        if k in existing: continue\n        al = a.get('level', -1)\n        bl = b.get('level', -1)\n        if abs(al - bl) > 1: continue\n        ac = set(str(a.get('constants','')).split(','))\n        bc = set(str(b.get('constants','')).split(','))\n        shared = ac & bc - {''}\n        if len(shared) >= 1:\n            new_edges.append({'source': aid, 'target': bid, 'type': 'n6_shared_const', 'constants': ','.join(sorted(shared))})\n            existing.add(k)\n        if len(new_edges) >= 200: break\n    if len(new_edges) >= 200: break\nprint(json.dumps({'count': len(new_edges), 'edges': new_edges[:200]}))\n\""
+
+    let mut result_raw = ""
+    try { result_raw = exec(discover_cmd).trim() } catch e {
+        println("[ERROR] discovery failed: " + to_string(e))
+        return
+    }
+
+    let mut new_count: i64 = 0
+    try {
+        let cp = result_raw.split("\"count\":")
+        if cp.len() >= 2 { new_count = to_int(to_float(cp[1].split(",")[0].split("}")[0].trim())) }
+    } catch e {}
+
+    let new_ratio = if n_nodes > 0 { to_float(n_edges + new_count) / to_float(n_nodes) } else { 0.0 }
+    let new_ratio_str = to_string(to_int(new_ratio * 100.0))
+
+    println("")
+    println("=== EDGE BUILDER ===")
+    println("  current nodes:  " + to_string(n_nodes))
+    println("  current edges:  " + to_string(n_edges))
+    println("  current ratio:  0." + ratio_str + " edges/node")
+    println("  discovered:     " + to_string(new_count) + " new edges")
+    println("  projected ratio: 0." + new_ratio_str + " edges/node")
+    println("====================")
+
+    if mode == "--apply" && new_count > 0 {
+        // Backup + apply
+        let bkp = map_path + ".bak.before_edge_builder"
+        exec("cp " + map_path + " " + bkp)
+        println("[backup] " + bkp)
+
+        let apply_cmd = "python3 -c \"\nimport json\nd = json.load(open('" + map_path + "'))\nnew = json.loads('" + result_raw.replace("'", "\\'") + "')\nfor e in new.get('edges', []):\n    d.setdefault('edges', []).append(e)\nwith open('" + map_path + "', 'w') as f:\n    json.dump(d, f, indent=2, ensure_ascii=False)\nprint('OK')\n\""
+        try {
+            let out = exec(apply_cmd).trim()
+            if out.contains("OK") {
+                println("[apply] wrote " + to_string(new_count) + " edges to reality_map.json")
+            }
+        } catch e {
+            println("[ERROR] apply failed: " + to_string(e))
+        }
+    } else if new_count > 0 {
+        println("  (use --apply to write edges to reality_map.json)")
+    }
+
+    // Append to growth_bus
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    try {
+        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"edge_builder\",\"nodes\":" + to_string(n_nodes) + ",\"edges_before\":" + to_string(n_edges) + ",\"discovered\":" + to_string(new_count) + ",\"applied\":" + if mode == "--apply" { "true" } else { "false" } + ",\"source\":\"edge_builder.hexa\"}\n"
+        let existing = exec("cat " + bus_path)
+        write_file(bus_path, existing + evt)
+    } catch e {}
+}
+
+main()

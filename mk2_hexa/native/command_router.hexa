@@ -1,4 +1,4 @@
-// ⛔ CORE — L0 불변식 (14종 명령 라우터. 수정 전 유저 승인 필수)
+// ⛔ CORE — L0 불변식 (24종 명령 라우터. 수정 전 유저 승인 필수)
 // command_router.hexa -- nexus 중앙 지휘 라우터
 // 자연어 입력 -> 3단 게이트 파싱 -> 모듈 디스패치 -> 결과 출력
 // 사용: hexa command_router.hexa "<자연어 입력>"
@@ -6,7 +6,7 @@
 //       hexa command_router.hexa "전체 리포트"
 //       hexa command_router.hexa "수학 돌파"
 
-comptime const version = "1.0.0"
+comptime const version = "2.0.0"
 
 // ─── 경로 설정 (env 기반, 하드코딩 금지) ───
 
@@ -409,6 +409,22 @@ fn classify(input: string) -> Classification {
         category = "DIRECTION"
     } else if domain == "empty_space" && verb_cat == "" {
         category = "EXPLORE_EMPTY"
+    } else if verb_cat == "SEED" {
+        category = "SEED"
+    } else if verb_cat == "AUDIT" {
+        category = "AUDIT"
+    } else if verb_cat == "VERIFY" {
+        category = "VERIFY"
+    } else if verb_cat == "BRIDGE" {
+        category = "BRIDGE"
+    } else if verb_cat == "HEAL" {
+        category = "HEAL"
+    } else if verb_cat == "HISTORY" {
+        category = "HISTORY"
+    } else if verb_cat == "RED_TEAM" {
+        category = "RED_TEAM"
+    } else if verb_cat == "DSE_CROSS" {
+        category = "DSE_CROSS"
     } else if verb_cat == "HELP" {
         category = "HELP"
     } else if project != "" {
@@ -690,6 +706,14 @@ fn handle_help() {
     println("|  " + pad_right("DIRECTION", 16) + pad_right("방향/새방향/next", 24) + "hexa 새 방향 제시")
     println("|  " + pad_right("EXPLORE_EMPTY", 16) + pad_right("빈공간/미지/DFS", 24) + "gap+deep+n6 위상변환")
     println("|  " + pad_right("NEXT_BT", 16) + pad_right("다음돌파/돌파방향", 24) + "discovery+gap 교차 추천")
+    println("|  " + pad_right("SEED", 16) + pad_right("시드/seed/merge", 24) + "seed_engine merge")
+    println("|  " + pad_right("AUDIT", 16) + pad_right("bt감사/검산", 24) + "red_team bt-report")
+    println("|  " + pad_right("VERIFY", 16) + pad_right("검증값/verify", 24) + "verifier")
+    println("|  " + pad_right("BRIDGE", 16) + pad_right("브릿지/연결상태", 24) + "bridge_ensure")
+    println("|  " + pad_right("HEAL", 16) + pad_right("치유/heal/복구", 24) + "auto_healer tick")
+    println("|  " + pad_right("HISTORY", 16) + pad_right("히스토리/이력", 24) + "history stats")
+    println("|  " + pad_right("RED_TEAM", 16) + pad_right("레드팀/반증/falsify", 24) + "red_team stress")
+    println("|  " + pad_right("DSE_CROSS", 16) + pad_right("DSE/교차DSE/융합", 24) + "cross_dse_fusion")
     println("|  " + pad_right("HELP", 16) + pad_right("도움/?", 24) + "this message")
     println("|")
     println("|  === Projects (" + to_string(project_names.len()) + ") ===")
@@ -731,6 +755,86 @@ fn handle_help() {
     println("|    hexa command_router.hexa \"전체 사이클\"")
     println("|")
     println("+" + pad_right("", 58) + "+")
+}
+
+// ─── SEED: 시드 엔진 교차수분 ───
+
+fn handle_seed(c: Classification) {
+    print_header("SEED", "seed merge")
+    let output = dispatch_sync("seed_engine.hexa", "merge")
+    print_result(output)
+    print_footer()
+    log_cmd("SEED", "seed_engine", "ok")
+}
+
+// ─── AUDIT: bt 감사/검산 ───
+
+fn handle_audit(c: Classification) {
+    print_header("AUDIT", "bt-report")
+    let output = dispatch_sync("red_team.hexa", "bt-report")
+    print_result(output)
+    print_footer()
+    log_cmd("AUDIT", "red_team", "ok")
+}
+
+// ─── VERIFY: 가설/값 검증 ───
+
+fn handle_verify(c: Classification) {
+    print_header("VERIFY", "verification")
+    let output = dispatch_sync("verifier.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("VERIFY", "verifier", "ok")
+}
+
+// ─── BRIDGE: 연결 상태 확인 ───
+
+fn handle_bridge(c: Classification) {
+    print_header("BRIDGE", "connection check")
+    let output = dispatch_sync("bridge_ensure.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("BRIDGE", "bridge_ensure", "ok")
+}
+
+// ─── HEAL: 자가치유/복구 ───
+
+fn handle_heal(c: Classification) {
+    print_header("HEAL", "auto-heal tick")
+    let output = dispatch_sync("auto_healer.hexa", "tick")
+    print_result(output)
+    print_footer()
+    log_cmd("HEAL", "auto_healer", "ok")
+}
+
+// ─── HISTORY: 이력/렌즈 통계 ───
+
+fn handle_history(c: Classification) {
+    print_header("HISTORY", "stats")
+    let output = dispatch_sync("history.hexa", "stats")
+    print_result(output)
+    print_footer()
+    log_cmd("HISTORY", "history", "ok")
+}
+
+// ─── RED_TEAM: 적대적 검증/반증 ───
+
+fn handle_red_team(c: Classification) {
+    print_header("RED_TEAM", "stress test")
+    let output = dispatch_sync("red_team.hexa", "stress")
+    print_result(output)
+    print_footer()
+    log_cmd("RED_TEAM", "red_team", "ok")
+}
+
+// ─── DSE_CROSS: 교차 DSE 도메인 융합 ───
+
+fn handle_dse_cross(c: Classification) {
+    print_header("DSE_CROSS", "cross-domain fusion")
+    let output = dispatch_sync("cross_dse_fusion.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("DSE_CROSS", "cross_dse_fusion", "ok")
 }
 
 // ─── 새 방향 탐색 (DIRECTION) ───
@@ -992,6 +1096,22 @@ if c.category == "STATUS_ALL" {
     handle_explore_empty(c)
 } else if c.category == "NEXT_BREAKTHROUGH" {
     handle_next_breakthrough(c)
+} else if c.category == "SEED" {
+    handle_seed(c)
+} else if c.category == "AUDIT" {
+    handle_audit(c)
+} else if c.category == "VERIFY" {
+    handle_verify(c)
+} else if c.category == "BRIDGE" {
+    handle_bridge(c)
+} else if c.category == "HEAL" {
+    handle_heal(c)
+} else if c.category == "HISTORY" {
+    handle_history(c)
+} else if c.category == "RED_TEAM" {
+    handle_red_team(c)
+} else if c.category == "DSE_CROSS" {
+    handle_dse_cross(c)
 } else if c.category == "HELP" {
     handle_help()
 } else {

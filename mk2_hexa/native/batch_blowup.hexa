@@ -1,0 +1,150 @@
+// batch_blowup.hexa — Batched seed firing for 10x throughput
+// Takes multiple domains, runs blowup in sequence with shared seed pool
+// New seeds discovered in domain N feed into domain N+1
+//
+// Usage:
+//   hexa batch_blowup.hexa <d1,d2,...> [depth] [max_per_domain]
+//   hexa batch_blowup.hexa all                  Run all known domains
+//   hexa batch_blowup.hexa all 4 5              depth=4, 5 rounds/domain
+
+fn load_seeds() -> string {
+    let home = exec("printenv HOME").trim()
+    let hexa = home + "/Dev/hexa-lang/target/release/hexa"
+    let se = home + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa"
+    let mut seeds = ""
+    try { seeds = exec(hexa + " " + se + " merge").trim() } catch e {}
+    if seeds.len() == 0 { seeds = "6|12|2|4|5|24|7|3|1|8|10|28|36|48" }
+    seeds
+}
+
+fn load_all_domains() -> list {
+    let path = exec("printenv HOME").trim() + "/Dev/nexus/shared/bt_domains.jsonl"
+    let mut domains = ["math", "physics", "topology", "consciousness", "chemistry", "cosmology"]
+    try {
+        let lines = read_file(path).split("\n")
+        let mut loaded = []
+        for l in lines {
+            if l.trim() != "" && l.contains("\"domain\":\"") {
+                loaded = loaded + [l.split("\"domain\":\"")[1].split("\"")[0]]
+            }
+        }
+        if loaded.len() > 0 { domains = loaded }
+    } catch e {}
+    domains
+}
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let hexa = home + "/Dev/hexa-lang/target/release/hexa"
+    let nexus = home + "/Dev/nexus"
+    let blowup_path = nexus + "/mk2_hexa/native/blowup.hexa"
+    let bus_path = nexus + "/shared/growth_bus.jsonl"
+
+    let a = args()
+    let domain_arg = if a.len() >= 3 { a[2] } else { "" }
+    let depth_arg = if a.len() >= 4 { a[3] } else { "3" }
+    let max_arg = if a.len() >= 5 { a[4] } else { "3" }
+
+    if domain_arg == "" || domain_arg == "--help" {
+        println("batch_blowup.hexa -- Batched seed firing for 10x throughput")
+        println("Usage: hexa batch_blowup.hexa <d1,d2,...|all> [depth] [max_per_domain]")
+        println("Seeds discovered in domain N feed into domain N+1 (shared pool).")
+        return
+    }
+
+    let depth = try { to_int(to_float(depth_arg)) } catch e { 3 }
+    let max_per = try { to_int(to_float(max_arg)) } catch e { 3 }
+
+    let domains = if domain_arg == "all" {
+        load_all_domains()
+    } else {
+        domain_arg.split(",")
+    }
+
+    let mut all_seeds = load_seeds()
+    let init_seed_count = all_seeds.split("|").len()
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+
+    println("")
+    println("======== BATCH BLOWUP ========")
+    println("  domains:   " + to_string(domains.len()))
+    println("  depth:     " + to_string(depth))
+    println("  rounds/d:  " + to_string(max_per))
+    println("  seeds:     " + to_string(init_seed_count))
+    println("==============================")
+    println("")
+
+    let mut total_exact: i64 = 0
+    let mut total_cor: i64 = 0
+    let mut new_seeds_total: i64 = 0
+    let mut seen = #{}
+    let start = exec("date +%s").trim()
+
+    let mut di: i64 = 0
+    while di < domains.len() {
+        let domain = domains[di]
+        println("[" + to_string(di + 1) + "/" + to_string(domains.len()) + "] " + domain)
+
+        let mut round: i64 = 0
+        while round < max_per {
+            let clean = all_seeds.replace("|", ",")
+            let cmd = "cd " + nexus + " && " + hexa + " " + blowup_path + " " + domain + " " + to_string(depth) + " --no-graph --fast --seeds " + clean
+            let mut out = ""
+            try { out = to_string(exec(cmd)) } catch e {
+                println("  [" + to_string(round + 1) + "] ERROR: " + to_string(e))
+                round = round + 1
+                continue
+            }
+
+            // Parse results
+            let mut exact: i64 = 0
+            let mut cor: i64 = 0
+            let lines = out.split("\n")
+            for l in lines {
+                if l.contains("EXACT match") {
+                    try { exact = to_int(to_float(l.split(":")[1].trim())) } catch e {}
+                }
+                if l.contains("total corollaries") {
+                    try { cor = to_int(to_float(l.split(":")[1].trim())) } catch e {}
+                }
+                // Extract new seeds from EXACT matches
+                if l.contains("EXACT") && l.contains("= ") {
+                    let eq = l.split("= ")
+                    if eq.len() >= 2 {
+                        let val = eq[eq.len() - 1].split(" ")[0].trim()
+                        if val != "" && !seen.contains_key(val) {
+                            seen[val] = 1
+                            all_seeds = all_seeds + "|" + val
+                            new_seeds_total = new_seeds_total + 1
+                        }
+                    }
+                }
+            }
+            total_exact = total_exact + exact
+            total_cor = total_cor + cor
+            println("  [" + to_string(round + 1) + "] " + to_string(cor) + "cor " + to_string(exact) + "EXACT +seeds=" + to_string(new_seeds_total))
+            round = round + 1
+        }
+        di = di + 1
+    }
+
+    let elapsed = to_int(exec("date +%s").trim()) - to_int(start)
+    let final_seeds = all_seeds.split("|").len()
+
+    // Append summary to growth_bus
+    try {
+        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"batch_blowup\",\"domains\":" + to_string(domains.len()) + ",\"total_cor\":" + to_string(total_cor) + ",\"total_exact\":" + to_string(total_exact) + ",\"seeds_gained\":" + to_string(new_seeds_total) + ",\"elapsed_s\":" + to_string(elapsed) + ",\"source\":\"batch_blowup.hexa\"}\n"
+        let existing = exec("cat " + bus_path)
+        write_file(bus_path, existing + evt)
+    } catch e {}
+
+    println("")
+    println("======== BATCH RESULT ========")
+    println("  elapsed:   " + to_string(elapsed) + "s")
+    println("  corollary: " + to_string(total_cor))
+    println("  EXACT:     " + to_string(total_exact))
+    println("  seeds:     " + to_string(init_seed_count) + " -> " + to_string(final_seeds) + " (+" + to_string(new_seeds_total) + ")")
+    println("==============================")
+}
+
+main()

@@ -1,0 +1,135 @@
+// bt_audit_auto.hexa — Automated BT audit pipeline wrapper
+// Calls python3 shared/bt_audit.py, parses results, appends to growth_bus
+//
+// Usage:
+//   hexa bt_audit_auto.hexa              Run audit + report summary
+//   hexa bt_audit_auto.hexa --full       Run audit with verbose output
+//   hexa bt_audit_auto.hexa --check      Quick check: show last audit score only
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let shared = home + "/Dev/nexus/shared"
+    let audit_py = shared + "/bt_audit.py"
+    let result_path = shared + "/bt_audit_result.json"
+    let bus_path = shared + "/growth_bus.jsonl"
+
+    let a = args()
+    let mode = if a.len() >= 3 { a[2] } else { "" }
+
+    if mode == "--help" {
+        println("bt_audit_auto.hexa -- Automated BT audit pipeline")
+        println("")
+        println("Usage:")
+        println("  hexa bt_audit_auto.hexa              Run audit + report summary")
+        println("  hexa bt_audit_auto.hexa --full       Run audit with verbose output")
+        println("  hexa bt_audit_auto.hexa --check      Quick check: last audit score")
+        println("")
+        println("Runs python3 shared/bt_audit.py, parses results, appends to growth_bus.")
+        return
+    }
+
+    if mode == "--check" {
+        // Quick check: read last result
+        try {
+            let raw = read_file(result_path)
+            let mut score = "?"
+            if raw.contains("\"score\":") {
+                let sp = raw.split("\"score\":")
+                if sp.len() >= 2 { score = sp[1].split(",")[0].split("}")[0].trim() }
+            }
+            let mut total = "?"
+            if raw.contains("\"total\":") {
+                let tp = raw.split("\"total\":")
+                if tp.len() >= 2 { total = tp[1].split(",")[0].split("}")[0].trim() }
+            }
+            let mut passed = "?"
+            if raw.contains("\"passed\":") {
+                let pp = raw.split("\"passed\":")
+                if pp.len() >= 2 { passed = pp[1].split(",")[0].split("}")[0].trim() }
+            }
+            println("[bt_audit] last score: " + score + "% (" + passed + "/" + total + " passed)")
+        } catch e {
+            println("[bt_audit] no previous result found at " + result_path)
+        }
+        return
+    }
+
+    // Run the audit
+    println("[bt_audit_auto] running python3 bt_audit.py...")
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    let verbose = if mode == "--full" { " 2>&1" } else { " 2>&1 | tail -30" }
+
+    let mut output = ""
+    try {
+        output = to_string(exec("cd " + shared + " && python3 " + audit_py + verbose))
+    } catch e {
+        println("[ERROR] bt_audit.py failed: " + to_string(e))
+        return
+    }
+
+    if mode == "--full" {
+        println(output)
+    }
+
+    // Parse results from output or result file
+    let mut score = "?"
+    let mut total: i64 = 0
+    let mut passed: i64 = 0
+    let mut failed: i64 = 0
+
+    // Try to parse from result JSON first
+    try {
+        let raw = read_file(result_path)
+        if raw.contains("\"score\":") {
+            let sp = raw.split("\"score\":")
+            if sp.len() >= 2 { score = sp[1].split(",")[0].split("}")[0].trim() }
+        }
+        if raw.contains("\"total\":") {
+            let tp = raw.split("\"total\":")
+            if tp.len() >= 2 { total = to_int(to_float(tp[1].split(",")[0].split("}")[0].trim())) }
+        }
+        if raw.contains("\"passed\":") {
+            let pp = raw.split("\"passed\":")
+            if pp.len() >= 2 { passed = to_int(to_float(pp[1].split(",")[0].split("}")[0].trim())) }
+        }
+        if raw.contains("\"failed\":") {
+            let fp = raw.split("\"failed\":")
+            if fp.len() >= 2 { failed = to_int(to_float(fp[1].split(",")[0].split("}")[0].trim())) }
+        }
+    } catch e {}
+
+    // Fallback: parse from stdout
+    if score == "?" {
+        let lines = output.split("\n")
+        for l in lines {
+            if l.contains("score") && l.contains("%") {
+                let pparts = l.split("%")
+                if pparts.len() >= 1 {
+                    let numpart = pparts[0]
+                    let toks = numpart.split(" ")
+                    score = toks[toks.len() - 1].trim()
+                }
+            }
+        }
+    }
+
+    println("")
+    println("=== BT AUDIT RESULT ===")
+    println("  score:   " + score + "%")
+    println("  passed:  " + to_string(passed))
+    println("  failed:  " + to_string(failed))
+    println("  total:   " + to_string(total))
+    println("=======================")
+
+    // Append to growth_bus
+    try {
+        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"bt_audit\",\"score\":\"" + score + "\",\"passed\":" + to_string(passed) + ",\"failed\":" + to_string(failed) + ",\"total\":" + to_string(total) + ",\"source\":\"bt_audit_auto.hexa\"}\n"
+        let existing = exec("cat " + bus_path)
+        write_file(bus_path, existing + evt)
+        println("[bus] appended audit event to growth_bus.jsonl")
+    } catch e {
+        println("[bus] failed to append: " + to_string(e))
+    }
+}
+
+main()

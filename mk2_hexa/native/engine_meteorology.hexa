@@ -1,0 +1,261 @@
+// engine_meteorology.hexa — "Meteorologist" (기상학자) 엔진
+// L6_meteorology 도메인: 대기역학·기후·강수·폭풍·예측 164 노드
+// 사용: hexa engine_meteorology.hexa status|tick
+//
+// I read the atmosphere's mood. Every cloud is a hypothesis,
+// every storm a theorem proven by wind and water.
+
+// ═══════════════════════════════════════════════════════════
+// ─── CONSTANTS ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const version = "1.0.0"
+comptime const domain = "meteorology"
+comptime const level_prefix = "L6_meteorology"
+comptime const personality = "Meteorologist"
+comptime const node_goal = 164
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let nexus_dir = dev + "/nexus"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let native_dir = nexus_dir + "/mk2_hexa/native"
+let reality_map = nexus_dir + "/shared/reality_map.json"
+let bus_file = nexus_dir + "/shared/growth_bus.jsonl"
+let state_path = nexus_dir + "/shared/engine_" + domain + "_state.json"
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(s.trim()) } catch e {}
+    return v
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn timestamp() -> string {
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
+    r.trim()
+}
+
+fn read_file_safe(path: string) -> string {
+    try { return read_file(path) } catch e { return "" }
+}
+
+// ─── JSON helpers ───
+
+fn json_float(content: string, field: string) -> f64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0.0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(val_str)
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_int(val_str)
+}
+
+fn json_str(content: string, field: string) -> string {
+    let marker = "\"" + field + "\":\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let end = rest.split("\"")
+    if end.len() < 1 { return "" }
+    return end[0]
+}
+
+// ─── Growth bus ───
+
+fn append_bus(phase: string, status: string, detail: string) {
+    let ts = timestamp()
+    let line = "{\"source\":\"engine_" + domain + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(bus_file, line + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA COLLECTION ───
+// ═══════════════════════════════════════════════════════════
+
+struct Metrics {
+    node_count: i64,
+    edge_count: i64,
+    health: f64,
+    status_flag: string,
+    node_rate: f64
+}
+
+fn count_domain_nodes() -> i64 {
+    if !file_exists(reality_map) { return 0 }
+    let result = exec("grep -c '\"" + level_prefix + "\"' " + reality_map + " || echo 0")
+    return safe_int(result.trim())
+}
+
+fn count_domain_edges() -> i64 {
+    if !file_exists(reality_map) { return 0 }
+    let result = exec("grep -c '\"" + domain + "\"' " + reality_map + " || echo 0")
+    return safe_int(result.trim())
+}
+
+fn collect_metrics() -> Metrics {
+    let nodes = count_domain_nodes()
+    let edges = count_domain_edges()
+
+    let prev_content = read_file_safe(state_path)
+    let prev_rate = json_float(prev_content, "node_rate")
+
+    let node_ratio = clamp01(to_float(nodes) / to_float(node_goal))
+    let edge_ratio = clamp01(to_float(edges) / (to_float(node_goal) * 3.0))
+    let rate_ratio = clamp01(prev_rate / 10.0)
+    let health = node_ratio * 0.70 + edge_ratio * 0.20 + rate_ratio * 0.10
+
+    let mut flag = "HEALTHY"
+    if nodes >= node_goal {
+        flag = "GOAL_REACHED"
+    } else if to_float(nodes) >= to_float(node_goal) * 0.9 {
+        flag = "GOAL_NEAR"
+    } else if health >= 0.7 {
+        flag = "BREAKTHROUGH"
+    } else if health < 0.3 {
+        flag = "STAGNANT"
+    }
+
+    return Metrics {
+        node_count: nodes,
+        edge_count: edges,
+        health: health,
+        status_flag: flag,
+        node_rate: prev_rate
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── EVOLVE ───
+// ═══════════════════════════════════════════════════════════
+
+fn evolve(m: Metrics) -> f64 {
+    let prev_content = read_file_safe(state_path)
+    let prev_nodes = json_int(prev_content, "node_count")
+    let prev_rate = json_float(prev_content, "node_rate")
+
+    let delta = m.node_count - prev_nodes
+    let new_rate = if prev_rate > 0.0 {
+        prev_rate * 0.7 + to_float(delta) * 0.3
+    } else {
+        to_float(delta)
+    }
+
+    let content = "{\"domain\":\"" + domain + "\",\"node_count\":" + to_string(m.node_count) + ",\"edge_count\":" + to_string(m.edge_count) + ",\"node_rate\":" + to_string(new_rate) + ",\"health\":" + to_string(m.health) + ",\"timestamp\":\"" + timestamp() + "\"}"
+    try { write_file(state_path, content + "\n") } catch e {}
+
+    return new_rate
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── TICK ───
+// ═══════════════════════════════════════════════════════════
+
+fn do_tick() {
+    println("=== " + personality + " Engine Tick [" + domain + "] — " + timestamp() + " ===")
+
+    let m = collect_metrics()
+    println("nodes: " + to_string(m.node_count) + "/" + to_string(node_goal))
+    println("edges: " + to_string(m.edge_count))
+    println("status: " + m.status_flag + " (health:" + to_string(m.health) + ")")
+    println("")
+
+    if m.node_count < node_goal {
+        let deficit = node_goal - m.node_count
+        println("[TICK] " + to_string(deficit) + " nodes below goal — triggering domain blowup")
+        let seeds = exec(hexa_bin + " " + native_dir + "/seed_engine.hexa merge")
+        let depth = if deficit > 50 { 3 } else { if deficit > 20 { 2 } else { 1 } }
+        let result = exec(hexa_bin + " " + native_dir + "/blowup.hexa " + domain + " " + to_string(depth) + " --no-graph --seeds " + seeds.trim())
+        println(result)
+    } else {
+        println("[TICK] Goal reached — running cross-link analysis")
+        let result = exec(hexa_bin + " " + native_dir + "/gap_finder.hexa " + domain)
+        println(result)
+    }
+
+    let rate = evolve(m)
+    println("")
+    println("evolve: rate=" + to_string(rate) + "/tick")
+
+    append_bus("tick", m.status_flag, "nodes=" + to_string(m.node_count) + " h=" + to_string(m.health) + " r=" + to_string(rate))
+
+    let post = collect_metrics()
+    let gained = post.node_count - m.node_count
+    println("")
+    println("=== TICK COMPLETE ===")
+    println("nodes: " + to_string(m.node_count) + " -> " + to_string(post.node_count) + " (+" + to_string(gained) + ")")
+    println("health: " + to_string(post.health))
+    println("status: " + post.status_flag)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── STATUS ───
+// ═══════════════════════════════════════════════════════════
+
+fn do_status() {
+    let m = collect_metrics()
+
+    println("=== " + personality + " Engine [" + domain + "] v" + version + " ===")
+    println("domain: " + level_prefix)
+    println("goal: " + to_string(node_goal) + " nodes")
+    println("")
+    println("nodes: " + to_string(m.node_count) + "/" + to_string(node_goal))
+    let pct = to_float(m.node_count) * 100.0 / to_float(node_goal)
+    println("progress: " + to_string(pct) + "%")
+    println("edges: " + to_string(m.edge_count))
+    println("")
+    println("health: " + to_string(m.health))
+    println("status: " + m.status_flag)
+
+    let rate = evolve(m)
+    println("rate: " + to_string(rate) + " nodes/tick")
+
+    if m.node_count < node_goal {
+        let remaining = node_goal - m.node_count
+        if rate > 0.1 {
+            let eta = to_float(remaining) / rate
+            println("ETA: ~" + to_string(eta) + " ticks")
+        }
+    }
+}
+
+// ─── MAIN ───
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "status" }
+
+if mode == "status" { do_status() }
+if mode == "tick" { do_tick() }
+if mode == "help" {
+    println("engine_" + domain + ".hexa — " + personality)
+    println("  status  — current state + health")
+    println("  tick    — run one improvement cycle")
+}

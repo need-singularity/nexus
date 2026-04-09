@@ -1,490 +1,75 @@
-// map_merge.hexa — nexus SSOT + n6-arch 고유 콘텐츠 병합 + 전계층 크로스링크
+// map_merge.hexa — nexus SSOT + n6-arch 병합 + 전계층 크로스링크
 // 사용: hexa map_merge.hexa
 //
-// 1) nexus/docs/n6-map-data.json (SSOT) 로드
-// 2) n6-architecture/docs/n6-map-data.json 에서 rm_* 제외 고유 노드 추가
-// 3) 전계층 도메인+키워드 크로스링크 생성
-// 4) n6-architecture/docs/n6-map-data.json 에 병합 결과 출력
+// nexus/docs/n6-map-data.json (SSOT) + n6-architecture 고유 콘텐츠 병합
+// rm_* reality 노드 제외, 전계층 도메인+키워드 크로스링크 생성
+// 출력: n6-architecture/docs/n6-map-data.json
 
 let home = exec("printenv HOME").trim()
 let dev = home + "/Dev"
 let nexus_map = dev + "/nexus/docs/n6-map-data.json"
 let n6arch_map = dev + "/n6-architecture/docs/n6-map-data.json"
-let out_path = n6arch_map
-
-// ─── 도메인 키워드 사전 ───
-
-comptime const DOMAINS = [
-    "fusion", "chip", "energy", "ai", "physics", "chemistry",
-    "materials", "biology", "astronomy", "math", "robotics",
-    "software", "display", "audio", "aerospace", "environment",
-    "economics", "geology", "music", "linguistics", "meteorology"
-]
-
-comptime const DOMAIN_KW = [
-    "fusion,plasma,tokamak,tritium,deuterium,magnetic,confinement,iter,stellarator",
-    "chip,semiconductor,transistor,silicon,dram,memory,nand,cpu,gpu,fpga,lithograph,wafer",
-    "energy,solar,battery,grid,power,wind,turbine,thermal,hydrogen,fuel,supercapacitor",
-    "neural,attention,transformer,scaling,inference,training,llm,dropout,embedding,gradient,diffusion",
-    "particle,quantum,neutrino,cosmology,relativity,gravity,string,higgs,boson,quark,lepton,gluon,gauge",
-    "chemistry,synthesis,element,compound,reaction,catalyst,enzyme,molecular,bond,orbital,valence",
-    "material,crystal,alloy,polymer,ceramic,graphene,superconductor,composite,diamond,topological,piezo",
-    "biology,cell,gene,protein,dna,rna,amino,photosynthesis,metabolism,mitosis",
-    "star,planet,galaxy,orbit,cosmic,pulsar,neutron,supernova,nebula,celestial",
-    "theorem,prime,modular,zeta,ramanujan,euler,bernoulli,riemann,algebraic,topology,manifold",
-    "robot,actuator,servo,locomotion,manipulator,humanoid,autonomous,sensor,lidar",
-    "compiler,operating,programming,algorithm,database,kernel,runtime,protocol",
-    "display,oled,lcd,pixel,refresh,hdr,panel",
-    "audio,speaker,acoustic,noise,codec,frequency,resonance,harmonic",
-    "aerospace,rocket,satellite,propulsion,space,launch,reentry",
-    "environment,carbon,water,recycling,desalination,pollution,climate,ocean",
-    "economics,market,currency,trade,inflation,supply,demand",
-    "geology,tectonic,mineral,volcanic,sediment,mantle,crust",
-    "music,harmony,consonance,octave,tuning,scale,rhythm,chord",
-    "linguistics,phoneme,syntax,morpheme,grammar,vowel,consonant",
-    "weather,atmosphere,pressure,tornado,hurricane,precipitation,cloud"
-]
-
-// ─── 유틸 ───
-
-fn to_lower_safe(s: string) -> string {
-    try { return s.to_lower() } catch e { return s }
-}
-
-fn extract_keywords(text: string) {
-    let low = to_lower_safe(text)
-    let parts = low.split(" ")
-    let mut result = []
-    let mut i = 0
-    while i < parts.len() {
-        let w = parts[i].trim()
-        if w.len() >= 3 {
-            result = result.push(w)
-        }
-        i = i + 1
-    }
-    result
-}
-
-fn node_text(n) -> string {
-    let mut t = ""
-    try { t = t + " " + to_string(n["label"]) } catch e {}
-    try { t = t + " " + to_string(n["description"]) } catch e {}
-    try { t = t + " " + to_string(n["note"]) } catch e {}
-    try { t = t + " " + to_string(n["title"]) } catch e {}
-    try { t = t + " " + to_string(n["domain"]) } catch e {}
-    try { t = t + " " + to_string(n["level"]) } catch e {}
-    t
-}
-
-fn classify_domains(text: string) {
-    let low = to_lower_safe(text)
-    let mut result = []
-    let mut di = 0
-    while di < DOMAINS.len() {
-        let kws = DOMAIN_KW[di].split(",")
-        let mut ki = 0
-        let mut matched = false
-        while ki < kws.len() {
-            if low.contains(kws[ki]) {
-                matched = true
-                break
-            }
-            ki = ki + 1
-        }
-        if matched {
-            result = result.push(DOMAINS[di])
-        }
-        di = di + 1
-    }
-    result
-}
-
-fn has_common(a, b) -> bool {
-    let mut ai = 0
-    while ai < a.len() {
-        let mut bi = 0
-        while bi < b.len() {
-            if a[ai] == b[bi] { return true }
-            bi = bi + 1
-        }
-        ai = ai + 1
-    }
-    false
-}
-
-fn count_common_kw(a, b) -> int {
-    let mut count = 0
-    let mut ai = 0
-    while ai < a.len() {
-        let mut bi = 0
-        while bi < b.len() {
-            if a[ai] == b[bi] {
-                count = count + 1
-                break
-            }
-            bi = bi + 1
-        }
-        ai = ai + 1
-    }
-    count
-}
-
-// ─── JSON 배열 직렬화 헬퍼 ───
-
-fn node_to_json(n) -> string {
-    let mut s = "{"
-    s = s + "\"id\":" + json_stringify(to_string(n["id"]))
-    try { s = s + ",\"label\":" + json_stringify(to_string(n["label"])) } catch e {}
-    try { s = s + ",\"layer\":" + to_string(n["layer"]) } catch e {}
-    try { s = s + ",\"type\":" + json_stringify(to_string(n["type"])) } catch e {}
-    try { s = s + ",\"description\":" + json_stringify(to_string(n["description"])) } catch e {}
-    try { s = s + ",\"grade\":" + json_stringify(to_string(n["grade"])) } catch e {}
-    try { s = s + ",\"origin\":" + json_stringify(to_string(n["origin"])) } catch e {}
-    try { s = s + ",\"level\":" + json_stringify(to_string(n["level"])) } catch e {}
-    try { s = s + ",\"note\":" + json_stringify(to_string(n["note"])) } catch e {}
-    try { s = s + ",\"title\":" + json_stringify(to_string(n["title"])) } catch e {}
-    try { s = s + ",\"domain\":" + json_stringify(to_string(n["domain"])) } catch e {}
-    try { s = s + ",\"bt_num\":" + to_string(n["bt_num"]) } catch e {}
-    try { s = s + ",\"combos\":" + to_string(n["combos"]) } catch e {}
-    try { s = s + ",\"alien_level\":" + to_string(n["alien_level"]) } catch e {}
-    try { s = s + ",\"n6_max\":" + to_string(n["n6_max"]) } catch e {}
-    try { s = s + ",\"ufo\":" + to_string(n["ufo"]) } catch e {}
-    try { s = s + ",\"section\":" + json_stringify(to_string(n["section"])) } catch e {}
-    try { s = s + ",\"closure_grade\":" + to_string(n["closure_grade"]) } catch e {}
-    try { s = s + ",\"bt_count\":" + to_string(n["bt_count"]) } catch e {}
-    s = s + "}"
-    s
-}
-
-fn edge_to_json(src: string, tgt: string, etype: string) -> string {
-    "{\"source\":" + json_stringify(src) + ",\"target\":" + json_stringify(tgt) + ",\"type\":" + json_stringify(etype) + "}"
-}
-
-// ─── 메인 ───
 
 fn main() {
     println("=== map_merge.hexa — nexus SSOT + n6-arch 병합 ===")
 
-    // 1. nexus SSOT 로드
-    println("[1/4] Loading nexus SSOT...")
-    let nx_raw = read_file(nexus_map)
-    let nx_data = json_parse(nx_raw)
-    let nx_nodes = nx_data["nodes"]
-    let nx_edges = nx_data["edges"]
-    println("  nexus: " + to_string(nx_nodes.len()) + " nodes, " + to_string(nx_edges.len()) + " edges")
+    // hexa는 오케스트레이터, 무거운 JSON 처리는 python3 위임
+    // 스크립트를 파일로 저장 후 실행 (exec 단일 문자열 제한 우회)
+    let script_path = dev + "/nexus/.tmp_map_merge.py"
+    let py_code = "import json,re,sys\nfrom collections import Counter\nfrom datetime import datetime,timezone\n\nDOMAIN_KW={\n"
+    let py2 = "  'fusion':{'fusion','plasma','tokamak','tritium','deuterium','magnetic','confinement','iter','stellarator'},\n"
+    let py3 = "  'chip':{'chip','semiconductor','transistor','silicon','dram','memory','nand','cpu','gpu','fpga','lithograph','wafer'},\n"
+    let py4 = "  'energy':{'energy','solar','battery','grid','power','wind','turbine','thermal','hydrogen','fuel','supercapacitor'},\n"
+    let py5 = "  'ai':{'neural','attention','transformer','scaling','inference','training','llm','dropout','embedding','gradient','diffusion'},\n"
+    let py6 = "  'physics':{'particle','quantum','neutrino','cosmology','relativity','gravity','string','higgs','boson','quark','lepton','gluon','gauge'},\n"
+    let py7 = "  'chemistry':{'chemistry','synthesis','element','compound','reaction','catalyst','enzyme','molecular','bond','orbital','valence'},\n"
+    let py8 = "  'materials':{'material','crystal','alloy','polymer','ceramic','graphene','superconductor','composite','diamond','topological','piezo'},\n"
+    let py9 = "  'biology':{'biology','cell','gene','protein','dna','rna','amino','photosynthesis','metabolism','mitosis'},\n"
+    let py10 = "  'astronomy':{'star','planet','galaxy','orbit','cosmic','pulsar','neutron','supernova','nebula','celestial'},\n"
+    let py11 = "  'math':{'theorem','prime','modular','zeta','ramanujan','euler','bernoulli','riemann','algebraic','topology','manifold'},\n"
+    let py12 = "  'robotics':{'robot','actuator','servo','locomotion','manipulator','humanoid','autonomous','sensor','lidar'},\n"
+    let py13 = "  'software':{'compiler','operating','programming','algorithm','database','kernel','runtime','protocol'},\n"
+    let py14 = "  'display':{'display','oled','lcd','pixel','refresh','hdr','panel'},\n"
+    let py15 = "  'audio':{'audio','speaker','acoustic','noise','codec','frequency','resonance','harmonic'},\n"
+    let py16 = "  'aerospace':{'aerospace','rocket','satellite','propulsion','space','launch','reentry'},\n"
+    let py17 = "  'environment':{'environment','carbon','water','recycling','desalination','pollution','climate','ocean'},\n"
+    let py18 = "  'economics':{'economics','market','currency','trade','inflation','supply','demand'},\n"
+    let py19 = "  'geology':{'geology','tectonic','mineral','volcanic','sediment','mantle','crust'},\n"
+    let py20 = "  'music':{'music','harmony','consonance','octave','tuning','scale','rhythm','chord'},\n"
+    let py21 = "  'linguistics':{'linguistics','phoneme','syntax','morpheme','grammar','vowel','consonant'},\n"
+    let py22 = "  'meteorology':{'weather','atmosphere','pressure','tornado','hurricane','precipitation','cloud'},\n}\n\n"
 
-    // nexus 노드 ID 셋 (HashMap으로 O(1) 조회)
-    let mut nx_id_set = #{}
-    let mut i = 0
-    while i < nx_nodes.len() {
-        nx_id_set[to_string(nx_nodes[i]["id"])] = 1
-        i = i + 1
-    }
+    let py_stop = "STOP={'the','and','for','with','from','that','this','are','was','were','has','have','had',\n  'not','but','can','all','one','two','its','also','been','into','more','new','than',\n  'each','most','some','such','very','just','like','over','only','same','when','will',\n  'used','based','using','high','low','level','type','layer','node','none','true','false'}\n\n"
+    let py_gen = "GEN_TYPES={'keyword_bridge','bt_resonance','dse_resonance','product_link'}\nGEN_PFX=['domain_']\ndef is_gen(t):\n  if t in GEN_TYPES: return True\n  return any(t.startswith(p) for p in GEN_PFX)\n\n"
+    let py_funcs = "def kw(t):\n  return {w for w in re.split(r'[\\\\s,/_\\\\-()]+',t.lower()) if len(w)>=4 and w not in STOP}\n\ndef doms(t):\n  kws={w for w in re.split(r'[\\\\s,/_\\\\-()]+',t.lower()) if len(w)>=3}\n  return {d for d,dk in DOMAIN_KW.items() if kws&dk}\n\ndef ntxt(n):\n  return ' '.join(str(n.get(k,'')) for k in ['label','description','note','title','domain','level'])\n\n"
 
-    // 2. n6-arch 고유 콘텐츠 로드
-    println("[2/4] Loading n6-arch unique nodes...")
-    let n6_raw = read_file(n6arch_map)
-    let n6_data = json_parse(n6_raw)
-    let n6_nodes = n6_data["nodes"]
-    let n6_edges = n6_data["edges"]
+    let py_main = "nx=json.load(open('" + nexus_map + "'))\nn6=json.load(open('" + n6arch_map + "'))\n"
+    let py_main2 = "nx_ids={n['id'] for n in nx['nodes']}\nnx_nodes=nx['nodes']\n"
+    let py_main3 = "uniq=[n for n in n6['nodes'] if not n['id'].startswith('rm_') and n['id'] not in nx_ids]\n"
+    let py_main4 = "all_n=nx_nodes+uniq\nall_ids={n['id'] for n in all_n}\nprint(f'nexus:{len(nx_nodes)} uniq:{len(uniq)} merged:{len(all_n)}',file=sys.stderr)\n\n"
 
-    let mut unique_nodes = []
-    let mut unique_count = 0
-    i = 0
-    while i < n6_nodes.len() {
-        let nid = to_string(n6_nodes[i]["id"])
-        // rm_* reality 노드 스킵 (nexus에 이미 있음)
-        if !nid.starts_with("rm_") && !nx_id_set.contains_key(nid) {
-            unique_nodes = unique_nodes.push(n6_nodes[i])
-            unique_count = unique_count + 1
-        }
-        i = i + 1
-    }
-    println("  n6-arch unique: " + to_string(unique_count) + " nodes (rm_* skipped)")
+    let py_edges = "edges=[]\nedge_set=set()\ndef add_e(s,t,tp):\n  if s==t or (s,t,tp) in edge_set or (t,s,tp) in edge_set: return\n  edge_set.add((s,t,tp))\n  edges.append({'source':s,'target':t,'type':tp})\n\n"
+    let py_edges2 = "for e in nx['edges']:\n  s=e.get('source',e.get('from',''))\n  t=e.get('target',e.get('to',''))\n  tp=e.get('type','nexus_link')\n  if s in all_ids and t in all_ids: add_e(s,t,tp)\n\n"
+    let py_edges3 = "for e in n6['edges']:\n  s,t=e.get('source',''),e.get('target','')\n  tp=e.get('type','n6arch_link')\n  if s.startswith('rm_') or t.startswith('rm_'): continue\n  if is_gen(tp): continue\n  if s in all_ids and t in all_ids: add_e(s,t,tp)\nprint(f'base_edges:{len(edges)}',file=sys.stderr)\n\n"
 
-    // 병합 노드 = nexus + unique
-    let mut all_nodes = []
-    let mut all_id_set = #{}
-    i = 0
-    while i < nx_nodes.len() {
-        all_nodes = all_nodes.push(nx_nodes[i])
-        all_id_set[to_string(nx_nodes[i]["id"])] = i
-        i = i + 1
-    }
-    let nx_count = i
-    i = 0
-    while i < unique_nodes.len() {
-        all_nodes = all_nodes.push(unique_nodes[i])
-        all_id_set[to_string(unique_nodes[i]["id"])] = nx_count + i
-        i = i + 1
-    }
-    println("  merged: " + to_string(all_nodes.len()) + " nodes")
+    let py_cross = "# domain cache\nnd={n['id']:doms(ntxt(n)) for n in all_n}\nnk={n['id']:kw(ntxt(n)) for n in all_n}\nnl={n['id']:n.get('layer',0) for n in all_n}\n\n"
+    let py_cross2 = "# domain crosslinks (same domain + different layer, cap per domain pair)\nby_dom={}\nfor n in all_n:\n  for d in nd[n['id']]: by_dom.setdefault(d,[]).append(n['id'])\ndc=0\nfor dom,nids in by_dom.items():\n  # group by layer, link only adjacent layers\n  bl={}\n  for nid in nids: bl.setdefault(nl[nid],[]).append(nid)\n  layers=sorted(bl.keys())\n  for li in range(len(layers)-1):\n    la,lb=layers[li],layers[li+1]\n    if abs(la-lb)>1: continue\n    for a in bl[la]:\n      for b in bl[lb]:\n        add_e(a,b,f'domain_{dom}'); dc+=1\nprint(f'domain_links:{dc}',file=sys.stderr)\n\n"
+    let py_cross3 = "# keyword bridges (adjacent layers, 7+ common keywords, 4+ chars, no stop words)\nkc=0\nby_layer={i:[n['id'] for n in all_n if n.get('layer',0)==i] for i in range(5)}\nfor la in range(4):\n  lb=la+1\n  for a in by_layer[la]:\n    ka=nk[a]\n    if len(ka)<7: continue\n    for b in by_layer[lb]:\n      if len(ka&nk[b])>=7: add_e(a,b,'keyword_bridge'); kc+=1\nprint(f'kw_bridges:{kc}',file=sys.stderr)\n\n"
+    let py_cross4 = "# BT/DSE/product resonance (2+ domain overlap)\nrc=0\nnx_set={n['id'] for n in nx_nodes}\nfor n in all_n:\n  tp=n.get('type','')\n  if tp not in ('breakthrough','dse_domain','product'): continue\n  n_d=nd[n['id']]\n  if len(n_d)<2: continue\n  et={'breakthrough':'bt_resonance','dse_domain':'dse_resonance','product':'product_link'}[tp]\n  for nx_id in nx_set:\n    if len(n_d&nd.get(nx_id,set()))>=2: add_e(n['id'],nx_id,et); rc+=1\nprint(f'resonance:{rc} total_edges:{len(edges)}',file=sys.stderr)\n\n"
 
-    // 기존 엣지 병합 (from/to → source/target 변환, dangling 제거)
-    let mut edge_set = #{}
-    let mut merged_edges = []
+    let py_out = "lc=Counter(n.get('layer',0) for n in all_n)\nout={'meta':{'title':'n=6 Architecture - Unified Map','version':'3.0-merged','source':'nexus SSOT + n6-arch (BT/DSE/products)','date':datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'),'layers':{'0':'Constants & Elements','1':'Materials & Chemistry','2':'Applications & Combinations','3':'Technology & Techniques','4':'Products'},'node_count':len(all_n),'edge_count':len(edges),'layer_counts':dict(sorted(lc.items()))},'nodes':all_n,'edges':edges}\n"
+    let py_out2 = "json.dump(out,open('" + n6arch_map + "','w'),ensure_ascii=False,indent=2)\nprint(f'DONE nodes:{len(all_n)} edges:{len(edges)} L0:{lc[0]} L1:{lc[1]} L2:{lc[2]} L3:{lc[3]} L4:{lc[4]}',file=sys.stderr)\n"
 
-    // nexus edges
-    i = 0
-    while i < nx_edges.len() {
-        let mut src = ""
-        let mut tgt = ""
-        try { src = to_string(nx_edges[i]["source"]) } catch e {}
-        try { tgt = to_string(nx_edges[i]["target"]) } catch e {}
-        if src == "" {
-            try { src = to_string(nx_edges[i]["from"]) } catch e {}
-        }
-        if tgt == "" {
-            try { tgt = to_string(nx_edges[i]["to"]) } catch e {}
-        }
-        let mut etype = "nexus_link"
-        try { etype = to_string(nx_edges[i]["type"]) } catch e {}
+    let full_script = py_code + py2 + py3 + py4 + py5 + py6 + py7 + py8 + py9 + py10 + py11 + py12 + py13 + py14 + py15 + py16 + py17 + py18 + py19 + py20 + py21 + py22 + py_stop + py_gen + py_funcs + py_main + py_main2 + py_main3 + py_main4 + py_edges + py_edges2 + py_edges3 + py_cross + py_cross2 + py_cross3 + py_cross4 + py_out + py_out2
 
-        if src != "" && tgt != "" && all_id_set.contains_key(src) && all_id_set.contains_key(tgt) {
-            let key = src + "|" + tgt + "|" + etype
-            let rev = tgt + "|" + src + "|" + etype
-            if !edge_set.contains_key(key) && !edge_set.contains_key(rev) {
-                edge_set[key] = 1
-                merged_edges = append(merged_edges, [src, tgt, etype])
-            }
-        }
-        i = i + 1
-    }
+    write_file(script_path, full_script)
+    println("[exec] Running merge engine...")
+    let result = to_string(exec("python3 " + script_path + " 2>&1"))
+    println(result)
 
-    // n6-arch edges (rm_* 관련 스킵)
-    i = 0
-    while i < n6_edges.len() {
-        let src = to_string(n6_edges[i]["source"])
-        let tgt = to_string(n6_edges[i]["target"])
-        if src.starts_with("rm_") || tgt.starts_with("rm_") {
-            i = i + 1
-            continue
-        }
-        let mut etype = "n6arch_link"
-        try { etype = to_string(n6_edges[i]["type"]) } catch e {}
-
-        if all_id_set.contains_key(src) && all_id_set.contains_key(tgt) {
-            let key = src + "|" + tgt + "|" + etype
-            let rev = tgt + "|" + src + "|" + etype
-            if !edge_set.contains_key(key) && !edge_set.contains_key(rev) {
-                edge_set[key] = 1
-                merged_edges = append(merged_edges, [src, tgt, etype])
-            }
-        }
-        i = i + 1
-    }
-    println("  base edges: " + to_string(merged_edges.len()))
-
-    // 3. 전계층 크로스링크
-    println("[3/4] Building full cross-layer links...")
-
-    // 노드별 도메인 + 키워드 캐시
-    let mut node_doms = #{}
-    let mut node_kws = #{}
-    let mut node_layers = #{}
-    i = 0
-    while i < all_nodes.len() {
-        let nid = to_string(all_nodes[i]["id"])
-        let text = node_text(all_nodes[i])
-        node_doms[nid] = classify_domains(text)
-        node_kws[nid] = extract_keywords(text)
-        let mut layer = 0
-        try { layer = to_int(to_string(all_nodes[i]["layer"])) } catch e {}
-        node_layers[nid] = layer
-        i = i + 1
-    }
-
-    // 도메인별 노드 그룹핑
-    let mut by_domain = #{}
-    i = 0
-    while i < all_nodes.len() {
-        let nid = to_string(all_nodes[i]["id"])
-        let doms = node_doms[nid]
-        let mut di = 0
-        while di < doms.len() {
-            let dom = doms[di]
-            if !by_domain.contains_key(dom) {
-                by_domain[dom] = []
-            }
-            by_domain[dom] = append(by_domain[dom], nid)
-            di = di + 1
-        }
-        i = i + 1
-    }
-
-    let mut cross_count = 0
-
-    // 3a. 도메인 매칭 (다른 계층 간)
-    let mut di = 0
-    while di < DOMAINS.len() {
-        let dom = DOMAINS[di]
-        if !by_domain.contains_key(dom) {
-            di = di + 1
-            continue
-        }
-        let nids = by_domain[dom]
-        let mut ai = 0
-        while ai < nids.len() {
-            let a = nids[ai]
-            let la = node_layers[a]
-            let mut bi = ai + 1
-            while bi < nids.len() {
-                let b = nids[bi]
-                let lb = node_layers[b]
-                if la != lb {
-                    let key = a + "|" + b + "|domain_" + dom
-                    let rev = b + "|" + a + "|domain_" + dom
-                    if !edge_set.contains_key(key) && !edge_set.contains_key(rev) {
-                        edge_set[key] = 1
-                        merged_edges = append(merged_edges, [a, b, "domain_" + dom])
-                        cross_count = cross_count + 1
-                    }
-                }
-                bi = bi + 1
-            }
-            ai = ai + 1
-        }
-        di = di + 1
-    }
-    println("  domain links: " + to_string(cross_count))
-
-    // 3b. 인접 계층 키워드 브릿지 (2+ 공통)
-    let mut kw_count = 0
-    let mut layer_a = 0
-    while layer_a < 4 {
-        let layer_b = layer_a + 1
-        // 계층별 노드 수집
-        let mut la_nodes = []
-        let mut lb_nodes = []
-        i = 0
-        while i < all_nodes.len() {
-            let nid = to_string(all_nodes[i]["id"])
-            let l = node_layers[nid]
-            if l == layer_a { la_nodes = append(la_nodes, nid) }
-            if l == layer_b { lb_nodes = append(lb_nodes, nid) }
-            i = i + 1
-        }
-
-        let mut ai = 0
-        while ai < la_nodes.len() {
-            let a = la_nodes[ai]
-            let kw_a = node_kws[a]
-            if kw_a.len() >= 2 {
-                let mut bi = 0
-                while bi < lb_nodes.len() {
-                    let b = lb_nodes[bi]
-                    let overlap = count_common_kw(kw_a, node_kws[b])
-                    if overlap >= 2 {
-                        let key = a + "|" + b + "|keyword_bridge"
-                        let rev = b + "|" + a + "|keyword_bridge"
-                        if !edge_set.contains_key(key) && !edge_set.contains_key(rev) {
-                            edge_set[key] = 1
-                            merged_edges = append(merged_edges, [a, b, "keyword_bridge"])
-                            kw_count = kw_count + 1
-                        }
-                    }
-                    bi = bi + 1
-                }
-            }
-            ai = ai + 1
-        }
-        layer_a = layer_a + 1
-    }
-    println("  keyword bridges: " + to_string(kw_count))
-
-    // 3c. BT/DSE/product → nexus 노드 (도메인 공명)
-    let mut resonance_count = 0
-    i = 0
-    while i < all_nodes.len() {
-        let nid = to_string(all_nodes[i]["id"])
-        let mut ntype = ""
-        try { ntype = to_string(all_nodes[i]["type"]) } catch e {}
-
-        let is_arch = ntype == "breakthrough" || ntype == "dse_domain" || ntype == "product"
-        if !is_arch {
-            i = i + 1
-            continue
-        }
-
-        let n_doms = node_doms[nid]
-        if n_doms.len() == 0 {
-            i = i + 1
-            continue
-        }
-
-        let etype = if ntype == "breakthrough" { "bt_resonance" } else if ntype == "dse_domain" { "dse_resonance" } else { "product_link" }
-
-        // nexus 노드와 매칭
-        let mut j = 0
-        while j < nx_count {
-            let nx_nid = to_string(all_nodes[j]["id"])
-            if has_common(n_doms, node_doms[nx_nid]) {
-                let key = nid + "|" + nx_nid + "|" + etype
-                let rev = nx_nid + "|" + nid + "|" + etype
-                if !edge_set.contains_key(key) && !edge_set.contains_key(rev) {
-                    edge_set[key] = 1
-                    merged_edges = append(merged_edges, [nid, nx_nid, etype])
-                    resonance_count = resonance_count + 1
-                }
-            }
-            j = j + 1
-        }
-        i = i + 1
-    }
-    println("  resonance links: " + to_string(resonance_count))
-    println("  total cross-links: " + to_string(cross_count + kw_count + resonance_count))
-
-    // 4. 출력
-    println("[4/4] Writing merged map...")
-
-    // 계층별 통계
-    let mut lc = #{0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
-    i = 0
-    while i < all_nodes.len() {
-        let l = node_layers[to_string(all_nodes[i]["id"])]
-        lc[l] = lc[l] + 1
-        i = i + 1
-    }
-
-    // JSON 직렬화
-    let mut nodes_json = ""
-    i = 0
-    while i < all_nodes.len() {
-        if i > 0 { nodes_json = nodes_json + ",\n" }
-        nodes_json = nodes_json + node_to_json(all_nodes[i])
-        i = i + 1
-    }
-
-    let mut edges_json = ""
-    i = 0
-    while i < merged_edges.len() {
-        if i > 0 { edges_json = edges_json + ",\n" }
-        edges_json = edges_json + edge_to_json(merged_edges[i][0], merged_edges[i][1], merged_edges[i][2])
-        i = i + 1
-    }
-
-    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
-    let mut output = "{\n  \"meta\": {\n"
-    output = output + "    \"title\": \"n=6 Architecture — Unified Map\",\n"
-    output = output + "    \"version\": \"3.0-merged\",\n"
-    output = output + "    \"source\": \"nexus SSOT + n6-arch (BT/DSE/products)\",\n"
-    output = output + "    \"date\": \"" + ts + "\",\n"
-    output = output + "    \"layers\": {\"0\":\"Constants & Elements\",\"1\":\"Materials & Chemistry\",\"2\":\"Applications & Combinations\",\"3\":\"Technology & Techniques\",\"4\":\"Products\"},\n"
-    output = output + "    \"node_count\": " + to_string(all_nodes.len()) + ",\n"
-    output = output + "    \"edge_count\": " + to_string(merged_edges.len()) + ",\n"
-    output = output + "    \"layer_counts\": {\"0\":" + to_string(lc[0]) + ",\"1\":" + to_string(lc[1]) + ",\"2\":" + to_string(lc[2]) + ",\"3\":" + to_string(lc[3]) + ",\"4\":" + to_string(lc[4]) + "}\n"
-    output = output + "  },\n"
-    output = output + "  \"nodes\": [\n" + nodes_json + "\n  ],\n"
-    output = output + "  \"edges\": [\n" + edges_json + "\n  ]\n"
-    output = output + "}\n"
-
-    write_file(out_path, output)
-
-    println("\n✅ " + out_path)
-    println("   Nodes: " + to_string(all_nodes.len()) + " (L0=" + to_string(lc[0]) + " L1=" + to_string(lc[1]) + " L2=" + to_string(lc[2]) + " L3=" + to_string(lc[3]) + " L4=" + to_string(lc[4]) + ")")
-    println("   Edges: " + to_string(merged_edges.len()))
-    println("   Cross: domain=" + to_string(cross_count) + " keyword=" + to_string(kw_count) + " resonance=" + to_string(resonance_count))
+    // 임시 스크립트 정리
+    exec("rm -f " + script_path)
+    println("✅ 병합 완료 → " + n6arch_map)
 }
 
 main()

@@ -1,0 +1,141 @@
+// cache_hotpath.hexa — Hot-path caching for shared/*.json data
+// Caches frequently accessed JSON files in memory with TTL
+// Target: <10s/domain scan by avoiding repeated disk reads
+//
+// Usage:
+//   hexa cache_hotpath.hexa warm              Pre-load all hot-path files
+//   hexa cache_hotpath.hexa get <file>        Get cached content (or load+cache)
+//   hexa cache_hotpath.hexa stats             Show cache hit/miss stats
+//   hexa cache_hotpath.hexa clear             Clear cache directory
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let shared = home + "/Dev/nexus/shared"
+    let cache_dir = "/tmp/n6_hotpath_cache"
+    let ttl_seconds: i64 = 300  // 5 min TTL
+
+    let a = args()
+    let mode = if a.len() >= 3 { a[2] } else { "" }
+
+    if mode == "" || mode == "--help" {
+        println("cache_hotpath.hexa -- Hot-path caching for <10s/domain scan")
+        println("")
+        println("Usage:")
+        println("  hexa cache_hotpath.hexa warm          Pre-load all hot-path files")
+        println("  hexa cache_hotpath.hexa get <file>    Get cached content (or load+cache)")
+        println("  hexa cache_hotpath.hexa stats         Show cache hit/miss stats")
+        println("  hexa cache_hotpath.hexa clear         Clear cache directory")
+        return
+    }
+
+    // Ensure cache dir exists
+    exec("mkdir -p " + cache_dir)
+
+    let hot_files = [
+        "core.json",
+        "reality_map.json",
+        "lens_registry.json",
+        "dse_cross_results.json",
+        "convergence/nexus.json",
+        "absolute_rules.json",
+        "n6_constants.jsonl",
+        "math_atlas.json"
+    ]
+
+    if mode == "warm" {
+        println("[cache_hotpath] warming " + to_string(hot_files.len()) + " hot-path files...")
+        let mut loaded: i64 = 0
+        let mut total_bytes: i64 = 0
+        for f in hot_files {
+            let src = shared + "/" + f
+            let dst = cache_dir + "/" + f.replace("/", "_")
+            try {
+                let content = read_file(src)
+                write_file(dst, content)
+                let sz = to_int(content.len())
+                total_bytes = total_bytes + sz
+                loaded = loaded + 1
+                println("  [OK] " + f + " (" + to_string(sz) + " bytes)")
+            } catch e {
+                println("  [SKIP] " + f + " -- " + to_string(e))
+            }
+        }
+        let ts = exec("date +%s").trim()
+        write_file(cache_dir + "/_meta.txt", ts + "|" + to_string(loaded))
+        println("[cache_hotpath] warmed " + to_string(loaded) + "/" + to_string(hot_files.len()) + " files, " + to_string(total_bytes) + " bytes total")
+
+    } else if mode == "get" {
+        let file_arg = if a.len() >= 4 { a[3] } else { "" }
+        if file_arg == "" {
+            println("Usage: hexa cache_hotpath.hexa get <filename>")
+            return
+        }
+        let cached = cache_dir + "/" + file_arg.replace("/", "_")
+        let now = to_int(exec("date +%s").trim())
+        let mut use_cache = false
+        try {
+            let mtime = to_int(exec("stat -f %m " + cached + " 2>/dev/null || echo 0").trim())
+            if (now - mtime) < ttl_seconds { use_cache = true }
+        } catch e {}
+
+        let mut content = ""
+        if use_cache {
+            content = read_file(cached)
+        } else {
+            try { content = read_file(shared + "/" + file_arg) } catch e {
+                println("[ERROR] cannot read " + shared + "/" + file_arg + " -- " + to_string(e))
+                return
+            }
+            write_file(cached, content)
+        }
+        println(content)
+        // Track hit/miss
+        try {
+            let sf = cache_dir + "/_stats.txt"
+            let prev = try { read_file(sf) } catch e { "0|0" }
+            let p = prev.trim().split("|")
+            let h = if use_cache { to_int(p[0]) + 1 } else { to_int(p[0]) }
+            let m = if use_cache { to_int(p[1]) } else { to_int(p[1]) + 1 }
+            write_file(sf, to_string(h) + "|" + to_string(m))
+        } catch e2 {}
+
+    } else if mode == "stats" {
+        let stats_file = cache_dir + "/_stats.txt"
+        let meta_file = cache_dir + "/_meta.txt"
+        let mut hits: i64 = 0
+        let mut misses: i64 = 0
+        try {
+            let raw = read_file(stats_file).trim()
+            let parts = raw.split("|")
+            hits = to_int(parts[0])
+            misses = to_int(parts[1])
+        } catch e {}
+        let total = hits + misses
+        let rate = if total > 0 { to_string(to_int(to_float(hits) / to_float(total) * 100.0)) + "%" } else { "N/A" }
+
+        let mut warmed_at = "never"
+        try {
+            let meta = read_file(meta_file).trim()
+            let mp = meta.split("|")
+            warmed_at = exec("date -r " + mp[0] + " '+%Y-%m-%d %H:%M:%S'").trim()
+        } catch e {}
+
+        println("=== cache_hotpath stats ===")
+        println("  hits:     " + to_string(hits))
+        println("  misses:   " + to_string(misses))
+        println("  hit rate: " + rate)
+        println("  warmed:   " + warmed_at)
+        println("  TTL:      " + to_string(ttl_seconds) + "s")
+        println("  dir:      " + cache_dir)
+
+    } else if mode == "clear" {
+        exec("rm -rf " + cache_dir)
+        println("[cache_hotpath] cache cleared")
+
+    } else {
+        println("[ERROR] unknown mode: " + mode)
+        println("Run with --help for usage")
+    }
+}
+
+main()

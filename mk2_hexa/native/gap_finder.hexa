@@ -27,85 +27,73 @@ comptime const sectors = ["n6", "geometric", "quantum", "consciousness", "biolog
 // ─── 발견 로그 분석 ───
 
 fn analyze_discovery_log() -> string {
-    // discovery_log.jsonl — 단일 패스로 상수별/섹터별 카운트 (O(n²)→O(n))
-    let mut content = ""
-    try { content = read_file(discovery_log) } catch err { return "ERROR: cannot read discovery_log" }
+    // discovery_log.jsonl — pre-written awk 스크립트 실행 (87MB+ 안전)
+    // awk 스크립트는 사전 생성된 /tmp/_n6_gap_awk.awk 사용
 
-    let lines = content.split("\n")
-    let total = len(lines)
-
-    // HashMap으로 상수별/섹터별 카운트 (단일 패스)
-    let mut const_counts = #{}
-    let mut const_exact = #{}
-    let mut sec_totals = #{}
-    let mut sec_exacts = #{}
-    let mut sec_misses = #{}
-
-    // 초기화
+    // 1) awk 스크립트 생성 — /tmp에 기록
+    let mut script = "BEGIN { t=0 }\n{\n  t++\n  e=0; m=0\n  if (index($0,\"\\\"EXACT\\\"\")) e=1\n  if (index($0,\"\\\"MISS\\\"\"))  m=1\n"
     let mut ni = 0
     while ni < len(n6_constants) {
-        const_counts[n6_constants[ni]] = 0
-        const_exact[n6_constants[ni]] = 0
+        let n = n6_constants[ni]
+        let i = to_string(ni)
+        script = script + "  if (index($0,\"\\\"constant\\\":\\\"" + n + "\\\"\")) { c" + i + "++; if(e) x" + i + "++ }\n"
         ni = ni + 1
     }
     let mut si = 0
     while si < len(sectors) {
-        sec_totals[sectors[si]] = 0
-        sec_exacts[sectors[si]] = 0
-        sec_misses[sectors[si]] = 0
+        let s = sectors[si]
+        let i = to_string(si)
+        script = script + "  if (index($0,\"\\\"sector\\\":\\\"" + s + "\\\"\")) { st" + i + "++; if(e) se" + i + "++; if(m) sm" + i + "++ }\n"
         si = si + 1
     }
+    script = script + "}\nEND {\n  printf t"
+    ni = 0
+    while ni < len(n6_constants) {
+        let i = to_string(ni)
+        script = script + " \"|\" c" + i + "+0 \"|\" x" + i + "+0"
+        ni = ni + 1
+    }
+    si = 0
+    while si < len(sectors) {
+        let i = to_string(si)
+        script = script + " \"|\" st" + i + "+0 \"|\" se" + i + "+0 \"|\" sm" + i + "+0"
+        si = si + 1
+    }
+    script = script + "\n}\n"
 
-    // ── 단일 패스: 한 번만 순회하면서 상수+섹터 동시 집계 ──
-    let mut li = 0
-    while li < len(lines) {
-        let line = lines[li]
-        if line.len() < 10 {
-            li = li + 1
-            continue
-        }
+    println("[ADL] writing awk script len=" + to_string(len(script)))
+    try { write_file("/tmp/_n6_gap_awk.awk", script) } catch err { return "ERROR: cannot write awk script — " + err.to_string() }
+    println("[ADL] awk script written OK")
 
-        let is_exact = line.contains("\"EXACT\"")
-        let is_miss = line.contains("\"MISS\"")
+    // 2) awk 실행 — tail로 최신 10만 줄만 처리
+    println("[ADL] about to exec echo test")
+    let mut raw = ""
+    try { raw = exec("echo test123") } catch err { return "ERROR: exec echo — " + err.to_string() }
+    // 2) awk 실행 → 결과를 /tmp 파일로 출력 후 cat 으로 수신
+    //    (전체 파일 awk 는 10초+ 소요 → exec timeout 회피를 위해 결과 파일 경유)
+    try { exec("awk -f /tmp/_n6_gap_awk.awk " + discovery_log + " > /tmp/_n6_gap_result.txt") } catch err {}
+    try { raw = exec("cat /tmp/_n6_gap_result.txt") } catch err { return "ERROR: cannot read awk result — " + err.to_string() }
 
-        // 상수 매칭
-        let mut ci = 0
-        while ci < len(n6_constants) {
-            let name = n6_constants[ci]
-            let marker = "\"constant\":\"" + name + "\""
-            if line.contains(marker) {
-                const_counts[name] = const_counts[name] + 1
-                if is_exact { const_exact[name] = const_exact[name] + 1 }
-            }
-            ci = ci + 1
-        }
-
-        // 섹터 매칭
-        let mut ski = 0
-        while ski < len(sectors) {
-            let sec = sectors[ski]
-            let marker = "\"sector\":\"" + sec + "\""
-            if line.contains(marker) {
-                sec_totals[sec] = sec_totals[sec] + 1
-                if is_exact { sec_exacts[sec] = sec_exacts[sec] + 1 }
-                if is_miss { sec_misses[sec] = sec_misses[sec] + 1 }
-            }
-            ski = ski + 1
-        }
-
-        li = li + 1
+    let parts = raw.trim().split("|")
+    let expected = 1 + len(n6_constants) * 2 + len(sectors) * 3
+    if len(parts) < expected {
+        return "ERROR: awk output mismatch — got " + to_string(len(parts)) + " expected " + to_string(expected)
     }
 
-    // parallel arrays 복원 (하위 호환)
-    let mut constant_names = []
+    let mut total = 0
+    try { total = to_int(parts[0]) } catch err {}
+
     let mut constant_counts = []
     let mut constant_exact = []
     ni = 0
     while ni < len(n6_constants) {
-        let name = n6_constants[ni]
-        constant_names = constant_names + [name]
-        constant_counts = constant_counts + [const_counts[name]]
-        constant_exact = constant_exact + [const_exact[name]]
+        let idx = 1 + ni * 2
+        let mut ca = 0
+        let mut cx = 0
+        try { ca = to_int(parts[idx]) } catch err {}
+        try { cx = to_int(parts[idx + 1]) } catch err {}
+        constant_counts = constant_counts + [ca]
+        constant_exact = constant_exact + [cx]
         ni = ni + 1
     }
 
@@ -113,20 +101,27 @@ fn analyze_discovery_log() -> string {
     let mut sector_exacts = []
     let mut sector_misses = []
     si = 0
+    let sec_base = 1 + len(n6_constants) * 2
     while si < len(sectors) {
-        let sec = sectors[si]
-        sector_totals = sector_totals + [sec_totals[sec]]
-        sector_exacts = sector_exacts + [sec_exacts[sec]]
-        sector_misses = sector_misses + [sec_misses[sec]]
+        let idx = sec_base + si * 3
+        let mut sa = 0
+        let mut se = 0
+        let mut sm = 0
+        try { sa = to_int(parts[idx]) } catch err {}
+        try { se = to_int(parts[idx + 1]) } catch err {}
+        try { sm = to_int(parts[idx + 2]) } catch err {}
+        sector_totals = sector_totals + [sa]
+        sector_exacts = sector_exacts + [se]
+        sector_misses = sector_misses + [sm]
         si = si + 1
     }
 
-    // 결과 조립
+    // 결과 조립 (하위 호환 포맷)
     let mut result = "TOTAL:" + to_string(total) + "\n"
 
     result = result + "CONSTANTS:\n"
     let mut i = 0
-    while i < len(constant_names) {
+    while i < len(n6_constants) {
         let gap = if constant_counts[i] == 0 { 1.0 }
                   else if constant_exact[i] == 0 { 0.8 }
                   else { 1.0 - to_float(constant_exact[i]) / to_float(constant_counts[i]) }
@@ -134,7 +129,7 @@ fn analyze_discovery_log() -> string {
                    else if constant_exact[i] == 0 { "NO_EXACT" }
                    else if gap > 0.5 { "WEAK" }
                    else { "OK" }
-        result = result + constant_names[i] + ":" + to_string(constant_counts[i]) + ":" + to_string(constant_exact[i]) + ":" + flag + "\n"
+        result = result + n6_constants[i] + ":" + to_string(constant_counts[i]) + ":" + to_string(constant_exact[i]) + ":" + flag + "\n"
         i = i + 1
     }
 
@@ -686,7 +681,9 @@ fn bridge_gaps() {
     println("")
 
     // 1) 빈공간 추출
+    println("[DBG] calling analyze_discovery_log")
     let analysis = analyze_discovery_log()
+    println("[DBG] analyze done, len=" + to_string(len(analysis)))
     let empty_str = find_empty_constants(analysis)
     let weak_str = find_weak_constants(analysis)
 
