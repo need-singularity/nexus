@@ -44,9 +44,7 @@
 | **papers** | Zenodo (§6), OSF (§7) |
 | **contact** | Gmail API (§5) |
 | **creator** | fal.ai (§3), OpenRouter (§4) |
-| **TECS-L** | Zenodo (§6), OSF (§7), Gmail (§5) |
 | **nexus** | — (인프라 전용, 토큰 불필요) |
-| **sedi** | Google AI (§8) |
 
 ## 사용법
 
