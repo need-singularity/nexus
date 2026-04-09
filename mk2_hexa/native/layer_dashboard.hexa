@@ -1,0 +1,645 @@
+// layer_dashboard.hexa — L0~L4 구간별 완성도 자동 집계 대시보드
+// TODO #18: L0(상수)→L1(소재)→L2(어플리케이션)→L3(테크놀로지)→L4(프로덕션)
+//
+// 사용: hexa layer_dashboard.hexa [report|brief|json]
+//   report → 마크다운 테이블 출력 (기본)
+//   brief  → 1줄 요약 (배너용)
+//   json   → JSON 출력 (파이프라인용)
+//
+// 데이터 소스:
+//   - shared/reality_map.json          (노드 수, 등급별 분포)
+//   - shared/bt_audit_result.json      (BT 검증 현황)
+//   - shared/convergence/*.json        (골화/안정/실패)
+//   - shared/discovery_log.jsonl       (발견 수)
+//   - shared/growth_bus.jsonl          (성장 이벤트)
+
+// ═══════════════════════════════════════════════════════════
+// ─── SETUP ───
+// ═══════════════════════════════════════════════════════════
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let nexus_dir = dev + "/nexus"
+let shared_dir = nexus_dir + "/shared"
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s)) } catch e {}
+    return v
+}
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn pad_right(s: string, w: i64) -> string {
+    let mut out = s
+    while len(out) < w {
+        out = out + " "
+    }
+    return out
+}
+
+fn pad_left(s: string, w: i64) -> string {
+    let mut out = s
+    while len(out) < w {
+        out = " " + out
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── LAYER DEFINITION ───
+// ═══════════════════════════════════════════════════════════
+// L0(상수): 기본 입자/원자 — 불변 물리 상수
+// L1(소재): 결합/분자/유전/물질/생체 — 소재 빌딩 블록
+// L2(어플리케이션): 응용 과학/인문 도메인
+// L3(테크놀로지): 공학/기술 도메인
+// L4(프로덕션): 천체/은하/우주론 + 배포 시스템
+
+struct LayerStat {
+    name: string,
+    label: string,
+    icon: string,
+    nodes: i64,
+    exact: i64,
+    close: i64,
+    miss: i64,
+    empirical: i64,
+    convention: i64,
+    bt_count: i64,
+    ossified: i64,
+    stable: i64,
+    failed: i64,
+    pct: f64
+}
+
+// reality_map level → dashboard layer 매핑
+fn map_level_to_layer(level: string) -> string {
+    // L0 상수: 기본 입자, 원자
+    if level.contains("particle") { return "L0" }
+    if level.contains("atom") { return "L0" }
+    if level.contains("quark") { return "L0" }
+    if level.contains("sub_quark") { return "L0" }
+
+    // L1 소재: 결합, 분자, 유전, 물질, 생체
+    if level.contains("bond") { return "L1" }
+    if level.contains("molecule") { return "L1" }
+    if level.contains("genetic") { return "L1" }
+    if level.contains("material") { return "L1" }
+    if level.contains("bio") { return "L1" }
+
+    // L3 테크놀로지: 공학 도메인 (L6_* 중 기술 계열)
+    if level.contains("computing") { return "L3" }
+    if level.contains("electrical") { return "L3" }
+    if level.contains("mechanical") { return "L3" }
+    if level.contains("civil") { return "L3" }
+    if level.contains("aerospace") { return "L3" }
+    if level.contains("nuclear") { return "L3" }
+    if level.contains("robotics") { return "L3" }
+    if level.contains("cryptography") { return "L3" }
+
+    // L4 프로덕션: 천체, 은하, 우주론, 다중우주
+    if level.contains("celestial") { return "L4" }
+    if level.contains("galactic") { return "L4" }
+    if level.contains("cosmological") { return "L4" }
+    if level.contains("multiversal") { return "L4" }
+
+    // L2 어플리케이션: 나머지 L6_* 응용 과학/인문
+    if level.starts_with("L6") { return "L2" }
+
+    // UNKNOWN 등 → L2 (가장 넓은 범주)
+    return "L2"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── A. reality_map 파싱 ───
+// ═══════════════════════════════════════════════════════════
+
+fn count_nodes_by_layer() {
+    // 결과: #{"L0_nodes": n, "L0_exact": n, ..., "L4_pct": f}
+    let mut stats = #{
+        "L0_nodes": 0, "L0_exact": 0, "L0_close": 0, "L0_miss": 0, "L0_empirical": 0, "L0_convention": 0,
+        "L1_nodes": 0, "L1_exact": 0, "L1_close": 0, "L1_miss": 0, "L1_empirical": 0, "L1_convention": 0,
+        "L2_nodes": 0, "L2_exact": 0, "L2_close": 0, "L2_miss": 0, "L2_empirical": 0, "L2_convention": 0,
+        "L3_nodes": 0, "L3_exact": 0, "L3_close": 0, "L3_miss": 0, "L3_empirical": 0, "L3_convention": 0,
+        "L4_nodes": 0, "L4_exact": 0, "L4_close": 0, "L4_miss": 0, "L4_empirical": 0, "L4_convention": 0
+    }
+
+    let rmap = shared_dir + "/reality_map.json"
+
+    // 셸에서 level+grade 쌍을 추출 (고속)
+    // awk로 level과 grade를 같은 노드에서 추출, "level|grade" 행으로 출력
+    let cmd = "awk -F'\"' '/\"level\"/{lv=$4} /\"grade\"/{print lv\"|\"$4}' " + rmap
+    let mut raw = ""
+    try { raw = to_string(exec(cmd)) } catch e {
+        println("WARN: reality_map 파싱 실패 — " + to_string(e))
+        return stats
+    }
+
+    let lines = raw.split("\n")
+    let mut li = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if line.contains("|") {
+            let parts = line.split("|")
+            if len(parts) >= 2 {
+                let level = parts[0]
+                let grade = parts[1]
+                let layer = map_level_to_layer(level)
+
+                stats[layer + "_nodes"] = stats[layer + "_nodes"] + 1
+
+                if grade == "EXACT" {
+                    stats[layer + "_exact"] = stats[layer + "_exact"] + 1
+                }
+                if grade == "CLOSE" {
+                    stats[layer + "_close"] = stats[layer + "_close"] + 1
+                }
+                if grade == "MISS" {
+                    stats[layer + "_miss"] = stats[layer + "_miss"] + 1
+                }
+                if grade == "EMPIRICAL" {
+                    stats[layer + "_empirical"] = stats[layer + "_empirical"] + 1
+                }
+                if grade == "CONVENTION" {
+                    stats[layer + "_convention"] = stats[layer + "_convention"] + 1
+                }
+            }
+        }
+        li = li + 1
+    }
+
+    return stats
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── B. BT 집계 (bt_audit_result.json) ───
+// ═══════════════════════════════════════════════════════════
+
+fn count_bt_stats() {
+    let mut result = #{
+        "total": 0,
+        "match": 0,
+        "mismatch": 0,
+        "accuracy": 0.0
+    }
+
+    let mut content = ""
+    try { content = read_file(shared_dir + "/bt_audit_result.json") } catch e {
+        return result
+    }
+
+    // total_bts
+    if content.contains("\"total_bts\":") {
+        let p = content.split("\"total_bts\": ")
+        if len(p) >= 2 {
+            result["total"] = safe_int(p[1].split(",")[0].split("}")[0].trim())
+        } else {
+            let p2 = content.split("\"total_bts\":")
+            if len(p2) >= 2 {
+                result["total"] = safe_int(p2[1].split(",")[0].split("}")[0].trim())
+            }
+        }
+    }
+
+    // match
+    if content.contains("\"match\":") {
+        let p = content.split("\"match\": ")
+        if len(p) >= 2 {
+            result["match"] = safe_int(p[1].split(",")[0].split("}")[0].trim())
+        } else {
+            let p2 = content.split("\"match\":")
+            if len(p2) >= 2 {
+                result["match"] = safe_int(p2[1].split(",")[0].split("}")[0].trim())
+            }
+        }
+    }
+
+    // mismatch
+    if content.contains("\"mismatch\":") {
+        let p = content.split("\"mismatch\": ")
+        if len(p) >= 2 {
+            result["mismatch"] = safe_int(p[1].split(",")[0].split("}")[0].trim())
+        }
+    }
+
+    // accuracy
+    if content.contains("\"accuracy_pct\":") {
+        let p = content.split("\"accuracy_pct\": ")
+        if len(p) >= 2 {
+            result["accuracy"] = safe_float(p[1].split(",")[0].split("}")[0].trim())
+        } else {
+            let p2 = content.split("\"accuracy_pct\":")
+            if len(p2) >= 2 {
+                result["accuracy"] = safe_float(p2[1].split(",")[0].split("}")[0].trim())
+            }
+        }
+    }
+
+    return result
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── C. 수렴 현황 (convergence/*.json) ───
+// ═══════════════════════════════════════════════════════════
+
+fn count_convergence() {
+    // 전 프로젝트 합산: ossified / stable / failed 수
+    let mut result = #{"ossified": 0, "stable": 0, "failed": 0}
+
+    let projects = ["nexus", "anima", "n6-architecture", "hexa-lang", "void", "papers", "airgenome"]
+    let mut pi = 0
+    while pi < len(projects) {
+        let pname = projects[pi]
+        let fpath = shared_dir + "/convergence/" + pname + ".json"
+        let mut content = ""
+        try { content = read_file(fpath) } catch e {
+            pi = pi + 1
+            continue
+        }
+
+        // ossified 항목 수: "status": "PASS" 를 ossified 블록에서 카운트
+        // 간단히: "ossified" 블록과 "stable", "failed" 블록의 status 수 세기
+        let sections = ["ossified", "stable", "failed"]
+        let mut si = 0
+        while si < len(sections) {
+            let sec = sections[si]
+            let marker = "\"" + sec + "\":"
+            if content.contains(marker) {
+                // 해당 섹션에서 "status" 키 등장 횟수 = 항목 수
+                let parts = content.split(marker)
+                if len(parts) >= 2 {
+                    let block = parts[1]
+                    // 다음 섹션까지 자르기
+                    let mut end_idx = len(block)
+                    let mut ei = 0
+                    while ei < len(sections) {
+                        let em = "\"" + sections[ei] + "\":"
+                        if sections[ei] != sec && block.contains(em) {
+                            let ep = block.split(em)
+                            if len(ep[0]) < end_idx {
+                                end_idx = len(ep[0])
+                            }
+                        }
+                        ei = ei + 1
+                    }
+
+                    // "status": 출현 횟수 카운트
+                    let status_parts = block.split("\"status\":")
+                    let count = len(status_parts) - 1
+                    if count > 0 {
+                        result[sec] = result[sec] + count
+                    }
+                }
+            }
+            si = si + 1
+        }
+
+        pi = pi + 1
+    }
+
+    return result
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── D. 발견 로그 총 건수 ───
+// ═══════════════════════════════════════════════════════════
+
+fn count_discoveries() -> i64 {
+    let mut count: i64 = 0
+    let cmd = "wc -l < " + shared_dir + "/discovery_log.jsonl"
+    let mut result = ""
+    try { result = to_string(exec(cmd)) } catch e { return 0 }
+    count = safe_int(result.trim())
+    return count
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── E. 레이어별 완성도 계산 ───
+// ═══════════════════════════════════════════════════════════
+
+fn compute_layer_pct(nodes: i64, exact: i64, close: i64, target: i64) -> f64 {
+    // 완성도 = (EXACT * 1.0 + CLOSE * 0.5) / target * 100
+    if target <= 0 { return 0.0 }
+    let score = to_float(exact) * 1.0 + to_float(close) * 0.5
+    let pct = score / to_float(target) * 100.0
+    if pct > 100.0 { return 100.0 }
+    return pct
+}
+
+fn build_layers(node_stats, conv, bt) -> [LayerStat] {
+    // 각 레이어별 목표 노드 수 (포화 기준)
+    let targets = #{
+        "L0": 500,
+        "L1": 1200,
+        "L2": 2500,
+        "L3": 200,
+        "L4": 800
+    }
+
+    let layers = ["L0", "L1", "L2", "L3", "L4"]
+    let labels = ["상수", "소재", "어플리케이션", "테크놀로지", "프로덕션"]
+    let icons = ["🔬", "🧱", "🔧", "⚙️", "🚀"]
+
+    let mut results = []
+    let mut li = 0
+    while li < len(layers) {
+        let lk = layers[li]
+        let nodes = node_stats[lk + "_nodes"]
+        let exact = node_stats[lk + "_exact"]
+        let close = node_stats[lk + "_close"]
+        let miss = node_stats[lk + "_miss"]
+        let empirical = node_stats[lk + "_empirical"]
+        let convention = node_stats[lk + "_convention"]
+        let target = targets[lk]
+
+        let pct = compute_layer_pct(nodes, exact, close, target)
+
+        // 수렴 현황은 전체 프로젝트 합산 (레이어별 분리 불가 → 비율 배분)
+        let total_conv = conv["ossified"] + conv["stable"] + conv["failed"]
+        let mut layer_ossified: i64 = 0
+        let mut layer_stable: i64 = 0
+        let mut layer_failed: i64 = 0
+        if total_conv > 0 {
+            // 노드 비율에 따라 배분
+            let total_nodes = node_stats["L0_nodes"] + node_stats["L1_nodes"] + node_stats["L2_nodes"] + node_stats["L3_nodes"] + node_stats["L4_nodes"]
+            if total_nodes > 0 {
+                let ratio = to_float(nodes) / to_float(total_nodes)
+                layer_ossified = to_int(to_float(conv["ossified"]) * ratio)
+                layer_stable = to_int(to_float(conv["stable"]) * ratio)
+                layer_failed = to_int(to_float(conv["failed"]) * ratio)
+            }
+        }
+
+        results = results + [LayerStat {
+            name: lk,
+            label: labels[li],
+            icon: icons[li],
+            nodes: nodes,
+            exact: exact,
+            close: close,
+            miss: miss,
+            empirical: empirical,
+            convention: convention,
+            bt_count: 0,
+            ossified: layer_ossified,
+            stable: layer_stable,
+            failed: layer_failed,
+            pct: pct
+        }]
+
+        li = li + 1
+    }
+
+    return results
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── F. 병목 레이어 탐지 ───
+// ═══════════════════════════════════════════════════════════
+
+fn find_bottleneck(layers) -> LayerStat {
+    let mut worst = layers[0]
+    let mut wi = 1
+    while wi < len(layers) {
+        if layers[wi].pct < worst.pct {
+            worst = layers[wi]
+        }
+        wi = wi + 1
+    }
+    return worst
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── G. 진행 바 생성 ───
+// ═══════════════════════════════════════════════════════════
+
+fn progress_bar(pct: f64, width: i64) -> string {
+    let filled = to_int(pct / 100.0 * to_float(width))
+    let mut bar = ""
+    let mut bi = 0
+    while bi < width {
+        if bi < filled {
+            bar = bar + "█"
+        } else {
+            bar = bar + "░"
+        }
+        bi = bi + 1
+    }
+    return bar
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── OUTPUT: report ───
+// ═══════════════════════════════════════════════════════════
+
+fn print_report(layers, bt, conv, disc_total) {
+    let ts = exec("date +%Y-%m-%d\\ %H:%M")
+    println("")
+    println("# L0~L4 구간별 완성도 대시보드")
+    println("")
+    println("> 생성: " + ts.trim() + " | 노드 소스: reality_map.json")
+    println("")
+
+    // 전체 요약
+    let mut total_nodes: i64 = 0
+    let mut total_exact: i64 = 0
+    let mut li = 0
+    while li < len(layers) {
+        total_nodes = total_nodes + layers[li].nodes
+        total_exact = total_exact + layers[li].exact
+        li = li + 1
+    }
+    let overall_pct = if total_nodes > 0 { to_float(total_exact) / to_float(total_nodes) * 100.0 } else { 0.0 }
+
+    println("## 전체 요약")
+    println("")
+    println("| 지표 | 값 |")
+    println("|------|-----|")
+    println("| 전체 노드 | " + to_string(total_nodes) + " |")
+    println("| EXACT 노드 | " + to_string(total_exact) + " (" + to_string(to_int(overall_pct)) + "%) |")
+    println("| BT 총 수 | " + to_string(bt["total"]) + " (정확도 " + to_string(bt["accuracy"]) + "%) |")
+    println("| 발견 로그 | " + to_string(disc_total) + "건 |")
+    println("| 수렴: 골화 | " + to_string(conv["ossified"]) + " |")
+    println("| 수렴: 안정 | " + to_string(conv["stable"]) + " |")
+    println("| 수렴: 실패 | " + to_string(conv["failed"]) + " |")
+    println("")
+
+    // 레이어별 상세
+    println("## 레이어별 완성도")
+    println("")
+    println("| 레이어 | 구간 | 노드 | EXACT | CLOSE | MISS | 완성도 | 진행 |")
+    println("|--------|------|------|-------|-------|------|--------|------|")
+
+    li = 0
+    while li < len(layers) {
+        let l = layers[li]
+        let pct_str = to_string(to_int(l.pct))
+        let bar = progress_bar(l.pct, 15)
+
+        let mut bottleneck_mark = ""
+        let bottleneck = find_bottleneck(layers)
+        if l.name == bottleneck.name {
+            bottleneck_mark = " **[병목]**"
+        }
+
+        println("| " + l.icon + " " + l.name + " | " + l.label + " | " + to_string(l.nodes) + " | " + to_string(l.exact) + " | " + to_string(l.close) + " | " + to_string(l.miss) + " | " + pct_str + "%" + bottleneck_mark + " | " + bar + " |")
+        li = li + 1
+    }
+
+    println("")
+
+    // 병목 분석
+    let bn = find_bottleneck(layers)
+    println("## 병목 분석")
+    println("")
+    println("**" + bn.icon + " " + bn.name + " (" + bn.label + ")** — 완성도 " + to_string(to_int(bn.pct)) + "%")
+    println("")
+
+    if bn.name == "L0" {
+        println("- 기본 상수/입자 노드 부족 → 물리 상수 추가 탐색 필요")
+        println("- 권장: `블로업 particle 3` 으로 L0 집중 돌파")
+    }
+    if bn.name == "L1" {
+        println("- 소재/분자 레이어 미완 → 화학/생물 도메인 확장 필요")
+        println("- 권장: `블로업 chemistry 3` + `블로업 biology 3`")
+    }
+    if bn.name == "L2" {
+        println("- 응용 과학 도메인 불균형 → L6_* 하위 도메인 균등 확장")
+        println("- 권장: gap_finder quick 후 빈 도메인 집중 블로업")
+    }
+    if bn.name == "L3" {
+        println("- 기술/공학 레이어 희소 → 엔지니어링 도메인 노드 추가")
+        println("- 권장: `블로업 engineering 3` + DSE 교차 융합")
+    }
+    if bn.name == "L4" {
+        println("- 프로덕션/우주론 레이어 미달 → 천체/은하 스케일 확장")
+        println("- 권장: `블로업 cosmology 3` + 제품 배포 검증")
+    }
+
+    println("")
+
+    // EXACT 비율 레이더
+    println("## EXACT 비율 (레이어별)")
+    println("")
+    li = 0
+    while li < len(layers) {
+        let l = layers[li]
+        let exact_pct = if l.nodes > 0 { to_int(to_float(l.exact) / to_float(l.nodes) * 100.0) } else { 0 }
+        let bar = progress_bar(to_float(exact_pct), 20)
+        println(l.icon + " " + l.name + " " + bar + " " + to_string(exact_pct) + "%")
+        li = li + 1
+    }
+
+    println("")
+    println("---")
+    println("layer_dashboard.hexa — TODO #18 자동 집계")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── OUTPUT: brief ───
+// ═══════════════════════════════════════════════════════════
+
+fn print_brief(layers) {
+    let mut out = "📊 레이어: "
+    let mut li = 0
+    while li < len(layers) {
+        let l = layers[li]
+        if li > 0 { out = out + " | " }
+        out = out + l.name + "(" + l.label + ")=" + to_string(to_int(l.pct)) + "%"
+        li = li + 1
+    }
+
+    let bn = find_bottleneck(layers)
+    out = out + " ⚠병목:" + bn.name + "(" + bn.label + ")"
+    println(out)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── OUTPUT: json ───
+// ═══════════════════════════════════════════════════════════
+
+fn print_json(layers, bt, conv, disc_total) {
+    let ts = exec("date +%Y-%m-%dT%H:%M:%S")
+    let mut out = "{\n  \"_meta\": {\"tool\": \"layer_dashboard.hexa\", \"ts\": \"" + ts.trim() + "\"},\n  \"layers\": [\n"
+
+    let mut li = 0
+    while li < len(layers) {
+        let l = layers[li]
+        if li > 0 { out = out + ",\n" }
+        out = out + "    {\"name\": \"" + l.name + "\", \"label\": \"" + l.label + "\""
+        out = out + ", \"nodes\": " + to_string(l.nodes)
+        out = out + ", \"exact\": " + to_string(l.exact)
+        out = out + ", \"close\": " + to_string(l.close)
+        out = out + ", \"miss\": " + to_string(l.miss)
+        out = out + ", \"pct\": " + to_string(to_int(l.pct))
+        out = out + "}"
+        li = li + 1
+    }
+
+    out = out + "\n  ],\n"
+
+    let bn = find_bottleneck(layers)
+    out = out + "  \"bottleneck\": \"" + bn.name + " (" + bn.label + ") " + to_string(to_int(bn.pct)) + "%\",\n"
+    out = out + "  \"bt_total\": " + to_string(bt["total"]) + ",\n"
+    out = out + "  \"bt_accuracy\": " + to_string(bt["accuracy"]) + ",\n"
+    out = out + "  \"discoveries\": " + to_string(disc_total) + ",\n"
+    out = out + "  \"convergence\": {\"ossified\": " + to_string(conv["ossified"]) + ", \"stable\": " + to_string(conv["stable"]) + ", \"failed\": " + to_string(conv["failed"]) + "}\n"
+    out = out + "}"
+
+    println(out)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+let cli_args = args()
+let mut mode = "report"
+if len(cli_args) >= 3 {
+    mode = cli_args[2]
+}
+
+// 데이터 수집
+let node_stats = count_nodes_by_layer()
+let bt = count_bt_stats()
+let conv = count_convergence()
+let disc_total = count_discoveries()
+let layers = build_layers(node_stats, conv, bt)
+
+if mode == "report" {
+    print_report(layers, bt, conv, disc_total)
+}
+
+if mode == "brief" {
+    print_brief(layers)
+}
+
+if mode == "json" {
+    print_json(layers, bt, conv, disc_total)
+}
+
+if mode == "help" {
+    println("layer_dashboard.hexa — L0~L4 구간별 완성도 대시보드")
+    println("")
+    println("사용: hexa layer_dashboard.hexa [report|brief|json|help]")
+    println("")
+    println("  report — 마크다운 테이블 출력 (기본)")
+    println("  brief  — 1줄 요약 (배너용)")
+    println("  json   — JSON 출력 (파이프라인용)")
+    println("  help   — 이 도움말")
+    println("")
+    println("레이어 정의:")
+    println("  L0 (상수)         — 기본 입자/원자 물리 상수")
+    println("  L1 (소재)         — 결합/분자/유전/물질/생체")
+    println("  L2 (어플리케이션) — 응용 과학/인문 도메인")
+    println("  L3 (테크놀로지)   — 공학/기술 도메인")
+    println("  L4 (프로덕션)     — 천체/은하/우주론 + 배포")
+}

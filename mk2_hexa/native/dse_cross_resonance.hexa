@@ -1,0 +1,462 @@
+// dse_cross_resonance.hexa — DSE 교차공명 236쌍 전수 융합 루프 (TODO #17)
+// domain_seeds.jsonl의 모든 도메인 쌍 교차 융합 → 공명 탐지 → blowup 트리거
+//
+// Usage:
+//   hexa dse_cross_resonance.hexa              전수 융합 + 리포트
+//   hexa dse_cross_resonance.hexa --dry-run    블로업 미실행, 탐지만
+//   hexa dse_cross_resonance.hexa --summary    한줄 요약
+//   hexa dse_cross_resonance.hexa --top N      상위 N쌍만 블로업
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e { v = 0.0 }
+    return v
+}
+
+fn json_str(line: string, field: string) -> string {
+    let marker = "\"" + field + "\":\""
+    let parts = line.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let end_parts = rest.split("\"")
+    if end_parts.len() < 1 { return "" }
+    return end_parts[0]
+}
+
+fn json_num(line: string, field: string) -> f64 {
+    let marker = "\"" + field + "\":"
+    let parts = line.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let rest = parts[1]
+    let end_str = rest.split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(end_str)
+}
+
+// 도메인 시드 로드: #{"domains": [...], "seeds": #{domain -> [#{name, value, ref}]}}
+fn load_domain_seeds(shared) {
+    let path = shared + "/domain_seeds.jsonl"
+    let mut raw = ""
+    try { raw = read_file(path) } catch e {
+        println("[ERROR] cannot read " + path + " -- " + to_string(e))
+        return #{"domains": [], "seeds": #{}}
+    }
+    let lines = raw.split("\n")
+    let mut domains = []
+    let mut domain_set = #{}
+    let mut seeds = #{}
+
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i].trim()
+        i = i + 1
+        if line == "" { continue }
+
+        let domain = json_str(line, "domain")
+        let name = json_str(line, "name")
+        let value = json_num(line, "value")
+        let ref_str = json_str(line, "ref")
+
+        if domain == "" { continue }
+
+        if !domain_set.contains_key(domain) {
+            domain_set[domain] = 1
+            domains.push(domain)
+            seeds[domain] = []
+        }
+
+        let entry = #{
+            "name": name,
+            "value": to_string(value),
+            "ref": ref_str
+        }
+        seeds[domain].push(entry)
+    }
+
+    return #{"domains": domains, "seeds": seeds}
+}
+
+// 기존 dse_cross_results.json 로드: #{pair_key -> score}
+fn load_existing_results(shared) {
+    let path = shared + "/dse_cross_results.json"
+    let mut existing = #{}
+    if !file_exists(path) { return existing }
+
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return existing }
+
+    // high_confidence 배열 파싱
+    let mut hc_raw = ""
+    try {
+        let hcp = raw.split("\"high_confidence\":[")
+        if hcp.len() >= 2 { hc_raw = hcp[1].split("]")[0] }
+    } catch e {}
+
+    if hc_raw == "" { return existing }
+
+    let entries = hc_raw.split("},{")
+    let mut ei = 0
+    while ei < entries.len() {
+        let entry = entries[ei]
+        ei = ei + 1
+        let a = json_str(entry, "a")
+        let b = json_str(entry, "b")
+        let score = json_num(entry, "score")
+        if a != "" && b != "" {
+            let key = a + "|" + b
+            existing[key] = to_string(score)
+        }
+    }
+    return existing
+}
+
+// 두 도메인의 시드 간 교차점 탐색
+// 반환: #{"kw": shared_keywords, "val": shared_values, "score": resonance_score}
+fn find_crosspoints(seeds_a, seeds_b, domain_a, domain_b) {
+    let mut shared_kw = ""
+    let mut shared_val = ""
+    let mut kw_count = 0
+    let mut val_count = 0
+
+    // 1) 값 일치 탐색 (동일 상수가 다른 도메인에서 출현 = 강한 공명)
+    let mut ai = 0
+    while ai < seeds_a.len() {
+        let sa = seeds_a[ai]
+        let va = safe_float(to_string(sa["value"]))
+        let mut bi = 0
+        while bi < seeds_b.len() {
+            let sb = seeds_b[bi]
+            let vb = safe_float(to_string(sb["value"]))
+
+            // 값 일치 (5% 허용 오차)
+            let diff = if va > vb { va - vb } else { vb - va }
+            let max_v = if va > vb { va } else { vb }
+            if max_v > 0.0001 {
+                let ratio = diff / max_v
+                if ratio < 0.05 {
+                    val_count = val_count + 1
+                    let tag = to_string(sa["name"]) + "=" + to_string(sb["name"])
+                    if shared_val == "" { shared_val = tag } else { shared_val = shared_val + "/" + tag }
+                }
+            }
+
+            // 2) ref 키워드 교차 (공통 단어 탐색)
+            let ref_a = to_string(sa["ref"]).to_lower()
+            let ref_b = to_string(sb["ref"]).to_lower()
+            let words_a = ref_a.split(" ")
+            let mut wi = 0
+            while wi < words_a.len() {
+                let w = words_a[wi]
+                wi = wi + 1
+                if w.len() < 3 { continue }
+                if ref_b.contains(w) {
+                    kw_count = kw_count + 1
+                    if shared_kw == "" { shared_kw = w } else {
+                        if !shared_kw.contains(w) {
+                            shared_kw = shared_kw + "/" + w
+                        }
+                    }
+                }
+            }
+
+            bi = bi + 1
+        }
+        ai = ai + 1
+    }
+
+    // 3) n=6 공명 체크: 값의 sopfr/sigma/tau가 6 관련인지
+    let mut n6_hits = 0
+    let mut ci = 0
+    while ci < seeds_a.len() {
+        let v = to_int(safe_float(to_string(seeds_a[ci]["value"])))
+        if v > 0 {
+            try {
+                let s = sigma(v)
+                let t = tau(v)
+                let sp = sopfr(v)
+                if s == 12 || t == 4 || sp == 6 || sp == 5 || v == 6 || v == 12 || v == 24 {
+                    n6_hits = n6_hits + 1
+                }
+            } catch e {}
+        }
+        ci = ci + 1
+    }
+    let mut di = 0
+    while di < seeds_b.len() {
+        let v = to_int(safe_float(to_string(seeds_b[di]["value"])))
+        if v > 0 {
+            try {
+                let s = sigma(v)
+                let t = tau(v)
+                let sp = sopfr(v)
+                if s == 12 || t == 4 || sp == 6 || sp == 5 || v == 6 || v == 12 || v == 24 {
+                    n6_hits = n6_hits + 1
+                }
+            } catch e {}
+        }
+        di = di + 1
+    }
+
+    // 공명 스코어: 값일치 * 0.4 + 키워드교차 * 0.3 + n6공명 * 0.3
+    let raw_score = to_float(val_count) * 0.4 + to_float(kw_count) * 0.3 + to_float(n6_hits) * 0.3
+    // 정규화 (0~1)
+    let score = if raw_score > 10.0 { 1.0 } else { raw_score / 10.0 }
+
+    return #{"kw": shared_kw, "val": shared_val, "score": to_string(score)}
+}
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let shared = home + "/Dev/nexus/shared"
+    let hexa_bin = home + "/Dev/hexa-lang/target/release/hexa"
+    let blowup_path = home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
+    let bus_path = shared + "/growth_bus.jsonl"
+    let out_path = shared + "/dse_cross_resonance_results.json"
+
+    let a = args()
+    let mode = if a.len() >= 3 { a[2] } else { "" }
+
+    let dry_run = mode == "--dry-run"
+    let summary_mode = mode == "--summary"
+    let mut top_n: i64 = 0
+    if mode == "--top" && a.len() >= 4 {
+        top_n = to_int(to_float(a[3]))
+    }
+
+    if mode == "--help" {
+        println("dse_cross_resonance.hexa -- DSE 교차공명 전수 융합 루프")
+        println("Usage:")
+        println("  hexa dse_cross_resonance.hexa              전수 융합 + blowup 트리거")
+        println("  hexa dse_cross_resonance.hexa --dry-run    블로업 미실행, 탐지만")
+        println("  hexa dse_cross_resonance.hexa --summary    한줄 요약")
+        println("  hexa dse_cross_resonance.hexa --top N      상위 N쌍만 블로업")
+        return
+    }
+
+    // ─── Phase 1: 도메인 시드 로드 ───
+    let loaded = load_domain_seeds(shared)
+    let domains = loaded["domains"]
+    let seeds = loaded["seeds"]
+    let n_domains = to_int(domains.len())
+
+    if !summary_mode {
+        println("")
+        println("=== DSE CROSS-RESONANCE FUSION ===")
+        println("  domains loaded: " + to_string(n_domains))
+        println("  total pairs:    " + to_string(n_domains * (n_domains - 1) / 2))
+    }
+
+    // ─── Phase 2: 기존 결과 로드 (보강용) ───
+    let existing = load_existing_results(shared)
+    if !summary_mode {
+        println("  existing HC pairs: " + to_string(keys(existing).len()))
+    }
+
+    // ─── Phase 3: 전수 쌍 생성 + 교차점 탐색 ───
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    let mut pairs = []
+    let mut resonant_count: i64 = 0
+    let mut blowup_count: i64 = 0
+    let mut high_resonance: i64 = 0
+    let mut bus_buf = ""
+
+    let mut i: i64 = 0
+    while i < n_domains {
+        let mut j = i + 1
+        while j < n_domains {
+            let da = to_string(domains[i])
+            let db = to_string(domains[j])
+            let sa = seeds[da]
+            let sb = seeds[db]
+
+            let cp = find_crosspoints(sa, sb, da, db)
+            let shared_kw = to_string(cp["kw"])
+            let shared_val = to_string(cp["val"])
+            let score = safe_float(to_string(cp["score"]))
+
+            // 기존 결과에서 보강 스코어
+            let ekey1 = da + "|" + db
+            let ekey2 = db + "|" + da
+            let mut boost = 0.0
+            if existing.contains_key(ekey1) {
+                boost = safe_float(to_string(existing[ekey1]))
+            }
+            if existing.contains_key(ekey2) {
+                boost = safe_float(to_string(existing[ekey2]))
+            }
+
+            let final_score = if boost > 0.0 {
+                // 기존 공명과 결합: 가중 평균
+                score * 0.6 + boost * 0.4
+            } else {
+                score
+            }
+
+            let is_resonant = final_score >= 0.1
+            if is_resonant { resonant_count = resonant_count + 1 }
+            if final_score >= 0.3 { high_resonance = high_resonance + 1 }
+
+            let pair = #{
+                "a": da,
+                "b": db,
+                "shared_kw": shared_kw,
+                "shared_val": shared_val,
+                "score": to_string(final_score),
+                "boosted": to_string(boost > 0.0),
+                "resonant": to_string(is_resonant)
+            }
+            pairs.push(pair)
+
+            // growth_bus 이벤트 (공명 쌍만)
+            if is_resonant {
+                let evt = "{\"ts\":\"" + ts + "\",\"type\":\"dse_cross_resonance\",\"domain_a\":\"" + da + "\",\"domain_b\":\"" + db + "\",\"shared_kw\":\"" + shared_kw + "\",\"shared_val\":\"" + shared_val + "\",\"score\":" + to_string(final_score) + ",\"source\":\"dse_cross_resonance.hexa\"}\n"
+                bus_buf = bus_buf + evt
+            }
+
+            j = j + 1
+        }
+        i = i + 1
+    }
+
+    let total_pairs = to_int(pairs.len())
+
+    // ─── Phase 4: 스코어 기준 정렬 (상위부터 블로업) ───
+    // 간단 버블 정렬 (820쌍이면 충분히 빠름)
+    let mut si = 0
+    while si < total_pairs {
+        let mut sj = si + 1
+        while sj < total_pairs {
+            let score_i = safe_float(to_string(pairs[si]["score"]))
+            let score_j = safe_float(to_string(pairs[sj]["score"]))
+            if score_j > score_i {
+                let tmp = pairs[si]
+                pairs[si] = pairs[sj]
+                pairs[sj] = tmp
+            }
+            sj = sj + 1
+        }
+        si = si + 1
+    }
+
+    // ─── Phase 5: 블로업 트리거 (공명 >= 0.3인 쌍) ───
+    if !dry_run {
+        let limit = if top_n > 0 { top_n } else { high_resonance }
+        let mut bi: i64 = 0
+        let mut pi: i64 = 0
+        while pi < total_pairs && bi < limit {
+            let p = pairs[pi]
+            pi = pi + 1
+            let ps = safe_float(to_string(p["score"]))
+            if ps < 0.3 { break }
+
+            let da = to_string(p["a"])
+            let db = to_string(p["b"])
+            let fused_domain = da + "+" + db
+
+            // seed_engine merge로 시드 확보
+            let mut seed_str = ""
+            try {
+                seed_str = exec(hexa_bin + " " + home + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa merge")
+            } catch e {}
+
+            // blowup 실행 (depth=3, 그래프 생략)
+            let mut blowup_cmd = hexa_bin + " " + blowup_path + " " + fused_domain + " 3 --no-graph"
+            if seed_str != "" {
+                blowup_cmd = blowup_cmd + " --seeds \"" + seed_str + "\""
+            }
+
+            if !summary_mode {
+                println("  [blowup] " + da + " x " + db + " (score=" + to_string(ps) + ")")
+            }
+            try { exec(blowup_cmd) } catch e {
+                if !summary_mode {
+                    println("  [warn] blowup failed: " + to_string(e))
+                }
+            }
+            blowup_count = blowup_count + 1
+            bi = bi + 1
+        }
+    }
+
+    // ─── Phase 6: 결과 JSON 저장 ───
+    let mut json_pairs = "["
+    let mut ji: i64 = 0
+    let max_out = if total_pairs > 500 { 500 } else { total_pairs }
+    while ji < max_out {
+        let p = pairs[ji]
+        if ji > 0 { json_pairs = json_pairs + "," }
+        json_pairs = json_pairs + "{\"a\":\"" + to_string(p["a"]) + "\",\"b\":\"" + to_string(p["b"]) + "\",\"shared_kw\":\"" + to_string(p["shared_kw"]) + "\",\"shared_val\":\"" + to_string(p["shared_val"]) + "\",\"score\":" + to_string(p["score"]) + ",\"resonant\":" + to_string(p["resonant"]) + "}"
+        ji = ji + 1
+    }
+    json_pairs = json_pairs + "]"
+
+    // 상위 공명 쌍 (score >= 0.3)
+    let mut json_hc = "["
+    let mut hi: i64 = 0
+    while hi < total_pairs {
+        let p = pairs[hi]
+        let ps = safe_float(to_string(p["score"]))
+        if ps < 0.3 { break }
+        if hi > 0 { json_hc = json_hc + "," }
+        json_hc = json_hc + "{\"a\":\"" + to_string(p["a"]) + "\",\"b\":\"" + to_string(p["b"]) + "\",\"shared_kw\":\"" + to_string(p["shared_kw"]) + "\",\"shared_val\":\"" + to_string(p["shared_val"]) + "\",\"score\":" + to_string(p["score"]) + "}"
+        hi = hi + 1
+    }
+    json_hc = json_hc + "]"
+
+    let out_json = "{\n  \"generated_at\":\"" + ts + "\",\n  \"source\":\"domain_seeds.jsonl\",\n  \"n_domains\":" + to_string(n_domains) + ",\n  \"total_pairs\":" + to_string(total_pairs) + ",\n  \"resonant_pairs\":" + to_string(resonant_count) + ",\n  \"high_resonance\":" + to_string(high_resonance) + ",\n  \"blowups_triggered\":" + to_string(blowup_count) + ",\n  \"high_confidence\":" + json_hc + ",\n  \"all_pairs\":" + json_pairs + "\n}\n"
+
+    try { write_file(out_path, out_json) } catch e {
+        println("[ERROR] write failed: " + to_string(e))
+    }
+
+    // ─── Phase 7: growth_bus 기록 ───
+    if bus_buf != "" {
+        try {
+            let existing_bus = exec("cat " + bus_path)
+            write_file(bus_path, existing_bus + bus_buf)
+        } catch e {
+            println("[WARN] growth_bus write failed: " + to_string(e))
+        }
+    }
+
+    // 요약 이벤트
+    try {
+        let summary_evt = "{\"ts\":\"" + ts + "\",\"type\":\"dse_cross_resonance_complete\",\"n_domains\":" + to_string(n_domains) + ",\"total_pairs\":" + to_string(total_pairs) + ",\"resonant\":" + to_string(resonant_count) + ",\"high_resonance\":" + to_string(high_resonance) + ",\"blowups\":" + to_string(blowup_count) + ",\"source\":\"dse_cross_resonance.hexa\"}\n"
+        let existing_bus2 = exec("cat " + bus_path)
+        write_file(bus_path, existing_bus2 + summary_evt)
+    } catch e {}
+
+    // ─── 리포트 ───
+    if summary_mode {
+        println("[dse_xr] domains=" + to_string(n_domains) + " pairs=" + to_string(total_pairs) + " resonant=" + to_string(resonant_count) + " high=" + to_string(high_resonance) + " blowups=" + to_string(blowup_count))
+    } else {
+        println("")
+        println("─── RESULTS ───")
+        println("  total pairs:      " + to_string(total_pairs))
+        println("  resonant (>=0.1): " + to_string(resonant_count))
+        println("  high (>=0.3):     " + to_string(high_resonance))
+        println("  blowups fired:    " + to_string(blowup_count))
+        println("  output:           " + out_path)
+
+        // 상위 10쌍 표시
+        println("")
+        println("─── TOP 10 PAIRS ───")
+        let mut ti: i64 = 0
+        let show_n = if total_pairs < 10 { total_pairs } else { 10 }
+        while ti < show_n {
+            let p = pairs[ti]
+            let da = to_string(p["a"])
+            let db = to_string(p["b"])
+            let ps = to_string(p["score"])
+            let kw = to_string(p["shared_kw"])
+            let sv = to_string(p["shared_val"])
+            println("  " + to_string(ti + 1) + ". " + da + " x " + db + "  score=" + ps)
+            if kw != "" { println("     kw: " + kw) }
+            if sv != "" { println("     val: " + sv) }
+            ti = ti + 1
+        }
+        println("")
+        println("=== DSE CROSS-RESONANCE COMPLETE ===")
+    }
+}
+
+main()

@@ -811,49 +811,306 @@ function setStatus(text, running) {
   }
 }
 
-// Check if daemon is already running (PID file)
+// Check if SSE server / daemon is already running
 async function checkDaemon() {
   try {
-    const r = await fetch('http://localhost:6600/status');
-    if (r.ok) { setStatus('RUNNING — daemon detected', true); return; }
+    const r = await fetch('http://127.0.0.1:6600/status', { signal: AbortSignal.timeout(3000) });
+    if (r.ok) {
+      const data = await r.json();
+      setStatus('SSE ACTIVE — ' + data.clients + ' clients, evt#' + data.event_id, true);
+      return;
+    }
   } catch(e) {}
-  // Fallback: just show idle
+  // SSE server not available, fall back to static mode
+  setStatus('STATIC MODE — SSE server offline', false);
 }
 
 function startDaemon() {
   if (daemonRunning) return;
-  setStatus('STARTING...', true);
-  // Simulate start — in production, this calls the daemon API or shell
-  setTimeout(() => setStatus('RUNNING — daemon active', true), 300);
+  setStatus('STARTING SSE...', true);
+  // Attempt to connect SSE
+  sseConnect();
+  setTimeout(() => {
+    if (sseSource && sseSource.readyState === EventSource.OPEN) {
+      setStatus('SSE CONNECTED', true);
+    } else {
+      setStatus('SSE CONNECTING... (start server: hexa sse_dashboard.hexa)', false);
+    }
+  }, 2000);
 }
 
 function stopDaemon() {
-  setStatus('STOPPING...', true);
-  setTimeout(() => setStatus('STOPPED', false), 300);
+  sseDisconnect();
+  setStatus('SSE STOPPED', false);
+  daemonRunning = false;
 }
 
 function runOneCycle() {
   if (daemonRunning) return;
-  setStatus('RUNNING — 1 cycle...', true);
-  setTimeout(() => setStatus('IDLE — cycle complete', false), 3000);
+  setStatus('FETCHING SNAPSHOT...', true);
+  fetch('http://127.0.0.1:6600/snapshot', { signal: AbortSignal.timeout(5000) })
+    .then(r => r.json())
+    .then(snap => {
+      sseApplySnapshot(snap);
+      setStatus('SNAPSHOT UPDATED', false);
+    })
+    .catch(() => setStatus('FETCH FAILED — SSE server offline?', false));
 }
 
 function dryRun() {
   if (daemonRunning) return;
-  setStatus('DRY-RUN — analyzing...', true);
-  setTimeout(() => setStatus('IDLE — dry-run complete', false), 2000);
+  setStatus('DRY-RUN — checking SSE server...', true);
+  fetch('http://127.0.0.1:6600/status', { signal: AbortSignal.timeout(3000) })
+    .then(r => r.json())
+    .then(data => {
+      setStatus('DRY-RUN OK — server up, ' + data.clients + ' clients, ' + data.dims + ' dims', false);
+    })
+    .catch(() => setStatus('DRY-RUN — SSE server not reachable', false));
+}
+
+// ═══ SSE Real-time Connection ═══
+const SSE_URL = 'http://127.0.0.1:6600/events';
+const SSE_RECONNECT_BASE = 1000;   // 1s initial
+const SSE_RECONNECT_MAX  = 30000;  // 30s max backoff
+const SSE_RECONNECT_DECAY = 0.9;   // decay factor after success
+
+let sseSource = null;
+let sseReconnectDelay = SSE_RECONNECT_BASE;
+let sseReconnectTimer = null;
+let sseLastEventId = null;
+let sseConnectedSince = null;
+let sseMissedHeartbeats = 0;
+let sseHeartbeatTimer = null;
+const SSE_HEARTBEAT_TIMEOUT = 45000;  // expect heartbeat within 45s (server sends every 15s)
+
+function sseUpdateStatus(text, connected) {
+  const el = document.getElementById('daemon-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'status' + (connected ? ' running' : '');
+}
+
+function sseConnect() {
+  if (sseSource) {
+    try { sseSource.close(); } catch(e) {}
+  }
+  clearTimeout(sseReconnectTimer);
+  clearTimeout(sseHeartbeatTimer);
+
+  sseUpdateStatus('SSE CONNECTING...', false);
+
+  try {
+    sseSource = new EventSource(SSE_URL);
+  } catch(e) {
+    sseScheduleReconnect();
+    return;
+  }
+
+  sseSource.onopen = function() {
+    sseConnectedSince = Date.now();
+    sseReconnectDelay = SSE_RECONNECT_BASE;
+    sseMissedHeartbeats = 0;
+    sseUpdateStatus('SSE CONNECTED', true);
+    sseResetHeartbeatWatch();
+  };
+
+  // snapshot event: full 15-dim state update
+  sseSource.addEventListener('snapshot', function(e) {
+    sseLastEventId = e.lastEventId;
+    sseResetHeartbeatWatch();
+    try {
+      const snap = JSON.parse(e.data);
+      sseApplySnapshot(snap);
+    } catch(err) {
+      console.warn('[SSE] snapshot parse error:', err);
+    }
+  });
+
+  // discovery event: new constant/finding
+  sseSource.addEventListener('discovery', function(e) {
+    sseLastEventId = e.lastEventId;
+    sseResetHeartbeatWatch();
+    try {
+      const evt = JSON.parse(e.data);
+      sseAppendDiscovery(evt);
+    } catch(err) {
+      console.warn('[SSE] discovery parse error:', err);
+    }
+  });
+
+  // breakthrough event: major discovery (6+ constants)
+  sseSource.addEventListener('breakthrough', function(e) {
+    sseLastEventId = e.lastEventId;
+    sseResetHeartbeatWatch();
+    try {
+      const evt = JSON.parse(e.data);
+      sseAppendBreakthrough(evt);
+    } catch(err) {
+      console.warn('[SSE] breakthrough parse error:', err);
+    }
+  });
+
+  sseSource.onerror = function(e) {
+    // EventSource auto-reconnects on network errors, but we add our own
+    // logic for better backoff and status reporting
+    if (sseSource.readyState === EventSource.CLOSED) {
+      sseUpdateStatus('SSE DISCONNECTED', false);
+      sseScheduleReconnect();
+    } else if (sseSource.readyState === EventSource.CONNECTING) {
+      sseUpdateStatus('SSE RECONNECTING...', false);
+    }
+  };
+}
+
+function sseScheduleReconnect() {
+  clearTimeout(sseReconnectTimer);
+  // Exponential backoff with jitter
+  const jitter = Math.random() * 0.3 * sseReconnectDelay;
+  const delay = Math.min(sseReconnectDelay + jitter, SSE_RECONNECT_MAX);
+  sseUpdateStatus('SSE RETRY in ' + Math.round(delay/1000) + 's', false);
+  sseReconnectTimer = setTimeout(function() {
+    sseReconnectDelay = Math.min(sseReconnectDelay * 1.5, SSE_RECONNECT_MAX);
+    sseConnect();
+  }, delay);
+}
+
+function sseResetHeartbeatWatch() {
+  clearTimeout(sseHeartbeatTimer);
+  sseMissedHeartbeats = 0;
+  sseHeartbeatTimer = setTimeout(function() {
+    sseMissedHeartbeats++;
+    if (sseMissedHeartbeats >= 2) {
+      // 2 missed heartbeats = likely dead connection
+      console.warn('[SSE] heartbeat timeout, reconnecting...');
+      sseUpdateStatus('SSE HEARTBEAT LOST', false);
+      if (sseSource) {
+        try { sseSource.close(); } catch(e) {}
+      }
+      sseScheduleReconnect();
+    } else {
+      // Give one more chance
+      sseHeartbeatTimer = setTimeout(function() {
+        console.warn('[SSE] 2nd heartbeat miss, forcing reconnect');
+        if (sseSource) {
+          try { sseSource.close(); } catch(e) {}
+        }
+        sseScheduleReconnect();
+      }, SSE_HEARTBEAT_TIMEOUT);
+    }
+  }, SSE_HEARTBEAT_TIMEOUT);
+}
+
+function sseApplySnapshot(snap) {
+  if (!snap || !snap.dims) return;
+  // Update the latest growth data point (add to G array or update last)
+  const newPoint = { ts: snap.ts || new Date().toISOString() };
+  const dims = snap.dims;
+  for (const d of Object.keys(dims)) {
+    newPoint[d] = dims[d].value || 0;
+  }
+  // Replace or append the latest snapshot
+  if (G.length > 0) {
+    const lastTs = G[G.length - 1].ts;
+    // If same cycle, update in place; otherwise append
+    if (snap.cycle && G[G.length - 1]._cycle === snap.cycle) {
+      G[G.length - 1] = newPoint;
+      G[G.length - 1]._cycle = snap.cycle;
+    } else {
+      newPoint._cycle = snap.cycle;
+      G.push(newPoint);
+      // Keep max 20 snapshots for chart
+      if (G.length > 20) G.shift();
+    }
+  } else {
+    newPoint._cycle = snap.cycle;
+    G.push(newPoint);
+  }
+  // Update header stats
+  const sSnap = document.getElementById('s-snap');
+  if (sSnap) sSnap.textContent = G.length;
+  // Update closures/topology in status bar if elements exist
+  const hdrStats = document.querySelector('.hdr-stats');
+  if (hdrStats && snap.closures_total) {
+    const closuresEl = hdrStats.querySelector('[data-stat="closures"]');
+    if (closuresEl) closuresEl.textContent = snap.closures_total.toLocaleString();
+  }
+  // Redraw all charts
+  GROUPS.forEach((g, i) => drawChart('c' + i, g));
+}
+
+function sseAppendDiscovery(evt) {
+  // Add to D array and re-render log
+  const entry = {
+    c: evt.constant || evt.name || '?',
+    v: String(evt.value || evt.v || '?'),
+    s: evt.source || evt.src || '?',
+    t: evt.ts || evt.timestamp || new Date().toISOString()
+  };
+  D.push(entry);
+  const sDisc = document.getElementById('s-disc');
+  if (sDisc) sDisc.textContent = D.length;
+  renderLog();
+}
+
+function sseAppendBreakthrough(evt) {
+  // Add to BT array and re-render
+  const btEntry = {
+    t: evt.ts || evt.timestamp || new Date().toISOString(),
+    count: evt.count || evt.constants_count || 6,
+    consts: evt.constants || evt.consts || [],
+    src: evt.source || evt.src || '?'
+  };
+  BT.unshift(btEntry);
+  btSet.add(btEntry.t);
+  const sBt = document.getElementById('s-bt');
+  if (sBt) sBt.textContent = BT.length;
+  renderBT();
+  // Flash breakthrough bar
+  const btBar = document.querySelector('.bt-bar');
+  if (btBar) {
+    btBar.style.background = 'rgba(255,200,0,.15)';
+    setTimeout(() => { btBar.style.background = ''; }, 2000);
+  }
+}
+
+function sseDisconnect() {
+  clearTimeout(sseReconnectTimer);
+  clearTimeout(sseHeartbeatTimer);
+  if (sseSource) {
+    try { sseSource.close(); } catch(e) {}
+    sseSource = null;
+  }
+  sseUpdateStatus('SSE STOPPED', false);
 }
 
 // ═══ Init ═══
 function init() {
-  checkDaemon();
   renderBT();
   renderLog();
   GROUPS.forEach((g, i) => drawChart('c' + i, g));
+
+  // Try SSE connection (falls back gracefully to static data if server unavailable)
+  sseConnect();
+
+  // Also try legacy daemon check as fallback
+  checkDaemon();
 }
 
 window.addEventListener('load', init);
 window.addEventListener('resize', () => GROUPS.forEach((g, i) => drawChart('c' + i, g)));
+
+// Reconnect SSE when page becomes visible again (tab switch, sleep wake)
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden && sseSource && sseSource.readyState === EventSource.CLOSED) {
+    sseReconnectDelay = SSE_RECONNECT_BASE;
+    sseConnect();
+  }
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', function() {
+  sseDisconnect();
+});
 </script>
 </body>
 </html>

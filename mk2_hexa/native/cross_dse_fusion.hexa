@@ -1,103 +1,158 @@
-// cross_dse_fusion.hexa — Cross-DSE fusion aggregator
-// Reads shared/dse_cross/all_pairs_s05.jsonl (existing pair data with shared_consts/formulas)
-// Counts shared n=6 constant lenses per pair; 3+ = high confidence
-// Writes: shared/dse_cross_results.json   (dedup by sorted pair key)
-// Appends: shared/growth_bus.jsonl        (high-confidence only)
-// Updates: shared/core.json dse.cross_fusion block (backup first)
+// cross_dse_fusion.hexa — Cross-DSE 335+ TOML 교차 융합 엔진 (TODO #31)
+// 1) DSE TOML 전수 스캔 → 도메인 메타/스코어/키워드 추출
+// 2) 도메인 쌍별 교차점 매트릭스 (keywords, scoring weights, levels, n6 sim, seeds)
+// 3) 공명 점수 높은 쌍 우선 융합
+// 4) 결과 → shared/dse_cross_results.json + growth_bus.jsonl
+//
+// Usage:
+//   hexa cross_dse_fusion.hexa              전체 교차 융합
+//   hexa cross_dse_fusion.hexa --summary    요약만 출력
+//   hexa cross_dse_fusion.hexa --top N      상위 N쌍 (default 30)
+//   hexa cross_dse_fusion.hexa --domain X   특정 도메인 포함 쌍만
 
-fn count_consts(s: string) -> i64 {
-    if s == "" { return 0 }
-    let parts = s.split("/")
-    return to_int(parts.len())
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s.trim())) } catch e { v = 0 }
+    return v
 }
 
 fn main() {
     let home = exec("printenv HOME").trim()
-    let root = home + "/Dev/nexus/shared"
-    let pairs_path = root + "/dse_cross/all_pairs_s05.jsonl"
-    let out_path = root + "/dse_cross_results.json"
-    let bus_path = root + "/growth_bus.jsonl"
-    let core_path = root + "/core.json"
+    let shared = home + "/Dev/nexus/shared"
+    let dse_dir = shared + "/dse/domains"
+    let out_path = shared + "/dse_cross_results.json"
+    let bus_path = shared + "/growth_bus.jsonl"
+    let seeds_path = shared + "/domain_seeds.jsonl"
 
-    let raw = exec("cat " + pairs_path)
-    let lines = raw.split("\n")
-    let n_lines = to_int(lines.len())
-
-    let mut pair_count: i64 = 0
-    let mut high_conf: i64 = 0
-    let mut seen = #{}
-    let mut top_json = "["
-    let mut top_added: i64 = 0
-    let mut hc_json = "["
-    let mut hc_added: i64 = 0
-    let mut bus_buf = ""
-    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
-
-    let mut i: i64 = 0
-    while i < n_lines {
-        let line = lines[i].trim()
-        i = i + 1
-        if line == "" { continue }
-        // naive JSON field extraction — rely on stable ordering from producer
-        let mut obj = #{}
-        try { obj = json_parse(line) } catch e { continue }
-        let a = to_string(obj["a"])
-        let b = to_string(obj["b"])
-        let k1 = a + "|" + b
-        let k2 = b + "|" + a
-        let key = k1
-        if seen.contains_key(k2) { continue }
-        if seen.contains_key(key) { continue }
-        seen[key] = 1
-
-        let sc = if obj.contains_key("shared_consts") { to_string(obj["shared_consts"]) } else { "" }
-        let sf_len = if obj.contains_key("shared_formulas") {
-            to_int(obj["shared_formulas"].len())
-        } else { 0 }
-        let n_consts = count_consts(sc)
-        let n_lenses = n_consts + sf_len
-        let score = if obj.contains_key("score") { to_float(to_string(obj["score"])) } else { 0.0 }
-
-        pair_count = pair_count + 1
-
-        let entry = "{\"a\":\"" + a + "\",\"b\":\"" + b + "\",\"shared_consts\":\"" + sc + "\",\"n_consts\":" + to_string(n_consts) + ",\"n_shared_formulas\":" + to_string(sf_len) + ",\"n_lenses\":" + to_string(n_lenses) + ",\"score\":" + to_string(score) + "}"
-
-        if top_added < 50 {
-            if top_added > 0 { top_json = top_json + "," }
-            top_json = top_json + entry
-            top_added = top_added + 1
+    // ─── ARGS ───
+    let a = args()
+    let mut mode = ""
+    let mut top_n: i64 = 30
+    let mut filter_domain = ""
+    let mut ai: i64 = 2
+    while ai < to_int(a.len()) {
+        if a[ai] == "--summary" { mode = "summary" }
+        if a[ai] == "--help" {
+            println("cross_dse_fusion.hexa -- Cross-DSE 335+ TOML 교차 융합")
+            println("  --summary        요약만")
+            println("  --top N          상위 N쌍 (default 30)")
+            println("  --domain NAME    특정 도메인 필터")
+            return
         }
+        if a[ai] == "--top" && ai + 1 < to_int(a.len()) {
+            top_n = safe_int(a[ai + 1])
+            if top_n < 1 { top_n = 30 }
+            ai = ai + 1
+        }
+        if a[ai] == "--domain" && ai + 1 < to_int(a.len()) {
+            filter_domain = a[ai + 1]
+            ai = ai + 1
+        }
+        ai = ai + 1
+    }
 
-        if n_lenses >= 3 {
-            high_conf = high_conf + 1
-            if hc_added > 0 { hc_json = hc_json + "," }
-            hc_json = hc_json + entry
-            hc_added = hc_added + 1
-            if hc_added <= 100 {
-                let evt = "{\"ts\":\"" + ts + "\",\"type\":\"cross_dse_resonance\",\"domain_a\":\"" + a + "\",\"domain_b\":\"" + b + "\",\"shared_consts\":\"" + sc + "\",\"n_lenses\":" + to_string(n_lenses) + ",\"score\":" + to_string(score) + ",\"source\":\"cross_dse_fusion.hexa\"}\n"
-                bus_buf = bus_buf + evt
+    println("=== Cross-DSE Fusion Engine ===")
+    println("[1/4] Scanning DSE TOML files...")
+
+    // ─── python3 위임: TOML 파싱 + 교차 매트릭스 + 융합 ───
+    // hexa = 오케스트레이터, 무거운 TOML 파싱/행렬은 python3 위임 (map_merge.hexa 패턴)
+    let script_path = shared + "/.tmp_cross_dse.py"
+
+    let summary_path = shared + "/.tmp_cross_dse_summary.txt"
+
+    let py_header = "import os,json,sys\ntry:\n    import tomllib\nexcept ImportError:\n    import tomli as tomllib\nfrom datetime import datetime,timezone\n\ndse_dir='" + dse_dir + "'\nout_path='" + out_path + "'\nseeds_path='" + seeds_path + "'\nsummary_path='" + summary_path + "'\ntop_n=" + to_string(top_n) + "\nfilter_dom='" + filter_domain + "'\n\n"
+
+    let py_scan = "# ── Phase 1: scan all TOML ──\nSTOP={'the','and','for','with','from','that','this','are','was','were','has','have','had',\n  'not','but','can','all','one','two','its','also','been','into','more','new','than',\n  'each','most','some','such','very','just','like','over','only','same','when','will',\n  'used','based','using','high','low','level','type','layer','node','none','true','false'}\n\ndomains={}\nfor f in sorted(os.listdir(dse_dir)):\n    if not f.endswith('.toml'): continue\n    fp=os.path.join(dse_dir,f)\n    try:\n        with open(fp,'rb') as fh: d=tomllib.load(fh)\n    except Exception as e:\n        print(f'  [WARN] skip {f}: {e}',file=sys.stderr)\n        continue\n    name=d.get('meta',{}).get('name',f.replace('.toml',''))\n    scoring=d.get('scoring',{})\n    candidates=[]\n    for c in d.get('candidate',[]):\n        candidates.append({'id':c.get('id',''),'level':c.get('level',0),'n6':c.get('n6',0.0),'label':c.get('label','')})\n    weights=sorted(scoring.keys())\n    levels=d.get('level',[])\n    level_names=[l.get('name','') for l in (levels if isinstance(levels,list) else [levels] if isinstance(levels,dict) else [])]\n    kw_text=(d.get('meta',{}).get('desc','')+' '+' '.join(c.get('label','') for c in candidates)).lower()\n    kw_set=set(w for w in kw_text.replace('/',' ').replace('-',' ').replace('(',' ').replace(')',' ').replace(',',' ').replace('=',' ').split() if len(w)>=4 and w not in STOP)\n    domains[name]={'file':f,'scoring_keys':weights,'level_names':level_names,'n_candidates':len(candidates),'keywords':kw_set,'n6_scores':[c.get('n6',0) for c in candidates]}\n\nprint(f'[scan] {len(domains)} TOML domains loaded',file=sys.stderr)\n\n"
+
+    let py_seeds = "# ── Load domain_seeds.jsonl ──\nseed_map={}\ntry:\n    with open(seeds_path) as f:\n        for line in f:\n            line=line.strip()\n            if not line: continue\n            s=json.loads(line)\n            dom=s.get('domain','')\n            seed_map.setdefault(dom,[]).append({'name':s.get('name',''),'value':s.get('value',0),'ref':s.get('ref','')})\nexcept: pass\nprint(f'[seeds] {len(seed_map)} domain seed groups',file=sys.stderr)\n\n"
+
+    let py_matrix = "# ── Phase 2: pairwise intersection matrix ──\ndom_list=sorted(domains.keys())\nn=len(dom_list)\npairs=[]\nfor i in range(n):\n    da=domains[dom_list[i]]\n    if filter_dom and filter_dom not in dom_list[i]: continue\n    for j in range(i+1,n):\n        db=domains[dom_list[j]]\n        if filter_dom and filter_dom not in dom_list[i] and filter_dom not in dom_list[j]: continue\n        kw_overlap=da['keywords']&db['keywords']\n        sw_overlap=set(da['scoring_keys'])&set(db['scoring_keys'])\n        ln_overlap=set(da['level_names'])&set(db['level_names'])\n        # n6 score similarity\n        n6a=da['n6_scores'][:6]\n        n6b=db['n6_scores'][:6]\n        n6_sim=0.0\n        if n6a and n6b:\n            ml=min(len(n6a),len(n6b))\n            diffs=sum(abs(n6a[k]-n6b[k]) for k in range(ml))/ml\n            n6_sim=max(0,1.0-diffs)\n        # shared seed constants\n        seeds_a=set(s['value'] for s in seed_map.get(dom_list[i],[]))\n        seeds_b=set(s['value'] for s in seed_map.get(dom_list[j],[]))\n        shared_seeds=seeds_a&seeds_b\n        # resonance score\n        kw_score=min(len(kw_overlap)/10.0, 1.0)\n        sw_score=min(len(sw_overlap)/4.0, 1.0)\n        ln_score=min(len(ln_overlap)/3.0, 1.0)\n        seed_score=min(len(shared_seeds)/3.0, 1.0)\n        resonance=0.30*kw_score + 0.20*sw_score + 0.20*n6_sim + 0.15*ln_score + 0.15*seed_score\n        if resonance<0.05: continue\n        pairs.append({'a':dom_list[i],'b':dom_list[j],'resonance':round(resonance,4),'kw_overlap':len(kw_overlap),'sw_overlap':len(sw_overlap),'ln_overlap':len(ln_overlap),'n6_sim':round(n6_sim,4),'shared_seeds':sorted(shared_seeds),'n_shared_seeds':len(shared_seeds),'top_keywords':sorted(kw_overlap)[:12]})\n\npairs.sort(key=lambda p:-p['resonance'])\nhigh_conf=[p for p in pairs if p['resonance']>=0.30]\nprint(f'[matrix] {len(pairs)} pairs (res>0.05), {len(high_conf)} high-conf (res>=0.30)',file=sys.stderr)\n\n"
+
+    let py_output = "# ── Phase 3: output ──\nts=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')\nresult={\n    'generated_at':ts,\n    'source':'dse/domains/*.toml (direct scan)',\n    'n_domains':len(domains),\n    'pair_count':len(pairs),\n    'high_confidence_count':len(high_conf),\n    'top_n':top_n,\n    'top_pairs':pairs[:top_n],\n    'high_confidence':high_conf,\n    'domain_stats':{name:{'n_candidates':d['n_candidates'],'scoring_keys':d['scoring_keys'],'file':d['file']} for name,d in domains.items()}\n}\njson.dump(result,open(out_path,'w'),ensure_ascii=False,indent=2)\nprint(f'[output] {out_path}',file=sys.stderr)\n\n# write summary to file for hexa to read back (exec stdout capture workaround)\nlines=[]\nlines.append(f'DOMAINS={len(domains)}')\nlines.append(f'PAIRS={len(pairs)}')\nlines.append(f'HIGH_CONF={len(high_conf)}')\nfor p in pairs[:15]:\n    lines.append(f\"  {p['a']:30s} <-> {p['b']:30s}  res={p['resonance']:.4f}  kw={p['kw_overlap']:3d}  n6={p['n6_sim']:.3f}  seeds={p['n_shared_seeds']}\")\nwith open(summary_path,'w') as sf:\n    sf.write('\\n'.join(lines)+'\\n')\nprint(f'[summary] {summary_path}',file=sys.stderr)\n"
+
+    let full_script = py_header + py_scan + py_seeds + py_matrix + py_output
+    write_file(script_path, full_script)
+
+    try {
+        exec("/usr/bin/python3 " + script_path)
+    } catch e {
+        println("[ERROR] fusion script failed: " + to_string(e))
+        exec("rm -f " + script_path)
+        return
+    }
+
+    // cleanup temp script
+    exec("rm -f " + script_path)
+
+    // ─── READ SUMMARY ───
+    let mut result = ""
+    try { result = read_file(summary_path) } catch e {
+        println("[ERROR] cannot read summary: " + to_string(e))
+        return
+    }
+    exec("rm -f " + summary_path)
+    let lines = result.split("\n")
+    let mut n_domains: i64 = 0
+    let mut n_pairs: i64 = 0
+    let mut n_hc: i64 = 0
+
+    let mut li: i64 = 0
+    while li < to_int(lines.len()) {
+        let line = lines[li]
+        if line.starts_with("DOMAINS=") {
+            n_domains = safe_int(line.split("=")[1])
+        }
+        if line.starts_with("PAIRS=") {
+            n_pairs = safe_int(line.split("=")[1])
+        }
+        if line.starts_with("HIGH_CONF=") {
+            n_hc = safe_int(line.split("=")[1])
+        }
+        li = li + 1
+    }
+
+    // ─── OUTPUT ───
+    if mode == "summary" {
+        println("[cross_dse] domains=" + to_string(n_domains) + " pairs=" + to_string(n_pairs) + " high_conf=" + to_string(n_hc))
+    } else {
+        println("")
+        println("[2/4] Pairwise intersection matrix built")
+        println("[3/4] Resonance scoring complete")
+        println("[4/4] Fusion output written")
+        println("")
+        println("============================================")
+        println("  CROSS-DSE FUSION REPORT")
+        println("============================================")
+        println("  TOML domains scanned:    " + to_string(n_domains))
+        println("  candidate pairs:         " + to_string(n_pairs))
+        println("  high confidence (>=0.3): " + to_string(n_hc))
+        println("  output: " + out_path)
+        println("============================================")
+        println("")
+        println("  Top pairs (resonance desc):")
+
+        let mut di: i64 = 0
+        while di < to_int(lines.len()) {
+            let dl = lines[di]
+            if dl.starts_with("  ") && dl.contains("<->") {
+                println(dl)
             }
+            di = di + 1
         }
-    }
-    top_json = top_json + "]"
-    hc_json = hc_json + "]"
-
-    let result = "{\n  \"generated_at\":\"" + ts + "\",\n  \"source\":\"shared/dse_cross/all_pairs_s05.jsonl\",\n  \"pair_count\":" + to_string(pair_count) + ",\n  \"high_confidence_count\":" + to_string(high_conf) + ",\n  \"top_patterns\":" + top_json + ",\n  \"high_confidence\":" + hc_json + "\n}\n"
-
-    write_file(out_path, result)
-    print("[out] wrote " + out_path)
-    print("[stat] pairs=" + to_string(pair_count) + " high_conf=" + to_string(high_conf))
-
-    if bus_buf != "" {
-        let existing = exec("cat " + bus_path)
-        write_file(bus_path, existing + bus_buf)
-        print("[bus] appended " + to_string(hc_added) + " events to growth_bus.jsonl")
+        println("")
     }
 
-    // core.json backup + update
-    let bkp = core_path + ".bak.cross_dse"
-    exec("test -f " + bkp + " || cp " + core_path + " " + bkp)
-    print("[core] backup: " + bkp)
+    // ─── GROWTH BUS 기록 ───
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    try {
+        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"cross_dse_fusion\",\"domains\":" + to_string(n_domains) + ",\"pairs\":" + to_string(n_pairs) + ",\"high_confidence\":" + to_string(n_hc) + ",\"source\":\"cross_dse_fusion.hexa\"}\n"
+        append_file(bus_path, evt)
+        println("[bus] growth_bus.jsonl updated")
+    } catch e {
+        println("[WARN] growth_bus write failed: " + to_string(e))
+    }
+
+    println("Done.")
 }
 
 main()
