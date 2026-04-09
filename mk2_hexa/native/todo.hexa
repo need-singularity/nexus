@@ -520,28 +520,56 @@ fn print_project(name: string, bt_lines: string) {
             }
         }
 
-        // void 전용
-        if name == "void" {
-            if gen < need {
-                gen = gen + 1
-                println("| A" + to_string(gen) + " | 터미널 | FATHOM 터미널 프로토타입 | 미시작 | UX |")
-            }
-            if gen < need {
-                gen = gen + 1
-                println("| A" + to_string(gen) + " | 플러그인 | 플러그인 시스템 v2 | 미시작 | 확장성 |")
-            }
+        // ─── 범용 자율 창발: 프로젝트 디렉토리 스캔 → 동적 TODO ───
+        // 하드코딩 없이 파일 상태에서 자동 생성
+        let proj_dir = _dev + "/" + name
+        if gen < need {
+            try {
+                // 1. 빈 디렉토리(하위 파일 0) = 미착수 모듈
+                let empty_dirs = exec("find " + proj_dir + " -mindepth 1 -maxdepth 2 -type d -empty 2>/dev/null | head -3")
+                let edl = empty_dirs.split("\n")
+                let mut edi: i64 = 0
+                while edi < len(edl) && gen < need {
+                    let ed = edl[edi].trim()
+                    if ed != "" {
+                        let short = ed.split("/")
+                        let label = short[len(short) - 1]
+                        gen = gen + 1
+                        println("| A" + to_string(gen) + " | 빈공간 | " + label + " 디렉토리 구현 | 미시작 | 커버리지 |")
+                    }
+                    edi = edi + 1
+                }
+            } catch e {}
         }
-
-        // airgenome 전용
-        if name == "airgenome" {
-            if gen < need {
-                gen = gen + 1
-                println("| A" + to_string(gen) + " | 스캔 | 크로스플랫폼 게놈 수집 확장 | 미시작 | 커버리지 |")
-            }
-            if gen < need {
-                gen = gen + 1
-                println("| A" + to_string(gen) + " | 분석 | 게놈 n=6 패턴 심화 분석 | 미시작 | 수렴 패턴 |")
-            }
+        if gen < need {
+            try {
+                // 2. TODO/FIXME/HACK 주석 = 미해결 이슈
+                let todos = exec("grep -rl 'TODO\\|FIXME\\|HACK' " + proj_dir + " --include='*.hexa' --include='*.rs' --include='*.py' --include='*.md' 2>/dev/null | head -5")
+                let tl = todos.split("\n")
+                let todo_count = safe_int(exec("grep -r 'TODO\\|FIXME\\|HACK' " + proj_dir + " --include='*.hexa' --include='*.rs' --include='*.py' 2>/dev/null | wc -l").trim())
+                if todo_count > 0 {
+                    gen = gen + 1
+                    println("| A" + to_string(gen) + " | 정리 | TODO/FIXME " + to_string(todo_count) + "건 해소 | 미시작 | 코드 품질 |")
+                }
+            } catch e {}
+        }
+        if gen < need {
+            try {
+                // 3. 최근 수정 안 된 핵심 파일 = 정체 영역
+                let stale = exec("find " + proj_dir + " -name '*.hexa' -o -name '*.rs' -o -name '*.py' 2>/dev/null | xargs ls -t 2>/dev/null | tail -3")
+                let sl = stale.split("\n")
+                let mut si: i64 = 0
+                while si < len(sl) && gen < need {
+                    let sf = sl[si].trim()
+                    if sf != "" {
+                        let sp = sf.split("/")
+                        let sname = sp[len(sp) - 1]
+                        gen = gen + 1
+                        println("| A" + to_string(gen) + " | 정체 | " + sname + " 갱신 필요 | 미시작 | 활성화 |")
+                    }
+                    si = si + 1
+                }
+            } catch e {}
         }
 
         // ─── 파동 간섭: growth_bus 최근 돌파 → 후속 할일 전파 (hexa native) ───
