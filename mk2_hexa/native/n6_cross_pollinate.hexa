@@ -1,0 +1,205 @@
+// n6_cross_pollinate.hexa — 교차수분 자동화: 도메인 간 시드 교환 + 공명 탐지
+// 흐름: domain_seeds 로드 → 도메인 쌍 조합 → 시드 교환 → blowup → 공명 점수 기록
+//
+// 사용:
+//   hexa n6_cross_pollinate.hexa                     기본 (상위 6 도메인)
+//   hexa n6_cross_pollinate.hexa --domains "a,b,c"   특정 도메인
+//   hexa n6_cross_pollinate.hexa --deep               깊은 교차 (depth 5)
+//   hexa n6_cross_pollinate.hexa --status             교차수분 현황
+//   hexa n6_cross_pollinate.hexa --help               사용법
+
+// ═══════════════════════════════════════════════════════════════
+// 공통 설정
+// ═══════════════════════════════════════════════════════════════
+
+let home = exec("printenv HOME").trim()
+let dev = home + "/Dev"
+let nexus_dir = dev + "/nexus"
+let shared = nexus_dir + "/shared"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let seed_engine_path = nexus_dir + "/mk2_hexa/native/seed_engine.hexa"
+let blowup_path = nexus_dir + "/mk2_hexa/native/blowup.hexa"
+let domain_seeds_path = shared + "/domain_seeds.jsonl"
+let bus_path = shared + "/growth_bus.jsonl"
+let cross_log_path = shared + "/.cross_pollinate_log.jsonl"
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "" }
+let arg3 = if a.len() >= 4 { a[3] } else { "" }
+
+// ═══════════════════════════════════════════════════════════════
+// 유틸리티
+// ═══════════════════════════════════════════════════════════════
+
+fn ts_now() -> string {
+    exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+}
+
+fn append_bus(msg: string) {
+    let home = exec("printenv HOME").trim()
+    let bus = home + "/Dev/nexus/shared/growth_bus.jsonl"
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    let line = "{\"ts\":\"" + ts + "\",\"src\":\"cross_pollinate\",\"event\":\"" + msg + "\"}"
+    try { exec("echo '" + line + "' >> " + bus) } catch e {}
+}
+
+fn append_cross_log(d1: string, d2: string, score: string) {
+    let home = exec("printenv HOME").trim()
+    let lp = home + "/Dev/nexus/shared/.cross_pollinate_log.jsonl"
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    let line = "{\"ts\":\"" + ts + "\",\"pair\":\"" + d1 + "×" + d2 + "\",\"resonance\":" + score + "}"
+    try { exec("echo '" + line + "' >> " + lp) } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 도메인 로드
+// ═══════════════════════════════════════════════════════════════
+
+fn load_domains() -> list {
+    let home = exec("printenv HOME").trim()
+    let seeds_path = home + "/Dev/nexus/shared/domain_seeds.jsonl"
+    let mut domains = ["math", "physics", "topology", "consciousness", "chemistry", "cosmology"]
+    try {
+        let raw = read_file(seeds_path)
+        let lines = raw.split("\n")
+        let mut loaded = []
+        for l in lines {
+            let t = l.trim()
+            if t != "" && t.contains("\"domain\"") {
+                let parts = t.split("\"domain\"")[1].split("\"")
+                if parts.len() >= 2 {
+                    let d = parts[1]
+                    if d != "" {
+                        loaded = loaded + [d]
+                    }
+                }
+            }
+        }
+        if loaded.len() > 0 { domains = loaded }
+    } catch e {}
+    domains
+}
+
+fn load_seeds_for(domain: string) -> string {
+    let home = exec("printenv HOME").trim()
+    let hexa = home + "/Dev/hexa-lang/target/release/hexa"
+    let se = home + "/Dev/nexus/mk2_hexa/native/seed_engine.hexa"
+    let mut seeds = ""
+    try { seeds = exec(hexa + " " + se + " domain " + domain).trim() } catch e {}
+    if seeds.len() == 0 { seeds = "6|12|2|4|5|24|7|3" }
+    seeds
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 교차수분 실행
+// ═══════════════════════════════════════════════════════════════
+
+fn cross_pollinate(d1: string, d2: string, depth: i64) -> f64 {
+    let home = exec("printenv HOME").trim()
+    let hexa = home + "/Dev/hexa-lang/target/release/hexa"
+    let bp = home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
+
+    // d1의 시드를 d2에 주입
+    let seeds1 = load_seeds_for(d1)
+    let mut resonance = 0.0
+
+    try {
+        let result = exec(hexa + " " + bp + " " + d2 + " " + to_string(depth) + " --no-graph --seeds \"" + seeds1 + "\"").trim()
+        // blowup 출력에서 n6 매치 수 파싱
+        let lines = result.split("\n")
+        for line in lines {
+            if line.contains("n6_match") || line.contains("resonance") || line.contains("score") {
+                let parts = line.split(":")
+                if parts.len() >= 2 {
+                    try { resonance = to_float(parts[parts.len() - 1].trim()) } catch e2 {}
+                }
+            }
+        }
+    } catch e {
+        println("  [WARN] blowup 실패: " + e.to_string())
+    }
+    resonance
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 메인
+// ═══════════════════════════════════════════════════════════════
+
+fn main() {
+    if mode == "--help" || mode == "help" {
+        println("n6_cross_pollinate.hexa — 교차수분 자동화")
+        println("")
+        println("사용법:")
+        println("  hexa n6_cross_pollinate.hexa                     기본 교차 (상위 6)")
+        println("  hexa n6_cross_pollinate.hexa --domains \"a,b,c\"   특정 도메인")
+        println("  hexa n6_cross_pollinate.hexa --deep               depth 5 교차")
+        println("  hexa n6_cross_pollinate.hexa --status             현황")
+        return
+    }
+
+    let mut depth: i64 = 3
+    let mut domains = load_domains()
+
+    if mode == "--deep" {
+        depth = 5
+    } else if mode == "--domains" && arg3 != "" {
+        domains = arg3.split(",")
+    }
+
+    if mode == "--status" {
+        println("═══ 교차수분 현황 ═══")
+        println("등록 도메인: " + to_string(domains.len()) + "개")
+        let pairs = domains.len() * (domains.len() - 1) / 2
+        println("가능한 쌍: " + to_string(pairs) + "개")
+        try {
+            let home2 = exec("printenv HOME").trim()
+            let log_count = exec("wc -l < " + home2 + "/Dev/nexus/shared/.cross_pollinate_log.jsonl 2>/dev/null || echo 0").trim()
+            println("누적 교차 기록: " + log_count + "건")
+        } catch e {}
+        return
+    }
+
+    println("═══════════════════════════════════════════════════")
+    println("  n6_cross_pollinate — 교차수분 자동화")
+    println("═══════════════════════════════════════════════════")
+    println("도메인: " + to_string(domains.len()) + "개 | depth: " + to_string(depth))
+    println("")
+
+    let mut total_pairs: i64 = 0
+    let mut high_resonance: i64 = 0
+    let mut best_pair = ""
+    let mut best_score = 0.0
+
+    for i in range(0, domains.len()) {
+        for j in range(i + 1, domains.len()) {
+            let d1 = domains[i]
+            let d2 = domains[j]
+            total_pairs = total_pairs + 1
+            println("[" + to_string(total_pairs) + "] " + d1 + " × " + d2)
+
+            let score = cross_pollinate(d1, d2, depth)
+            println("  공명 점수: " + to_string(score))
+            append_cross_log(d1, d2, to_string(score))
+
+            if score > 0.5 {
+                high_resonance = high_resonance + 1
+            }
+            if score > best_score {
+                best_score = score
+                best_pair = d1 + "×" + d2
+            }
+        }
+    }
+
+    println("")
+    println("═══ 교차수분 결과 ═══")
+    println("총 쌍: " + to_string(total_pairs))
+    println("고공명 (>0.5): " + to_string(high_resonance))
+    if best_pair != "" {
+        println("최고 쌍: " + best_pair + " (score=" + to_string(best_score) + ")")
+    }
+    append_bus("cross_pollinate pairs=" + to_string(total_pairs) + " high=" + to_string(high_resonance))
+    println("growth_bus 기록 완료")
+}
+
+main()

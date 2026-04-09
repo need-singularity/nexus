@@ -1,0 +1,173 @@
+// verify_loop.hexa — verify 배치 자동화: 미검증 BT 항목 일괄 검증
+// 흐름: bt_audit_result → 미검증 추출 → verify_hypotheses 배치 → 결과 갱신 → growth_bus 기록
+//
+// 사용:
+//   hexa verify_loop.hexa                    기본 (max 20건)
+//   hexa verify_loop.hexa --max 50           최대 건수 지정
+//   hexa verify_loop.hexa --domain math      특정 도메인만
+//   hexa verify_loop.hexa --status           미검증 현황
+//   hexa verify_loop.hexa --help             사용법
+
+// ═══════════════════════════════════════════════════════════════
+// 공통 설정
+// ═══════════════════════════════════════════════════════════════
+
+let home = exec("printenv HOME").trim()
+let dev = home + "/Dev"
+let nexus_dir = dev + "/nexus"
+let shared = nexus_dir + "/shared"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let bt_result_path = shared + "/bt_audit_result.json"
+let bus_path = shared + "/growth_bus.jsonl"
+let verify_path = nexus_dir + "/mk2_hexa/native/verify_hypotheses.hexa"
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "" }
+let arg3 = if a.len() >= 4 { a[3] } else { "" }
+
+// ═══════════════════════════════════════════════════════════════
+// 유틸리티
+// ═══════════════════════════════════════════════════════════════
+
+fn ts_now() -> string {
+    exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s)) } catch e {}
+    v
+}
+
+fn append_bus(msg: string) {
+    let home = exec("printenv HOME").trim()
+    let bus = home + "/Dev/nexus/shared/growth_bus.jsonl"
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+    let line = "{\"ts\":\"" + ts + "\",\"src\":\"verify_loop\",\"event\":\"" + msg + "\"}"
+    try { exec("echo '" + line + "' >> " + bus) } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 미검증 항목 추출
+// ═══════════════════════════════════════════════════════════════
+
+fn extract_unverified(domain_filter: string) -> list {
+    let home = exec("printenv HOME").trim()
+    let bt_path = home + "/Dev/nexus/shared/bt_audit_result.json"
+    let mut items = []
+    try {
+        let raw = read_file(bt_path)
+        let lines = raw.split("\n")
+        for line in lines {
+            let l = line.trim()
+            if l.contains("\"status\"") && (l.contains("\"unverified\"") || l.contains("\"pending\"")) {
+                if domain_filter == "" || l.contains("\"" + domain_filter + "\"") {
+                    // 가설 ID 추출 시도
+                    if l.contains("\"id\"") {
+                        let parts = l.split("\"id\"")[1].split("\"")
+                        if parts.len() >= 2 {
+                            items = items + [parts[1]]
+                        }
+                    }
+                }
+            }
+        }
+    } catch e {
+        println("[WARN] bt_audit_result.json 읽기 실패: " + e.to_string())
+    }
+    items
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 검증 실행
+// ═══════════════════════════════════════════════════════════════
+
+fn run_verify(hypothesis_id: string) -> string {
+    let home = exec("printenv HOME").trim()
+    let hexa = home + "/Dev/hexa-lang/target/release/hexa"
+    let vpath = home + "/Dev/nexus/mk2_hexa/native/verify_hypotheses.hexa"
+    let mut result = ""
+    try {
+        result = exec(hexa + " " + vpath + " " + hypothesis_id).trim()
+    } catch e {
+        result = "ERROR: " + e.to_string()
+    }
+    result
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 메인
+// ═══════════════════════════════════════════════════════════════
+
+fn main() {
+    if mode == "--help" || mode == "help" {
+        println("verify_loop.hexa — 미검증 BT 항목 배치 자동 검증")
+        println("")
+        println("사용법:")
+        println("  hexa verify_loop.hexa                    기본 (max 20건)")
+        println("  hexa verify_loop.hexa --max 50           최대 건수")
+        println("  hexa verify_loop.hexa --domain math      도메인 필터")
+        println("  hexa verify_loop.hexa --status           미검증 현황")
+        return
+    }
+
+    let mut max_count: i64 = 20
+    let mut domain_filter = ""
+
+    if mode == "--max" && arg3 != "" {
+        max_count = safe_int(arg3)
+        if max_count <= 0 { max_count = 20 }
+    } else if mode == "--domain" && arg3 != "" {
+        domain_filter = arg3
+    }
+
+    // 미검증 추출
+    let unverified = extract_unverified(domain_filter)
+    let total = unverified.len()
+
+    if mode == "--status" {
+        println("═══ verify_loop 현황 ═══")
+        println("미검증 항목: " + to_string(total) + "건")
+        if domain_filter != "" {
+            println("도메인 필터: " + domain_filter)
+        }
+        return
+    }
+
+    println("═══════════════════════════════════════════════════")
+    println("  verify_loop — 배치 검증 시작")
+    println("═══════════════════════════════════════════════════")
+    println("미검증 항목: " + to_string(total) + "건")
+    println("최대 처리: " + to_string(max_count) + "건")
+    if domain_filter != "" { println("도메인: " + domain_filter) }
+    println("")
+
+    let mut verified: i64 = 0
+    let mut passed: i64 = 0
+    let mut failed: i64 = 0
+    let limit = if total < max_count { total } else { max_count }
+
+    for i in range(0, limit) {
+        let hid = unverified[i]
+        println("[" + to_string(i + 1) + "/" + to_string(limit) + "] 검증: " + hid)
+        let result = run_verify(hid)
+        verified = verified + 1
+        if result.contains("PASS") || result.contains("verified") || result.contains("confirmed") {
+            passed = passed + 1
+            println("  → PASS")
+        } else if result.contains("ERROR") || result.contains("FAIL") {
+            failed = failed + 1
+            println("  → FAIL: " + result)
+        } else {
+            println("  → 결과: " + result)
+        }
+    }
+
+    println("")
+    println("═══ 결과 요약 ═══")
+    println("처리: " + to_string(verified) + " | 통과: " + to_string(passed) + " | 실패: " + to_string(failed))
+    append_bus("batch_verify done=" + to_string(verified) + " pass=" + to_string(passed) + " fail=" + to_string(failed))
+    println("growth_bus 기록 완료")
+}
+
+main()

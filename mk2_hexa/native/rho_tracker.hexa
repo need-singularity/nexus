@@ -1,0 +1,224 @@
+// rho_tracker.hexa — 돌파율(ρ) 추적기: 시간대별 돌파 밀도 + 추세 분석
+// 흐름: growth_bus 파싱 → 시간대별 돌파 카운트 → ρ(돌파/시간) 계산 → 추세 리포트
+//
+// 사용:
+//   hexa rho_tracker.hexa                  최근 7일 요약
+//   hexa rho_tracker.hexa --days 30        기간 지정
+//   hexa rho_tracker.hexa --hourly         시간대별 분포
+//   hexa rho_tracker.hexa --domain math    도메인별 필터
+//   hexa rho_tracker.hexa --trend          추세 방향 분석
+//   hexa rho_tracker.hexa --help           사용법
+
+// ═══════════════════════════════════════════════════════════════
+// 공통 설정
+// ═══════════════════════════════════════════════════════════════
+
+let home = exec("printenv HOME").trim()
+let dev = home + "/Dev"
+let nexus_dir = dev + "/nexus"
+let shared = nexus_dir + "/shared"
+let bus_path = shared + "/growth_bus.jsonl"
+let discovery_log_path = shared + "/discovery_log.jsonl"
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "" }
+let arg3 = if a.len() >= 4 { a[3] } else { "" }
+
+// ═══════════════════════════════════════════════════════════════
+// 유틸리티
+// ═══════════════════════════════════════════════════════════════
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s)) } catch e {}
+    v
+}
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    v
+}
+
+// ═══════════════════════════════════════════════════════════════
+// growth_bus 파싱 (돌파 이벤트 추출)
+// ═══════════════════════════════════════════════════════════════
+
+fn count_breakthroughs(days: i64, domain_filter: string) -> #{} {
+    let home = exec("printenv HOME").trim()
+    let bp = home + "/Dev/nexus/shared/growth_bus.jsonl"
+    let mut total: i64 = 0
+    let mut by_day = #{}
+    let mut by_domain = #{}
+
+    // 기준 날짜 계산
+    let cutoff = exec("date -u -v-" + to_string(days) + "d +%Y-%m-%d 2>/dev/null || date -u -d '" + to_string(days) + " days ago' +%Y-%m-%d 2>/dev/null").trim()
+
+    try {
+        let raw = read_file(bp)
+        let lines = raw.split("\n")
+        for line in lines {
+            let l = line.trim()
+            if l == "" { continue }
+            // 돌파 관련 이벤트 필터
+            let is_bt = l.contains("breakthrough") || l.contains("blowup") || l.contains("discovery") || l.contains("verified")
+            if !is_bt { continue }
+
+            // 날짜 추출
+            let mut day = ""
+            if l.contains("\"ts\":\"") {
+                let parts = l.split("\"ts\":\"")[1].split("\"")
+                if parts.len() >= 1 {
+                    day = parts[0]
+                    if day.len() >= 10 { day = day[0..10] }
+                }
+            }
+
+            if day < cutoff { continue }
+
+            // 도메인 필터
+            if domain_filter != "" && !l.contains(domain_filter) { continue }
+
+            total = total + 1
+            by_day[day] = safe_int(to_string(try { by_day[day] } catch e { 0 })) + 1
+        }
+    } catch e {
+        println("[WARN] growth_bus 읽기 실패: " + e.to_string())
+    }
+
+    #{
+        "total": total,
+        "by_day": by_day,
+        "days": days
+    }
+}
+
+fn count_discovery_log(days: i64) -> i64 {
+    let home = exec("printenv HOME").trim()
+    let dl = home + "/Dev/nexus/shared/discovery_log.jsonl"
+    let mut count: i64 = 0
+    let cutoff = exec("date -u -v-" + to_string(days) + "d +%Y-%m-%d 2>/dev/null || date -u -d '" + to_string(days) + " days ago' +%Y-%m-%d 2>/dev/null").trim()
+    try {
+        let tail = exec("tail -500 " + dl).trim()
+        let lines = tail.split("\n")
+        for l in lines {
+            if l.contains("\"ts\":\"") {
+                let parts = l.split("\"ts\":\"")[1].split("\"")
+                if parts.len() >= 1 {
+                    let day = parts[0]
+                    if day.len() >= 10 && day[0..10] >= cutoff {
+                        count = count + 1
+                    }
+                }
+            }
+        }
+    } catch e {}
+    count
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 추세 분석
+// ═══════════════════════════════════════════════════════════════
+
+fn analyze_trend(data: #{}) -> string {
+    let total = safe_int(to_string(data["total"]))
+    let days = safe_int(to_string(data["days"]))
+    if days == 0 { return "데이터 부족" }
+
+    let rho = to_float(to_string(total)) / to_float(to_string(days))
+
+    if rho >= 10.0 { return "🔥 폭발적 (ρ=" + to_string(rho) + "/day)" }
+    if rho >= 5.0 { return "▲ 상승세 (ρ=" + to_string(rho) + "/day)" }
+    if rho >= 2.0 { return "→ 안정 (ρ=" + to_string(rho) + "/day)" }
+    if rho >= 0.5 { return "▽ 둔화 (ρ=" + to_string(rho) + "/day)" }
+    return "▼ 침체 (ρ=" + to_string(rho) + "/day)"
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 메인
+// ═══════════════════════════════════════════════════════════════
+
+fn main() {
+    if mode == "--help" || mode == "help" {
+        println("rho_tracker.hexa — 돌파율(ρ) 추적기")
+        println("")
+        println("사용법:")
+        println("  hexa rho_tracker.hexa                  최근 7일 요약")
+        println("  hexa rho_tracker.hexa --days 30        기간 지정")
+        println("  hexa rho_tracker.hexa --hourly         시간대별 분포")
+        println("  hexa rho_tracker.hexa --domain math    도메인 필터")
+        println("  hexa rho_tracker.hexa --trend          추세 분석")
+        return
+    }
+
+    let mut days: i64 = 7
+    let mut domain_filter = ""
+
+    if mode == "--days" && arg3 != "" {
+        days = safe_int(arg3)
+        if days <= 0 { days = 7 }
+    } else if mode == "--domain" && arg3 != "" {
+        domain_filter = arg3
+    }
+
+    let data = count_breakthroughs(days, domain_filter)
+    let total = safe_int(to_string(data["total"]))
+    let rho = if days > 0 { to_float(to_string(total)) / to_float(to_string(days)) } else { 0.0 }
+    let disc_count = count_discovery_log(days)
+
+    println("═══════════════════════════════════════════════════")
+    println("  rho_tracker — 돌파율(ρ) 리포트")
+    println("═══════════════════════════════════════════════════")
+    println("기간: 최근 " + to_string(days) + "일")
+    if domain_filter != "" { println("도메인: " + domain_filter) }
+    println("")
+    println("돌파 이벤트: " + to_string(total) + "건")
+    println("발견 로그: " + to_string(disc_count) + "건")
+    println("ρ (돌파/일): " + to_string(rho))
+    println("")
+    println("추세: " + analyze_trend(data))
+
+    if mode == "--trend" {
+        println("")
+        println("═══ 상세 추세 ═══")
+        // 최근 7일 vs 이전 7일 비교
+        let recent = count_breakthroughs(7, domain_filter)
+        let older = count_breakthroughs(14, domain_filter)
+        let recent_total = safe_int(to_string(recent["total"]))
+        let older_total = safe_int(to_string(older["total"])) - recent_total
+        println("최근 7일: " + to_string(recent_total) + "건")
+        println("이전 7일: " + to_string(older_total) + "건")
+        if older_total > 0 {
+            let change = to_float(to_string(recent_total - older_total)) / to_float(to_string(older_total)) * 100.0
+            println("변화율: " + to_string(change) + "%")
+        }
+    }
+
+    if mode == "--hourly" {
+        println("")
+        println("═══ 시간대별 분포 ═══")
+        let home2 = exec("printenv HOME").trim()
+        let bp2 = home2 + "/Dev/nexus/shared/growth_bus.jsonl"
+        // 최근 건에서 시간대 파싱
+        try {
+            let tail = exec("tail -200 " + bp2).trim()
+            let lines = tail.split("\n")
+            let mut hours = #{}
+            for l in lines {
+                if l.contains("\"ts\":\"") && l.contains("T") {
+                    let ts = l.split("\"ts\":\"")[1].split("\"")[0]
+                    if ts.contains("T") {
+                        let hour = ts.split("T")[1][0..2]
+                        hours[hour] = safe_int(to_string(try { hours[hour] } catch e { 0 })) + 1
+                    }
+                }
+            }
+            for h in ["00","03","06","09","12","15","18","21"] {
+                let c = try { hours[h] } catch e { 0 }
+                println("  " + h + "h: " + to_string(c) + "건")
+            }
+        } catch e {}
+    }
+}
+
+main()
