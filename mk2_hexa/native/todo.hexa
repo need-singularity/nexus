@@ -290,21 +290,24 @@ fn resolve_project(name: string) -> string {
 // ═══════════════════════════════════════════════════════════
 
 let _args = args()
-let _filter = if _args.len() >= 3 { _args[2] } else { "all" }
+// 인자 없으면 현재 cwd 기준으로 자동 판별 (전 프로젝트 일괄 출력 모드는 폐기)
+let mut _filter = if _args.len() >= 3 { _args[2] } else { "" }
+if _filter == "" || _filter == "all" {
+    let cwd = exec("pwd").trim()
+    let segs = cwd.split("/")
+    _filter = segs[segs.len() - 1]
+}
 let _target = resolve_project(_filter)
-
-// 돌파 엔진 데이터 로드 (1회)
-println("⚡ 돌파 엔진 스캔 중...")
-let _bt_todos = load_breakthrough_todos()
-
-let all_projects = ["nexus", "anima", "n6-architecture", "papers", "hexa-lang", "void", "airgenome"]
-
 if _target == "all" {
-    println("## 전 프로젝트 할일 (돌파 엔진 통합)")
-    for p in all_projects {
-        print_project(p, _bt_todos)
-    }
+    println("❌ 프로젝트를 특정할 수 없습니다: " + _filter)
+    println("사용법: hexa todo.hexa <nexus|anima|n6-arch|papers|hexa-lang|void|airgenome>")
 } else {
+    // nexus만 글로벌 돌파 엔진 로드 (다른 프로젝트는 자기 것만)
+    let mut _bt_todos = ""
+    if _target == "nexus" {
+        println("⚡ 돌파 엔진 스캔 중...")
+        _bt_todos = load_breakthrough_todos()
+    }
     println("## 할일 (돌파 엔진 통합)")
     print_project(_target, _bt_todos)
 }
