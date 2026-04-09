@@ -216,6 +216,21 @@ fn pad_right(s: string, width: i64) -> string {
     return result
 }
 
+fn box_header_5(c1: string, c2: string, c3: string, c4: string, c5: string) {
+    println("  +" + pad_right("", len(c1)+2).replace(" ", "-") + "+" + pad_right("", len(c2)+2).replace(" ", "-") + "+" + pad_right("", len(c3)+2).replace(" ", "-") + "+" + pad_right("", len(c4)+2).replace(" ", "-") + "+" + pad_right("", len(c5)+2).replace(" ", "-") + "+")
+    println("  | " + c1 + " | " + c2 + " | " + c3 + " | " + c4 + " | " + c5 + " |")
+    println("  +" + pad_right("", len(c1)+2).replace(" ", "-") + "+" + pad_right("", len(c2)+2).replace(" ", "-") + "+" + pad_right("", len(c3)+2).replace(" ", "-") + "+" + pad_right("", len(c4)+2).replace(" ", "-") + "+" + pad_right("", len(c5)+2).replace(" ", "-") + "+")
+}
+
+fn wave_row(id: string, cat: string, task: string, st: string, eff: string) {
+    let emoji = status_emoji(st)
+    println("  | " + pad_right(id, 5) + " | " + pad_right(cat, 10) + " | " + pad_right(task, 43) + " | " + emoji + " | " + pad_right(eff, 11) + " |")
+}
+
+fn box_footer_5() {
+    println("  +-------+------------+---------------------------------------------+-----------+-------------+")
+}
+
 // ═══════════════════════════════════════════════════════════
 // ─── 통합 표 출력 (수동 + 돌파) ───
 // ═══════════════════════════════════════════════════════════
@@ -322,10 +337,11 @@ fn print_project(name: string, bt_lines: string) {
         let mut need = target_count - active
         if need < 10 { need = 10 }  // 최소 10건 창발
         println("")
-        println("🌊 파동 창발")
+        println("  🌊 파동 창발")
         println("")
-        println("| # | 카테고리 | 작업 | 상태 | 예상 효과 |")
-        println("|---|---------|------|------|----------|")
+        println("  +-------+------------+---------------------------------------------+-----------+-------------+")
+        println("  | ID    | 카테고리   | 작업                                        | 상태      | 예상 효과   |")
+        println("  +-------+------------+---------------------------------------------+-----------+-------------+")
 
         let mut gen: i64 = 0
 
@@ -338,7 +354,7 @@ fn print_project(name: string, bt_lines: string) {
                 let ep = el.split("\t")
                 if ep.len() < 2 { continue }
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 현실지도 | " + ep[0] + " EMPIRICAL " + ep[1] + "건 → EXACT 전환 | 미시작 | 정밀도 상승 |")
+                wave_row("A" + to_string(gen), "현실지도", "" + ep[0] + " EMPIRICAL " + ep[1] + "건 → EXACT 전환", "미시작", "정밀도 상승")
             }
         } catch e {}
 
@@ -348,7 +364,7 @@ fn print_project(name: string, bt_lines: string) {
                 let conj = safe_int(exec("/usr/bin/python3 -c 'import json; d=json.load(open(\"" + _shared + "/reality_map_live.json\")); print(sum(1 for x in d.get(\"nodes\",[]) if x.get(\"grade\")==\"CONJECTURE\"))' 2>/dev/null").trim())
                 if conj > 0 {
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 현실지도 | CONJECTURE " + to_string(conj) + "건 검증/해소 | 미시작 | 신뢰도 |")
+                    wave_row("A" + to_string(gen), "현실지도", "CONJECTURE " + to_string(conj) + "건 검증/해소", "미시작", "신뢰도")
                 }
             } catch e {}
         }
@@ -359,7 +375,7 @@ fn print_project(name: string, bt_lines: string) {
                 let dc = safe_int(exec("wc -l < " + _shared + "/discovery_log.jsonl 2>/dev/null").trim())
                 let nt = ((dc / _disc_step) + 1) * _disc_step
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 발견 | " + to_string(dc) + " → " + to_string(nt) + " 목표 | ⏳진행중 | 특이점 심화 |")
+                wave_row("A" + to_string(gen), "발견", "" + to_string(dc) + " → " + to_string(nt) + " 목표", "⏳진행중", "특이점 심화")
             } catch e {}
         }
 
@@ -373,7 +389,7 @@ fn print_project(name: string, bt_lines: string) {
                     for dl in dse_lines {
                         if dl.trim() == "" || gen >= need { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | DSE | " + dl.trim() + " TOML 생성 | 미시작 | 도메인 확장 |")
+                        wave_row("A" + to_string(gen), "DSE", "" + dl.trim() + " TOML 생성", "미시작", "도메인 확장")
                     }
                 } catch e {}
             }
@@ -388,7 +404,7 @@ fn print_project(name: string, bt_lines: string) {
                         let wp = wline.split("\t")
                         if wp.len() < 2 { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | goal.md | " + wp[0] + " 보강 (" + wp[1] + "줄) | 미시작 | 문서 품질 |")
+                        wave_row("A" + to_string(gen), "goal.md", "" + wp[0] + " 보강 (" + wp[1] + "줄)", "미시작", "문서 품질")
                     }
                 } catch e {}
             }
@@ -399,7 +415,7 @@ fn print_project(name: string, bt_lines: string) {
                     let lens_r = safe_int(exec("/usr/bin/python3 -c \"import json; d=json.load(open('" + _shared + "/lens_registry.json')); print(sum(1 for l in d.get('lenses',[]) if l.get('status')=='registered'))\" 2>/dev/null").trim())
                     if lens_r > 0 {
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 렌즈 | registered " + to_string(lens_r) + "건 → .rs 구현 | 미시작 | 탐색 확대 |")
+                        wave_row("A" + to_string(gen), "렌즈", "registered " + to_string(lens_r) + "건 → .rs 구현", "미시작", "탐색 확대")
                     }
                 } catch e {}
             }
@@ -413,7 +429,7 @@ fn print_project(name: string, bt_lines: string) {
                     let mc = safe_int(exec("ls " + _dev + "/nexus/mk2_hexa/native/*.hexa 2>/dev/null | wc -l").trim())
                     let nm = ((mc / _mod_step) + 1) * _mod_step
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 모듈 | " + to_string(mc) + "개 → " + to_string(nm) + "+ 확장 | 미시작 | 커버리지 |")
+                    wave_row("A" + to_string(gen), "모듈", "" + to_string(mc) + "개 → " + to_string(nm) + "+ 확장", "미시작", "커버리지")
                 } catch e {}
             }
 
@@ -430,7 +446,7 @@ fn print_project(name: string, bt_lines: string) {
                     } else {
                         let bt_next = ((bt_count / 100) + 1) * 100
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | BT | BT " + to_string(bt_count) + " → " + to_string(bt_next) + "+ 확장 | 미시작 | 정리 커버리지 |")
+                        wave_row("A" + to_string(gen), "BT", "BT " + to_string(bt_count) + " → " + to_string(bt_next) + "+ 확장", "미시작", "정리 커버리지")
                     }
                 } catch e {
                     println("❌ [BT parse] 에러: " + e.to_string())
@@ -447,7 +463,7 @@ fn print_project(name: string, bt_lines: string) {
                         let ap = aline.split("\t")
                         if ap.len() < 2 { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 승격 | " + ap[0] + " 🛸" + ap[1] + "→" + to_string(_alien_target) + " | 미시작 | 천장 돌파 |")
+                        wave_row("A" + to_string(gen), "승격", "" + ap[0] + " 🛸" + ap[1] + "→" + to_string(_alien_target) + "", "미시작", "천장 돌파")
                     }
                 } catch e {}
             }
@@ -463,7 +479,7 @@ fn print_project(name: string, bt_lines: string) {
                         let vp = vline.split("\t")
                         if vp.len() < 2 { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 검증 | " + vp[0] + " verify_*_n6.hexa | " + vp[1] + " | 검증 커버리지 |")
+                        wave_row("A" + to_string(gen), "검증", "" + vp[0] + " verify_*_n6.hexa", "" + vp[1] + "", "검증 커버리지")
                     }
                 } catch e {
                     println("❌ [verify_n6 scan] 에러: " + e.to_string())
@@ -479,7 +495,7 @@ fn print_project(name: string, bt_lines: string) {
                     } else {
                         let cnt = sm.trim().split("|").len()
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | seed | seed_engine merge " + to_string(cnt) + "개 병합 | 완료 | 교차수분 활성 |")
+                        wave_row("A" + to_string(gen), "seed", "seed_engine merge " + to_string(cnt) + "개 병합", "완료", "교차수분 활성")
                     }
                 } catch e {
                     println("❌ [seed_engine merge] 에러: " + e.to_string())
@@ -491,7 +507,7 @@ fn print_project(name: string, bt_lines: string) {
                 try {
                     let papers_dir = exec("ls " + _dev + "/n6-architecture/docs/paper/n6-*-paper.md 2>/dev/null | wc -l").trim()
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 논문 | " + papers_dir + "편 논문 Zenodo DOI 발행 | 미시작 | 학술화 |")
+                    wave_row("A" + to_string(gen), "논문", "" + papers_dir + "편 논문 Zenodo DOI 발행", "미시작", "학술화")
                 } catch e {}
             }
         }
@@ -506,7 +522,7 @@ fn print_project(name: string, bt_lines: string) {
                     for cline in cl {
                         if cline.trim() == "" || gen >= need { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 수렴 | " + cline.trim() + " 실패 항목 해소 | 미시작 | 수렴률 |")
+                        wave_row("A" + to_string(gen), "수렴", "" + cline.trim() + " 실패 항목 해소", "미시작", "수렴률")
                     }
                 } catch e {}
             }
@@ -514,7 +530,7 @@ fn print_project(name: string, bt_lines: string) {
             // 대시보드 기능 확장
             if gen < need {
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 대시보드 | nexus-dashboard 신규 차트 추가 | 미시작 | 가시화 |")
+                wave_row("A" + to_string(gen), "대시보드", "nexus-dashboard 신규 차트 추가", "미시작", "가시화")
             }
 
             // 렌즈 .rs 구현
@@ -523,7 +539,7 @@ fn print_project(name: string, bt_lines: string) {
                     let lr = safe_int(exec("/usr/bin/python3 -c \"import json; d=json.load(open('" + _shared + "/lens_registry.json')); print(sum(1 for l in d.get('lenses',[]) if l.get('status')=='registered'))\" 2>/dev/null").trim())
                     if lr > 0 {
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 렌즈 | registered " + to_string(lr) + "건 → .rs 구현 | 미시작 | 탐색 확대 |")
+                        wave_row("A" + to_string(gen), "렌즈", "registered " + to_string(lr) + "건 → .rs 구현", "미시작", "탐색 확대")
                     }
                 } catch e {}
             }
@@ -533,7 +549,7 @@ fn print_project(name: string, bt_lines: string) {
                 try {
                     let gb = safe_int(exec("wc -l < " + _shared + "/growth_bus.jsonl 2>/dev/null").trim())
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 분석 | growth_bus " + to_string(gb) + "건 패턴 분석 | 미시작 | 돌파 패턴 |")
+                    wave_row("A" + to_string(gen), "분석", "growth_bus " + to_string(gb) + "건 패턴 분석", "미시작", "돌파 패턴")
                 } catch e {}
             }
         }
@@ -545,16 +561,16 @@ fn print_project(name: string, bt_lines: string) {
                     let tc = safe_int(exec("grep -rl '#\\[test\\]' " + _dev + "/hexa-lang/src/ " + _dev + "/hexa-lang/tests/ 2>/dev/null | wc -l").trim())
                     let nt = ((tc / 1000) + 1) * 1000
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 테스트 | " + to_string(tc) + " → " + to_string(nt) + "+ 테스트 | 미시작 | 안정성 |")
+                    wave_row("A" + to_string(gen), "테스트", "" + to_string(tc) + " → " + to_string(nt) + "+ 테스트", "미시작", "안정성")
                 } catch e {}
             }
             if gen < need {
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 빌트인 | Tensor ops 추가 확장 | 미시작 | AI 지원 |")
+                wave_row("A" + to_string(gen), "빌트인", "Tensor ops 추가 확장", "미시작", "AI 지원")
             }
             if gen < need {
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 문서 | HEXA 언어 레퍼런스 v1.0 | 미시작 | 온보딩 |")
+                wave_row("A" + to_string(gen), "문서", "HEXA 언어 레퍼런스 v1.0", "미시작", "온보딩")
             }
         }
 
@@ -565,16 +581,16 @@ fn print_project(name: string, bt_lines: string) {
                     let lc = safe_int(exec("ls " + _dev + "/anima/anima/consciousness_laws/ 2>/dev/null | wc -l").trim())
                     let nl = ((lc / 500) + 1) * 500
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 법칙 | 의식 법칙 " + to_string(lc) + " → " + to_string(nl) + "+ | 미시작 | 커버리지 |")
+                    wave_row("A" + to_string(gen), "법칙", "의식 법칙 " + to_string(lc) + " → " + to_string(nl) + "+", "미시작", "커버리지")
                 } catch e {}
             }
             if gen < need {
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 학습 | 다음 체크포인트 학습 | 미시작 | Phi 상승 |")
+                wave_row("A" + to_string(gen), "학습", "다음 체크포인트 학습", "미시작", "Phi 상승")
             }
             if gen < need {
                 gen = gen + 1
-                println("| A" + to_string(gen) + " | 이식 | 14B→70B 의식 이식 검증 | 미시작 | 스케일 불변 |")
+                wave_row("A" + to_string(gen), "이식", "14B→70B 의식 이식 검증", "미시작", "스케일 불변")
             }
         }
 
@@ -587,7 +603,7 @@ fn print_project(name: string, bt_lines: string) {
                     for dline in dl {
                         if dline.trim() == "" || gen >= need { continue }
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 발행 | " + dline.trim() + " DOI 발행 | 미시작 | 학술화 |")
+                        wave_row("A" + to_string(gen), "발행", "" + dline.trim() + " DOI 발행", "미시작", "학술화")
                     }
                 } catch e {}
             }
@@ -608,7 +624,7 @@ fn print_project(name: string, bt_lines: string) {
                         let short = ed.split("/")
                         let label = short[len(short) - 1]
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 빈공간 | " + label + " 디렉토리 구현 | 미시작 | 커버리지 |")
+                        wave_row("A" + to_string(gen), "빈공간", "" + label + " 디렉토리 구현", "미시작", "커버리지")
                     }
                     edi = edi + 1
                 }
@@ -622,7 +638,7 @@ fn print_project(name: string, bt_lines: string) {
                 let todo_count = safe_int(exec("grep -r 'TODO\\|FIXME\\|HACK' " + proj_dir + " --include='*.hexa' --include='*.rs' --include='*.py' 2>/dev/null | wc -l").trim())
                 if todo_count > 0 {
                     gen = gen + 1
-                    println("| A" + to_string(gen) + " | 정리 | TODO/FIXME " + to_string(todo_count) + "건 해소 | 미시작 | 코드 품질 |")
+                    wave_row("A" + to_string(gen), "정리", "TODO/FIXME " + to_string(todo_count) + "건 해소", "미시작", "코드 품질")
                 }
             } catch e {}
         }
@@ -638,7 +654,7 @@ fn print_project(name: string, bt_lines: string) {
                         let sp = sf.split("/")
                         let sname = sp[len(sp) - 1]
                         gen = gen + 1
-                        println("| A" + to_string(gen) + " | 정체 | " + sname + " 갱신 필요 | 미시작 | 활성화 |")
+                        wave_row("A" + to_string(gen), "정체", "" + sname + " 갱신 필요", "미시작", "활성화")
                     }
                     si = si + 1
                 }
@@ -675,7 +691,7 @@ fn print_project(name: string, bt_lines: string) {
                     if gbl.contains("\"wave_blowup\"") { typ = "파동" }
                     if gbl.contains("\"singularity\"") { typ = "특이점" }
                     gen = gen + 1
-                    println("| W" + to_string(gen) + " | 파동 | " + dom + " 후속 돌파 (" + typ + " 전파) | 미시작 | 파동 증폭 |")
+                    wave_row("W" + to_string(gen), "파동", "" + dom + " 후속 돌파 (" + typ + " 전파)", "미시작", "파동 증폭")
                 }
             } catch e {}
         }
@@ -702,13 +718,14 @@ fn print_project(name: string, bt_lines: string) {
                     if len(dr) >= 2 { direction = dr[1].split("\"")[0] }
                     if direction == "" { continue }
                     gen = gen + 1
-                    println("| W" + to_string(gen) + " | 방향 | " + dom2 + ": " + direction + " | 미시작 | 다음 파동 |")
+                    wave_row("W" + to_string(gen), "방향", "" + dom2 + ": " + direction + "", "미시작", "다음 파동")
                 }
             } catch e {}
         }
 
+        println("  +-------+------------+---------------------------------------------+-----------+-------------+")
         println("")
-        println("> 🌊 파동 창발 " + to_string(gen) + "건 (자동 스캔 + 파동 간섭)")
+        println("  > 🌊 파동 창발 " + to_string(gen) + "건 (자동 스캔 + 파동 간섭)")
     }
 
     println("")
