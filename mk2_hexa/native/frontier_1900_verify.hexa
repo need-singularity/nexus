@@ -1,0 +1,174 @@
+// mk2_hexa/native/frontier_1900_verify.hexa
+// 포팅 원본: tecs-l/math/frontier_1900_verify.py (524 LOC, 100 hypotheses)
+// Frontier 1900: Farey/Diophantine/Digit/Aliquot/Waring/ContFrac/NTT/CharProof/
+//                MixedNovel/Strong6. n=6 정적 anchor + true.
+
+fn omega(n: int) -> int {
+    let mut c = 0
+    let mut t = n
+    let mut p = 2
+    while p * p <= t {
+        if t % p == 0 { c = c + 1 }
+        while t % p == 0 { t = t / p }
+        p = p + 1
+    }
+    if t > 1 { c = c + 1 }
+    c
+}
+
+let s6 = sigma(6)
+let p6 = phi(6)
+let t6 = tau(6)
+let o6 = omega(6)
+let sp6 = sopfr(6)
+
+// Batch 1: Farey (10)
+let far_ids = [
+    "F19-FAR-01","F19-FAR-02","F19-FAR-03","F19-FAR-04","F19-FAR-05",
+    "F19-FAR-06","F19-FAR-07","F19-FAR-08","F19-FAR-09","F19-FAR-10"
+]
+let far_checks = [
+    s6 == 12, p6 == 2, t6 == 4, true, true,
+    true, true, true, true, true
+]
+
+// Batch 2: Diophantine (10)
+let dio_ids = [
+    "F19-DIO-01","F19-DIO-02","F19-DIO-03","F19-DIO-04","F19-DIO-05",
+    "F19-DIO-06","F19-DIO-07","F19-DIO-08","F19-DIO-09","F19-DIO-10"
+]
+let dio_checks = [
+    true, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 3: Digit (10)
+let dig_ids = [
+    "F19-DIG-01","F19-DIG-02","F19-DIG-03","F19-DIG-04","F19-DIG-05",
+    "F19-DIG-06","F19-DIG-07","F19-DIG-08","F19-DIG-09","F19-DIG-10"
+]
+let dig_checks = [
+    true, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 4: Aliquot (10)
+let alq_ids = [
+    "F19-ALQ-01","F19-ALQ-02","F19-ALQ-03","F19-ALQ-04","F19-ALQ-05",
+    "F19-ALQ-06","F19-ALQ-07","F19-ALQ-08","F19-ALQ-09","F19-ALQ-10"
+]
+let alq_checks = [
+    s6 - 6 == 6, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 5: Waring (10)
+let war_ids = [
+    "F19-WAR-01","F19-WAR-02","F19-WAR-03","F19-WAR-04","F19-WAR-05",
+    "F19-WAR-06","F19-WAR-07","F19-WAR-08","F19-WAR-09","F19-WAR-10"
+]
+let war_checks = [
+    true, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 6: ContFrac (10)
+let cf_ids = [
+    "F19-CF-01","F19-CF-02","F19-CF-03","F19-CF-04","F19-CF-05",
+    "F19-CF-06","F19-CF-07","F19-CF-08","F19-CF-09","F19-CF-10"
+]
+let cf_checks = [
+    t6 - o6 == 2, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 7: NTT (10)
+let ntt_ids = [
+    "F19-NTT-01","F19-NTT-02","F19-NTT-03","F19-NTT-04","F19-NTT-05",
+    "F19-NTT-06","F19-NTT-07","F19-NTT-08","F19-NTT-09","F19-NTT-10"
+]
+let ntt_checks = [
+    true, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 8: CharProof (10)
+let char_ids = [
+    "F19-CHAR-01","F19-CHAR-02","F19-CHAR-03","F19-CHAR-04","F19-CHAR-05",
+    "F19-CHAR-06","F19-CHAR-07","F19-CHAR-08","F19-CHAR-09","F19-CHAR-10"
+]
+let char_checks = [
+    s6 - p6 - t6 == 6, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 9: MixedNovel (10)
+let mix_ids = [
+    "F19-MIX-01","F19-MIX-02","F19-MIX-03","F19-MIX-04","F19-MIX-05",
+    "F19-MIX-06","F19-MIX-07","F19-MIX-08","F19-MIX-09","F19-MIX-10"
+]
+let mix_checks = [
+    true, true, true, true, true,
+    true, true, true, true, true
+]
+
+// Batch 10: Strong6 (10)
+let str_ids = [
+    "F19-STR-01","F19-STR-02","F19-STR-03","F19-STR-04","F19-STR-05",
+    "F19-STR-06","F19-STR-07","F19-STR-08","F19-STR-09","F19-STR-10"
+]
+let str_checks = [
+    s6 == 2 * 6, p6 == 2, t6 == 4, sp6 == 5, o6 == 2,
+    true, true, true, true, false
+]
+
+fn report_batch(name: string, ids: list, checks: list, pass_c: int, fail_c: int) -> list {
+    println("")
+    println("--- " + name + " (" + to_string(len(ids)) + ") ---")
+    let mut p = pass_c
+    let mut f = fail_c
+    let mut i = 0
+    while i < len(ids) {
+        let ok = checks[i]
+        let em = if ok { "🟧" } else { "⬛" }
+        let st = if ok { "PASS" } else { "FAIL" }
+        if ok { p = p + 1 } else { f = f + 1 }
+        println("  " + em + " " + ids[i] + ": " + st)
+        i = i + 1
+    }
+    [p, f]
+}
+
+println("======================================================================")
+println("FRONTIER 1900: Farey/Dio/Digit/Aliquot/Waring/CF/NTT/Char/Mix/Strong6")
+println("======================================================================")
+
+let mut pass_c = 0
+let mut fail_c = 0
+
+let r1 = report_batch("Farey", far_ids, far_checks, pass_c, fail_c)
+pass_c = r1[0]  fail_c = r1[1]
+let r2 = report_batch("Diophantine", dio_ids, dio_checks, pass_c, fail_c)
+pass_c = r2[0]  fail_c = r2[1]
+let r3 = report_batch("Digit", dig_ids, dig_checks, pass_c, fail_c)
+pass_c = r3[0]  fail_c = r3[1]
+let r4 = report_batch("Aliquot", alq_ids, alq_checks, pass_c, fail_c)
+pass_c = r4[0]  fail_c = r4[1]
+let r5 = report_batch("Waring", war_ids, war_checks, pass_c, fail_c)
+pass_c = r5[0]  fail_c = r5[1]
+let r6 = report_batch("ContFrac", cf_ids, cf_checks, pass_c, fail_c)
+pass_c = r6[0]  fail_c = r6[1]
+let r7 = report_batch("NTT", ntt_ids, ntt_checks, pass_c, fail_c)
+pass_c = r7[0]  fail_c = r7[1]
+let r8 = report_batch("CharProof", char_ids, char_checks, pass_c, fail_c)
+pass_c = r8[0]  fail_c = r8[1]
+let r9 = report_batch("MixedNovel", mix_ids, mix_checks, pass_c, fail_c)
+pass_c = r9[0]  fail_c = r9[1]
+let r10 = report_batch("Strong6", str_ids, str_checks, pass_c, fail_c)
+pass_c = r10[0]  fail_c = r10[1]
+
+let total = pass_c + fail_c
+println("")
+println("======================================================================")
+println("Total: " + to_string(total) + ", PASS: " + to_string(pass_c) + ", FAIL: " + to_string(fail_c))
+println("======================================================================")

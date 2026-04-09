@@ -1,0 +1,154 @@
+// mk2_hexa/native/torus_knot_topology.hexa
+// 포팅 원본: tecs-l/math/torus_knot_topology_n6.py
+// Torus knot T(p,q) 불변량 + n=6 연결 탐지
+// 정수 계산 코어만 포팅 (symbolic/complex 부분은 생략)
+
+fn my_gcd(a: int, b: int) -> int {
+    let mut x = a
+    let mut y = b
+    if x < 0 { x = 0 - x }
+    if y < 0 { y = 0 - y }
+    while y != 0 {
+        let t = y
+        y = x % y
+        x = t
+    }
+    x
+}
+
+fn my_min(a: int, b: int) -> int { if a < b { a } else { b } }
+
+// ── T(p,q) 불변량 ──
+
+// Seifert genus: g = (p-1)(q-1)/2  (gcd=1 조건에서 knot)
+fn seifert_genus(p: int, q: int) -> int { (p - 1) * (q - 1) / 2 }
+
+// Crossing number: c = min(p(q-1), q(p-1))
+fn crossing_number(p: int, q: int) -> int {
+    if p == 1 { return 0 }
+    my_min(p * (q - 1), q * (p - 1))
+}
+
+// Alexander polynomial at t=-1 via formula:
+// Delta_{T(p,q)}(t) = (t^{pq}-1)(t-1) / ((t^p-1)(t^q-1))
+// t=-1: numer = ((-1)^{pq}-1)*(-2), denom = ((-1)^p - 1)*((-1)^q - 1)
+// knot requires gcd(p,q)=1, so one of p,q is odd.
+fn pow_neg1(k: int) -> int { if k % 2 == 0 { 1 } else { 0 - 1 } }
+
+// Alexander formula 특이점 회피 — 알려진 T(p,q) det 값.
+// T(2, q) with q odd: det = q
+// T(3, q) with gcd(3,q)=1: det = 1 if q≡±1 mod 6 else 3
+// T(p, q) both odd coprime: 일반 공식 — Seifert matrix 필요. 주요 값 하드코딩 생략 위해
+// 정의식의 대칭 limit로 계산: det = prod_{k=1}^{(p-1)(q-1)/2} (관련) — 대신 소형 케이스만.
+fn determinant_torus(p: int, q: int) -> int {
+    if my_gcd(p, q) != 1 { return 0 - 1 }   // link
+    if p == 1 || q == 1 { return 1 }         // unknot
+    // 소수 p=2 케이스: q 홀수일 때 det = q
+    if p == 2 { if q % 2 == 1 { return q } else { return 0 - 1 } }
+    if q == 2 { if p % 2 == 1 { return p } else { return 0 - 1 } }
+    // p=3 케이스: q ≡ ±1 mod 6 → 1, q ≡ ±2 → 3
+    if p == 3 {
+        let m = q % 6
+        if m == 1 || m == 5 { return 1 }
+        if m == 2 || m == 4 { return 3 }
+        return 0 - 1
+    }
+    if q == 3 {
+        let m = p % 6
+        if m == 1 || m == 5 { return 1 }
+        if m == 2 || m == 4 { return 3 }
+        return 0 - 1
+    }
+    // 그 외: 공식화 생략
+    0 - 1
+}
+
+// Signature for T(2,q), q odd: sigma = -(q-1)
+fn signature_t2q(q: int) -> int {
+    if q % 2 == 0 { return 0 }  // link
+    0 - (q - 1)
+}
+
+// ── n=6 연결 탐지 ──
+let n = 6
+let sigma_n = sigma(n)  // 12
+let tau_n = tau(n)      // 4
+let phi_n = phi(n)      // 2
+
+// 후보: (p,q) with p*q ∈ {divisors of 6} ∪ {divisors of 12}
+let cands_p = [1, 1, 1, 2, 2, 3, 3, 4]
+let cands_q = [2, 3, 6, 3, 6, 4, 6, 6]
+
+println("======================================================================")
+println("TORUS KNOT TOPOLOGY — n=6 연결 탐지 (hexa port)")
+println("======================================================================")
+println("n=6: sigma=" + to_string(sigma_n) + " tau=" + to_string(tau_n) + " phi=" + to_string(phi_n))
+println("")
+println("Knot      gcd  type     cross  genus  det   notes")
+println("----------------------------------------------------------------------")
+
+let mut connections = 0
+let mut i = 0
+while i < len(cands_p) {
+    let p = cands_p[i]
+    let q = cands_q[i]
+    let g = my_gcd(p, q)
+    let kind = if p == 1 { "unknot" } else if g == 1 { "knot" } else { "link" }
+    let cross = crossing_number(p, q)
+    let genus = seifert_genus(p, q)
+    let det = determinant_torus(p, q)
+
+    let mut notes = ""
+    if p * q == 6 { notes = notes + "pq=6 " }
+    if p * q == 12 { notes = notes + "pq=12=σ(6) " }
+    if det == 3 { notes = notes + "det=3=n/2 " }
+    if det == 6 { notes = notes + "det=6=n " }
+    if det == 12 { notes = notes + "det=12=σ(6) " }
+    if genus == 3 { notes = notes + "genus=3=τ·... " }
+    if genus == 1 { notes = notes + "genus=1 " }
+    if cross == 6 { notes = notes + "cross=6=n " }
+
+    if len(notes) > 0 { connections = connections + 1 }
+
+    println("T(" + to_string(p) + "," + to_string(q) + ")     " + to_string(g) + "    " + kind + "   " + to_string(cross) + "      " + to_string(genus) + "      " + to_string(det) + "    " + notes)
+    i = i + 1
+}
+
+// ── T(2,3) Trefoil 상세 검증 ──
+println("")
+println("--- T(2,3) Trefoil 상세 ---")
+let tg = seifert_genus(2, 3)
+let tc = crossing_number(2, 3)
+let td = determinant_torus(2, 3)
+let ts = signature_t2q(3)
+println("  genus=" + to_string(tg) + " (expect 1)  " + (if tg == 1 { "🟧" } else { "⬛" }))
+println("  crossing=" + to_string(tc) + " (expect 3)  " + (if tc == 3 { "🟧" } else { "⬛" }))
+println("  det=" + to_string(td) + " (expect 3)  " + (if td == 3 { "🟧" } else { "⬛" }))
+println("  signature=" + to_string(ts) + " (expect -2)  " + (if ts == (0 - 2) { "🟧" } else { "⬛" }))
+
+// ── T(3,4): 8-crossing knot ──
+println("")
+println("--- T(3,4) ---")
+let g34 = seifert_genus(3, 4)
+let c34 = crossing_number(3, 4)
+let d34 = determinant_torus(3, 4)
+println("  genus=" + to_string(g34) + " (expect 3 = τ-1? half-σ/4)  " + (if g34 == 3 { "🟧" } else { "⬛" }))
+println("  crossing=" + to_string(c34) + " (expect 8)  " + (if c34 == 8 { "🟧" } else { "⬛" }))
+println("  det=" + to_string(d34))
+
+// ── T(2,5): Solomon seal knot ──
+println("")
+println("--- T(2,5) ---")
+let g25 = seifert_genus(2, 5)
+let c25 = crossing_number(2, 5)
+let d25 = determinant_torus(2, 5)
+let s25 = signature_t2q(5)
+println("  genus=" + to_string(g25) + " (expect 2)  " + (if g25 == 2 { "🟧" } else { "⬛" }))
+println("  crossing=" + to_string(c25) + " (expect 5)  " + (if c25 == 5 { "🟧" } else { "⬛" }))
+println("  det=" + to_string(d25) + " (expect 5)  " + (if d25 == 5 { "🟧" } else { "⬛" }))
+println("  signature=" + to_string(s25) + " (expect -4)  " + (if s25 == (0 - 4) { "🟧" } else { "⬛" }))
+
+println("")
+println("======================================================================")
+println("n=6 connections found: " + to_string(connections))
+println("======================================================================")
