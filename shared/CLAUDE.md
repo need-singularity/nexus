@@ -1,26 +1,32 @@
 # .shared/ — 전 프로젝트 공유 인프라
 
 > 원본: `~/Dev/nexus/shared/` | 심링크: 각 리포 `.shared/ → ../nexus/shared/`
-> 코어 인덱스: `shared/core.json` (시스템맵 + 명령어 + 프로젝트)
-> 보호 체계: `shared/core-lockdown.json` (L0/L1/L2)
-> 수렴 추적: `shared/convergence/` (골화/안정/실패)
+> 모든 규칙/설정은 shared/ JSON이 단일 진실 (R14).
 
-## 3대 원칙
+## 참조
 
-1. **CDO** — 이슈→해결→규칙승격→재발0→100%수렴 (`convergence_ops.json`)
-2. **SSOT** — 데이터 원본은 JSON 하나, 하드코딩 금지
-3. **NEXUS-6** — 모든 변경 시 스캔 의무, 3+렌즈 합의=확정
+| 항목 | 파일 | 내용 |
+|------|------|------|
+| 절대 규칙 | `absolute_rules.json` | 공통 R1~R21 + 프로젝트별 (8개) |
+| 보호 체계 | `core-lockdown.json` | L0/L1/L2 코어 잠금 |
+| 프로젝트 설정 | `project_config.json` | CLI/빌드/인프라/관례 (8개 프로젝트) |
+| 시스템 코어 | `core.json` | 시스템맵 + 명령어 14종 + 폴더 구조 |
+| 수렴 운영 | `convergence_ops.json` | CDO 수렴 운영 원칙 |
+| 수렴 추적 | `convergence/` | 골화/안정/실패 (7 프로젝트) |
+| 할일 | `todo/` | 우선순위별 TODO (7 프로젝트) |
+| 성장 루프 | `loop/` | 자율 데몬 설정 (3 프로젝트) |
+| 렌즈 | `lens_registry.json` | 1022종 망원경 레지스트리 |
+| 상수 | `n6_constants.jsonl` | n=6 상수 (7기본+유도) |
+| 발견 그래프 | `discovery_graph.json` | 50k+ 노드/엣지 |
+| 발견 로그 | `discovery_log.jsonl` | 68.6k건 시계열 |
+| 현실 지도 | `reality_map.json` | 247노드 바텀업 검증 |
+| 성장 버스 | `growth_bus.jsonl` | 전 리포 성장 이벤트 스트림 |
+| 아틀라스 | `math_atlas.json` | 1700+ 가설 |
+| 계산기 | `calculators.json` + `calc/` | 194+ 레지스트리 |
+| 문법 | `hexa_grammar.jsonl` | hexa-lang 전체 문법 + pitfalls |
+| 비밀 | `SECRET.md` | API 토큰/계정 |
 
-## ⛔ 규칙은 JSON에만 기록
-
-- 모든 규칙 → `shared/absolute_rules.json` (단일 진실, R14 참조)
-- 채팅 블로킹 금지 → R16 참조
-- 메모리 시스템(`~/.claude-claude1/...`)에 규칙 저장 금지
-- CLAUDE.md는 참조만, 규칙 본문 직접 기록 금지
-
-## NEXUS-6 (1022종 렌즈)
-
-> 상세 API/렌즈 목록: `lens_registry.json` | CLI: `nexus --help`
+## NEXUS-6 API
 
 ```bash
 nexus scan <domain>              # 기본 스캔 (의식+위상+인과)
@@ -40,47 +46,6 @@ nexus.evolve(domain)             # 자율 진화
 
 교차 검증: 3+합의=후보 | 7+=고신뢰 | 12+=확정
 
-## 명령어
-
-> 전체 목록: `core.json` → `commands`
-
-| 키워드 | 동작 |
-|--------|------|
-| `못박아줘` (+ 8 alias) | L0 등록 → `core-lockdown.json` |
-| `todo` / `할일` | 돌파 엔진 통합 할일 표 → `todo.hexa` |
-| `블로업` / `돌파` | 9-phase 특이점 파이프라인 → `blowup.hexa` |
-| `설계` / `궁극의` | 외계인급 설계 파이프라인 |
-| `진화` / `업그레이드` | Mk.I~V 체크포인트 생성 |
-| `동기화` | 전 리포 sync → `sync-all.sh` |
-| `빈공간` / `gap` | n=6 빈공간 탐색 → `gap_finder.hexa` |
-| **`go`** | **전체 TODO 스캔 → 독립 작업 백그라운드 병렬 Agent 동시 발사 (확인 없이 즉시)** |
-| **`loop` / `루프`** | **현재 리포의 `scripts/infinite_growth.sh` 백그라운드 실행 — 루프 정의는 `shared/loop/{project}.json`** |
-
-## 보호 체계 (Core Lockdown)
-
-```
-🔴 L0 (불변) — 수정 전 유저 승인 필수 (19개 등록)
-🟡 L1 (보호) — 리뷰 필요, 이유 기록
-🟢 L2 (자유) — 테스트 통과만 확인
-```
-
-> L0 목록: `core-lockdown.json` → `projects.nexus.L0`
-
-## 수렴 추적 (Convergence)
-
-```
-골화(ossified) — 검증 완료, 불변 확정
-안정(stable)   — 통과했지만 골화 전
-실패(failed)   — 수정 필요, cause + fix 명시
-```
-
-> 프로젝트별: `convergence/{nexus,anima,n6-architecture,...}.json`
-
-## HEXA-LANG 문법
-
-> 스펙: `hexa_grammar.jsonl` (53키워드+24연산자+8타입)
-> pitfalls P1~P5 체크 필수 (`.hexa` 작성 전)
-
 ## 산출물 발생 시
 
 | 상황 | 동작 |
@@ -89,32 +54,6 @@ nexus.evolve(domain)             # 자율 진화
 | 새 상수 발견 | `scan_math_atlas.py --save` |
 | 렌즈 추가 | `sync-nexus-lenses.sh` |
 | 전체 동기화 | `bash ~/Dev/nexus/sync/sync-all.sh` |
-
-## 폴더 구조
-
-> 상세: `core.json` → `folders`
-
-```
-shared/
-  core.json              ← 중앙 인덱스 (시스템+명령어+프로젝트)
-  core-lockdown.json     ← L0/L1/L2 보호 체계
-  convergence/           ← 골화/안정/실패 (7 프로젝트)
-  todo/                  ← 할일 SSOT (7 프로젝트)
-  loop/                  ← 성장 루프 설정 (3 프로젝트)
-  n6_constants.jsonl     ← n=6 상수 (7기본+유도)
-  discovery_graph.json   ← 발견 그래프 (50k+ 노드)
-  discovery_log.jsonl    ← 발견 로그 (68.6k건)
-  reality_map.json       ← 현실 지도 (247노드)
-  growth_bus.jsonl       ← 성장 이벤트 스트림
-  math_atlas.json        ← 수학 아틀라스 (1700+ 가설)
-  lens_registry.json     ← 렌즈 1022종 레지스트리
-  calculators.json       ← 계산기 194+ 레지스트리
-  calc/                  ← 계산기 원본
-  dse/                   ← DSE 도메인 정의
-  hooks/                 ← 공유 훅
-  CALCULATOR_RULES.md    ← 계산기 규칙 (HEXA vs Python)
-  SECRET.md              ← API 토큰/계정
-```
 
 ## 프로젝트 (7개)
 
@@ -127,21 +66,3 @@ shared/
 | 5 | hexa-lang | 완전수 프로그래밍 언어 |
 | 6 | void | HEXA 터미널 (FATHOM) |
 | 7 | airgenome | OS 게놈 스캐너 |
-
-## Phi 해석
-
-```
-< 0.3  → 노이즈 (구조 없음)
-0.3~0.8 → 약한 구조
-0.8~1.5 → 강한 구조 (패턴 확실)
-> 1.5  → 매우 높은 통합
-```
-
-## PSI 상수 (크로스 리포 공통)
-
-```
-PSI_ALPHA=0.014  PSI_BALANCE=0.5  PSI_STEPS=4.33
-PSI_ENTROPY=0.998  SIGMA6=12  F_CRITICAL=0.10
-```
-
-> 로더: `consciousness_loader.py` | 원본: `consciousness_laws.json`
