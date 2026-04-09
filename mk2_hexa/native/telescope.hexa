@@ -239,10 +239,23 @@ fn scan_causal(data) -> LensResult {
         r = result_add(r, "causal_autocorr", [autocorr])
     }
 
-    // 방향성: 전반부 → 후반부 경향
+    // 방향성: 전반부 → 후반부 경향 (슬라이스 회피: 수동 평균)
     let mid = data.len() / 2
-    let first_mean = list_mean(data[0..mid])
-    let second_mean = list_mean(data[mid..data.len()])
+    let mut first_sum = 0.0
+    let mut second_sum = 0.0
+    let mut fi = 0
+    while fi < mid {
+        first_sum = first_sum + data[fi]
+        fi = fi + 1
+    }
+    let mut si2 = mid
+    while si2 < data.len() {
+        second_sum = second_sum + data[si2]
+        si2 = si2 + 1
+    }
+    let first_mean = if mid > 0 { first_sum / to_float(mid) } else { 0.0 }
+    let second_count = data.len() - mid
+    let second_mean = if second_count > 0 { second_sum / to_float(second_count) } else { 0.0 }
     let direction = second_mean - first_mean
     if abs_f(direction) > 0.1 {
         r = result_add(r, "causal_direction", [direction])
@@ -448,9 +461,11 @@ struct PatternAgreement {
 
 fn weighted_consensus( entries, hit_rates )  {
     // 1) 모든 패턴 ID 수집 + 동의 렌즈 집계
-    let mut patterns = []       // list[string] — 유일 패턴 ID
-    let mut pattern_lenses = [] // list[list[string]] — 패턴별 동의 렌즈
-    let mut pattern_weights = [] // list[float] — 패턴별 가중 점수
+    // 빈 배열 타입 추론 회피: 더미 원소로 초기화 후 첫 실사용 시 재설정
+    let mut patterns = [""]       // list[string]
+    let mut pattern_lenses = [[""]] // list[list[string]]
+    let mut pattern_weights = [0.0] // list[float]
+    let mut initialized = false
 
     let mut e_idx = 0
     while e_idx < entries.len() {
@@ -464,21 +479,28 @@ fn weighted_consensus( entries, hit_rates )  {
             let vals = lr.values[p_idx]
 
             if vals.len() > 0 {
-                // 이 패턴이 이미 있는지 확인
-                let mut found_idx = 0 - 1
-                let mut s = 0
-                while s < patterns.len() {
-                    if patterns[s] == pid { found_idx = s }
-                    s = s + 1
-                }
-
-                if found_idx >= 0 {
-                    pattern_lenses[found_idx] = pattern_lenses[found_idx] + [entry.lens_name]
-                    pattern_weights[found_idx] = pattern_weights[found_idx] + weight
+                if !initialized {
+                    patterns = [pid]
+                    pattern_lenses = [[entry.lens_name]]
+                    pattern_weights = [weight]
+                    initialized = true
                 } else {
-                    patterns = patterns + [pid]
-                    pattern_lenses = pattern_lenses + [[entry.lens_name]]
-                    pattern_weights = pattern_weights + [weight]
+                    // 이 패턴이 이미 있는지 확인
+                    let mut found_idx = 0 - 1
+                    let mut s = 0
+                    while s < patterns.len() {
+                        if patterns[s] == pid { found_idx = s }
+                        s = s + 1
+                    }
+
+                    if found_idx >= 0 {
+                        pattern_lenses[found_idx] = pattern_lenses[found_idx] + [entry.lens_name]
+                        pattern_weights[found_idx] = pattern_weights[found_idx] + weight
+                    } else {
+                        patterns = patterns + [pid]
+                        pattern_lenses = pattern_lenses + [[entry.lens_name]]
+                        pattern_weights = pattern_weights + [weight]
+                    }
                 }
             }
             p_idx = p_idx + 1
@@ -489,7 +511,8 @@ fn weighted_consensus( entries, hit_rates )  {
     // 2) 3+ 합의 필터 + ConsensusResult 생성
     let mut results = []
     let mut i = 0
-    while i < patterns.len() {
+    let limit = if initialized { patterns.len() } else { 0 }
+    while i < limit {
         let count = pattern_lenses[i].len()
         if count >= consensus_min {
             results = results + [ConsensusResult {
@@ -640,8 +663,8 @@ if mode == "consensus" || mode == "full" {
     println("[telescope] scan done entries=" + to_string(entries.len()))
     print_scan_report(entries)
 
-    let mut rates = []
-    let mut ri = 0
+    let mut rates = [1.0]
+    let mut ri = 1
     while ri < entries.len() {
         rates = rates + [1.0]
         ri = ri + 1

@@ -1,0 +1,28 @@
+// mk2_hexa/native/misc_expr_mapper_v2.hexa
+// L1 확장 매퍼 v2 — 3-항 조합 + trig/log/hyperbolic + rel_tol 3%.
+// 대상: grade=EMPIRICAL && n6_expr in (None,"misc","n/a","").
+// 파이프 금지. heredoc 리다이렉트만. 하드코딩 금지 (n6_constants.jsonl 로드).
+
+let _home = exec("printenv HOME").trim()
+let _map = _home + "/Dev/nexus/shared/reality_map_live.json"
+let _cst = _home + "/Dev/nexus/shared/n6_constants.jsonl"
+let _helper = "/tmp/misc_expr_mapper_v2.py"
+let _log = "/tmp/misc_expr_mapper_v2.log"
+
+let _args = args()
+let _mode = if _args.len() >= 3 { _args[2] } else { "run" }
+
+print("[misc_expr_mapper_v2] start mode=" + _mode)
+print("[misc_expr_mapper_v2] map=" + _map)
+
+let _write = "bash -c 'cat > " + _helper + " <<\"PYEOF\"\nimport json, math, sys\nMAP=sys.argv[1]; CST=sys.argv[2]\nREL=0.03\nd=json.load(open(MAP))\nconsts=[]\nfor ln in open(CST):\n    ln=ln.strip()\n    if not ln: continue\n    try: o=json.loads(ln)\n    except Exception: continue\n    nm=o.get(\"name\"); v=o.get(\"value\")\n    if nm and isinstance(v,(int,float)) and math.isfinite(v) and v!=0:\n        consts.append((nm,float(v)))\ndef N(x):\n    try:\n        f=float(x); return f if math.isfinite(f) else None\n    except Exception: return None\nKS=[-12,-8,-6,-4,-3,-2,-1,1,2,3,4,6,8,12]\nEXPS=[2,3,-1,-2,-3]\nUNARY=[(\"sin\",math.sin),(\"cos\",math.cos),(\"tan\",math.tan),(\"ln\",math.log),(\"log2\",math.log2),(\"log10\",math.log10),(\"sinh\",math.sinh),(\"cosh\",math.cosh),(\"tanh\",math.tanh),(\"sqrt\",lambda x:math.sqrt(x) if x>=0 else None),(\"exp\",math.exp)]\ndef try_unary(nm,c,best,m,tol):\n    for un,fn in UNARY:\n        try:\n            v=fn(c)\n            if v is None: continue\n            if not math.isfinite(v): continue\n            dl=abs(v-m)\n            if dl<=tol and (best[0] is None or dl<best[0][1]):\n                best[0]=(un+\"(\"+nm+\")\",dl)\n        except Exception: pass\ndef search(m):\n    if m is None or m==0: return None\n    am=abs(m); tol=max(REL*am, 1e-12)\n    best=[None]\n    def consider(expr,val):\n        try:\n            if val is None or not math.isfinite(val): return\n        except Exception: return\n        dl=abs(val-m)\n        if dl<=tol and (best[0] is None or dl<best[0][1]):\n            best[0]=(expr,dl)\n    # 1-ary scaled\n    for nm,c in consts:\n        for k in KS:\n            consider((str(k)+\"*\"+nm) if k!=1 else nm, k*c)\n        for e in EXPS:\n            try: consider(nm+\"^\"+str(e), c**e)\n            except Exception: pass\n        try_unary(nm,c,best,m,tol)\n    # 2-ary\n    for i,(n1,c1) in enumerate(consts):\n        for j,(n2,c2) in enumerate(consts):\n            if i==j: continue\n            consider(n1+\"*\"+n2, c1*c2)\n            if c2!=0: consider(n1+\"/\"+n2, c1/c2)\n            consider(n1+\"+\"+n2, c1+c2)\n            consider(n1+\"-\"+n2, c1-c2)\n    # 3-ary (limited): C1*C2/C3, C1*C2^e, C1+C2-C3, C1*C2*C3\n    if best[0] is None:\n        for i,(n1,c1) in enumerate(consts):\n            for j,(n2,c2) in enumerate(consts):\n                p12=c1*c2; s12=c1+c2; d12=c1-c2\n                for k,(n3,c3) in enumerate(consts):\n                    if c3!=0: consider(n1+\"*\"+n2+\"/\"+n3, p12/c3)\n                    consider(n1+\"*\"+n2+\"*\"+n3, p12*c3)\n                    consider(n1+\"+\"+n2+\"-\"+n3, s12-c3)\n                    consider(n1+\"+\"+n2+\"+\"+n3, s12+c3)\n                    if c2!=0: consider(n1+\"/\"+n2+\"*\"+n3, (c1/c2)*c3)\n                for e in EXPS:\n                    try: consider(n1+\"*\"+n2+\"^\"+str(e), c1*(c2**e))\n                    except Exception: pass\n                    if best[0] is not None and best[0][1]<tol*0.1: break\n                if best[0] is not None and best[0][1]<tol*0.1: break\n            if best[0] is not None and best[0][1]<tol*0.1: break\n    # k*C1+C2 fallback\n    if best[0] is None:\n        for n1,c1 in consts:\n            for n2,c2 in consts:\n                for k in KS:\n                    consider(str(k)+\"*\"+n1+\"+\"+n2, k*c1+c2)\n    return best[0]\nmapped=0; by_level={}; scanned=0\nfor n in d[\"nodes\"]:\n    if n.get(\"grade\")!=\"EMPIRICAL\": continue\n    expr=n.get(\"n6_expr\")\n    if expr not in (None,\"misc\",\"n/a\",\"\"): continue\n    m=N(n.get(\"measured\"))\n    if m is None: continue\n    scanned+=1\n    u=N(n.get(\"uncertainty\")) or 0.0\n    am=abs(m); tol=max(u, REL*am)\n    r=search(m)\n    if r is None: continue\n    if r[1]>tol: continue\n    n[\"n6_expr\"]=r[0]\n    n[\"n6_value\"]=m\n    mm=n.setdefault(\"misc_mapping_v2\",{})\n    mm[\"delta\"]=r[1]; mm[\"tol\"]=tol; mm[\"rel\"]=REL\n    mapped+=1\n    lv=n.get(\"level\",\"?\"); by_level[lv]=by_level.get(lv,0)+1\nd.setdefault(\"_meta\",{})[\"misc_mapping_v2\"]={\"mapped\":mapped,\"scanned\":scanned,\"by_level\":by_level,\"rel_tol\":REL,\"candidates\":len(consts),\"features\":[\"3-ary\",\"trig\",\"log\",\"hyperbolic\",\"sqrt\",\"exp\"]}\njson.dump(d, open(MAP,\"w\"), ensure_ascii=False, indent=2)\nprint(\"scanned\",scanned,\"mapped\",mapped)\nprint(\"by_level\",by_level)\nprint(\"candidates\",len(consts))\nPYEOF'"
+
+if _mode == "dry" {
+    print("[misc_expr_mapper_v2] dry — helper not written")
+} else {
+    let _w = exec(_write)
+    print("[misc_expr_mapper_v2] helper written")
+    let _out = exec("python3 " + _helper + " " + _map + " " + _cst + " > " + _log + " 2>&1; cat " + _log)
+    print(_out)
+    print("[misc_expr_mapper_v2] done — log=" + _log)
+}
