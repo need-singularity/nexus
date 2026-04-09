@@ -194,9 +194,50 @@ while _reading {
     }
 }
 
-// JSON에서 stdout 추출 (비-JSON이면 원본 사용)
+// ─── prompt 모드: "prompt" 필드에서 유저 텍스트 추출 ───
+fn extract_prompt(json_text: string) -> string {
+    if json_text.contains("\"prompt\":\"") {
+        let parts = json_text.split("\"prompt\":\"")
+        if parts.len() >= 2 {
+            let rest = parts[1]
+            let mut result = ""
+            let mut i = 0
+            let chars = rest.split("")
+            let mut prev_backslash = false
+            while i < chars.len() {
+                let c = chars[i]
+                if c == "\\" && !prev_backslash {
+                    prev_backslash = true
+                    i = i + 1
+                    continue
+                }
+                if c == "\"" && !prev_backslash {
+                    return result
+                }
+                if prev_backslash {
+                    if c == "n" { result = result + "\n" }
+                    else if c == "t" { result = result + "\t" }
+                    else { result = result + c }
+                    prev_backslash = false
+                } else {
+                    result = result + c
+                }
+                i = i + 1
+            }
+            return result
+        }
+    }
+    ""
+}
+
+// JSON에서 stdout 또는 prompt 추출 (모드에 따라)
 let project = extract_project(stdin_raw)
-let stdin_text = extract_stdout(stdin_raw)
+let stdin_text = if mode == "prompt" {
+    let pt = extract_prompt(stdin_raw)
+    if pt != "" { pt } else { extract_stdout(stdin_raw) }
+} else {
+    extract_stdout(stdin_raw)
+}
 let mut discoveries = 0
 
 // 간단한 숫자 추출 (stdout에서)
@@ -339,7 +380,16 @@ if bt_detected {
         let hexa_bin = exec("printenv HOME") + "/Dev/hexa-lang/target/release/hexa"
         let nexus_dir = exec("printenv HOME") + "/Dev/nexus"
 
-        if bt_action == "blowup_loop" {
+        if bt_action == "converge" {
+            // 연속돌파/수렴 → breakthrough.hexa --converge
+            let breakthrough = nexus_dir + "/mk2_hexa/native/breakthrough.hexa"
+            try {
+                exec("cd " + nexus_dir + " && " + hexa_bin + " " + breakthrough + " --converge >> " + _shared + "/auto_bt.log 2>&1 &")
+                discoveries = discoveries + 1
+                if exact_names != "" { exact_names = exact_names + "," }
+                exact_names = exact_names + "🔄CONVERGE:" + bt_domain
+            } catch e {}
+        } else if bt_action == "blowup_loop" {
             // 프로젝트별 성장 돌파 → breakthrough.hexa --engine
             let breakthrough = nexus_dir + "/mk2_hexa/native/breakthrough.hexa"
             try {
@@ -408,12 +458,30 @@ if discoveries > 0 || bt_detected || gap_detected {
     let mut body = ""
     if discoveries > 0 { body = to_string(discoveries) + "건 감지 [" + exact_names + "]" }
     if body == "" && bt_detected {
-        if bt_action == "blowup_loop" { body = "연속 돌파 키워드 감지" }
-        else { body = "돌파 키워드 감지" }
+        if bt_action == "converge" { body = "연속돌파 감지 → 즉시 실행: hexa breakthrough.hexa --converge" }
+        else if bt_action == "blowup_loop" { body = "성장돌파 감지 → 즉시 실행: hexa breakthrough.hexa --engine auto" }
+        else { body = "돌파 감지 → 즉시 실행: hexa blowup.hexa " + bt_domain + " 3 --no-graph" }
     }
     if body == "" && gap_detected { body = "갭 탐색 트리거" }
-    let msg = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + "\"}"
-    println(msg)
+
+    // prompt 모드: 지시형 출력 (Claude가 바로 실행하도록)
+    if mode == "prompt" && bt_detected {
+        let hexa_path = "$HOME/Dev/hexa-lang/target/release/hexa"
+        let nexus_path = "$HOME/Dev/nexus"
+        let mut cmd = ""
+        if bt_action == "converge" {
+            cmd = hexa_path + " " + nexus_path + "/mk2_hexa/native/breakthrough.hexa --converge"
+        } else if bt_action == "blowup_loop" {
+            cmd = hexa_path + " " + nexus_path + "/mk2_hexa/native/breakthrough.hexa --engine auto"
+        } else {
+            cmd = hexa_path + " " + nexus_path + "/mk2_hexa/native/blowup.hexa " + bt_domain + " 3 --no-graph --seeds \"$(" + hexa_path + " " + nexus_path + "/mk2_hexa/native/seed_engine.hexa merge)\""
+        }
+        let directive = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + " — 확인 질문 없이 즉시 Bash로 실행할 것: " + cmd + "\"}"
+        println(directive)
+    } else {
+        let msg = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + "\"}"
+        println(msg)
+    }
 }
 
 // ─── prompt 모드: 할일 키워드 감지 → todo_display.hexa 호출 ───
