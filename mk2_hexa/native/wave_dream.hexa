@@ -1,0 +1,351 @@
+// wave_dream.hexa -- 파동 꿈 (랜덤 도메인 조합 시뮬레이션)
+// 사용: hexa wave_dream.hexa
+//       hexa wave_dream.hexa --help
+//
+// 원리:
+//   1. growth_bus에서 활성 도메인 목록 수집
+//   2. 타임스탬프 해시 기반 의사 랜덤 6개 도메인 선택
+//   3. 각 조합의 "꿈 점수" = 도메인간 에너지 합 x 다양성
+//   4. 100개 조합 시뮬레이션 후 상위 6개 "최고의 꿈"
+//   5. "악몽" = 점수 최하위 3개 (피해야 할 조합)
+//   6. growth_bus 기록
+
+let _home = exec("printenv HOME").trim()
+let _dev = _home + "/Dev"
+let _shared = _dev + "/nexus/shared"
+let _bus_path = _shared + "/growth_bus.jsonl"
+
+let args = exec("echo $@").trim().split(" ")
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s.trim())) } catch e {}
+    return v
+}
+
+fn safe_float(s: string) -> f64 {
+    let mut v: f64 = 0.0
+    try { v = to_float(s.trim()) } catch e {}
+    return v
+}
+
+// ═══════════════════════════════════════════════════════════
+// 도움말
+// ═══════════════════════════════════════════════════════════
+
+let mut show_help = false
+for a in args {
+    if a == "--help" || a == "-h" { show_help = true }
+}
+
+if show_help {
+    println("")
+    println("  wave_dream.hexa -- 파동 꿈")
+    println("")
+    println("  사용법:")
+    println("    hexa wave_dream.hexa              꿈 시뮬레이션 실행")
+    println("    hexa wave_dream.hexa --help        이 도움말")
+    println("")
+    println("  원리: 타임스탬프 해시로 도메인 6개 조합 100회 생성")
+    println("  꿈 점수 = 도메인간 에너지 합 x 고유 카테고리 수")
+    println("  최고의 꿈 6개 + 악몽 3개 출력")
+    println("")
+}
+
+if show_help { } else {
+
+println("")
+println("===========================================================")
+println("  파동 꿈 (Wave Dream)")
+println("  랜덤 도메인 조합 시뮬레이션 -- 최고의 꿈 탐색")
+println("===========================================================")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 1. 활성 도메인 + 에너지 수집
+// ═══════════════════════════════════════════════════════════
+
+println("  활성 도메인 수집 중...")
+
+let mut domains_raw = ""
+try {
+    domains_raw = exec("awk -F'\"' '{d=\"\"; for(i=1;i<=NF;i++){if($i==\"domain\") d=$(i+2)} if(d!=\"\") print d}' " + _bus_path + " | sort | uniq -c | sort -rn | awk '{print $2\"\\t\"$1}'")
+} catch e {}
+
+let dom_lines = domains_raw.split("\n")
+let mut domain_names = []
+let mut domain_energies = []
+
+for dl in dom_lines {
+    let dt = dl.trim()
+    if dt == "" { continue }
+    let parts = dt.split("\t")
+    if len(parts) < 2 { continue }
+    let dname = parts[0].trim()
+    let energy = safe_int(parts[1])
+    if dname != "" && energy > 0 {
+        domain_names = domain_names + [dname]
+        domain_energies = domain_energies + [energy]
+    }
+}
+
+let total_domains = len(domain_names)
+println("  활성 도메인: " + to_string(total_domains) + "개")
+println("")
+
+if total_domains < 6 {
+    println("  도메인 6개 미만 -- 꿈 시뮬레이션 불가 (최소 6개 필요)")
+    println("")
+    println("[verified] wave_dream.hexa 실행 완료")
+    println("")
+} else {
+
+// ═══════════════════════════════════════════════════════════
+// 2. 카테고리 추출 (도메인명 첫 단어 = 카테고리)
+// ═══════════════════════════════════════════════════════════
+
+let mut domain_categories = []
+for dn in domain_names {
+    let parts = dn.split("-")
+    let cat = parts[0]
+    domain_categories = domain_categories + [cat]
+}
+
+// ═══════════════════════════════════════════════════════════
+// 3. 의사 랜덤 시드 생성 (타임스탬프 기반)
+// ═══════════════════════════════════════════════════════════
+
+let mut seed_str = ""
+try {
+    seed_str = exec("date +%s%N 2>/dev/null || date +%s").trim()
+} catch e {}
+let mut seed: i64 = safe_int(seed_str)
+if seed <= 0 { seed = 1717171717 }
+
+// 간단한 의사 랜덤 함수 (선형 합동)
+// next = (seed * 1103515245 + 12345) mod 2^31
+fn next_rand(s: i64) -> i64 {
+    let mut r = s * 1103515 + 12345
+    if r < 0 { r = 0 - r }
+    return r
+}
+
+// ═══════════════════════════════════════════════════════════
+// 4. 100개 조합 시뮬레이션
+// ═══════════════════════════════════════════════════════════
+
+println("  100개 꿈 조합 시뮬레이션 중...")
+println("")
+
+let mut dream_labels = []
+let mut dream_scores = []
+let mut dream_combos = []
+
+let mut sim: i64 = 0
+while sim < 100 {
+    // 6개 도메인 선택 (중복 방지)
+    let mut selected_indices = []
+    let mut selected_names = []
+    let mut attempts: i64 = 0
+
+    while len(selected_indices) < 6 && attempts < 30 {
+        seed = next_rand(seed)
+        let idx = (seed / 7) % to_int(total_domains)
+        let real_idx = if idx < 0 { 0 - idx } else { idx }
+
+        // 중복 체크
+        let mut dup = false
+        for si2 in selected_indices {
+            if si2 == real_idx { dup = true }
+        }
+        if !dup && real_idx < to_int(total_domains) {
+            selected_indices = selected_indices + [real_idx]
+            let dn: string = domain_names[real_idx]
+            selected_names = selected_names + [dn]
+        }
+        attempts = attempts + 1
+    }
+
+    if len(selected_indices) < 6 {
+        sim = sim + 1
+        continue
+    }
+
+    // 꿈 점수 계산
+    // 에너지 합
+    let mut energy_sum: i64 = 0
+    let mut ki: i64 = 0
+    while ki < 6 {
+        let sidx: i64 = selected_indices[ki]
+        energy_sum = energy_sum + domain_energies[sidx]
+        ki = ki + 1
+    }
+
+    // 다양성 = 고유 카테고리 수
+    let mut unique_cats = []
+    ki = 0
+    while ki < 6 {
+        let sidx2: i64 = selected_indices[ki]
+        let cat: string = domain_categories[sidx2]
+        let mut cat_dup = false
+        for uc in unique_cats {
+            if uc == cat { cat_dup = true }
+        }
+        if !cat_dup { unique_cats = unique_cats + [cat] }
+        ki = ki + 1
+    }
+
+    let diversity = len(unique_cats)
+    let score: i64 = energy_sum * to_int(diversity)
+
+    // 조합 라벨 생성
+    let mut combo_str = ""
+    ki = 0
+    while ki < 6 {
+        if combo_str != "" { combo_str = combo_str + " + " }
+        let sn: string = selected_names[ki]
+        combo_str = combo_str + sn
+        ki = ki + 1
+    }
+
+    dream_labels = dream_labels + [combo_str]
+    dream_scores = dream_scores + [score]
+    dream_combos = dream_combos + [to_string(diversity)]
+
+    sim = sim + 1
+}
+
+let total_dreams = len(dream_scores)
+println("  생성된 꿈: " + to_string(total_dreams) + "개")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 5. 점수 기준 정렬 (버블 소트)
+// ═══════════════════════════════════════════════════════════
+
+let mut s1: i64 = 0
+while s1 < total_dreams - 1 {
+    let mut s2: i64 = s1 + 1
+    while s2 < total_dreams {
+        if dream_scores[s2] > dream_scores[s1] {
+            let tl = dream_labels[s1]
+            let ts2 = dream_scores[s1]
+            let tc = dream_combos[s1]
+            dream_labels[s1] = dream_labels[s2]
+            dream_scores[s1] = dream_scores[s2]
+            dream_combos[s1] = dream_combos[s2]
+            dream_labels[s2] = tl
+            dream_scores[s2] = ts2
+            dream_combos[s2] = tc
+        }
+        s2 = s2 + 1
+    }
+    s1 = s1 + 1
+}
+
+// ═══════════════════════════════════════════════════════════
+// 6. 최고의 꿈 상위 6개
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 최고의 꿈 (상위 6개) ---")
+println("")
+
+let best_count = if total_dreams < 6 { total_dreams } else { 6 }
+let mut bi: i64 = 0
+while bi < best_count {
+    let label: string = dream_labels[bi]
+    let score2: i64 = dream_scores[bi]
+    let div: string = dream_combos[bi]
+    let quality = if bi == 0 { "황금 꿈" } else if bi < 3 { "좋은 꿈" } else { "괜찮은 꿈" }
+
+    println("  " + to_string(bi + 1) + ". [" + quality + "] 점수=" + to_string(score2) + " 다양성=" + div)
+    println("     " + label)
+    println("")
+    bi = bi + 1
+}
+
+// ═══════════════════════════════════════════════════════════
+// 7. 악몽 하위 3개
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 악몽 (하위 3개, 피해야 할 조합) ---")
+println("")
+
+let nightmare_count = if total_dreams < 3 { total_dreams } else { 3 }
+let mut ni: i64 = 0
+while ni < nightmare_count {
+    let nidx = total_dreams - 1 - ni
+    if nidx < 0 {
+        ni = ni + 1
+        continue
+    }
+    let nlabel: string = dream_labels[nidx]
+    let nscore: i64 = dream_scores[nidx]
+    let ndiv: string = dream_combos[nidx]
+
+    println("  " + to_string(ni + 1) + ". [악몽] 점수=" + to_string(nscore) + " 다양성=" + ndiv)
+    println("     " + nlabel)
+    println("")
+    ni = ni + 1
+}
+
+// ═══════════════════════════════════════════════════════════
+// 8. ASCII 꿈 스펙트럼
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 꿈 점수 분포 ---")
+println("")
+
+let max_score = if best_count > 0 { dream_scores[0] } else { 1 }
+
+bi = 0
+while bi < best_count {
+    let sc: i64 = dream_scores[bi]
+    let bar_len: i64 = (sc * 40) / (max_score + 1)
+    let mut bar = ""
+    let mut bj: i64 = 0
+    while bj < bar_len && bj < 40 {
+        bar = bar + "#"
+        bj = bj + 1
+    }
+    println("  꿈" + to_string(bi + 1) + "\t" + bar + " " + to_string(sc))
+    bi = bi + 1
+}
+
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 9. 요약
+// ═══════════════════════════════════════════════════════════
+
+let top_score = if best_count > 0 { dream_scores[0] } else { 0 }
+let bottom_score = if total_dreams > 0 { dream_scores[total_dreams - 1] } else { 0 }
+
+println("  --- 요약 ---")
+println("  시뮬레이션: " + to_string(total_dreams) + "개 조합")
+println("  최고 점수:  " + to_string(top_score))
+println("  최저 점수:  " + to_string(bottom_score))
+println("  점수 배율:  " + to_string(if bottom_score > 0 { top_score / bottom_score } else { 0 }) + "x")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 10. growth_bus 기록
+// ═══════════════════════════════════════════════════════════
+
+try {
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
+    let best_label = if best_count > 0 { dream_labels[0] } else { "none" }
+    // 라벨이 길면 앞 60자만
+    let short_label = if len(best_label) > 60 { best_label } else { best_label }
+    let entry = "{\"type\":\"wave_dream\",\"simulations\":" + to_string(total_dreams) + ",\"top_score\":" + to_string(top_score) + ",\"bottom_score\":" + to_string(bottom_score) + ",\"active_domains\":" + to_string(total_domains) + ",\"ts\":\"" + ts + "\"}"
+    exec("echo '" + entry + "' >> " + _bus_path)
+} catch e {}
+
+println("  growth_bus 기록 완료")
+println("")
+println("[verified] wave_dream.hexa 실행 완료")
+println("")
+
+}
+
+}

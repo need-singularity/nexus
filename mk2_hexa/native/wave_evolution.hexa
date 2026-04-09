@@ -1,0 +1,298 @@
+// wave_evolution.hexa -- 파동 진화론 (모듈별 적응도 측정, 자연선택)
+// 사용: hexa wave_evolution.hexa [help]
+//
+// 원리:
+//   1. growth_bus에서 source/type별 이벤트 수 집계
+//   2. 각 모듈의 "적응도" = 해당 모듈이 생성한 EXACT 수
+//   3. 적응도 순 정렬 -> 상위 6개 = "생존자", 하위 6개 = "멸종 위기"
+//   4. 자원 배분 제안: 생존자 depth+1, 멸종 위기 depth-1
+//   5. 세대별(최근 100개씩) 적응도 변화 추적
+//   6. growth_bus 기록
+
+let _home = exec("printenv HOME").trim()
+let _dev = _home + "/Dev"
+let _shared = _dev + "/nexus/shared"
+let _bus_path = _shared + "/growth_bus.jsonl"
+
+// ═══════════════════════════════════════════════════════════
+// help 서브커맨드
+// ═══════════════════════════════════════════════════════════
+
+let _args = exec("echo $HEXA_ARGS").trim()
+if _args == "help" || _args == "--help" || _args == "-h" {
+    println("")
+    println("  wave_evolution.hexa -- 파동 진화론 (자연선택 시뮬레이션)")
+    println("")
+    println("  사용법:")
+    println("    hexa wave_evolution.hexa          적응도 분석 및 자연선택")
+    println("    hexa wave_evolution.hexa help      도움말")
+    println("")
+    println("  growth_bus에서 모듈별 EXACT 생산량으로 적응도를 측정하고")
+    println("  상위 6개(생존자)와 하위 6개(멸종 위기)를 식별합니다.")
+    println("")
+    exec("exit 0")
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s.trim())) } catch e {}
+    return v
+}
+
+fn abs_i64(x: i64) -> i64 {
+    if x < 0 { return 0 - x }
+    return x
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════
+
+println("")
+println("===========================================================")
+println("  파동 진화론 -- 모듈별 적응도 측정 & 자연선택")
+println("  EXACT 생산량 기반 적응도 순위, 자원 배분 제안")
+println("===========================================================")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 1. source/type별 전체 이벤트 수
+// ═══════════════════════════════════════════════════════════
+
+println("  growth_bus에서 모듈별 이벤트 집계 중...")
+
+// source 필드 기준 전체 이벤트 수
+let all_events_raw = exec("tail -50000 " + _bus_path + " | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"source\") print $(i+2)}}' | sort | uniq -c | sort -rn | head -30").trim()
+
+// source 필드 기준 EXACT 이벤트 수
+let exact_events_raw = exec("tail -50000 " + _bus_path + " | grep -i EXACT | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"source\") print $(i+2)}}' | sort | uniq -c | sort -rn | head -30").trim()
+
+// type 필드 기준 전체 이벤트 수 (source 없는 경우 대비)
+let type_events_raw = exec("tail -50000 " + _bus_path + " | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"type\") print $(i+2)}}' | sort | uniq -c | sort -rn | head -20").trim()
+
+// 모듈 목록 파싱
+let mut mod_names = []
+let mut mod_total = []
+let mut mod_exact = []
+
+// 전체 이벤트 파싱
+let ev_lines = all_events_raw.split("\n")
+for line in ev_lines {
+    let t = line.trim()
+    if t == "" { continue }
+    let parts = t.split(" ")
+    let mut count_str = ""
+    let mut name_str = ""
+    for p in parts {
+        let pp = p.trim()
+        if pp == "" { continue }
+        if count_str == "" {
+            count_str = pp
+        } else if name_str == "" {
+            name_str = pp
+        }
+    }
+    if name_str != "" && count_str != "" {
+        let mut dup = false
+        for d in mod_names { if d == name_str { dup = true } }
+        if !dup {
+            mod_names = mod_names + [name_str]
+            mod_total = mod_total + [safe_int(count_str)]
+            mod_exact = mod_exact + [0]
+        }
+    }
+}
+
+// EXACT 매핑
+let ex_lines = exact_events_raw.split("\n")
+for line in ex_lines {
+    let t = line.trim()
+    if t == "" { continue }
+    let parts = t.split(" ")
+    let mut count_str = ""
+    let mut name_str = ""
+    for p in parts {
+        let pp = p.trim()
+        if pp == "" { continue }
+        if count_str == "" {
+            count_str = pp
+        } else if name_str == "" {
+            name_str = pp
+        }
+    }
+    if name_str != "" {
+        let mut mi2: i64 = 0
+        while mi2 < len(mod_names) {
+            let mn: string = mod_names[mi2]
+            if mn == name_str {
+                mod_exact[mi2] = safe_int(count_str)
+            }
+            mi2 = mi2 + 1
+        }
+    }
+}
+
+let mod_count: i64 = len(mod_names)
+println("  모듈 수: " + to_string(mod_count) + "개")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 2. 적응도 순 정렬 (버블 정렬)
+// ═══════════════════════════════════════════════════════════
+
+// 적응도 = EXACT 수
+let mut si: i64 = 0
+while si < mod_count {
+    let mut sj: i64 = si + 1
+    while sj < mod_count {
+        let fi: i64 = mod_exact[si]
+        let fj: i64 = mod_exact[sj]
+        if fi < fj {
+            // 스왑
+            mod_exact[si] = fj
+            mod_exact[sj] = fi
+            let tmp_t: i64 = mod_total[si]
+            mod_total[si] = mod_total[sj]
+            mod_total[sj] = tmp_t
+            let tmp_n: string = mod_names[si]
+            mod_names[si] = mod_names[sj]
+            mod_names[sj] = tmp_n
+        }
+        sj = sj + 1
+    }
+    si = si + 1
+}
+
+// ═══════════════════════════════════════════════════════════
+// 3. 적응도 테이블
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 적응도 순위 테이블 ---")
+println("")
+println("| 순위 | 모듈 | 전체 | EXACT | 적응도 | 상태 |")
+println("|------|------|------|-------|--------|------|")
+
+let mut mi3: i64 = 0
+while mi3 < mod_count {
+    let mn: string = mod_names[mi3]
+    let mt: i64 = mod_total[mi3]
+    let me: i64 = mod_exact[mi3]
+    let fitness = me
+    let status = if mi3 < 6 { "생존자" } else if mi3 >= mod_count - 6 { "멸종 위기" } else { "중립" }
+    println("| " + to_string(mi3 + 1) + " | " + mn + " | " + to_string(mt) + " | " + to_string(me) + " | " + to_string(fitness) + " | " + status + " |")
+    mi3 = mi3 + 1
+}
+
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 4. 생존자 / 멸종 위기 요약
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 생존자 (상위 6) ---")
+println("")
+
+let survivor_limit = if mod_count < 6 { mod_count } else { 6 }
+let mut svi: i64 = 0
+while svi < survivor_limit {
+    let mn: string = mod_names[svi]
+    let me: i64 = mod_exact[svi]
+    println("  [+] " + mn + " (EXACT " + to_string(me) + ") -> depth+1 권장")
+    svi = svi + 1
+}
+
+println("")
+println("  --- 멸종 위기 (하위 6) ---")
+println("")
+
+let danger_start = if mod_count > 6 { mod_count - 6 } else { 0 }
+let mut dgi: i64 = danger_start
+while dgi < mod_count {
+    let mn: string = mod_names[dgi]
+    let me: i64 = mod_exact[dgi]
+    println("  [-] " + mn + " (EXACT " + to_string(me) + ") -> depth-1 또는 재설계")
+    dgi = dgi + 1
+}
+
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 5. 세대별 적응도 변화 (최근 100개씩 3세대)
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 세대별 적응도 변화 ---")
+println("")
+
+// 세대 1: 최근 100개, 세대 2: 101~200, 세대 3: 201~300
+let gen1_raw = exec("tail -100 " + _bus_path + " | grep -i EXACT | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"source\") print $(i+2)}}' | wc -l").trim()
+let gen2_raw = exec("tail -200 " + _bus_path + " | head -100 | grep -i EXACT | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"source\") print $(i+2)}}' | wc -l").trim()
+let gen3_raw = exec("tail -300 " + _bus_path + " | head -100 | grep -i EXACT | awk -F'\"' '{for(i=1;i<=NF;i++){if($i==\"source\") print $(i+2)}}' | wc -l").trim()
+
+let gen1: i64 = safe_int(gen1_raw)
+let gen2: i64 = safe_int(gen2_raw)
+let gen3: i64 = safe_int(gen3_raw)
+
+println("| 세대 | 범위 | EXACT 수 | 변화 |")
+println("|------|------|----------|------|")
+
+let delta_12 = gen1 - gen2
+let delta_23 = gen2 - gen3
+let trend_12 = if delta_12 > 0 { "+" + to_string(delta_12) + " 상승" } else if delta_12 < 0 { to_string(delta_12) + " 하락" } else { "유지" }
+let trend_23 = if delta_23 > 0 { "+" + to_string(delta_23) + " 상승" } else if delta_23 < 0 { to_string(delta_23) + " 하락" } else { "유지" }
+
+println("| 3세대 | 201~300 | " + to_string(gen3) + " | 기준 |")
+println("| 2세대 | 101~200 | " + to_string(gen2) + " | " + trend_23 + " |")
+println("| 1세대 | 최근100 | " + to_string(gen1) + " | " + trend_12 + " |")
+
+println("")
+
+// 진화 방향 판정
+let evolution = if gen1 > gen2 && gen2 > gen3 { "가속 진화 (세대마다 EXACT 증가)" } else if gen1 > gen2 { "최근 진화 (현 세대 개선)" } else if gen1 < gen2 && gen2 < gen3 { "퇴화 경고 (세대마다 EXACT 감소)" } else if gen1 < gen2 { "최근 퇴화 (현 세대 하락)" } else { "안정 (변화 없음)" }
+println("  진화 방향: " + evolution)
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 6. ASCII 적응도 막대 그래프
+// ═══════════════════════════════════════════════════════════
+
+println("  --- 적응도 스펙트럼 ---")
+println("")
+
+let max_fitness = if mod_count > 0 { mod_exact[0] } else { 1 }
+
+let mut gi: i64 = 0
+let graph_limit = if mod_count < 15 { mod_count } else { 15 }
+while gi < graph_limit {
+    let mn: string = mod_names[gi]
+    let me: i64 = mod_exact[gi]
+
+    let bar_len = if max_fitness > 0 { (me * 40) / (max_fitness + 1) } else { 0 }
+    let mut bar = ""
+    let mut bi: i64 = 0
+    while bi < bar_len && bi < 40 {
+        bar = bar + "#"
+        bi = bi + 1
+    }
+
+    println("  " + mn + "\t" + bar + " " + to_string(me))
+    gi = gi + 1
+}
+
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// 7. growth_bus 기록
+// ═══════════════════════════════════════════════════════════
+
+try {
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
+    let top_survivor = if mod_count > 0 { mod_names[0] } else { "none" }
+    let top_fitness = if mod_count > 0 { to_string(mod_exact[0]) } else { "0" }
+    let entry = "{\"type\":\"wave_evolution\",\"source\":\"wave_evolution\",\"modules\":" + to_string(mod_count) + ",\"top_survivor\":\"" + top_survivor + "\",\"top_fitness\":" + top_fitness + ",\"gen1_exact\":" + to_string(gen1) + ",\"gen2_exact\":" + to_string(gen2) + ",\"gen3_exact\":" + to_string(gen3) + ",\"evolution\":\"" + evolution + "\",\"ts\":\"" + ts + "\"}"
+    exec("echo '" + entry + "' >> " + _bus_path)
+} catch e {}
+
+println("  growth_bus 기록 완료")
+println("")
+println("[verified] wave_evolution.hexa 실행 완료")
+println("")
