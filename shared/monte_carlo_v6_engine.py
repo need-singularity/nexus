@@ -11,7 +11,11 @@ DIAGNOSE    = sys.argv[5] == '1' if len(sys.argv) > 5 else False
 SEED        = 20260409
 
 def n_constants(n):
+    """n의 7대 산술함수: [n, sigma, tau, phi, sopfr, J2, mu=1]."""
     divs = [d for d in range(1, n+1) if n % d == 0]
+    sigma = sum(divs)
+    tau = len(divs)
+    phi = sum(1 for k in range(1, n+1) if math.gcd(k, n) == 1)
     sopfr = 0
     tmp = n
     for p in range(2, n+1):
@@ -26,11 +30,7 @@ def n_constants(n):
             while tmp2 % p == 0:
                 tmp2 //= p
     j2 = int(round(j2))
-    sigma = sum(divs)
-    tau = len(divs)
-    phi = sum(1 for k in range(1, n+1) if math.gcd(k, n) == 1)
-    consts = sorted(set([n] + divs + [sigma, tau, phi, sopfr, j2, 1]))
-    return consts[:7] if len(consts) >= 7 else consts
+    return sorted(set([n, sigma, tau, phi, sopfr, j2, 1]))
 
 def reachable(constants, max_r=10000, max_exp=10):
     reach = set()
