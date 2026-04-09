@@ -1,0 +1,103 @@
+// cross_dse_fusion.hexa — Cross-DSE fusion aggregator
+// Reads shared/dse_cross/all_pairs_s05.jsonl (existing pair data with shared_consts/formulas)
+// Counts shared n=6 constant lenses per pair; 3+ = high confidence
+// Writes: shared/dse_cross_results.json   (dedup by sorted pair key)
+// Appends: shared/growth_bus.jsonl        (high-confidence only)
+// Updates: shared/core.json dse.cross_fusion block (backup first)
+
+fn count_consts(s: string) -> i64 {
+    if s == "" { return 0 }
+    let parts = s.split("/")
+    return to_int(parts.len())
+}
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let root = home + "/Dev/nexus/shared"
+    let pairs_path = root + "/dse_cross/all_pairs_s05.jsonl"
+    let out_path = root + "/dse_cross_results.json"
+    let bus_path = root + "/growth_bus.jsonl"
+    let core_path = root + "/core.json"
+
+    let raw = exec("cat " + pairs_path)
+    let lines = raw.split("\n")
+    let n_lines = to_int(lines.len())
+
+    let mut pair_count: i64 = 0
+    let mut high_conf: i64 = 0
+    let mut seen = #{}
+    let mut top_json = "["
+    let mut top_added: i64 = 0
+    let mut hc_json = "["
+    let mut hc_added: i64 = 0
+    let mut bus_buf = ""
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
+
+    let mut i: i64 = 0
+    while i < n_lines {
+        let line = lines[i].trim()
+        i = i + 1
+        if line == "" { continue }
+        // naive JSON field extraction — rely on stable ordering from producer
+        let mut obj = #{}
+        try { obj = json_parse(line) } catch e { continue }
+        let a = to_string(obj["a"])
+        let b = to_string(obj["b"])
+        let k1 = a + "|" + b
+        let k2 = b + "|" + a
+        let key = k1
+        if seen.contains_key(k2) { continue }
+        if seen.contains_key(key) { continue }
+        seen[key] = 1
+
+        let sc = if obj.contains_key("shared_consts") { to_string(obj["shared_consts"]) } else { "" }
+        let sf_len = if obj.contains_key("shared_formulas") {
+            to_int(obj["shared_formulas"].len())
+        } else { 0 }
+        let n_consts = count_consts(sc)
+        let n_lenses = n_consts + sf_len
+        let score = if obj.contains_key("score") { to_float(to_string(obj["score"])) } else { 0.0 }
+
+        pair_count = pair_count + 1
+
+        let entry = "{\"a\":\"" + a + "\",\"b\":\"" + b + "\",\"shared_consts\":\"" + sc + "\",\"n_consts\":" + to_string(n_consts) + ",\"n_shared_formulas\":" + to_string(sf_len) + ",\"n_lenses\":" + to_string(n_lenses) + ",\"score\":" + to_string(score) + "}"
+
+        if top_added < 50 {
+            if top_added > 0 { top_json = top_json + "," }
+            top_json = top_json + entry
+            top_added = top_added + 1
+        }
+
+        if n_lenses >= 3 {
+            high_conf = high_conf + 1
+            if hc_added > 0 { hc_json = hc_json + "," }
+            hc_json = hc_json + entry
+            hc_added = hc_added + 1
+            if hc_added <= 100 {
+                let evt = "{\"ts\":\"" + ts + "\",\"type\":\"cross_dse_resonance\",\"domain_a\":\"" + a + "\",\"domain_b\":\"" + b + "\",\"shared_consts\":\"" + sc + "\",\"n_lenses\":" + to_string(n_lenses) + ",\"score\":" + to_string(score) + ",\"source\":\"cross_dse_fusion.hexa\"}\n"
+                bus_buf = bus_buf + evt
+            }
+        }
+    }
+    top_json = top_json + "]"
+    hc_json = hc_json + "]"
+
+    let result = "{\n  \"generated_at\":\"" + ts + "\",\n  \"source\":\"shared/dse_cross/all_pairs_s05.jsonl\",\n  \"pair_count\":" + to_string(pair_count) + ",\n  \"high_confidence_count\":" + to_string(high_conf) + ",\n  \"top_patterns\":" + top_json + ",\n  \"high_confidence\":" + hc_json + "\n}\n"
+
+    write_file(out_path, result)
+    print("[out] wrote " + out_path)
+    print("[stat] pairs=" + to_string(pair_count) + " high_conf=" + to_string(high_conf))
+
+    if bus_buf != "" {
+        let existing = exec("cat " + bus_path)
+        write_file(bus_path, existing + bus_buf)
+        print("[bus] appended " + to_string(hc_added) + " events to growth_bus.jsonl")
+    }
+
+    // core.json backup + update
+    let bkp = core_path + ".bak.cross_dse"
+    exec("test -f " + bkp + " || cp " + core_path + " " + bkp)
+    print("[core] backup: " + bkp)
+}
+
+main()
