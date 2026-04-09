@@ -98,41 +98,19 @@ SUP_MAP = {
     '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
 }
 
-# 위첨자 부호 (⁻⁵, ⁺³)
-SUP_SIGN_MAP = {'⁻': '-', '⁺': '+'}
-
-
-def normalize_expr_unicode(s):
-    """유니코드 특수기호를 ASCII 로 정규화 (parse 전처리 진입점)."""
-    if s is None:
-        return s
-    s = s.replace('\u00a0', ' ').replace('\u2009', ' ')
-    s = s.replace('\u200b', '').replace('\ufeff', '')
-    s = s.replace('×', '*').replace('·', '*').replace('÷', '/')
-    s = s.replace('−', '-').replace('–', '-').replace('—', '-')
-    s = s.replace('\u2010', '-').replace('\u2011', '-')
-    return re.sub(r'\s+', ' ', s).strip()
-
 
 def _convert_superscripts(s):
-    """연속된 유니코드 윗첨자(부호 포함)를 **<sign>N 으로 변환"""
+    """연속된 유니코드 윗첨자를 **N 으로 변환"""
     out = []
     i = 0
     while i < len(s):
-        if s[i] in SUP_MAP or s[i] in SUP_SIGN_MAP:
+        if s[i] in SUP_MAP:
             j = i
-            sign = ''
-            if s[j] in SUP_SIGN_MAP:
-                sign = SUP_SIGN_MAP[s[j]]
-                j += 1
             digits = ''
             while j < len(s) and s[j] in SUP_MAP:
                 digits += SUP_MAP[s[j]]
                 j += 1
-            if digits:
-                out.append('**' + sign + digits)
-            elif sign:
-                out.append('**' + sign)
+            out.append('**' + digits)
             i = j
         else:
             out.append(s[i])
@@ -173,16 +151,10 @@ BARE_NUM_RE = re.compile(
     r'\s*$'
 )
 
-# 과학적 표기: 6×10⁻⁵, 1.5x10^-3, 6*10^-5, 10^20 (계수 생략 허용)
+# 과학적 표기: 6×10⁻⁵, 1.5x10^-3, 6*10^-5
 SCI_NOTATION_RE = re.compile(
-    r'^\s*(?:([+-]?\d+\.?\d*)\s*[×x*·]\s*)?10\s*[\^]?\s*([+-]?\d+|⁻?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)\s*'
+    r'^\s*([+-]?\d+\.?\d*)\s*[×x*·]\s*10\s*[\^]?\s*([+-]?\d+|⁻?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)\s*'
     r'(?:[A-Za-zμ/·\-^\d]+)?\s*$'
-)
-
-# 파이썬 e-표기: 3.08e-5, 1.5E+3 (단위 꼬리 허용)
-E_NOTATION_RE = re.compile(
-    r'^\s*([+-]?\d+\.?\d*|[+-]?\.\d+)[eE]([+-]?\d+)'
-    r'\s*(?:[A-Za-zμ/·\-^\d]+)?\s*$'
 )
 
 
@@ -213,19 +185,11 @@ def parse_bare_numeric(s):
     # 선행 ± ~ ≈
     s = re.sub(r'^[±~≈]+', '', s).strip()
 
-    # e-표기 우선 (3.08e-5)
-    me = E_NOTATION_RE.match(s)
-    if me:
-        try:
-            return float(me.group(1)) * (10 ** int(me.group(2)))
-        except (ValueError, OverflowError):
-            pass
-
     # 과학적 표기 우선
     m = SCI_NOTATION_RE.match(s)
     if m:
         try:
-            base = float(m.group(1)) if m.group(1) else 1.0
+            base = float(m.group(1))
             exp = _parse_sup_int(m.group(2))
             if exp is not None:
                 return base * (10 ** exp)
@@ -253,7 +217,6 @@ def parse_bare_numeric(s):
 def normalize_expr(expr_str):
     """n=6 수식 문자열을 Python eval 가능한 형태로 정규화"""
     s = expr_str.strip()
-    s = normalize_expr_unicode(s)
 
     # 마크다운 굵게 제거
     s = re.sub(r'^\*\*(.*)\*\*$', r'\1', s).strip()
@@ -314,11 +277,6 @@ def normalize_expr(expr_str):
 
     # J_2 -> J2
     s = s.replace('J_2', 'J2')
-
-    # number-theory 함수 호출 사전 평가 (n=6) — sigma( → sigma*( 치환 이전 수행
-    _NT_FUNC_N6 = {'sigma':12,'tau':4,'phi':2,'omega':2,'rad':6,'sopfr':5,'mu':1,'Omega':2}
-    for _fn,_val in _NT_FUNC_N6.items():
-        s = re.sub(rf'\b{_fn}\(\s*6\s*\)', str(_val), s)
 
     # sigma/phi/tau 등은 함수가 아닌 상수 — 'sigma(' 같은 사용은 곱셈으로 해석
     # 예: σ(σ-μ) → sigma*(sigma-mu)
@@ -554,168 +512,22 @@ def _eval_known_core(s):
     return None
 
 
-def known_decimal_tolerance(raw_str, target_value):
-    """
-    Known 표기 유효 소수자릿수 기반 절대 허용오차 추정.
-    "0.9649" -> 5e-5, "33.7%" -> 0.0005, "3.08e-5" -> 0.005e-5
-    """
-    if raw_str is None or target_value is None:
-        return None
-    s = str(raw_str).strip()
-    s = s.lstrip('~≈').strip()
-    s = re.sub(r'^\*\*(.+?)\*\*$', r'\1', s).strip()
-    # 단위 제거 (parse_predicted_value 와 유사)
-    s = re.sub(r'\s*(eV|keV|MeV|GeV|kHz|MHz|GHz|Hz|kW|MW|MPa|nm|mm|cm|km|kV|ms|us|ns|bits?|bytes?|m|s|V|A|W|T|K)\b.*$', '', s)
-    s = s.strip()
-    if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
-        s = s.split('=')[-1].strip()
-    pct = False
-    pm = re.match(r'^([+-]?\d+\.?\d*)\s*%$', s)
-    if pm:
-        s = pm.group(1)
-        pct = True
-    em = re.match(r'^([+-]?\d+\.?\d*|[+-]?\.\d+)[eE]([+-]?\d+)$', s)
-    if em:
-        mantissa = em.group(1); exp = int(em.group(2))
-        decimals = len(mantissa.split('.')[1]) if '.' in mantissa else 0
-        return 0.5 * (10 ** (-decimals)) * (10 ** exp)
-    nm = re.match(r'^([+-]?\d+\.?\d*)$', s)
-    if nm:
-        num = nm.group(1)
-        decimals = len(num.split('.')[1]) if '.' in num else 0
-        tol = 0.5 * (10 ** (-decimals))
-        if pct:
-            tol = tol / 100.0
-        return tol
-    return None
-
-
 def parse_known_value(val_str):
-    """Known 열에서 숫자 추출 (설명 텍스트가 붙을 수 있음) — v5 파서 보강"""
+    """Known 열에서 숫자 추출 (설명 텍스트가 붙을 수 있음)"""
     s = val_str.strip()
+
+    # "SOLID 5" → 5
+    # "AES-128" → 128
+    # "12 (AASHTO)" → 12
+    # "~20 (concrete 7d)" → 20
+
     s = s.lstrip('~≈')
-    # 유니코드 정규화 (×10⁻ⁿ, 아래첨자, ^ → **)
-    s = normalize_expr_unicode(s)
-    s = _convert_superscripts(s).translate(SUB_MAP)
-    s = s.replace('^', '**')
 
-    # v5: 팩토리얼 패턴 "= N!" → N! 평가
-    fac_m = re.search(r'(\d+)\s*!', s)
-    if fac_m:
-        try:
-            return float(math.factorial(int(fac_m.group(1))))
-        except (ValueError, OverflowError):
-            pass
-
-    # v5: 라벨 접두사 제거 (q_95, Re_, Pr_) → 뒤의 부등식 값 추출
-    label_m = re.match(r'^[A-Za-z]+_\d+\s*(?:>=|<=|>|<|=)\s*([+-]?\d+\.?\d*)', s)
-    if label_m:
-        try:
-            return float(label_m.group(1))
-        except ValueError:
-            pass
-
-    # v5: 부등식 패턴 "< 0.06", ">= 2.0" → 경계값 추출
-    ineq_m = re.match(r'^\s*(?:>=|<=|>|<)\s*([+-]?\d+\.?\d*)', s)
-    if ineq_m:
-        try:
-            return float(ineq_m.group(1))
-        except ValueError:
-            pass
-
-    # v5: 범위 패턴 "~0.01-0.1", "9-15 kW" → 범위 상한 (computed가 범위 내인지 검사용)
-    range_m = re.match(r'^\s*~?\s*([+-]?\d+\.?\d*)\s*-\s*(\d+\.?\d*)\s*(?:[A-Za-z]+)?\s*$', s)
-    if range_m:
-        try:
-            lo = float(range_m.group(1))
-            hi = float(range_m.group(2))
-            if hi > lo:
-                return (lo + hi) / 2.0  # 범위 중간값
-        except ValueError:
-            pass
-
-    # v5: 슬래시 분수 우선 평가 — "1e-6 / 1e-5" → 0.1, "16/27" → 0.593
-    if '/' in s:
-        frac_str = s
-        if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
-            parts = s.split('=')
-            for p in parts:
-                if '/' in p:
-                    frac_str = p.strip()
-                    break
-        efrac_m = re.match(
-            r'^\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*/\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*$',
-            frac_str
-        )
-        if efrac_m:
-            try:
-                num = float(efrac_m.group(1))
-                den = float(efrac_m.group(2))
-                if den != 0:
-                    return num / den
-            except (ValueError, ZeroDivisionError):
-                pass
-
-    # v5: "4M" (mega), "4G" (giga) 접미사
-    mega_m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*M\s*$', s)
-    if mega_m:
-        try:
-            return float(mega_m.group(1)) * 1e6
-        except ValueError:
-            pass
-    giga_m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*G\s*$', s)
-    if giga_m:
-        try:
-            return float(giga_m.group(1)) * 1e9
-        except ValueError:
-            pass
-
-    # e-표기: 3.08e-5, 1.5E+3 (단위 꼬리 허용, 다른 연산자 없어야 함)
-    if '/' not in s and not re.search(r'(?<![eE\d])[\+\-](?!\d)', s):
-        me = re.fullmatch(r'\s*([+-]?\d+\.?\d*|[+-]?\.\d+)[eE]([+-]?\d+)\s*(?:[A-Za-zμ/·\-^\d]+)?\s*', s)
-        if me:
-            try:
-                return float(me.group(1)) * (10 ** int(me.group(2)))
-            except (ValueError, OverflowError):
-                pass
-
-        # 과학적 표기: 6*10^-5, 10^20 (계수 생략 포함), 전체 매칭
-        ms = re.fullmatch(r'\s*(?:([+-]?\d+\.?\d*)\s*\*\s*)?10\s*\*\*\s*([+-]?\d+)\s*(?:[A-Za-zμ/·\-^\d]+)?\s*', s)
-        if ms:
-            try:
-                base = float(ms.group(1)) if ms.group(1) else 1.0
-                return base * (10 ** int(ms.group(2)))
-            except (ValueError, OverflowError):
-                pass
-
-    # 퍼센트: "33.7%", "16.7%", "1/6 = 16.7%"
-    pm = re.search(r'([+-]?\d+\.?\d*)\s*%', s)
-    if pm:
-        try:
-            return float(pm.group(1)) / 100.0
-        except ValueError:
-            pass
-
-    # v5: 등호 뒤 평가 — "A = 12" → 12, "4.18/1.005 = 4.16" → 우변 수치
-    if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
-        parts = s.split('=')
-        for candidate in reversed(parts):
-            c = candidate.strip()
-            c = re.sub(r'\s*[A-Za-z]+$', '', c).strip()
-            try:
-                return float(c)
-            except ValueError:
-                pass
-
-    # 일반 숫자
-    m = re.search(r'([+-]?\d+\.?\d*)', s)
+    # 먼저 숫자만 추출 시도
+    m = re.search(r'(\d+\.?\d*)', s)
     if m:
-        try:
-            return float(m.group(1))
-        except ValueError:
-            return None
+        return float(m.group(1))
     return None
-
 
 
 def parse_bt_sections(text):
@@ -1030,17 +842,7 @@ def audit_row(bt_num, row):
         error_pct = float('inf')
     else:
         error_pct = abs(computed - target) / abs(target) * 100
-        # v4: 상대 1% 또는 절대 1e-3 이내면 일치 (반올림 표기 허용)
-        match = error_pct < 1.0 or abs(computed - target) <= 1e-3
-
-    # v2 보강(전 출처): predicted/known 표기 유효자릿수 기반 반올림 허용
-    if not match:
-        tol_abs_any = known_decimal_tolerance(
-            predicted_raw if target_source == 'predicted' else known_raw,
-            target,
-        )
-        if tol_abs_any is not None and abs(computed - target) <= tol_abs_any * 1.5:
-            match = True
+        match = error_pct < 0.01  # 0.01% 이내면 일치
 
     # v2 보강: MISMATCH 일 때 파서 결함 가능성 재검사 (기존 MATCH 는 건드리지 않음)
     if not match and target_source == 'known':
@@ -1058,14 +860,6 @@ def audit_row(bt_num, row):
                     match = True
                     error_pct = alt_err
                     target = alt
-        if not match:
-            # 2-D: Known 표기 유효자릿수 기반 반올림 허용 (+안전 2% 캡)
-            tol_abs = known_decimal_tolerance(known_raw, target)
-            if tol_abs is not None and abs(computed - target) <= tol_abs * 1.5:
-                match = True
-            elif error_pct < 3.5 and not is_descriptive_known(known_raw):
-                # 추가 안전망: known 출처이면서 3.5% 미만은 반올림/유효자릿수 표기로 인정
-                match = True
         if not match:
             # 2-A: 리터럴 Expression + 서술 Known → SKIP
             # 2-B: 서술형 Known → SKIP

@@ -591,84 +591,13 @@ def known_decimal_tolerance(raw_str, target_value):
 
 
 def parse_known_value(val_str):
-    """Known 열에서 숫자 추출 (설명 텍스트가 붙을 수 있음) — v5 파서 보강"""
+    """Known 열에서 숫자 추출 (설명 텍스트가 붙을 수 있음)"""
     s = val_str.strip()
     s = s.lstrip('~≈')
     # 유니코드 정규화 (×10⁻ⁿ, 아래첨자, ^ → **)
     s = normalize_expr_unicode(s)
     s = _convert_superscripts(s).translate(SUB_MAP)
     s = s.replace('^', '**')
-
-    # v5: 팩토리얼 패턴 "= N!" → N! 평가
-    fac_m = re.search(r'(\d+)\s*!', s)
-    if fac_m:
-        try:
-            return float(math.factorial(int(fac_m.group(1))))
-        except (ValueError, OverflowError):
-            pass
-
-    # v5: 라벨 접두사 제거 (q_95, Re_, Pr_) → 뒤의 부등식 값 추출
-    label_m = re.match(r'^[A-Za-z]+_\d+\s*(?:>=|<=|>|<|=)\s*([+-]?\d+\.?\d*)', s)
-    if label_m:
-        try:
-            return float(label_m.group(1))
-        except ValueError:
-            pass
-
-    # v5: 부등식 패턴 "< 0.06", ">= 2.0" → 경계값 추출
-    ineq_m = re.match(r'^\s*(?:>=|<=|>|<)\s*([+-]?\d+\.?\d*)', s)
-    if ineq_m:
-        try:
-            return float(ineq_m.group(1))
-        except ValueError:
-            pass
-
-    # v5: 범위 패턴 "~0.01-0.1", "9-15 kW" → 범위 상한 (computed가 범위 내인지 검사용)
-    range_m = re.match(r'^\s*~?\s*([+-]?\d+\.?\d*)\s*-\s*(\d+\.?\d*)\s*(?:[A-Za-z]+)?\s*$', s)
-    if range_m:
-        try:
-            lo = float(range_m.group(1))
-            hi = float(range_m.group(2))
-            if hi > lo:
-                return (lo + hi) / 2.0  # 범위 중간값
-        except ValueError:
-            pass
-
-    # v5: 슬래시 분수 우선 평가 — "1e-6 / 1e-5" → 0.1, "16/27" → 0.593
-    if '/' in s:
-        frac_str = s
-        if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
-            parts = s.split('=')
-            for p in parts:
-                if '/' in p:
-                    frac_str = p.strip()
-                    break
-        efrac_m = re.match(
-            r'^\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*/\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*$',
-            frac_str
-        )
-        if efrac_m:
-            try:
-                num = float(efrac_m.group(1))
-                den = float(efrac_m.group(2))
-                if den != 0:
-                    return num / den
-            except (ValueError, ZeroDivisionError):
-                pass
-
-    # v5: "4M" (mega), "4G" (giga) 접미사
-    mega_m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*M\s*$', s)
-    if mega_m:
-        try:
-            return float(mega_m.group(1)) * 1e6
-        except ValueError:
-            pass
-    giga_m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*G\s*$', s)
-    if giga_m:
-        try:
-            return float(giga_m.group(1)) * 1e9
-        except ValueError:
-            pass
 
     # e-표기: 3.08e-5, 1.5E+3 (단위 꼬리 허용, 다른 연산자 없어야 함)
     if '/' not in s and not re.search(r'(?<![eE\d])[\+\-](?!\d)', s):
@@ -696,17 +625,6 @@ def parse_known_value(val_str):
         except ValueError:
             pass
 
-    # v5: 등호 뒤 평가 — "A = 12" → 12, "4.18/1.005 = 4.16" → 우변 수치
-    if '=' in s and '==' not in s and '>=' not in s and '<=' not in s:
-        parts = s.split('=')
-        for candidate in reversed(parts):
-            c = candidate.strip()
-            c = re.sub(r'\s*[A-Za-z]+$', '', c).strip()
-            try:
-                return float(c)
-            except ValueError:
-                pass
-
     # 일반 숫자
     m = re.search(r'([+-]?\d+\.?\d*)', s)
     if m:
@@ -715,7 +633,6 @@ def parse_known_value(val_str):
         except ValueError:
             return None
     return None
-
 
 
 def parse_bt_sections(text):
