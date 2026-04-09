@@ -11,6 +11,13 @@
 2. **SSOT** — 데이터 원본은 JSON 하나, 하드코딩 금지
 3. **NEXUS-6** — 모든 변경 시 스캔 의무, 3+렌즈 합의=확정
 
+## ⛔ 규칙은 JSON에만 기록
+
+- 모든 규칙 → `shared/absolute_rules.json` (단일 진실, R14 참조)
+- 채팅 블로킹 금지 → R16 참조
+- 메모리 시스템(`~/.claude-claude1/...`)에 규칙 저장 금지
+- CLAUDE.md는 참조만, 규칙 본문 직접 기록 금지
+
 ## NEXUS-6 (1022종 렌즈)
 
 > 상세 API/렌즈 목록: `lens_registry.json` | CLI: `nexus --help`
