@@ -1,0 +1,958 @@
+// airgenome_quantum.hexa — AIRGENOME v2 양자 스캔 엔진
+// 사용: hexa airgenome_quantum.hexa scan <path>    — 양자 게놈 스캔
+//       hexa airgenome_quantum.hexa threats         — 중첩 위협 상태
+//       hexa airgenome_quantum.hexa help            — 도움말
+//
+// 원리:
+//   1. 중첩 패턴 매칭: 다수 OS 시그니처를 동시에 중첩 매칭
+//   2. 양자 간섭 위협 탐지: 실제 위협 보강 / 오탐 상쇄 간섭
+//   3. 얽힘 파일시스템: 관련 파일 동시 검사 (얽힌 쌍)
+//   4. n=6 게놈 양자 모델: 6종 DNA 염기 (시스템 유비), 양자 돌연변이 탐지
+//   5. Grover 탐색 가속: 패턴 DB에서 √N 가속 시뮬레이션
+//   6. growth_bus.jsonl 출력
+
+// ═══════════════════════════════════════════════════════════
+// n=6 상수 및 경로 설정
+// ═══════════════════════════════════════════════════════════
+
+let _home = exec("printenv HOME").trim()
+let _dev = _home + "/Dev"
+let _nexus = _dev + "/nexus"
+let _shared = _nexus + "/shared"
+let _bus_path = _shared + "/growth_bus.jsonl"
+let _genome_dir = _nexus + "/airgenome"
+
+// n=6 핵심 상수
+comptime const N6 = 6
+comptime const N6_PERFECT = 6
+comptime const N6_DIVISOR_SUM = 12
+comptime const N6_FACTORIAL = 720
+comptime const N6_PARTITIONS = 11
+comptime const N6_PRIME_COUNTING = 3
+comptime const SUPERPOSITION_DEPTH = 6
+comptime const GROVER_ITERATIONS = 6
+comptime const ENTANGLE_PAIRS = 6
+comptime const INTERFERENCE_PHASES = 6
+comptime const QUBIT_REGISTER = 6
+comptime const COLLAPSE_THRESHOLD = 0.16667  // 1/6
+
+// n=6 게놈 DNA 염기 6종 (시스템 유비)
+comptime const DNA_BASES = ["CPU", "MEM", "DISK", "NET", "PROC", "KERN"]
+comptime const DNA_BASE_COUNT = 6
+comptime const MUTATION_SENSITIVITY = 0.06  // 6% 변이 임계
+
+// 위협 가중치 (n=6 기반)
+comptime const THREAT_AMPLIFY = 1.6
+comptime const FALSE_POS_CANCEL = 0.16
+comptime const CONSENSUS_MIN = 6
+
+// ═══════════════════════════════════════════════════════════
+// 수학 유틸리티
+// ═══════════════════════════════════════════════════════════
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn sqrt_approx(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut guess = x / 2.0
+    let mut i = 0
+    while i < 6 {
+        guess = (guess + x / guess) / 2.0
+        i = i + 1
+    }
+    return guess
+}
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e { v = 0.0 }
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(to_float(s.trim())) } catch e {}
+    return v
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a >= b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a <= b { return a }
+    return b
+}
+
+fn clamp_f(x: f64, lo: f64, hi: f64) -> f64 {
+    if x < lo { return lo }
+    if x > hi { return hi }
+    return x
+}
+
+// 간단한 해시 (문자열 → 0~N-1 인덱스)
+fn str_hash(s: string, n: i64) -> i64 {
+    let mut h: i64 = 0
+    let mut i = 0
+    let chars = s.split("")
+    while i < chars.len() {
+        if i < 100 {
+            h = h + i * 31 + chars.len()
+        }
+        i = i + 1
+    }
+    if n <= 0 { return 0 }
+    let result = h - (h / n) * n
+    if result < 0 { return 0 - result }
+    return result
+}
+
+fn timestamp_now() -> string {
+    return exec("date -u '+%Y-%m-%dT%H:%M:%SZ'").trim()
+}
+
+// ═══════════════════════════════════════════════════════════
+// §1. 양자 상태 벡터 (6-qubit 레지스터)
+// ═══════════════════════════════════════════════════════════
+
+// |genome⟩ = Σᵢ αᵢ|baseᵢ⟩  (i ∈ {0..5}, 6종 DNA 염기)
+// 진폭 벡터 = [α_CPU, α_MEM, α_DISK, α_NET, α_PROC, α_KERN]
+
+fn new_genome_state() -> list {
+    // 균등 중첩: 모든 염기에 1/√6 진폭
+    let amp = 1.0 / sqrt_approx(to_float(DNA_BASE_COUNT))
+    let mut amps = []
+    let mut i = 0
+    while i < DNA_BASE_COUNT {
+        amps = amps + [amp]
+        i = i + 1
+    }
+    return amps
+}
+
+fn normalize_amps(amps: list) -> list {
+    let mut sum_sq = 0.0
+    let mut i = 0
+    while i < amps.len() {
+        let a = to_float(to_string(amps[i]))
+        sum_sq = sum_sq + a * a
+        i = i + 1
+    }
+    if sum_sq < 0.0001 { return new_genome_state() }
+    let norm = sqrt_approx(sum_sq)
+    let mut result = []
+    i = 0
+    while i < amps.len() {
+        let a = to_float(to_string(amps[i]))
+        result = result + [a / norm]
+        i = i + 1
+    }
+    return result
+}
+
+fn probability_at(amps: list, idx: i64) -> f64 {
+    if idx < 0 { return 0.0 }
+    if idx >= amps.len() { return 0.0 }
+    let a = to_float(to_string(amps[idx]))
+    return a * a
+}
+
+fn measure_state(amps: list) -> i64 {
+    // 최대 진폭 상태로 붕괴 (결정론적 시뮬레이션)
+    let mut max_amp = 0.0
+    let mut max_idx: i64 = 0
+    let mut i = 0
+    while i < amps.len() {
+        let a = abs_f(to_float(to_string(amps[i])))
+        if a > max_amp {
+            max_amp = a
+            max_idx = i
+        }
+        i = i + 1
+    }
+    return max_idx
+}
+
+// ═══════════════════════════════════════════════════════════
+// §2. 중첩 패턴 매칭 — 다중 OS 시그니처 동시 매칭
+// ═══════════════════════════════════════════════════════════
+
+// OS 시그니처 패턴 DB (n=6 카테고리)
+comptime const SIG_CATEGORIES = ["kernel", "daemon", "config", "binary", "log", "runtime"]
+comptime const SIG_COUNT = 6
+
+// 중첩 상태에서 모든 시그니처 동시 매칭
+fn superposition_match(filepath: string, content: string) -> list {
+    // 6종 시그니처 각각에 대한 매칭 진폭 계산
+    let mut match_amps = []
+    let mut i = 0
+    while i < SIG_COUNT {
+        match_amps = match_amps + [0.0]
+        i = i + 1
+    }
+
+    let lower = content.trim()
+
+    // [0] kernel — 커널 관련 시그니처
+    if lower.contains("kernel") { match_amps[0] = 0.9 }
+    if lower.contains("kext") { match_amps[0] = max_f(to_float(to_string(match_amps[0])), 0.8) }
+    if lower.contains("sysctl") { match_amps[0] = max_f(to_float(to_string(match_amps[0])), 0.7) }
+    if lower.contains("vmlinuz") { match_amps[0] = max_f(to_float(to_string(match_amps[0])), 0.95) }
+    if filepath.contains("/System/") { match_amps[0] = max_f(to_float(to_string(match_amps[0])), 0.6) }
+
+    // [1] daemon — 데몬/서비스 시그니처
+    if lower.contains("launchd") { match_amps[1] = 0.9 }
+    if lower.contains("systemd") { match_amps[1] = max_f(to_float(to_string(match_amps[1])), 0.9) }
+    if lower.contains("daemon") { match_amps[1] = max_f(to_float(to_string(match_amps[1])), 0.7) }
+    if filepath.contains("LaunchDaemons") { match_amps[1] = max_f(to_float(to_string(match_amps[1])), 0.85) }
+    if filepath.contains("LaunchAgents") { match_amps[1] = max_f(to_float(to_string(match_amps[1])), 0.8) }
+
+    // [2] config — 설정 파일 시그니처
+    if filepath.contains(".conf") { match_amps[2] = 0.8 }
+    if filepath.contains(".plist") { match_amps[2] = max_f(to_float(to_string(match_amps[2])), 0.85) }
+    if filepath.contains(".json") { match_amps[2] = max_f(to_float(to_string(match_amps[2])), 0.6) }
+    if filepath.contains("/etc/") { match_amps[2] = max_f(to_float(to_string(match_amps[2])), 0.75) }
+    if lower.contains("config") { match_amps[2] = max_f(to_float(to_string(match_amps[2])), 0.5) }
+
+    // [3] binary — 실행 바이너리 시그니처
+    if filepath.contains("/usr/bin/") { match_amps[3] = 0.8 }
+    if filepath.contains("/usr/sbin/") { match_amps[3] = max_f(to_float(to_string(match_amps[3])), 0.85) }
+    if filepath.contains("/usr/local/bin/") { match_amps[3] = max_f(to_float(to_string(match_amps[3])), 0.7) }
+    if lower.contains("Mach-O") { match_amps[3] = max_f(to_float(to_string(match_amps[3])), 0.95) }
+    if lower.contains("ELF") { match_amps[3] = max_f(to_float(to_string(match_amps[3])), 0.95) }
+
+    // [4] log — 로그 시그니처
+    if filepath.contains(".log") { match_amps[4] = 0.85 }
+    if filepath.contains("/var/log/") { match_amps[4] = max_f(to_float(to_string(match_amps[4])), 0.9) }
+    if lower.contains("error") { match_amps[4] = max_f(to_float(to_string(match_amps[4])), 0.6) }
+    if lower.contains("warning") { match_amps[4] = max_f(to_float(to_string(match_amps[4])), 0.5) }
+    if lower.contains("timestamp") { match_amps[4] = max_f(to_float(to_string(match_amps[4])), 0.4) }
+
+    // [5] runtime — 런타임 시그니처
+    if lower.contains("dylib") { match_amps[5] = 0.8 }
+    if lower.contains(".so") { match_amps[5] = max_f(to_float(to_string(match_amps[5])), 0.8) }
+    if lower.contains("framework") { match_amps[5] = max_f(to_float(to_string(match_amps[5])), 0.75) }
+    if filepath.contains("/Library/Frameworks/") { match_amps[5] = max_f(to_float(to_string(match_amps[5])), 0.85) }
+    if lower.contains("runtime") { match_amps[5] = max_f(to_float(to_string(match_amps[5])), 0.6) }
+
+    return normalize_amps(match_amps)
+}
+
+// ═══════════════════════════════════════════════════════════
+// §3. 양자 간섭 위협 탐지 — 보강/상쇄 간섭
+// ═══════════════════════════════════════════════════════════
+
+// 위협 시그니처 6종 (n=6)
+comptime const THREAT_SIGS = ["unauthorized_mod", "privilege_esc", "rootkit_trace", "config_tamper", "binary_inject", "log_wipe"]
+comptime const THREAT_COUNT = 6
+
+fn compute_threat_amplitude(filepath: string, content: string) -> list {
+    // 6종 위협에 대한 양자 진폭 벡터
+    let mut amps = []
+    let mut i = 0
+    while i < THREAT_COUNT {
+        amps = amps + [0.0]
+        i = i + 1
+    }
+
+    let lower = content.trim()
+
+    // [0] unauthorized_mod — 미인가 수정
+    if lower.contains("chmod 777") { amps[0] = 0.9 }
+    if lower.contains("chmod 666") { amps[0] = max_f(to_float(to_string(amps[0])), 0.7) }
+    if lower.contains("chown root") { amps[0] = max_f(to_float(to_string(amps[0])), 0.5) }
+
+    // [1] privilege_esc — 권한 상승
+    if lower.contains("sudo") { amps[1] = 0.3 }
+    if lower.contains("setuid") { amps[1] = max_f(to_float(to_string(amps[1])), 0.8) }
+    if lower.contains("NOPASSWD") { amps[1] = max_f(to_float(to_string(amps[1])), 0.85) }
+
+    // [2] rootkit_trace — 루트킷 흔적
+    if lower.contains("LD_PRELOAD") { amps[2] = 0.9 }
+    if lower.contains("DYLD_INSERT") { amps[2] = max_f(to_float(to_string(amps[2])), 0.95) }
+    if lower.contains("hidden") { amps[2] = max_f(to_float(to_string(amps[2])), 0.4) }
+
+    // [3] config_tamper — 설정 변조
+    if lower.contains("PermitRootLogin yes") { amps[3] = 0.9 }
+    if lower.contains("disable_functions") { amps[3] = max_f(to_float(to_string(amps[3])), 0.6) }
+    if lower.contains("AllowOverride All") { amps[3] = max_f(to_float(to_string(amps[3])), 0.5) }
+
+    // [4] binary_inject — 바이너리 주입
+    if lower.contains("inject") { amps[4] = 0.6 }
+    if lower.contains("hook") { amps[4] = max_f(to_float(to_string(amps[4])), 0.5) }
+    if lower.contains("patch") { amps[4] = max_f(to_float(to_string(amps[4])), 0.3) }
+
+    // [5] log_wipe — 로그 삭제
+    if lower.contains("rm -rf /var/log") { amps[5] = 0.95 }
+    if lower.contains("truncate") { amps[5] = max_f(to_float(to_string(amps[5])), 0.6) }
+    if lower.contains("shred") { amps[5] = max_f(to_float(to_string(amps[5])), 0.7) }
+
+    return amps
+}
+
+fn quantum_interference(threat_amps: list, context_amps: list) -> list {
+    // 양자 간섭: 실제 위협은 보강, 오탐은 상쇄
+    // 보강: 위협 진폭 + 컨텍스트 양의 상관 → 증폭
+    // 상쇄: 위협 진폭 - 컨텍스트 음의 상관 → 감쇠
+    let mut result = []
+    let mut i = 0
+    while i < THREAT_COUNT {
+        let t_amp = to_float(to_string(threat_amps[i]))
+        // 컨텍스트에서 해당 위협 관련 진폭 추출
+        let c_idx = i  // 1:1 매핑 (위협 ↔ DNA 염기)
+        let mut c_amp = 0.0
+        if c_idx < context_amps.len() {
+            c_amp = to_float(to_string(context_amps[c_idx]))
+        }
+
+        // 간섭 공식: A_out = A_threat * (1 + boost * correlation)
+        // correlation > 0: 보강 (실제 위협)
+        // correlation ≈ 0: 상쇄 (오탐)
+        let correlation = t_amp * c_amp
+        let mut interfered = t_amp
+        if correlation > 0.1 {
+            // 보강 간섭 — 실제 위협 증폭
+            interfered = t_amp * THREAT_AMPLIFY
+        }
+        if correlation < 0.01 {
+            if t_amp > 0.0 {
+                if t_amp < 0.3 {
+                    // 상쇄 간섭 — 약한 신호는 오탐 가능성 높음
+                    interfered = t_amp * FALSE_POS_CANCEL
+                }
+            }
+        }
+        result = result + [clamp_f(interfered, 0.0, 1.0)]
+        i = i + 1
+    }
+    return result
+}
+
+// ═══════════════════════════════════════════════════════════
+// §4. 얽힘 파일시스템 — 관련 파일 동시 검사
+// ═══════════════════════════════════════════════════════════
+
+// 얽힌 쌍 6종 (n=6): (A 변경 → B 즉시 검사)
+comptime const ENTANGLE_A = ["/etc/passwd", "/etc/ssh/sshd_config", "/etc/sudoers", "/usr/bin/", "/var/log/auth.log", "/etc/hosts"]
+comptime const ENTANGLE_B = ["/etc/shadow", "/etc/ssh/ssh_config", "/etc/sudoers.d/", "/usr/sbin/", "/var/log/syslog", "/etc/resolv.conf"]
+
+fn measure_file_state(path: string) -> list {
+    // 단일 파일 양자 상태 측정 → [state, anomaly_delta]
+    let mut state = "unknown"
+    let mut anom = 0.0
+    let exists = file_exists(path)
+    if exists {
+        let mut content = ""
+        try { content = exec("head -c 1024 " + path + " 2>/dev/null") } catch e {}
+        if content.len() > 0 {
+            state = "readable"
+            let mut recent = ""
+            try { recent = exec("find " + path + " -mmin -360 2>/dev/null").trim() } catch e {}
+            if recent != "" { state = "recently_modified" }
+            if recent != "" { anom = 0.3 }
+        }
+        if content.len() == 0 { state = "empty_or_denied" }
+        if content.len() == 0 { anom = 0.5 }
+    }
+    if exists == false { state = "missing" }
+    return [state, to_string(anom)]
+}
+
+fn check_entangled_pair(path_a: string, path_b: string) -> list {
+    // EPR 쌍 검사: A 상태 측정 → B 상태 즉시 결정
+    let sa = measure_file_state(path_a)
+    let sb = measure_file_state(path_b)
+    let state_a = to_string(sa[0])
+    let state_b = to_string(sb[0])
+    let mut anomaly = to_float(to_string(sa[1])) + to_float(to_string(sb[1]))
+    // Bell 부등식 위반: 비대칭 변조
+    if state_a == "recently_modified" {
+        if state_b != "recently_modified" { anomaly = anomaly + 0.4 }
+    }
+    return [path_a, state_a, path_b, state_b, to_string(anomaly)]
+}
+
+fn scan_entangled_filesystem() -> list {
+    // 6쌍 얽힌 파일 동시 검사
+    let mut results = []
+    let mut i = 0
+    while i < ENTANGLE_PAIRS {
+        let pair = check_entangled_pair(ENTANGLE_A[i], ENTANGLE_B[i])
+        results = results + [pair]
+        i = i + 1
+    }
+    return results
+}
+
+// ═══════════════════════════════════════════════════════════
+// §5. n=6 게놈 양자 모델 — 6종 DNA 돌연변이 탐지
+// ═══════════════════════════════════════════════════════════
+
+fn collect_dna_base(base_idx: i64) -> f64 {
+    // 각 DNA 염기의 현재 "건강도" 측정 (0.0 ~ 1.0)
+    let base = DNA_BASES[base_idx]
+    let mut health = 1.0
+
+    if base == "CPU" {
+        let raw = exec("sysctl -n vm.loadavg 2>/dev/null").trim()
+        let parts = raw.split(" ")
+        if parts.len() >= 2 {
+            let load = safe_float(parts[1])
+            let ncpu_raw = exec("sysctl -n hw.ncpu 2>/dev/null").trim()
+            let ncpu = safe_float(ncpu_raw)
+            if ncpu > 0.0 {
+                let ratio = load / ncpu
+                health = clamp_f(1.0 - ratio / 6.0, 0.0, 1.0)
+            }
+        }
+    }
+    if base == "MEM" {
+        let raw = exec("vm_stat 2>/dev/null | head -6").trim()
+        if raw.contains("free") {
+            health = 0.8  // macOS default — 정밀 측정은 vm_stat 파싱 필요
+        }
+        // Linux fallback
+        let mem_raw = exec("cat /proc/meminfo 2>/dev/null | head -3").trim()
+        if mem_raw.contains("MemAvailable") {
+            let parts = mem_raw.split("\n")
+            for line in parts {
+                if line.contains("MemAvailable") {
+                    let segs = line.split(":")
+                    if segs.len() >= 2 {
+                        let val = safe_float(segs[1].trim().split(" ")[0])
+                        health = clamp_f(val / 8000000.0, 0.0, 1.0)
+                    }
+                }
+            }
+        }
+    }
+    if base == "DISK" {
+        let raw = exec("df -h / 2>/dev/null | tail -1").trim()
+        let parts = raw.split(" ")
+        // 사용률 추출
+        for part in parts {
+            if part.contains("%") {
+                let pct_str = part.split("%")[0]
+                let pct = safe_float(pct_str)
+                health = clamp_f(1.0 - pct / 100.0, 0.0, 1.0)
+            }
+        }
+    }
+    if base == "NET" {
+        let raw = exec("ping -c 1 -t 2 8.8.8.8 2>/dev/null | tail -1").trim()
+        if raw.contains("avg") {
+            let parts = raw.split("/")
+            if parts.len() >= 5 {
+                let avg_ms = safe_float(parts[4])
+                health = clamp_f(1.0 - avg_ms / 600.0, 0.0, 1.0)
+            }
+        }
+        if raw == "" { health = 0.5 }
+    }
+    if base == "PROC" {
+        let raw = exec("ps aux 2>/dev/null | wc -l").trim()
+        let count = safe_float(raw)
+        // 600 이상 프로세스 → 건강도 저하
+        health = clamp_f(1.0 - count / 3600.0, 0.0, 1.0)
+    }
+    if base == "KERN" {
+        // 커널 메시지 에러 카운트
+        let raw = exec("dmesg 2>/dev/null | tail -60 | grep -ci error").trim()
+        let errors = safe_float(raw)
+        health = clamp_f(1.0 - errors / 36.0, 0.0, 1.0)
+    }
+
+    return health
+}
+
+fn collect_genome_state() -> list {
+    // 6종 DNA 염기 건강도 수집 → 양자 상태 벡터
+    let mut healths = []
+    let mut i = 0
+    while i < DNA_BASE_COUNT {
+        let h = collect_dna_base(i)
+        healths = healths + [h]
+        i = i + 1
+    }
+    return healths
+}
+
+fn detect_mutations(current: list, baseline: list) -> list {
+    // 양자 돌연변이 탐지: |Δ| > MUTATION_SENSITIVITY → 변이
+    let mut mutations = []
+    let mut i = 0
+    while i < DNA_BASE_COUNT {
+        let cur = to_float(to_string(current[i]))
+        let base = to_float(to_string(baseline[i]))
+        let delta = cur - base
+        if abs_f(delta) > MUTATION_SENSITIVITY {
+            let severity = abs_f(delta) / 1.0
+            mutations = mutations + [[DNA_BASES[i], to_string(delta), to_string(severity)]]
+        }
+        i = i + 1
+    }
+    return mutations
+}
+
+// ═══════════════════════════════════════════════════════════
+// §6. Grover 탐색 가속 — 패턴 DB에서 √N 가속
+// ═══════════════════════════════════════════════════════════
+
+fn grover_oracle(patterns: list, target: string) -> i64 {
+    // 오라클: target 패턴에 매칭되면 부호 반전
+    let mut i = 0
+    while i < patterns.len() {
+        let pat = to_string(patterns[i])
+        if target.contains(pat) { return i }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+fn grover_diffusion(amps: list) -> list {
+    // 디퓨전 연산자: 평균 기준 반전
+    let mut mean = 0.0
+    let mut i = 0
+    while i < amps.len() {
+        mean = mean + to_float(to_string(amps[i]))
+        i = i + 1
+    }
+    if amps.len() > 0 {
+        mean = mean / to_float(amps.len())
+    }
+    let mut result = []
+    i = 0
+    while i < amps.len() {
+        let a = to_float(to_string(amps[i]))
+        // 2*mean - a (평균 기준 반사)
+        result = result + [2.0 * mean - a]
+        i = i + 1
+    }
+    return result
+}
+
+fn grover_search(patterns: list, target: string) -> list {
+    // Grover 탐색: √N 반복으로 target 패턴 증폭
+    let n = patterns.len()
+    if n == 0 { return [to_string(0 - 1), to_string(0.0)] }
+
+    // 초기 균등 중첩
+    let init_amp = 1.0 / sqrt_approx(to_float(n))
+    let mut amps = []
+    let mut i = 0
+    while i < n {
+        amps = amps + [init_amp]
+        i = i + 1
+    }
+
+    // 오라클 적용: target 매칭 인덱스 찾기
+    let match_idx = grover_oracle(patterns, target)
+    if match_idx < 0 { return [to_string(0 - 1), to_string(0.0)] }
+
+    // √N 반복 (최소 GROVER_ITERATIONS = 6)
+    let sqrt_n = sqrt_approx(to_float(n))
+    let mut iters = to_int(sqrt_n)
+    if iters < GROVER_ITERATIONS { iters = GROVER_ITERATIONS }
+
+    let mut round = 0
+    while round < iters {
+        // 1) 오라클: 매칭 항 부호 반전
+        let old = to_float(to_string(amps[match_idx]))
+        amps[match_idx] = 0.0 - old
+        // 2) 디퓨전
+        amps = grover_diffusion(amps)
+        round = round + 1
+    }
+
+    let final_amp = abs_f(to_float(to_string(amps[match_idx])))
+    let prob = final_amp * final_amp
+    return [to_string(match_idx), to_string(prob)]
+}
+
+// ═══════════════════════════════════════════════════════════
+// §7. 파일시스템 양자 스캐너
+// ═══════════════════════════════════════════════════════════
+
+fn scan_directory(path: string) -> list {
+    // 디렉토리 내 파일 목록 (최대 6*6 = 36 파일)
+    let raw = exec("find " + path + " -maxdepth 2 -type f 2>/dev/null | head -36").trim()
+    if raw == "" { return [] }
+    return raw.split("\n")
+}
+
+fn quantum_scan_file(filepath: string) -> list {
+    // 단일 파일 양자 스캔
+    // [filepath, match_state, threat_state, anomaly_score]
+    let mut content = ""
+    try { content = exec("head -c 2048 " + filepath + " 2>/dev/null") } catch e {}
+
+    // §2: 중첩 패턴 매칭
+    let match_amps = superposition_match(filepath, content)
+
+    // §3: 위협 진폭 계산
+    let threat_raw = compute_threat_amplitude(filepath, content)
+
+    // 간섭 적용 (매칭 컨텍스트로 위협 필터링)
+    let threats = quantum_interference(threat_raw, match_amps)
+
+    // 최고 매칭 카테고리
+    let match_idx = measure_state(match_amps)
+    let match_cat = SIG_CATEGORIES[match_idx]
+    let match_prob = probability_at(match_amps, match_idx)
+
+    // 위협 점수 합산
+    let mut threat_score = 0.0
+    let mut max_threat_idx: i64 = 0
+    let mut max_threat = 0.0
+    let mut i = 0
+    while i < THREAT_COUNT {
+        let t = to_float(to_string(threats[i]))
+        threat_score = threat_score + t
+        if t > max_threat {
+            max_threat = t
+            max_threat_idx = i
+        }
+        i = i + 1
+    }
+
+    let mut threat_label = "clean"
+    if max_threat > 0.5 { threat_label = THREAT_SIGS[max_threat_idx] }
+    if max_threat > 0.3 {
+        if threat_label == "clean" { threat_label = "suspicious" }
+    }
+
+    return [filepath, match_cat, to_string(match_prob), threat_label, to_string(threat_score), to_string(max_threat)]
+}
+
+fn quantum_scan_path(target_path: string) -> list {
+    // 대상 경로 양자 스캔 (파일/디렉토리)
+    let mut results = []
+
+    // 단일 파일인지 확인
+    let is_file = exec("test -f " + target_path + " && echo yes || echo no").trim()
+    if is_file == "yes" {
+        let r = quantum_scan_file(target_path)
+        results = results + [r]
+        return results
+    }
+
+    // 디렉토리 스캔
+    let files = scan_directory(target_path)
+    for f in files {
+        let fp = f.trim()
+        if fp == "" { continue }
+        let r = quantum_scan_file(fp)
+        results = results + [r]
+    }
+
+    return results
+}
+
+// ═══════════════════════════════════════════════════════════
+// §8. growth_bus 출력
+// ═══════════════════════════════════════════════════════════
+
+fn emit_growth_bus(event_type: string, detail: string, score: f64) -> bool {
+    let ts = timestamp_now()
+    let line = "{\"ts\":\"" + ts + "\",\"src\":\"airgenome_quantum\",\"type\":\"" + event_type + "\",\"detail\":\"" + detail + "\",\"score\":" + to_string(score) + ",\"n6\":true}"
+    try {
+        let mut existing = ""
+        try { existing = read_file(_bus_path) } catch e {}
+        write_file(_bus_path, existing + line + "\n")
+        return true
+    } catch e {
+        return false
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// §9. 리포트 출력
+// ═══════════════════════════════════════════════════════════
+
+fn print_header() -> bool {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║   AIRGENOME v2 — 양자 스캔 엔진  (n=6 quantum model)   ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+    return true
+}
+
+fn print_genome_report(healths: list, mutations: list) -> bool {
+    println("┌─── n=6 게놈 상태 ──────────────────────────────────────┐")
+    let mut i = 0
+    while i < DNA_BASE_COUNT {
+        let h = to_float(to_string(healths[i]))
+        let pct = to_int(h * 100.0)
+        let mut bar = ""
+        let mut b = 0
+        while b < 6 {
+            if b < to_int(h * 6.0) { bar = bar + "█" }
+            if b >= to_int(h * 6.0) { bar = bar + "░" }
+            b = b + 1
+        }
+        println("│  " + DNA_BASES[i] + "\t" + bar + "  " + to_string(pct) + "%")
+        i = i + 1
+    }
+
+    if mutations.len() > 0 {
+        println("│")
+        println("│  ⚠ 돌연변이 감지: " + to_string(mutations.len()) + "건")
+        for m in mutations {
+            let base = to_string(m[0])
+            let delta = to_float(to_string(m[1]))
+            let sev = to_float(to_string(m[2]))
+            let mut dir = "▲"
+            if delta < 0.0 { dir = "▼" }
+            println("│    " + base + " " + dir + " Δ=" + to_string(delta) + "  심각도=" + to_string(to_int(sev * 100.0)) + "%")
+        }
+    }
+    if mutations.len() == 0 {
+        println("│  ✓ 돌연변이 없음 — 게놈 안정")
+    }
+    println("└──────────────────────────────────────────────────────────┘")
+    return true
+}
+
+fn print_scan_report(results: list) -> bool {
+    println("┌─── 양자 스캔 결과 ────────────────────────────────────┐")
+    let mut threats_found = 0
+    let mut clean_count = 0
+    for r in results {
+        let fp = to_string(r[0])
+        let cat = to_string(r[1])
+        let prob = to_float(to_string(r[2]))
+        let threat = to_string(r[3])
+        let score = to_float(to_string(r[5]))
+
+        let mut icon = "✓"
+        if threat != "clean" { icon = "⚠" }
+        if score > 0.7 { icon = "✗" }
+
+        // 파일 경로 축약 (긴 경로 대응)
+        let mut short_fp = fp
+        if fp.len() > 40 {
+            short_fp = "..." + fp.split("/").pop()
+        }
+
+        println("│  " + icon + " " + short_fp)
+        println("│    매칭: " + cat + " (P=" + to_string(to_int(prob * 100.0)) + "%)  위협: " + threat)
+
+        if threat != "clean" { threats_found = threats_found + 1 }
+        if threat == "clean" { clean_count = clean_count + 1 }
+    }
+    println("│")
+    println("│  요약: " + to_string(results.len()) + "건 스캔 | " + to_string(clean_count) + " 정상 | " + to_string(threats_found) + " 위협")
+    println("└──────────────────────────────────────────────────────────┘")
+    return true
+}
+
+fn print_entangle_report(pairs: list) -> bool {
+    println("┌─── 얽힘 파일시스템 검사 ──────────────────────────────┐")
+    for pair in pairs {
+        let a = to_string(pair[0])
+        let sa = to_string(pair[1])
+        let b = to_string(pair[2])
+        let sb = to_string(pair[3])
+        let anom = to_float(to_string(pair[4]))
+
+        let mut icon = "⊗"
+        if anom > 0.5 { icon = "⚠" }
+        if anom < 0.1 { icon = "✓" }
+
+        println("│  " + icon + " " + a + " [" + sa + "]")
+        println("│    ↔ " + b + " [" + sb + "]  이상도=" + to_string(to_int(anom * 100.0)) + "%")
+    }
+    println("└──────────────────────────────────────────────────────────┘")
+    return true
+}
+
+fn print_threat_superposition(results: list) -> bool {
+    println("┌─── 중첩 위협 상태 ────────────────────────────────────┐")
+    println("│")
+    println("│  위협 유형 6종 (n=6 양자 기저):")
+    let mut i = 0
+    while i < THREAT_COUNT {
+        println("│    |" + to_string(i) + "⟩ = " + THREAT_SIGS[i])
+        i = i + 1
+    }
+    println("│")
+
+    // 스캔 결과에서 위협 통계 집계
+    let mut threat_counts = []
+    i = 0
+    while i < THREAT_COUNT {
+        threat_counts = threat_counts + [0]
+        i = i + 1
+    }
+
+    let mut total_threats = 0
+    for r in results {
+        let threat = to_string(r[3])
+        if threat != "clean" {
+            if threat != "suspicious" {
+                let mut j = 0
+                while j < THREAT_COUNT {
+                    if threat == THREAT_SIGS[j] {
+                        let cur = to_int(to_float(to_string(threat_counts[j])))
+                        threat_counts[j] = cur + 1
+                        total_threats = total_threats + 1
+                    }
+                    j = j + 1
+                }
+            }
+        }
+    }
+
+    println("│  중첩 상태 |Ψ_threat⟩:")
+    if total_threats == 0 {
+        println("│    |vacuum⟩ — 위협 기저 상태 (진공)")
+    }
+    if total_threats > 0 {
+        i = 0
+        while i < THREAT_COUNT {
+            let cnt = to_int(to_float(to_string(threat_counts[i])))
+            if cnt > 0 {
+                let amp = sqrt_approx(to_float(cnt)) / sqrt_approx(to_float(total_threats))
+                println("│    α=" + to_string(to_int(amp * 100.0)) + "% |" + THREAT_SIGS[i] + "⟩  (" + to_string(cnt) + "건)")
+            }
+            i = i + 1
+        }
+    }
+    println("│")
+    println("│  총 위협 이벤트: " + to_string(total_threats))
+    println("└──────────────────────────────────────────────────────────┘")
+    return true
+}
+
+// ═══════════════════════════════════════════════════════════
+// §10. Grover 패턴 DB 검색 데모
+// ═══════════════════════════════════════════════════════════
+
+fn demo_grover_search(target: string) -> bool {
+    // 위협 시그니처 DB에서 Grover 탐색
+    let result = grover_search(THREAT_SIGS, target)
+    let idx = to_int(to_float(to_string(result[0])))
+    let prob = to_float(to_string(result[1]))
+
+    println("┌─── Grover 탐색 가속 ──────────────────────────────────┐")
+    println("│  DB 크기: " + to_string(THREAT_COUNT) + "  (n=6 기저)")
+    println("│  타겟: \"" + target + "\"")
+    if idx >= 0 {
+        println("│  결과: |" + to_string(idx) + "⟩ = " + THREAT_SIGS[idx])
+        println("│  증폭 확률: " + to_string(to_int(prob * 100.0)) + "%")
+        println("│  반복 횟수: " + to_string(GROVER_ITERATIONS) + " (√N 가속)")
+    }
+    if idx < 0 {
+        println("│  결과: 매칭 없음")
+    }
+    println("└──────────────────────────────────────────────────────────┘")
+    return true
+}
+
+// ═══════════════════════════════════════════════════════════
+// §11. 도움말
+// ═══════════════════════════════════════════════════════════
+
+fn print_help() -> bool {
+    print_header()
+    println("사용법:")
+    println("  hexa airgenome_quantum.hexa scan <path>   양자 게놈 스캔")
+    println("  hexa airgenome_quantum.hexa threats        중첩 위협 상태 표시")
+    println("  hexa airgenome_quantum.hexa help           이 도움말")
+    println("")
+    println("양자 모듈 (n=6):")
+    println("  §1 6-qubit 상태벡터  §2 중첩 패턴매칭  §3 간섭 위협탐지")
+    println("  §4 얽힘 파일시스템   §5 돌연변이 탐지  §6 Grover 탐색가속")
+    println("")
+    println("상수: DNA=6종(CPU/MEM/DISK/NET/PROC/KERN) DEPTH=6 PAIRS=6 ITER=6")
+    return true
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN — CLI 엔트리포인트
+// ═══════════════════════════════════════════════════════════
+
+let argv = args()
+let mut cmd = "help"
+let mut target_path = "."
+
+if argv.len() >= 3 { cmd = argv[2] }
+if argv.len() >= 3 { target_path = argv[2] }
+
+if cmd == "help" {
+    print_help()
+}
+
+if cmd == "scan" {
+    print_header()
+
+    // 기준선: 균등 건강도 (최초 스캔 시)
+    let baseline = [0.85, 0.85, 0.85, 0.85, 0.85, 0.85]
+
+    // Phase 1: n=6 게놈 상태 수집
+    println("⟨Phase 1⟩ n=6 게놈 상태 수집...")
+    let healths = collect_genome_state()
+    let mutations = detect_mutations(healths, baseline)
+    print_genome_report(healths, mutations)
+    println("")
+
+    // Phase 2: 얽힘 파일시스템 검사
+    println("⟨Phase 2⟩ 얽힘 파일시스템 검사 (6쌍 EPR)...")
+    let entangled = scan_entangled_filesystem()
+    print_entangle_report(entangled)
+    println("")
+
+    // Phase 3: 대상 경로 양자 스캔
+    println("⟨Phase 3⟩ 중첩 패턴 매칭 + 간섭 위협 탐지...")
+    println("│  대상: " + target_path)
+    let results = quantum_scan_path(target_path)
+    print_scan_report(results)
+    println("")
+
+    // Phase 4: Grover 탐색 데모
+    println("⟨Phase 4⟩ Grover 탐색 가속...")
+    demo_grover_search("rootkit")
+    println("")
+
+    // Phase 5: 중첩 위협 상태 요약
+    println("⟨Phase 5⟩ 중첩 위협 상태 붕괴...")
+    print_threat_superposition(results)
+    println("")
+
+    // Phase 6: growth_bus 출력
+    let mut threat_total = 0
+    for r in results {
+        let t = to_string(r[3])
+        if t != "clean" { threat_total = threat_total + 1 }
+    }
+    let score = 1.0 - to_float(threat_total) / max_f(to_float(results.len()), 1.0)
+    emit_growth_bus("quantum_scan", "path=" + target_path + " files=" + to_string(results.len()) + " threats=" + to_string(threat_total) + " mutations=" + to_string(mutations.len()), score)
+    println("✓ growth_bus.jsonl 기록 완료")
+    println("")
+    println("═══════════════════════════════════════════════════════════")
+    println("  양자 스캔 완료 — " + to_string(results.len()) + "건 분석 | n=6 모델 적용")
+    println("═══════════════════════════════════════════════════════════")
+}
+
+if cmd == "threats" {
+    print_header()
+    let healths = collect_genome_state()
+    let baseline = [0.85, 0.85, 0.85, 0.85, 0.85, 0.85]
+    let mutations = detect_mutations(healths, baseline)
+    print_genome_report(healths, mutations)
+    println("")
+    let entangled = scan_entangled_filesystem()
+    print_entangle_report(entangled)
+    println("")
+    let results = quantum_scan_path(".")
+    print_threat_superposition(results)
+    println("")
+    demo_grover_search("rootkit")
+    println("")
+    emit_growth_bus("quantum_threats", "threat_check mutations=" + to_string(mutations.len()), 1.0)
+    println("✓ growth_bus.jsonl 기록 완료")
+}

@@ -22,7 +22,7 @@ while i < argc {
     }
     let a = argv[i]
     // --seeds 뒤의 값은 큰따옴표로 감싸기 (공백/특수문자 보호)
-    if a.contains(" ") || a.contains("'") || a.contains("$") || a.contains("(") {
+    if a.contains(" ") || a.contains("'") || a.contains("$") || a.contains("(") || a.contains("|") || a.contains(";") || a.contains("&") || a.contains(">") || a.contains("<") || a.contains("`") {
         blowup_args = blowup_args + "'" + a.replace("'", "'\\''") + "'"
     } else {
         blowup_args = blowup_args + a
@@ -30,12 +30,16 @@ while i < argc {
     i = i + 1
 }
 
-// htz 접속 시도
+// htz 접속 시도 (이미 htz에서 실행 중이면 skip)
 let mut htz_ok = false
-try {
-    let probe = exec("ssh -o ConnectTimeout=3 -o BatchMode=yes hetzner 'echo ok' 2>/dev/null").trim()
-    if probe == "ok" { htz_ok = true }
-} catch e {}
+let mut _gate_local = ""
+try { _gate_local = exec("printenv GATE_LOCAL 2>/dev/null").trim() } catch e {}
+if _gate_local != "1" {
+    try {
+        let probe = exec("ssh -o ConnectTimeout=3 -o BatchMode=yes hetzner 'echo ok' 2>/dev/null").trim()
+        if probe == "ok" { htz_ok = true }
+    } catch e {}
+}
 
 if htz_ok {
     // htz에서 실행 — hexa 경로 동적 탐색
@@ -57,10 +61,9 @@ if htz_ok == false {
     let home = exec("printenv HOME").trim()
     let mut hexa = ""
     try {
-        hexa = exec("which hexa 2>/dev/null || echo " + home + "/Dev/hexa-lang/target/release/hexa").trim()
-    } catch e {
-        hexa = home + "/Dev/hexa-lang/target/release/hexa"
-    }
+        hexa = exec("for p in /home/hexa-lang/hexa " + home + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
+    } catch e {}
+    if hexa == "" { hexa = home + "/Dev/hexa-lang/target/release/hexa" }
     let blowup = home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
     let result = exec("GATE_LOCAL=1 HEXA_GATE_DISABLE=1 " + hexa + " " + blowup + " " + blowup_args + " 2>&1")
     println(result)

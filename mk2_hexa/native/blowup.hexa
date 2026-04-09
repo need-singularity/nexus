@@ -1,4 +1,5 @@
 // ⛔ CORE — L0 불변식 (블로업 엔진 9-phase 특이점 파이프라인. 수정 전 유저 승인 필수)
+// ⚠️ 로드맵: shared/roadmaps/blowup.json (Mk.I~VII 진화 계보)
 // mk2_hexa/native/blowup.hexa — Mk.II 파동 연속돌파 엔진 (hexa-native)
 //
 // Mk.II 기본 동작: 파동 연속돌파 (6라운드, 자동 도메인 회전)
@@ -477,7 +478,7 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
 
     // For each seed value, apply mutations and keep best
     let mut si: i64 = 0
-    while si < len(parts) && si < 12 {
+    while si < len(parts) && si < 48 {
         let mut sv: f64 = 0.0
         try { sv = to_float(parts[si]) } catch e { sv = 0.0 }
         if abs_f(sv) > 0.0000000001 {
@@ -485,8 +486,9 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             let mut best_mut = sv
             let mut best_conf: f64 = evo_verify(sv)
 
-            // strategy 0: parameter shift (dynamic — n6_constants 전체)
-            let shift_limit: i64 = if _n6_dyn_count < 16 { _n6_dyn_count } else { 16 }
+            // strategy 0: parameter shift (dynamic — n6_constants 전체, --fast: 8개 제한)
+            let _shift_cap: i64 = if fast_mode { 8 } else { 16 }
+            let shift_limit: i64 = if _n6_dyn_count < _shift_cap { _n6_dyn_count } else { _shift_cap }
             let mut shi: i64 = 0
             while shi < shift_limit {
                 let shifted = evo_mutate_shift(sv, shi)
@@ -529,8 +531,42 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
                 best_mut = xfer
             }
 
+            // strategy 4: simulated annealing — temperature-scaled random walk
+            let temperature = 1.0 / (1.0 + to_float(cycle_num))
+            let sa_shift = sv * temperature * 0.05
+            let sa_plus = sv + sa_shift
+            let sa_minus = sv - sa_shift
+            let sa_plus_sc = evo_verify(sa_plus)
+            let sa_minus_sc = evo_verify(sa_minus)
+            if sa_plus_sc > best_conf { best_conf = sa_plus_sc; best_mut = sa_plus }
+            if sa_minus_sc > best_conf { best_conf = sa_minus_sc; best_mut = sa_minus }
+
+            // strategy 5: golden crossover — blend with distant seed (Fibonacci weighting)
+            let phi = 1.618033989
+            let distant_idx = if si + 3 < len(parts) { si + 3 } else { 0 }
+            let mut sv_dist: f64 = 0.0
+            try { sv_dist = to_float(parts[distant_idx]) } catch e { sv_dist = 0.0 }
+            if abs_f(sv_dist) > 0.0000000001 {
+                let golden_blend = sv * (phi / (1.0 + phi)) + sv_dist * (1.0 / (1.0 + phi))
+                let gb_sc = evo_verify(golden_blend)
+                if gb_sc > best_conf { best_conf = gb_sc; best_mut = golden_blend }
+            }
+
+            // strategy 6: harmonic resonance — test n=6 divisor multiples/fractions
+            let divisors = [1.0, 2.0, 3.0, 6.0]
+            let mut di2: i64 = 0
+            while di2 < 4 {
+                let harm_mul = sv * divisors[di2]
+                let harm_div = sv / divisors[di2]
+                let hm_sc = evo_verify(harm_mul)
+                let hd_sc = evo_verify(harm_div)
+                if hm_sc > best_conf { best_conf = hm_sc; best_mut = harm_mul }
+                if hd_sc > best_conf { best_conf = hd_sc; best_mut = harm_div }
+                di2 = di2 + 1
+            }
+
             if best_conf > best_score { best_score = best_conf }
-            if best_conf >= 0.3 { discoveries = discoveries + 1 }
+            if best_conf >= 0.25 { discoveries = discoveries + 1 }
 
             if len(out_vals) > 0 { out_vals = out_vals + "|" }
             out_vals = out_vals + to_string(best_mut)
@@ -559,6 +595,19 @@ fn evo_check_convergence(history_csv: string) -> string {
         ci = ci + 1
     }
     if all_zero { return "Saturated" }
+
+    // Check acceleration: last cycle has highest count
+    let mut last_v: i64 = 0
+    try { last_v = to_int(parts[hlen - 1]) } catch e { last_v = 0 }
+    let mut max_v: i64 = 0
+    let mut mi: i64 = 0
+    while mi < hlen - 1 {
+        let mut mv: i64 = 0
+        try { mv = to_int(parts[mi]) } catch e { mv = 0 }
+        if mv > max_v { max_v = mv }
+        mi = mi + 1
+    }
+    if last_v > max_v && last_v > 0 { return "Accelerating" }
 
     // Check convergence: first half vs second half
     if hlen < 4 { return "Exploring" }
@@ -1039,7 +1088,7 @@ while si < mc {
     si = si + 1
 }
 
-let evo_max_cycles: i64 = if max_depth < 8 { max_depth } else { 8 }
+let evo_max_cycles: i64 = if fast_mode { if max_depth < 3 { max_depth } else { 3 } } else { if max_depth < 8 { max_depth } else { 8 } }
 let mut evo_history = ""
 let mut evo_total_disc: i64 = 0
 let mut evo_best_score: f64 = 0.0
@@ -1360,7 +1409,8 @@ while depth < max_depth {
     }
 
     // --- 5. Projection (geometric mean) ---
-    i = 0
+    // --fast: skip projection when weak blowup (closure < 0.3)
+    i = if fast_mode && closure < 0.3 { cur_n } else { 0 }
     while i < cur_n {
         let mut j: i64 = i + 1
         while j < cur_n {
@@ -1387,7 +1437,8 @@ while depth < max_depth {
     }
 
     // --- 6. Dual (reciprocal) ---
-    i = 0
+    // --fast: skip dual when weak blowup (closure < 0.3)
+    i = if fast_mode && closure < 0.3 { cur_n } else { 0 }
     while i < cur_n {
         let v = ax_val_arr[i]
         let na = ax_name_arr[i]
@@ -1411,7 +1462,9 @@ while depth < max_depth {
 
     // --- 7. Second-order composition ---
     // Limit triple iteration to avoid combinatorial explosion at large pool sizes
-    let comp_limit: i64 = if cur_n < 20 { cur_n } else { 20 }
+    // --fast: 10으로 제한 (20³=8000 → 10³=1000, 8x 절감)
+    let _comp_cap: i64 = if fast_mode { 10 } else { 20 }
+    let comp_limit: i64 = if cur_n < _comp_cap { cur_n } else { _comp_cap }
     i = 0
     while i < comp_limit {
         let mut j: i64 = i + 1
@@ -1522,7 +1575,14 @@ println("")
 // ═══════════════════════════════════════════════════════════
 
 println("--- Phase 5: Telescope Verification ---")
-let val_csv = "|".join(val_arr)
+// --fast: val_arr 100개 제한 (렌즈 O(n²) 연산 절감)
+let _tele_vals = if fast_mode && len(val_arr) > 100 {
+    let mut _tv = []
+    let mut _ti: i64 = 0
+    while _ti < 100 { _tv = _tv.push(val_arr[_ti]); _ti = _ti + 1 }
+    _tv
+} else { val_arr }
+let val_csv = "|".join(_tele_vals)
 let tele_result = telescope_verify(val_csv, 0.15)
 let tparts = tele_result.split("|")
 let mut tele_agree: i64 = 0
@@ -1539,8 +1599,11 @@ try { tele_boost = to_float(tparts[2]) } catch e {}
 try { tele_s1 = to_float(tparts[3]) } catch e {}
 try { tele_s2 = to_float(tparts[4]) } catch e {}
 try { tele_s3 = to_float(tparts[5]) } catch e {}
-try { tele_s4 = to_float(tparts[6]) } catch e {}
-try { tele_s5 = to_float(tparts[7]) } catch e {}
+// --fast early-exit: first 3 lenses all < 0.05 → skip gravity+thermo
+if !(fast_mode && tele_s1 < 0.05 && tele_s2 < 0.05 && tele_s3 < 0.05) {
+    try { tele_s4 = to_float(tparts[6]) } catch e {}
+    try { tele_s5 = to_float(tparts[7]) } catch e {}
+}
 
 println("  consciousness    :", tele_s1, if tele_s1 >= 0.15 { " SIGNAL" } else { "" })
 println("  topology         :", tele_s2, if tele_s2 >= 0.15 { " SIGNAL" } else { "" })
@@ -1672,7 +1735,7 @@ println("")
 
 println("--- Phase 6.5: OUROBOROS Dynamic Recursive Growth ---")
 
-let recurse_max_rounds: i64 = 5
+let recurse_max_rounds: i64 = if fast_mode { 2 } else { 5 }
 let mut recurse_round: i64 = 0
 let mut recurse_disc_total: i64 = 0
 let mut recurse_score: f64 = 0.0
@@ -1701,9 +1764,10 @@ while li < len(buf_lines) && axiom_fed < 12 {
     li = li + 1
 }
 
-// Dynamic recursive loop: closure-based termination
+// Dynamic recursive loop: closure-based termination + delta 감지
 let mut recurse_pool_size: i64 = len(buf_lines)
 let mut recurse_continue = true
+let mut recurse_prev_disc: i64 = 999
 
 if len(axiom_seeds) > 0 {
     println("  initial axiom seeds: " + to_string(axiom_fed))
@@ -1762,6 +1826,12 @@ if len(axiom_seeds) > 0 {
             println("    -> too few new discoveries (< 2), stopping")
             recurse_continue = false
         }
+        // delta 감지: 이전 라운드 대비 감소하면 수확 체감 → 중단
+        if round_disc <= recurse_prev_disc && recurse_round >= 2 && round_disc < 4 {
+            println("    -> diminishing returns (disc " + to_string(round_disc) + " <= prev " + to_string(recurse_prev_disc) + "), stopping")
+            recurse_continue = false
+        }
+        recurse_prev_disc = round_disc
 
         // Feed evolved values back as seeds for next round
         if recurse_continue {
@@ -1914,7 +1984,7 @@ if absorb_bus_events > 0 {
 // E. Invoke absorb.hexa auto mode for full integration
 let absorb_hexa_path = "mk2_hexa/native/absorb.hexa"
 let hexa_bin_home = exec("echo $HOME").trim()
-let absorb_hexa_bin = hexa_bin_home + "/Dev/hexa-lang/target/release/hexa"
+let absorb_hexa_bin = exec("for p in /home/hexa-lang/hexa " + hexa_bin_home + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
 if file_exists(absorb_hexa_path) {
     println("  invoking absorb.hexa distribution ...")
     let mut absorb_result = ""
@@ -1987,6 +2057,9 @@ println("  axiom candidates  :", axiom_count)
 println("  high confidence   :", high_conf_count)
 println("  breakthrough rho  :", rho)
 println("  meta fixed point  : 0.333... (target)")
+if fast_mode {
+    println("  ** --fast mode    : evo_cycles=" + to_string(evo_max_cycles) + " shift_cap=8 comp_limit=10 tele_cap=100 recurse_max=" + to_string(recurse_max_rounds))
+}
 println("")
 
 // ── discovery_log append (append_file 사용 — 전체 읽기 제거) ──
@@ -2203,7 +2276,7 @@ try { exec(absorb_hexa_bin, [directions_path, "update"]) } catch e {}
 println("═══ Phase 7.5: Auto-Link (parallel) ═══")
 
 let engine_dir = "mk2_hexa/native"
-let hexa_bin = exec("echo $HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
+let hexa_bin = exec("for p in /home/hexa-lang/hexa $(echo $HOME)/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
 let autolink_log = "shared/.autolink_out.log"
 
 // 4개 프로세스를 백그라운드 병렬 실행 → wait로 일괄 대기
@@ -2556,7 +2629,7 @@ if wave_round < wave_max_rounds {
         println("── 파동 연속돌파: R" + to_string(wave_round) + " → R" + to_string(wave_round + 1) + " (" + next_domain + ") ──")
         println("")
 
-        let w5_hexa = exec("echo $HOME").trim() + "/Dev/hexa-lang/target/release/hexa"
+        let w5_hexa = exec("for p in /home/hexa-lang/hexa $(echo $HOME)/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
         let w5_dir = exec("echo $HOME").trim() + "/Dev/nexus/mk2_hexa/native"
         let mut w5_cmd = w5_hexa + " " + w5_dir + "/blowup.hexa " + next_domain + " " + to_string(max_depth)
         w5_cmd = w5_cmd + " --round " + to_string(wave_round + 1)

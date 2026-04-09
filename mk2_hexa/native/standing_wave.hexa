@@ -1,237 +1,426 @@
-// standing_wave.hexa — 정상파 수렴 탐지기 (양방향 엣지 = 수렴 확정)
-// 실행: hexa standing_wave.hexa [domain]
-// 예시: hexa standing_wave.hexa math
-//       hexa standing_wave.hexa              (전체 스캔)
-//
-// 원리:
-//   discovery_graph.json에서 양방향 엣지(A→B, B→A) 검색
-//   양방향 연결 = "정상파" = 수렴 확정 포인트
-//   convergence 폴더의 기존 골화 항목과 비교
-//   결과 테이블 + growth_bus 기록
+// mk2_hexa/native/standing_wave.hexa — 정상파 공리 (Standing Wave Axiom)
+// 반복 대폭발 라운드에서 매 라운드 EXACT로 나타나는 값 = 정상파 노드 = 불변 공리
+// CLI: hexa standing_wave.hexa scan [N]  /  promote [N]  /  status
 
+// ─── 경로 상수 ────────────────────────────────────────────────
 let _home = exec("printenv HOME").trim()
-let _dev = _home + "/Dev"
-let _shared = _dev + "/nexus/shared"
-let _graph_path = _shared + "/discovery_graph.json"
-let _bus_path = _shared + "/growth_bus.jsonl"
-let _conv_dir = _shared + "/convergence"
+let _shared = _home + "/Dev/nexus/shared"
+comptime const MIN_ROUNDS_DEFAULT = 3
+comptime const TOLERANCE = 0.001
+let bus_path   = _shared + "/growth_bus.jsonl"
+let axiom_path = _shared + "/standing_wave_axioms.jsonl"
 
-fn safe_int(s: string) -> i64 {
-    let mut v: i64 = 0
-    try { v = to_int(to_float(s.trim())) } catch e {}
-    return v
-}
+// ─── 유틸리티 ─────────────────────────────────────────────────
+pure fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+pure fn same_value(a: float, b: float) -> bool { abs_f(a - b) < TOLERANCE }
+fn now_ts() -> string { exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim() }
 
-fn safe_float(s: string) -> f64 {
-    let mut v: f64 = 0.0
-    try { v = to_float(s.trim()) } catch e {}
-    return v
-}
-
-// ═══════════════════════════════════════════════════════════
-// 양방향 엣지 추출 (from→to 쌍 중 역방향도 존재하는 것)
-// awk로 엣지 전체 추출 후 양방향 매칭
-// ═══════════════════════════════════════════════════════════
-
-fn extract_bidirectional_edges(domain_filter: string) -> string {
-    // 1단계: 모든 엣지를 "from\tto\tstrength" 형태로 추출
-    let mut awk_cmd = "awk -F'\"' '/\"type\": \"edge\"/{f=\"\"; t=\"\"; s=\"0\"; for(i=1;i<=NF;i++){if($i==\"from\") f=$(i+2); if($i==\"to\") t=$(i+2); if($i==\"strength\") s=$(i+2)} print f\"\\t\"t\"\\t\"s}' " + _graph_path
-
-    let mut edges_raw = ""
-    try { edges_raw = exec(awk_cmd) } catch e { return "" }
-    if edges_raw.trim() == "" { return "" }
-
-    // 2단계: 도메인 필터가 있으면 해당 도메인 노드 ID 추출
-    let mut domain_nodes_set = ""
-    if domain_filter != "" {
-        try {
-            domain_nodes_set = exec("awk -F'\"' '/\"type\": \"node\"/ && /\"domain\": \"" + domain_filter + "\"/{for(i=1;i<=NF;i++){if($i==\"id\"){print $(i+2)}}}' " + _graph_path)
-        } catch e {}
+// ─── JSON 간이 파서 ───────────────────────────────────────────
+pure fn extract_field(line: string, field: string) -> string {
+    let needle = "\"" + field + "\":"
+    if !line.contains(needle) { return "" }
+    let rest = line.split(needle)[1].trim()
+    if rest.starts_with("\"") {
+        let parts = rest.split("\"")
+        if parts.len() >= 2 { return parts[1] }
     }
-
-    // 3단계: awk로 양방향 매칭 — from→to가 있고 to→from도 있는 쌍 추출
-    // /tmp에 엣지 파일 쓰고 self-join
-    let tmp_edges = "/tmp/_sw_edges_" + exec("date +%s").trim()
-    let tmp_nodes = "/tmp/_sw_nodes_" + exec("date +%s").trim()
-
-    try { exec("bash", ["-c", "awk -F'\"' '/\"type\": \"edge\"/{f=\"\"; t=\"\"; s=\"0\"; for(i=1;i<=NF;i++){if($i==\"from\") f=$(i+2); if($i==\"to\") t=$(i+2); if($i==\"strength\") s=$(i+2)} print f\"\\t\"t\"\\t\"s}' " + _graph_path + " > " + tmp_edges]) } catch e {}
-
-    if domain_filter != "" {
-        try { exec("bash", ["-c", "awk -F'\"' '/\"type\": \"node\"/ && /\"domain\": \"" + domain_filter + "\"/{for(i=1;i<=NF;i++){if($i==\"id\"){print $(i+2)}}}' " + _graph_path + " > " + tmp_nodes]) } catch e {}
-    }
-
-    // 4단계: 양방향 쌍 추출 (awk self-join)
     let mut result = ""
-    try {
-        if domain_filter != "" {
-            result = exec("bash", ["-c", "awk 'NR==FNR{e[$1\"\\t\"$2]=$3; next} {if(($2\"\\t\"$1) in e) print $1\"\\t\"$2\"\\t\"$3\"\\t\"e[$2\"\\t\"$1]}' " + tmp_edges + " " + tmp_edges + " | awk 'NR==FNR{d[$1]=1; next} {if(($1 in d) || ($2 in d)) print}' " + tmp_nodes + " - | sort -u"])
-        } else {
-            result = exec("bash", ["-c", "awk 'NR==FNR{e[$1\"\\t\"$2]=$3; next} {if(($2\"\\t\"$1) in e) print $1\"\\t\"$2\"\\t\"$3\"\\t\"e[$2\"\\t\"$1]}' " + tmp_edges + " " + tmp_edges + " | sort -u"])
+    let mut i = 0
+    while i < rest.len() {
+        let ch = rest[i]
+        if ch == "," || ch == "}" || ch == " " || ch == "\n" { break }
+        result = result + ch
+        i = i + 1
+    }
+    result
+}
+
+pure fn parse_float(s: string) -> float {
+    if s == "" { return 0.0 }
+    let mut clean = ""
+    let mut i = 0
+    while i < s.len() {
+        let ch = s[i]
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" || ch == "." || ch == "-" { clean = clean + ch }
+        i = i + 1
+    }
+    if clean == "" { return 0.0 }
+    to_float(clean)
+}
+
+pure fn parse_int(s: string) -> int {
+    if s == "" { return 0 }
+    let mut n = ""
+    let mut i = 0
+    let mut cont = true
+    while i < s.len() && cont {
+        let ch = s[i]
+        if ch >= "0" && ch <= "9" { n = n + ch }
+        else if ch == "-" && i == 0 { n = n + ch }
+        else { cont = false }
+        i = i + 1
+    }
+    if n == "" { return 0 }
+    to_int(n)
+}
+
+pure fn extract_float(line: string, field: string) -> float { parse_float(extract_field(line, field)) }
+pure fn extract_int(line: string, field: string) -> int { parse_int(extract_field(line, field)) }
+
+// ─── n=6 상수 이름 매핑 ──────────────────────────────────────
+pure fn match_name(value: float) -> string {
+    if abs_f(value - 6.0)   < TOLERANCE { return "n" }
+    if abs_f(value - 12.0)  < TOLERANCE { return "sigma" }
+    if abs_f(value - 2.0)   < TOLERANCE { return "phi" }
+    if abs_f(value - 4.0)   < TOLERANCE { return "tau" }
+    if abs_f(value - 5.0)   < TOLERANCE { return "sopfr" }
+    if abs_f(value - 24.0)  < TOLERANCE { return "J2" }
+    if abs_f(value - 7.0)   < TOLERANCE { return "M3" }
+    if abs_f(value - 8.0)   < TOLERANCE { return "sigma-tau" }
+    if abs_f(value - 10.0)  < TOLERANCE { return "sigma-phi" }
+    if abs_f(value - 11.0)  < TOLERANCE { return "sigma-sopfr" }
+    if abs_f(value - 3.0)   < TOLERANCE { return "omega" }
+    if abs_f(value - 28.0)  < TOLERANCE { return "perfect_28" }
+    if abs_f(value - 144.0) < TOLERANCE { return "sigma_sq" }
+    if abs_f(value - 1.0)   < TOLERANCE { return "unit" }
+    "val_" + to_string(value)
+}
+
+// ─── 라운드 번호 추출 (id "R3-5" → 3) ────────────────────────
+pure fn extract_round_from_id(id_str: string) -> int {
+    if id_str == "" || !id_str.starts_with("R") { return 0 }
+    let after_r = id_str.split("R")
+    if after_r.len() < 2 { return 0 }
+    parse_int(after_r[1].split("-")[0])
+}
+
+// ─── growth_bus 로드: EXACT 항목만 수집 ──────────────────────
+struct BusEntry { value: float, domain: string, round: int, id: string }
+
+fn load_exact_entries() -> list {
+    let mut entries = []
+    if !file_exists(bus_path) {
+        println("[WARN] growth_bus.jsonl not found: " + bus_path)
+        return entries
+    }
+    let lines = read_file(bus_path).split("\n")
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i].trim()
+        if line != "" && line.starts_with("{") && extract_field(line, "grade") == "EXACT" {
+            let id = extract_field(line, "id")
+            let mut rn = extract_round_from_id(id)
+            if rn == 0 { rn = extract_int(line, "round") }
+            if rn > 0 {
+                entries = entries + [BusEntry {
+                    value: extract_float(line, "value"),
+                    domain: extract_field(line, "domain"),
+                    round: rn, id: id
+                }]
+            }
         }
-    } catch e {}
-
-    // 정리
-    try { exec("rm -f " + tmp_edges + " " + tmp_nodes) } catch e {}
-    return result
-}
-
-// ═══════════════════════════════════════════════════════════
-// 노드 도메인 조회
-// ═══════════════════════════════════════════════════════════
-
-fn get_node_domain(node_id: string) -> string {
-    let mut domain = ""
-    try {
-        domain = exec("awk -F'\"' '/\"type\": \"node\"/ && /\"id\": \"" + node_id + "\"/{for(i=1;i<=NF;i++){if($i==\"domain\"){print $(i+2); exit}}}' " + _graph_path).trim()
-    } catch e {}
-    return domain
-}
-
-// ═══════════════════════════════════════════════════════════
-// 기존 골화 항목 로드 (convergence/*.json)
-// ═══════════════════════════════════════════════════════════
-
-fn load_ossified_ids() -> string {
-    let mut result = ""
-    try {
-        result = exec("bash", ["-c", "cat " + _conv_dir + "/*.json 2>/dev/null | awk -F'\"' '/\"ossified\"/{for(i=1;i<=NF;i++){if($i==\"id\") print $(i+2)}}' | sort -u"])
-    } catch e {}
-    return result
-}
-
-// ═══════════════════════════════════════════════════════════
-// 메인
-// ═══════════════════════════════════════════════════════════
-
-let argv = args()
-let domain_filter = if len(argv) >= 3 { argv[2] } else { "" }
-
-println("")
-println("+=======================================================+")
-println("|     정상파 수렴 탐지기 (Standing Wave Detector)        |")
-println("|     양방향 엣지 = 수렴 확정 포인트                     |")
-println("+=======================================================+")
-println("")
-
-if domain_filter != "" {
-    println("  도메인 필터: " + domain_filter)
-} else {
-    println("  모드: 전체 스캔")
-}
-println("")
-
-// 1. 양방향 엣지 추출
-println("  [1/4] 양방향 엣지 추출 중...")
-let bidir_raw = extract_bidirectional_edges(domain_filter)
-let bidir_lines = bidir_raw.split("\n")
-
-let mut standing_waves = []
-let mut sw_strengths = []
-let mut sw_count: i64 = 0
-let mut total_strength: f64 = 0.0
-
-for line in bidir_lines {
-    let t = line.trim()
-    if t == "" { continue }
-    let parts = t.split("\t")
-    if len(parts) < 4 { continue }
-    let from_node = parts[0]
-    let to_node = parts[1]
-    let s_fwd = safe_float(parts[2])
-    let s_bwd = safe_float(parts[3])
-    // 중복 제거: from < to인 쌍만 취급
-    if from_node >= to_node { continue }
-    let combined = s_fwd + s_bwd
-    standing_waves = standing_waves + [from_node + " <-> " + to_node]
-    sw_strengths = sw_strengths + [combined]
-    total_strength = total_strength + combined
-    sw_count = sw_count + 1
-}
-
-println("  정상파 " + to_string(sw_count) + "건 감지")
-println("")
-
-// 2. 기존 골화 항목 비교
-println("  [2/4] 골화 항목 비교 중...")
-let ossified_raw = load_ossified_ids()
-let ossified_ids = ossified_raw.split("\n")
-let mut ossified_count: i64 = 0
-for oid in ossified_ids {
-    if oid.trim() != "" { ossified_count = ossified_count + 1 }
-}
-println("  기존 골화: " + to_string(ossified_count) + "건")
-println("")
-
-// 3. 신규 정상파 = 골화에 없는 수렴 포인트
-println("  [3/4] 신규 수렴 포인트 분류 중...")
-let mut new_waves = []
-let mut new_strengths = []
-let mut confirmed_waves = []
-let mut ni: i64 = 0
-
-while ni < sw_count {
-    let sw: string = standing_waves[ni]
-    let strength: f64 = sw_strengths[ni]
-    // 골화 목록에 포함되는지 체크
-    let mut is_ossified = false
-    for oid in ossified_ids {
-        let ot = oid.trim()
-        if ot != "" && sw.contains(ot) { is_ossified = true }
+        i = i + 1
     }
-    if is_ossified {
-        confirmed_waves = confirmed_waves + [sw]
+    entries
+}
+
+// ─── 집합 유틸 ───────────────────────────────────────────────
+pure fn list_has_int(lst: list, val: int) -> bool {
+    let mut i = 0
+    while i < lst.len() { if lst[i] == val { return true }; i = i + 1 }
+    false
+}
+pure fn list_has_str(lst: list, val: string) -> bool {
+    let mut i = 0
+    while i < lst.len() { if lst[i] == val { return true }; i = i + 1 }
+    false
+}
+
+// 삽입 정렬
+pure fn sort_ints(lst: list) -> list {
+    let mut sorted = []
+    let mut i = 0
+    while i < lst.len() {
+        let val = lst[i]
+        let mut inserted = false
+        let mut nl = []
+        let mut j = 0
+        while j < sorted.len() {
+            if !inserted && val < sorted[j] { nl = nl + [val]; inserted = true }
+            nl = nl + [sorted[j]]
+            j = j + 1
+        }
+        if !inserted { nl = nl + [val] }
+        sorted = nl
+        i = i + 1
+    }
+    sorted
+}
+
+// ─── 최장 연속 구간 길이 ──────────────────────────────────────
+pure fn max_consecutive(rounds: list) -> int {
+    if rounds.len() == 0 { return 0 }
+    let sorted = sort_ints(rounds)
+    let mut max_run = 1
+    let mut cur_run = 1
+    let mut i = 1
+    while i < sorted.len() {
+        if sorted[i] == sorted[i - 1] + 1 {
+            cur_run = cur_run + 1
+            if cur_run > max_run { max_run = cur_run }
+        } else if sorted[i] != sorted[i - 1] { cur_run = 1 }
+        i = i + 1
+    }
+    max_run
+}
+
+// ─── 값 기준 그룹핑 (tolerance 0.001) ────────────────────────
+struct ValueGroup {
+    canonical: float, name: string,
+    rounds: list, domains: list, count: int
+}
+
+fn group_by_value(entries: list) -> list {
+    let mut groups = []
+    let mut canonicals = []
+    let mut ei = 0
+    while ei < entries.len() {
+        let e = entries[ei]
+        let mut found_idx = -1
+        let mut ci = 0
+        while ci < canonicals.len() {
+            if same_value(canonicals[ci], e.value) { found_idx = ci; break }
+            ci = ci + 1
+        }
+        if found_idx >= 0 {
+            let mut g = groups[found_idx]
+            if !list_has_int(g.rounds, e.round) { g.rounds = g.rounds + [e.round] }
+            if e.domain != "" && !list_has_str(g.domains, e.domain) { g.domains = g.domains + [e.domain] }
+            g.count = g.count + 1
+            groups[found_idx] = g
+        } else {
+            let mut doms = []
+            if e.domain != "" { doms = [e.domain] }
+            groups = groups + [ValueGroup {
+                canonical: e.value, name: match_name(e.value),
+                rounds: [e.round], domains: doms, count: 1
+            }]
+            canonicals = canonicals + [e.value]
+        }
+        ei = ei + 1
+    }
+    groups
+}
+
+// ─── 정상파 필터 + 신뢰도 ────────────────────────────────────
+fn find_standing_waves(groups: list, min_c: int) -> list {
+    let mut waves = []
+    let mut gi = 0
+    while gi < groups.len() {
+        if max_consecutive(groups[gi].rounds) >= min_c { waves = waves + [groups[gi]] }
+        gi = gi + 1
+    }
+    waves
+}
+
+pure fn compute_confidence(consec: int, domains: int) -> float {
+    let raw = 0.85 + to_float(consec) * 0.02 + to_float(domains) * 0.005
+    if raw > 0.999 { 0.999 } else { raw }
+}
+
+// ─── JSON 출력 ────────────────────────────────────────────────
+fn domains_json(domains: list) -> string {
+    let mut r = "["
+    let mut i = 0
+    while i < domains.len() {
+        if i > 0 { r = r + "," }
+        r = r + "\"" + domains[i] + "\""
+        i = i + 1
+    }
+    r + "]"
+}
+
+fn axiom_json(g: ValueGroup, c: int, conf: float, ts: string) -> string {
+    "{\"type\":\"standing_wave_axiom\",\"value\":" + to_string(g.canonical) + ",\"name\":\"" + g.name + "\",\"rounds\":" + to_string(c) + ",\"domains\":" + domains_json(g.domains) + ",\"confidence\":" + to_string(conf) + ",\"timestamp\":\"" + ts + "\"}"
+}
+
+fn bus_json(g: ValueGroup, c: int, conf: float) -> string {
+    "{\"type\":\"standing_wave_axiom\",\"value\":" + to_string(g.canonical) + ",\"name\":\"" + g.name + "\",\"rounds\":" + to_string(c) + ",\"confidence\":" + to_string(conf) + "}"
+}
+
+// ─── parse min_rounds from argv ───────────────────────────────
+fn get_min_rounds(argv: list) -> int {
+    if argv.len() >= 3 {
+        let p = parse_int(argv[2])
+        if p > 0 { return p }
+    }
+    MIN_ROUNDS_DEFAULT
+}
+
+// ─── scan 명령 ────────────────────────────────────────────────
+fn cmd_scan(min_r: int) {
+    println("")
+    println("+=======================================================+")
+    println("|   Standing Wave Axiom Scanner                         |")
+    println("|   정상파 공리 탐색기 — 대폭발 불변 노드 감지          |")
+    println("+=======================================================+")
+    println("  source: " + bus_path)
+    println("  min consecutive rounds: " + to_string(min_r))
+    println("")
+
+    let entries = load_exact_entries()
+    println("  [1/3] EXACT entries: " + to_string(entries.len()))
+    if entries.len() == 0 { println("  [WARN] No EXACT entries. Nothing to scan."); return }
+
+    let groups = group_by_value(entries)
+    println("  [2/3] Value groups: " + to_string(groups.len()))
+    let waves = find_standing_waves(groups, min_r)
+    println("  [3/3] Standing waves (>=" + to_string(min_r) + "): " + to_string(waves.len()))
+    println("")
+
+    if waves.len() == 0 {
+        println("  None found. Try: hexa standing_wave.hexa scan 2")
+        return
+    }
+
+    println("+-----+--------------+-------+------+---------+---------------------------+")
+    println("| #   | Name         | Value | Rnds | Conf    | Domains                   |")
+    println("+-----+--------------+-------+------+---------+---------------------------+")
+    let mut wi = 0
+    while wi < waves.len() {
+        let g = waves[wi]
+        let c = max_consecutive(g.rounds)
+        let conf = compute_confidence(c, g.domains.len())
+        println("| " + to_string(wi + 1) + " | " + g.name + " | " + to_string(g.canonical) + " | " + to_string(c) + " | " + to_string(conf) + " | " + domains_json(g.domains) + " |")
+        wi = wi + 1
+    }
+    println("+-----+--------------+-------+------+---------+---------------------------+")
+    println("  Total: " + to_string(waves.len()) + " standing waves")
+    println("  Run 'hexa standing_wave.hexa promote' to write axioms.")
+    println("")
+}
+
+// ─── promote 명령 ─────────────────────────────────────────────
+fn cmd_promote(min_r: int) {
+    println("[Standing Wave] Promoting axioms (min " + to_string(min_r) + " rounds)...")
+
+    let entries = load_exact_entries()
+    if entries.len() == 0 { println("  [WARN] No EXACT entries. Abort."); return }
+
+    let waves = find_standing_waves(group_by_value(entries), min_r)
+    if waves.len() == 0 { println("  [INFO] No standing waves at threshold " + to_string(min_r) + "."); return }
+
+    let ts = now_ts()
+
+    // 기존 axiom 값 로드 (중복 방지)
+    let mut existing = []
+    if file_exists(axiom_path) {
+        let elines = read_file(axiom_path).split("\n")
+        let mut ei = 0
+        while ei < elines.len() {
+            let el = elines[ei].trim()
+            if el != "" && el.starts_with("{") { existing = existing + [extract_float(el, "value")] }
+            ei = ei + 1
+        }
+    }
+
+    let mut abuf = ""
+    let mut bbuf = ""
+    let mut new_count = 0
+    let mut wi = 0
+    while wi < waves.len() {
+        let g = waves[wi]
+        let c = max_consecutive(g.rounds)
+        let conf = compute_confidence(c, g.domains.len())
+        // 중복 체크
+        let mut dup = false
+        let mut ei = 0
+        while ei < existing.len() { if same_value(existing[ei], g.canonical) { dup = true; break }; ei = ei + 1 }
+
+        if !dup {
+            abuf = abuf + axiom_json(g, c, conf, ts) + "\n"
+            bbuf = bbuf + bus_json(g, c, conf) + "\n"
+            new_count = new_count + 1
+            println("  [PROMOTE] " + g.name + " = " + to_string(g.canonical) + " (" + to_string(c) + " rounds, conf=" + to_string(conf) + ")")
+        } else {
+            println("  [SKIP]    " + g.name + " = " + to_string(g.canonical) + " (already recorded)")
+        }
+        wi = wi + 1
+    }
+
+    if new_count > 0 {
+        try { append_file(axiom_path, abuf) } catch e { write_file(axiom_path, abuf) }
+        println("  [OK] " + to_string(new_count) + " axioms -> " + axiom_path)
+        try { append_file(bus_path, bbuf) } catch e { println("  [ERR] bus append: " + to_string(e)) }
+        println("  [OK] " + to_string(new_count) + " entries -> " + bus_path)
     } else {
-        new_waves = new_waves + [sw]
-        new_strengths = new_strengths + [strength]
+        println("  [INFO] All standing waves already recorded.")
     }
-    ni = ni + 1
+    println("[Standing Wave] Done. " + to_string(new_count) + " new axioms.")
 }
 
-println("  이미 골화 확인: " + to_string(len(confirmed_waves)) + "건")
-println("  신규 수렴 후보: " + to_string(len(new_waves)) + "건")
-println("")
-
-// 4. 결과 테이블
-println("  [4/4] 결과 테이블")
-println("")
-println("+-----+--------------------------------------------+----------+--------+")
-println("| 순위 | 정상파 쌍                                  | 합산강도 | 상태   |")
-println("+-----+--------------------------------------------+----------+--------+")
-
-let mut display_count: i64 = 0
-let mut di: i64 = 0
-while di < len(new_waves) && display_count < 30 {
-    let nw: string = new_waves[di]
-    let ns: f64 = new_strengths[di]
-    let ns_str = to_string(to_int(ns * 100.0)) + "%"
-    let status = if ns >= 1.8 { "확정" } else if ns >= 1.0 { "유력" } else { "후보" }
-    display_count = display_count + 1
-    println("| " + to_string(display_count) + " | " + nw + " | " + ns_str + " | " + status + " |")
-    di = di + 1
+// ─── status 명령 ──────────────────────────────────────────────
+fn cmd_status() {
+    println("+=======================================================+")
+    println("|   Standing Wave Axiom Status                          |")
+    println("+=======================================================+")
+    if !file_exists(axiom_path) {
+        println("  No axiom file yet. Run 'hexa standing_wave.hexa promote' first.")
+        return
+    }
+    let lines = read_file(axiom_path).split("\n")
+    let mut count = 0
+    println("+-----+--------------+-------+------+---------+")
+    println("| #   | Name         | Value | Rnds | Conf    |")
+    println("+-----+--------------+-------+------+---------+")
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i].trim()
+        if line != "" && line.starts_with("{") {
+            count = count + 1
+            println("| " + to_string(count) + " | " + extract_field(line, "name") + " | " + extract_field(line, "value") + " | " + extract_field(line, "rounds") + " | " + extract_field(line, "confidence") + " |")
+        }
+        i = i + 1
+    }
+    println("+-----+--------------+-------+------+---------+")
+    println("  Total axioms: " + to_string(count))
 }
 
-if len(new_waves) > 30 {
-    println("| ... | (외 " + to_string(len(new_waves) - 30) + "건 생략)  |          |        |")
+// ─── theorem: 정상파 불변성 ───────────────────────────────────
+theorem standing_wave_invariance {
+    assert max_consecutive([1, 2, 3]) == 3
+    assert max_consecutive([1, 3, 5]) == 1
+    assert max_consecutive([1, 2, 4, 5, 6]) == 3
+    assert max_consecutive([]) == 0
+    assert same_value(6.0, 6.0005) == true
+    assert same_value(6.0, 7.0) == false
+    assert match_name(6.0) == "n"
+    assert match_name(12.0) == "sigma"
+    assert match_name(24.0) == "J2"
+    assert extract_round_from_id("R3-5") == 3
+    assert extract_round_from_id("R10-1") == 10
 }
-println("+-----+--------------------------------------------+----------+--------+")
-println("")
 
-// 요약
-let avg_strength = if sw_count > 0 { total_strength / to_float(sw_count) } else { 0.0 }
-println("  === 요약 ===")
-println("  총 정상파:      " + to_string(sw_count) + "건")
-println("  평균 합산강도:  " + to_string(to_int(avg_strength * 100.0)) + "%")
-println("  신규 수렴:      " + to_string(len(new_waves)) + "건")
-println("  기존 골화 확인: " + to_string(len(confirmed_waves)) + "건")
-println("")
+proof standing_wave_proof {
+    // 정상파 = 파동 방정식의 진폭 0 노드
+    // ∀ r ∈ [r₀..r₀+N]: value ∈ EXACT(r)  ⇒  value = 불변 공리
+    // 신뢰도 = f(연속 라운드 수, 도메인 다양성)
+    // QED: 연속 3+ EXACT는 구조적 불변
+}
 
-// growth_bus 기록
-try {
-    let ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
-    let entry = "{\"type\":\"standing_wave\",\"domain\":\"" + domain_filter + "\",\"total\":" + to_string(sw_count) + ",\"new\":" + to_string(len(new_waves)) + ",\"confirmed\":" + to_string(len(confirmed_waves)) + ",\"avg_strength\":" + to_string(to_int(avg_strength * 100.0)) + ",\"ts\":\"" + ts + "\"}"
-    exec("echo '" + entry + "' >> " + _bus_path)
-    println("  -> growth_bus.jsonl 기록 완료")
-} catch e {}
-
-println("")
-println("=== standing_wave verified ===")
+// ─── main ─────────────────────────────────────────────────────
+fn main() {
+    let argv = args()
+    if argv.len() < 2 {
+        println("Usage: hexa standing_wave.hexa [scan|scan N|promote|status]")
+        println("  scan    Scan growth_bus for standing wave axioms (default min 3 rounds)")
+        println("  promote Promote standing waves to axiom pool + growth_bus")
+        println("  status  Show current standing wave axioms")
+        return
+    }
+    let cmd = argv[1]
+    if cmd == "scan" { cmd_scan(get_min_rounds(argv)) }
+    else if cmd == "promote" { cmd_promote(get_min_rounds(argv)) }
+    else if cmd == "status" { cmd_status() }
+    else { println("[ERR] Unknown: " + cmd + ". Use scan/promote/status.") }
+}

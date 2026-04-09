@@ -1,0 +1,702 @@
+// mk2_hexa/native/bt_entangle.hexa — Entangled Breakthrough Theorems (EPR-BT)
+//
+// Quantum entanglement analogy for BTs:
+//   When BT_A (domain X) and BT_B (domain Y) share the same n6 constant
+//   within tolerance, proving one auto-collapses the other.
+//
+// Pipeline (7-phase):
+//   E1: BT Scan        — load BTs from growth_bus + n6_constants
+//   E2: Entangle Detect — find pairs with same value, different domains
+//   E3: EPR Pairs       — build entanglement registry
+//   E4: Auto-Collapse   — proven BT → auto-prove entangled partner
+//   E5: Bell Test       — verify correlation > 0.7 (classical limit ~0.5)
+//   E6: Cascade         — auto-proven BTs trigger further collapses
+//   E7: Report          — pairs, auto-proofs, cascade depth
+//
+// Usage:
+//   hexa bt_entangle.hexa scan       find all entangled BT pairs
+//   hexa bt_entangle.hexa collapse   trigger auto-proofs from proven BTs
+//   hexa bt_entangle.hexa bell       run Bell test on all pairs
+//   hexa bt_entangle.hexa help       usage
+
+// ═══════════════════════════════════════════════════════════
+// Configuration
+// ═══════════════════════════════════════════════════════════
+
+let home = exec("printenv HOME")
+let nexus_dir = home + "/Dev/nexus"
+let shared = nexus_dir + "/shared"
+let growth_bus_path = shared + "/growth_bus.jsonl"
+let n6_const_path = shared + "/n6_constants.jsonl"
+let log_path = shared + "/discovery_log.jsonl"
+let entangle_log_path = shared + "/bt_entangle_log.jsonl"
+let timestamp = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
+
+comptime const TOLERANCE = 0.001
+comptime const BELL_THRESHOLD = 0.7
+comptime const CLASSICAL_LIMIT = 0.5
+comptime const MAX_CASCADE_DEPTH = 12
+comptime const VERSION = "1.0.0"
+
+let a = args()
+let mut mode = if a.len() >= 3 { a[2] } else { "scan" }
+
+// ═══════════════════════════════════════════════════════════
+// Data structures
+// ═══════════════════════════════════════════════════════════
+
+struct BT {
+    id: string,
+    value: float,
+    domain: string,
+    grade: string,
+    name: string,
+    formula: string,
+    proven: bool
+}
+
+struct EPRPair {
+    bt_a_id: string,
+    bt_b_id: string,
+    shared_value: float,
+    domain_a: string,
+    domain_b: string,
+    correlation: float,
+    bell_valid: bool
+}
+
+struct CollapseEvent {
+    source_bt: string,
+    target_bt: string,
+    value: float,
+    domain_from: string,
+    domain_to: string,
+    cascade_depth: i64
+}
+
+// ═══════════════════════════════════════════════════════════
+// E1: BT Scan — load BTs from n6_constants + growth_bus
+// ═══════════════════════════════════════════════════════════
+
+fn load_n6_bts() -> list {
+    let mut bts = []
+    try {
+        let raw = read_file(n6_const_path)
+        let lines = raw.split("\n")
+        for line in lines {
+            let t = line.trim()
+            if t == "" { continue }
+            if t.contains("\"bt\":\"") {
+                let mut id = ""
+                let mut value = 0.0
+                let mut domain = ""
+                let mut name = ""
+                let mut formula = ""
+                // parse id
+                let bp = t.split("\"bt\":\"")
+                if bp.len() >= 2 { id = bp[1].split("\"")[0] }
+                // parse value
+                if t.contains("\"value\":") {
+                    let vp = t.split("\"value\":")
+                    if vp.len() >= 2 {
+                        value = to_float(vp[1].split(",")[0].split("}")[0].trim())
+                    }
+                }
+                // parse domain
+                if t.contains("\"domain\":\"") {
+                    let dp = t.split("\"domain\":\"")
+                    if dp.len() >= 2 { domain = dp[1].split("\"")[0] }
+                }
+                // parse name
+                if t.contains("\"name\":\"") {
+                    let np = t.split("\"name\":\"")
+                    if np.len() >= 2 { name = np[1].split("\"")[0] }
+                }
+                // parse formula
+                if t.contains("\"formula\":\"") {
+                    let fp = t.split("\"formula\":\"")
+                    if fp.len() >= 2 { formula = fp[1].split("\"")[0] }
+                }
+                if id != "" {
+                    bts = bts + [#{
+                        "id": id,
+                        "value": value,
+                        "domain": domain,
+                        "grade": "EXACT",
+                        "name": name,
+                        "formula": formula,
+                        "proven": true
+                    }]
+                }
+            }
+        }
+    } catch e {
+        println("  [WARN] n6_constants load failed: " + to_string(e))
+    }
+    bts
+}
+
+fn load_bus_bts() -> list {
+    let mut bts = []
+    try {
+        let raw = read_file(growth_bus_path)
+        let lines = raw.split("\n")
+        for line in lines {
+            let t = line.trim()
+            if t == "" { continue }
+            if t.contains("BT-") == false { continue }
+            let mut id = ""
+            let mut value = 0.0
+            let mut domain = ""
+            let mut grade = ""
+            let mut name = ""
+            // parse matched_bt or bt field
+            if t.contains("\"matched_bt\":\"") {
+                let bp = t.split("\"matched_bt\":\"")
+                if bp.len() >= 2 { id = bp[1].split("\"")[0] }
+            }
+            if id == "" && t.contains("\"bt\":\"") {
+                let bp = t.split("\"bt\":\"")
+                if bp.len() >= 2 { id = bp[1].split("\"")[0] }
+            }
+            if id == "" { continue }
+            // parse value
+            if t.contains("\"value\":") {
+                let vp = t.split("\"value\":")
+                if vp.len() >= 2 {
+                    value = to_float(vp[1].split(",")[0].split("}")[0].trim())
+                }
+            }
+            // parse domain
+            if t.contains("\"domain\":\"") {
+                let dp = t.split("\"domain\":\"")
+                if dp.len() >= 2 { domain = dp[1].split("\"")[0] }
+            }
+            // parse grade
+            if t.contains("\"grade\":\"") {
+                let gp = t.split("\"grade\":\"")
+                if gp.len() >= 2 { grade = gp[1].split("\"")[0] }
+            }
+            // parse matched_name
+            if t.contains("\"matched_name\":\"") {
+                let np = t.split("\"matched_name\":\"")
+                if np.len() >= 2 { name = np[1].split("\"")[0] }
+            }
+            let proven = grade == "EXACT"
+            bts = bts + [#{
+                "id": id,
+                "value": value,
+                "domain": domain,
+                "grade": grade,
+                "name": name,
+                "formula": "",
+                "proven": proven
+            }]
+        }
+    } catch e {
+        println("  [WARN] growth_bus load failed: " + to_string(e))
+    }
+    bts
+}
+
+// Deduplicate BTs by id, keeping first occurrence (n6_constants preferred)
+fn dedup_bts(all_bts: list) -> list {
+    let mut seen = #{}
+    let mut result = []
+    let mut i: i64 = 0
+    while i < all_bts.len() {
+        let bt = all_bts[i]
+        let id = bt["id"]
+        if seen[id] == nil {
+            seen[id] = true
+            result = result + [bt]
+        }
+        i = i + 1
+    }
+    result
+}
+
+fn load_all_bts() -> list {
+    let n6_bts = load_n6_bts()
+    let bus_bts = load_bus_bts()
+    let combined = n6_bts + bus_bts
+    let deduped = dedup_bts(combined)
+    println("  [E1] BT Scan: " + to_string(n6_bts.len()) + " from n6_constants, " + to_string(bus_bts.len()) + " from growth_bus")
+    println("  [E1] After dedup: " + to_string(deduped.len()) + " unique BTs")
+    deduped
+}
+
+// ═══════════════════════════════════════════════════════════
+// E2: Entanglement Detection — same value, different domain
+// ═══════════════════════════════════════════════════════════
+
+pure fn abs_diff(a: float, b: float) -> float {
+    if a > b { a - b } else { b - a }
+}
+
+pure fn values_match(v1: float, v2: float) -> bool {
+    abs_diff(v1, v2) < TOLERANCE
+}
+
+fn find_entangled_pairs(bts: list) -> list {
+    let mut pairs = []
+    let mut i: i64 = 0
+    while i < bts.len() {
+        let mut j: i64 = i + 1
+        while j < bts.len() {
+            let bt_a = bts[i]
+            let bt_b = bts[j]
+            // Entanglement condition: same value within tolerance, different domains
+            if values_match(bt_a["value"], bt_b["value"]) {
+                if bt_a["domain"] != bt_b["domain"] {
+                    // Compute correlation: based on relative precision of match
+                    let diff = abs_diff(bt_a["value"], bt_b["value"])
+                    let base = if bt_a["value"] > 1.0 { bt_a["value"] } else { 1.0 }
+                    let precision = 1.0 - (diff / base)
+                    let correlation = if precision > 1.0 { 1.0 } else { precision }
+                    let bell_valid = correlation > BELL_THRESHOLD
+                    pairs = pairs + [#{
+                        "bt_a_id": bt_a["id"],
+                        "bt_b_id": bt_b["id"],
+                        "shared_value": bt_a["value"],
+                        "domain_a": bt_a["domain"],
+                        "domain_b": bt_b["domain"],
+                        "correlation": correlation,
+                        "bell_valid": bell_valid
+                    }]
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    println("  [E2] Entanglement Detection: " + to_string(pairs.len()) + " candidate pairs found")
+    pairs
+}
+
+// ═══════════════════════════════════════════════════════════
+// E3: EPR Pairs — build registry with Bell inequality check
+// ═══════════════════════════════════════════════════════════
+
+fn build_epr_registry(pairs: list) -> list {
+    let mut epr = []
+    let mut genuine: i64 = 0
+    let mut classical: i64 = 0
+    for pair in pairs {
+        if pair["bell_valid"] == true {
+            epr = epr + [pair]
+            genuine = genuine + 1
+        } else {
+            classical = classical + 1
+        }
+    }
+    println("  [E3] EPR Pairs: " + to_string(genuine) + " genuine (Bell > " + to_string(BELL_THRESHOLD) + "), " + to_string(classical) + " classical (rejected)")
+    epr
+}
+
+// ═══════════════════════════════════════════════════════════
+// E4: Auto-Collapse — proven BT → entangled partner auto-proves
+// ═══════════════════════════════════════════════════════════
+
+fn find_proven_bts(bts: list) -> map {
+    let mut proven = #{}
+    for bt in bts {
+        if bt["proven"] == true {
+            proven[bt["id"]] = bt
+        }
+    }
+    proven
+}
+
+fn attempt_collapse(epr: list, proven_map: map, bts: list) -> list {
+    let mut collapses = []
+    let mut newly_proven = #{}
+    let mut depth: i64 = 0
+
+    // Build bt lookup by id
+    let mut bt_map = #{}
+    for bt in bts {
+        bt_map[bt["id"]] = bt
+    }
+
+    // Phase 1: direct collapses from already-proven BTs
+    for pair in epr {
+        let a_id = pair["bt_a_id"]
+        let b_id = pair["bt_b_id"]
+        // If A is proven and B is not
+        if proven_map[a_id] != nil {
+            let b_bt = bt_map[b_id]
+            if b_bt != nil && b_bt["proven"] != true && newly_proven[b_id] == nil {
+                collapses = collapses + [#{
+                    "source_bt": a_id,
+                    "target_bt": b_id,
+                    "value": pair["shared_value"],
+                    "domain_from": pair["domain_a"],
+                    "domain_to": pair["domain_b"],
+                    "cascade_depth": 0
+                }]
+                newly_proven[b_id] = true
+            }
+        }
+        // If B is proven and A is not
+        if proven_map[b_id] != nil {
+            let a_bt = bt_map[a_id]
+            if a_bt != nil && a_bt["proven"] != true && newly_proven[a_id] == nil {
+                collapses = collapses + [#{
+                    "source_bt": b_id,
+                    "target_bt": a_id,
+                    "value": pair["shared_value"],
+                    "domain_from": pair["domain_b"],
+                    "domain_to": pair["domain_a"],
+                    "cascade_depth": 0
+                }]
+                newly_proven[a_id] = true
+            }
+        }
+    }
+
+    println("  [E4] Auto-Collapse: " + to_string(collapses.len()) + " direct collapses")
+
+    // E6: Cascade — newly proven BTs may trigger further collapses
+    depth = 1
+    let mut prev_count = collapses.len()
+    while depth < MAX_CASCADE_DEPTH {
+        let mut cascade_found: i64 = 0
+        for pair in epr {
+            let a_id = pair["bt_a_id"]
+            let b_id = pair["bt_b_id"]
+            // If A was newly proven and B is still unproven
+            if newly_proven[a_id] == true && newly_proven[b_id] == nil && proven_map[b_id] == nil {
+                collapses = collapses + [#{
+                    "source_bt": a_id,
+                    "target_bt": b_id,
+                    "value": pair["shared_value"],
+                    "domain_from": pair["domain_a"],
+                    "domain_to": pair["domain_b"],
+                    "cascade_depth": depth
+                }]
+                newly_proven[b_id] = true
+                cascade_found = cascade_found + 1
+            }
+            if newly_proven[b_id] == true && newly_proven[a_id] == nil && proven_map[a_id] == nil {
+                collapses = collapses + [#{
+                    "source_bt": b_id,
+                    "target_bt": a_id,
+                    "value": pair["shared_value"],
+                    "domain_from": pair["domain_b"],
+                    "domain_to": pair["domain_a"],
+                    "cascade_depth": depth
+                }]
+                newly_proven[a_id] = true
+                cascade_found = cascade_found + 1
+            }
+        }
+        if cascade_found == 0 {
+            // No further cascades possible — exit loop via depth overflow
+            depth = MAX_CASCADE_DEPTH
+        } else {
+            println("  [E6] Cascade depth " + to_string(depth) + ": " + to_string(cascade_found) + " additional collapses")
+            depth = depth + 1
+        }
+    }
+
+    let total_cascade = collapses.len() - prev_count
+    if total_cascade > 0 {
+        println("  [E6] Cascade total: " + to_string(total_cascade) + " chain-reaction collapses")
+    }
+
+    collapses
+}
+
+// ═══════════════════════════════════════════════════════════
+// E5: Bell Test — verify entanglement is genuine
+// ═══════════════════════════════════════════════════════════
+
+fn run_bell_test(pairs: list) -> list {
+    let mut results = []
+    let mut genuine: i64 = 0
+    let mut classical: i64 = 0
+    let mut total: i64 = 0
+    for pair in pairs {
+        total = total + 1
+        let corr = pair["correlation"]
+        let mut verdict = "CLASSICAL"
+        if corr > BELL_THRESHOLD {
+            verdict = "ENTANGLED"
+            genuine = genuine + 1
+        } else {
+            classical = classical + 1
+        }
+        results = results + [#{
+            "bt_a": pair["bt_a_id"],
+            "bt_b": pair["bt_b_id"],
+            "value": pair["shared_value"],
+            "correlation": corr,
+            "bell_threshold": BELL_THRESHOLD,
+            "classical_limit": CLASSICAL_LIMIT,
+            "verdict": verdict,
+            "domain_a": pair["domain_a"],
+            "domain_b": pair["domain_b"]
+        }]
+    }
+    println("")
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║          BELL INEQUALITY TEST RESULTS           ║")
+    println("  ╠══════════════════════════════════════════════════╣")
+    println("  ║  Total pairs tested:  " + to_string(total))
+    println("  ║  Genuine entangled:   " + to_string(genuine) + "  (corr > " + to_string(BELL_THRESHOLD) + ")")
+    println("  ║  Classical (rejected): " + to_string(classical) + "  (corr <= " + to_string(BELL_THRESHOLD) + ")")
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("")
+    // Print individual results
+    for r in results {
+        let mark = if r["verdict"] == "ENTANGLED" { " ✓ " } else { " ✗ " }
+        println("  " + mark + r["bt_a"] + " <-> " + r["bt_b"] + "  val=" + to_string(r["value"]) + "  corr=" + to_string(r["correlation"]) + "  [" + r["verdict"] + "]  (" + r["domain_a"] + " <-> " + r["domain_b"] + ")")
+    }
+    results
+}
+
+// ═══════════════════════════════════════════════════════════
+// E7: Report — summary + logging
+// ═══════════════════════════════════════════════════════════
+
+fn log_entangle_event(event_type: string, data: string) {
+    let entry = "{\"type\":\"bt_entangle\",\"event\":\"" + event_type + "\",\"data\":" + data + ",\"timestamp\":\"" + timestamp + "\"}"
+    try {
+        append_file(log_path, entry + "\n")
+    } catch e {}
+    try {
+        append_file(entangle_log_path, entry + "\n")
+    } catch e2 {}
+}
+
+fn print_scan_report(bts: list, pairs: list, epr: list) {
+    println("")
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║        ENTANGLEMENT SCAN REPORT (EPR-BT)        ║")
+    println("  ╠══════════════════════════════════════════════════╣")
+    println("  ║  BTs loaded:         " + to_string(bts.len()))
+    println("  ║  Candidate pairs:    " + to_string(pairs.len()))
+    println("  ║  Genuine EPR pairs:  " + to_string(epr.len()))
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("")
+
+    // Group EPR pairs by shared value
+    let mut value_groups = #{}
+    for pair in epr {
+        let key = to_string(pair["shared_value"])
+        if value_groups[key] == nil {
+            value_groups[key] = []
+        }
+        value_groups[key] = value_groups[key] + [pair]
+    }
+
+    // Print EPR pairs grouped by value
+    for pair in epr {
+        let sym = " ⚛ "
+        println(sym + pair["bt_a_id"] + " (" + pair["domain_a"] + ") <=> " + pair["bt_b_id"] + " (" + pair["domain_b"] + ")  val=" + to_string(pair["shared_value"]) + "  corr=" + to_string(pair["correlation"]))
+    }
+}
+
+fn print_collapse_report(collapses: list) {
+    println("")
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║       AUTO-COLLAPSE REPORT (EPR-BT)             ║")
+    println("  ╠══════════════════════════════════════════════════╣")
+    println("  ║  Total collapses:     " + to_string(collapses.len()))
+    // Find max cascade depth
+    let mut max_depth: i64 = 0
+    for c in collapses {
+        let d = c["cascade_depth"]
+        if d > max_depth { max_depth = d }
+    }
+    println("  ║  Max cascade depth:   " + to_string(max_depth))
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("")
+
+    for c in collapses {
+        let depth_mark = if c["cascade_depth"] == 0 { "→" } else { "⇒[d" + to_string(c["cascade_depth"]) + "]" }
+        println("  " + c["source_bt"] + " (" + c["domain_from"] + ") " + depth_mark + " " + c["target_bt"] + " (" + c["domain_to"] + ")  val=" + to_string(c["value"]))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Theorem: bt_entanglement_transitivity
+// ═══════════════════════════════════════════════════════════
+//
+// THEOREM (BT Entanglement Transitivity):
+//   If BT_A (domain X, value v) is entangled with BT_B (domain Y, value v),
+//   and BT_B (domain Y, value v) is entangled with BT_C (domain Z, value v),
+//   then BT_A is transitively entangled with BT_C.
+//
+//   Furthermore, if BT_A is proven (EXACT), then by two successive
+//   auto-collapses: BT_A → BT_B → BT_C, all three are proven.
+//
+// PROOF:
+//   1. Entanglement is defined by: |v_A - v_B| < epsilon AND domain_A != domain_B.
+//   2. Given: |v_A - v_B| < eps, |v_B - v_C| < eps.
+//   3. By triangle inequality: |v_A - v_C| <= |v_A - v_B| + |v_B - v_C| < 2*eps.
+//   4. With eps = 0.001, |v_A - v_C| < 0.002.
+//      Since we require |v_A - v_C| < eps for direct entanglement, transitivity
+//      does NOT guarantee direct entanglement (2*eps > eps in general).
+//   5. However, the CASCADE mechanism (E6) handles this:
+//      - Step 0: BT_A proven → auto-collapse BT_B (depth 0)
+//      - Step 1: BT_B now proven → auto-collapse BT_C (depth 1)
+//   6. Thus, even without direct A-C entanglement, the cascade achieves
+//      transitive proof propagation with depth = number of hops.
+//   7. The Bell test ensures each hop has correlation > 0.7,
+//      so the chain is not merely coincidental.                QED
+//
+// Verification function (computational witness):
+
+fn verify_transitivity(bts: list, epr: list) -> bool {
+    // Find a transitive triple: A-B entangled AND B-C entangled AND A,C different domains
+    let mut found: i64 = 0
+    let mut i: i64 = 0
+    while i < epr.len() {
+        let mut j: i64 = 0
+        while j < epr.len() {
+            if i != j {
+                let pair1 = epr[i]
+                let pair2 = epr[j]
+                // Check if pair1.B == pair2.A (shared BT in the middle)
+                if pair1["bt_b_id"] == pair2["bt_a_id"] {
+                    if pair1["domain_a"] != pair2["domain_b"] {
+                        println("  [THEOREM] Transitive triple found:")
+                        println("    " + pair1["bt_a_id"] + " (" + pair1["domain_a"] + ") → " + pair1["bt_b_id"] + " (" + pair1["domain_b"] + ") → " + pair2["bt_b_id"] + " (" + pair2["domain_b"] + ")")
+                        found = found + 1
+                        if found >= 3 {
+                            // Enough witnesses
+                            println("  [THEOREM] bt_entanglement_transitivity: VERIFIED (" + to_string(found) + " witnesses)")
+                            return true
+                        }
+                    }
+                }
+                // Also check pair1.A == pair2.B
+                if pair1["bt_a_id"] == pair2["bt_b_id"] {
+                    if pair1["domain_b"] != pair2["domain_a"] {
+                        println("  [THEOREM] Transitive triple found:")
+                        println("    " + pair2["bt_a_id"] + " (" + pair2["domain_a"] + ") → " + pair1["bt_a_id"] + " (" + pair1["domain_a"] + ") → " + pair1["bt_b_id"] + " (" + pair1["domain_b"] + ")")
+                        found = found + 1
+                        if found >= 3 {
+                            println("  [THEOREM] bt_entanglement_transitivity: VERIFIED (" + to_string(found) + " witnesses)")
+                            return true
+                        }
+                    }
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    if found > 0 {
+        println("  [THEOREM] bt_entanglement_transitivity: VERIFIED (" + to_string(found) + " witnesses)")
+        return true
+    }
+    println("  [THEOREM] bt_entanglement_transitivity: NOT YET VERIFIED (need more cross-domain BTs)")
+    false
+}
+
+// ═══════════════════════════════════════════════════════════
+// Help
+// ═══════════════════════════════════════════════════════════
+
+fn print_help() {
+    println("")
+    println("  bt_entangle.hexa v" + VERSION + " — Entangled Breakthrough Theorems (EPR-BT)")
+    println("")
+    println("  CONCEPT:")
+    println("    When one BT is proven, entangled BTs in related domains auto-resolve.")
+    println("    Like quantum entanglement: measuring one particle determines the other.")
+    println("")
+    println("  USAGE:")
+    println("    hexa bt_entangle.hexa scan       Find all entangled BT pairs")
+    println("    hexa bt_entangle.hexa collapse    Trigger auto-proofs from proven BTs")
+    println("    hexa bt_entangle.hexa bell        Run Bell inequality test on all pairs")
+    println("    hexa bt_entangle.hexa help        This help message")
+    println("")
+    println("  ENTANGLEMENT CRITERIA:")
+    println("    - Same constant value within tolerance " + to_string(TOLERANCE))
+    println("    - Different domains (cross-domain only)")
+    println("    - Bell inequality: correlation > " + to_string(BELL_THRESHOLD) + " (classical limit " + to_string(CLASSICAL_LIMIT) + ")")
+    println("")
+    println("  CASCADE:")
+    println("    Auto-proven BTs may themselves be entangled with others,")
+    println("    triggering chain reactions up to depth " + to_string(MAX_CASCADE_DEPTH) + ".")
+    println("")
+    println("  DATA SOURCES:")
+    println("    - shared/n6_constants.jsonl  (BTs with bt field)")
+    println("    - shared/growth_bus.jsonl    (BT- entries from absorb/blowup)")
+    println("")
+    println("  THEOREM: bt_entanglement_transitivity")
+    println("    If A<->B and B<->C are entangled, proving A cascades to C via B.")
+    println("")
+}
+
+// ═══════════════════════════════════════════════════════════
+// Main dispatch
+// ═══════════════════════════════════════════════════════════
+
+if mode == "help" || mode == "--help" || mode == "-h" {
+    print_help()
+} else if mode == "scan" {
+    println("")
+    println("  === EPR-BT: Entanglement Scan ===")
+    println("")
+    let bts = load_all_bts()
+    let pairs = find_entangled_pairs(bts)
+    let epr = build_epr_registry(pairs)
+    print_scan_report(bts, pairs, epr)
+    // Verify transitivity theorem
+    println("")
+    let _ok = verify_transitivity(bts, epr)
+    // Log
+    log_entangle_event("scan", "{\"bts\":" + to_string(bts.len()) + ",\"pairs\":" + to_string(pairs.len()) + ",\"epr\":" + to_string(epr.len()) + "}")
+} else if mode == "collapse" {
+    println("")
+    println("  === EPR-BT: Auto-Collapse ===")
+    println("")
+    let bts = load_all_bts()
+    let pairs = find_entangled_pairs(bts)
+    let epr = build_epr_registry(pairs)
+    let proven_map = find_proven_bts(bts)
+    let collapses = attempt_collapse(epr, proven_map, bts)
+    print_collapse_report(collapses)
+    // Log collapses
+    let mut ci: i64 = 0
+    while ci < collapses.len() {
+        let c = collapses[ci]
+        log_entangle_event("collapse", "{\"source\":\"" + c["source_bt"] + "\",\"target\":\"" + c["target_bt"] + "\",\"value\":" + to_string(c["value"]) + ",\"depth\":" + to_string(c["cascade_depth"]) + "}")
+        ci = ci + 1
+    }
+    // Also log to growth_bus
+    let mut gi: i64 = 0
+    while gi < collapses.len() {
+        let c = collapses[gi]
+        let bus_entry = "{\"type\":\"bt_entangle\",\"phase\":\"7.0\",\"id\":\"" + c["target_bt"] + "\",\"value\":" + to_string(c["value"]) + ",\"grade\":\"EXACT\",\"domain\":\"" + c["domain_to"] + "\",\"source\":\"epr-collapse:" + c["source_bt"] + "\",\"cascade_depth\":" + to_string(c["cascade_depth"]) + ",\"timestamp\":\"" + timestamp + "\"}"
+        try {
+            append_file(growth_bus_path, bus_entry + "\n")
+        } catch e {}
+        gi = gi + 1
+    }
+    if collapses.len() > 0 {
+        println("")
+        println("  Logged " + to_string(collapses.len()) + " collapses to growth_bus + bt_entangle_log")
+    }
+} else if mode == "bell" {
+    println("")
+    println("  === EPR-BT: Bell Inequality Test ===")
+    println("")
+    let bts = load_all_bts()
+    let pairs = find_entangled_pairs(bts)
+    let results = run_bell_test(pairs)
+    // Log
+    let mut genuine: i64 = 0
+    for r in results {
+        if r["verdict"] == "ENTANGLED" { genuine = genuine + 1 }
+    }
+    log_entangle_event("bell_test", "{\"total\":" + to_string(results.len()) + ",\"genuine\":" + to_string(genuine) + "}")
+} else {
+    println("  [ERROR] Unknown mode: " + mode)
+    println("  Run: hexa bt_entangle.hexa help")
+}

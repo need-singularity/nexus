@@ -41,6 +41,21 @@ fn pipe_count(pipe: string) -> i64 {
     return pipe.split("|").len()
 }
 
+// n=6 기본 상수 근접도 점수 (0.0~1.0)
+fn seed_quality(v: f64) -> f64 {
+    let consts = [6.0, 12.0, 2.0, 4.0, 5.0, 24.0, 7.0, 28.0, 120.0, 720.0]
+    let mut best = 1.0
+    let mut i = 0
+    while i < 10 {
+        let c = consts[i]
+        let d = if c > 1.0 { abs_f(v - c) / c } else { abs_f(v - c) }
+        if d < best { best = d }
+        i = i + 1
+    }
+    if best > 1.0 { return 0.0 }
+    return 1.0 - best
+}
+
 let _se_home = exec("printenv HOME")
 let _se_shared = _se_home + "/Dev/nexus/shared"
 
@@ -129,7 +144,8 @@ fn load_atlas() -> string {
 // ─── MERGE ───
 
 fn merge_all() -> string {
-    // base n=6 상수
+    // list .contains() 기반 dedup (pipe 문자열 분할 오버헤드 제거)
+    let mut seen = ["6", "12", "2", "4", "5", "24", "7"]
     let mut result = "6|12|2|4|5|24|7"
 
     // discovery
@@ -137,8 +153,9 @@ fn merge_all() -> string {
     if disc.len() > 0 {
         let dparts = disc.split("|")
         let mut di = 0
-        while di < dparts.len() && pipe_count(result) < 50 {
-            if !pipe_contains(result, dparts[di]) {
+        while di < dparts.len() && seen.len() < 50 {
+            if !seen.contains(dparts[di]) {
+                seen = seen + [dparts[di]]
                 result = result + "|" + dparts[di]
             }
             di = di + 1
@@ -150,8 +167,9 @@ fn merge_all() -> string {
     if atlas.len() > 0 {
         let aparts = atlas.split("|")
         let mut ai = 0
-        while ai < aparts.len() && pipe_count(result) < 50 {
-            if !pipe_contains(result, aparts[ai]) {
+        while ai < aparts.len() && seen.len() < 50 {
+            if !seen.contains(aparts[ai]) {
+                seen = seen + [aparts[ai]]
                 result = result + "|" + aparts[ai]
             }
             ai = ai + 1
@@ -163,15 +181,15 @@ fn merge_all() -> string {
     if file_exists(psi_path) {
         try {
             let psi_content = read_file(psi_path)
-            // "value": N.NNN 패턴 추출
             let vparts = psi_content.split("\"value\":")
             let mut pi = 1
-            while pi < vparts.len() && pipe_count(result) < 60 {
+            while pi < vparts.len() && seen.len() < 60 {
                 let vstr = vparts[pi].split(",")[0].split("}")[0]
                 let v = safe_float(vstr)
                 if v > 0.001 && v < 100000.0 {
                     let sv = to_string(v)
-                    if !pipe_contains(result, sv) {
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
                         result = result + "|" + sv
                     }
                 }
@@ -187,12 +205,13 @@ fn merge_all() -> string {
             let sedi_content = read_file(sedi_path)
             let sparts = sedi_content.split("\"score\":")
             let mut si = 1
-            while si < sparts.len() && pipe_count(result) < 70 {
+            while si < sparts.len() && seen.len() < 70 {
                 let vstr = sparts[si].split(",")[0].split("}")[0]
                 let v = safe_float(vstr)
                 if v > 0.01 && v < 10000.0 {
                     let sv = to_string(v)
-                    if !pipe_contains(result, sv) {
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
                         result = result + "|" + sv
                     }
                 }
@@ -201,19 +220,20 @@ fn merge_all() -> string {
         } catch e {}
     }
 
-    // cross-project: anima seeds (from cross_project.hexa feedback)
+    // cross-project: anima seeds
     let anima_path = _se_shared + "/anima_seeds.json"
     if file_exists(anima_path) {
         try {
             let anima_content = read_file(anima_path)
             let aparts = anima_content.split("\"value\":")
             let mut ai = 1
-            while ai < aparts.len() && pipe_count(result) < 80 {
+            while ai < aparts.len() && seen.len() < 80 {
                 let vstr = aparts[ai].split(",")[0].split("}")[0]
                 let v = safe_float(vstr)
                 if v > 0.001 && v < 100000.0 {
                     let sv = to_string(v)
-                    if !pipe_contains(result, sv) {
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
                         result = result + "|" + sv
                     }
                 }
@@ -222,14 +242,14 @@ fn merge_all() -> string {
         } catch e {}
     }
 
-    // domain_seeds.jsonl: 16 미탐색 도메인 상수 (지질/기상/경제/언어/음악/해양/세포/효소/단백질/양자중력/암흑물질/플라즈마/초전도/위상물질/복잡계)
+    // domain_seeds.jsonl
     let dom_path = _se_shared + "/domain_seeds.jsonl"
     if file_exists(dom_path) {
         try {
             let dom_content = read_file(dom_path)
             let dlines = dom_content.split("\n")
             let mut dli = 0
-            while dli < dlines.len() && pipe_count(result) < 100 {
+            while dli < dlines.len() && seen.len() < 100 {
                 let dline = dlines[dli]
                 if dline.contains("\"value\":") {
                     let vparts = dline.split("\"value\":")
@@ -238,7 +258,8 @@ fn merge_all() -> string {
                         let v = safe_float(vstr)
                         if v > 0.001 && v < 100000.0 {
                             let sv = to_string(v)
-                            if !pipe_contains(result, sv) {
+                            if !seen.contains(sv) {
+                                seen = seen + [sv]
                                 result = result + "|" + sv
                             }
                         }
@@ -249,7 +270,53 @@ fn merge_all() -> string {
         } catch e {}
     }
 
-    return result
+    // 품질 순위화: n6 정렬도 기준 상위 seed 우선 배치
+    let all_parts = result.split("|")
+    let mut scored = ""
+    let mut si = 0
+    while si < all_parts.len() {
+        let sv = safe_float(all_parts[si])
+        let q = seed_quality(sv)
+        if scored.len() > 0 { scored = scored + "|" }
+        scored = scored + all_parts[si] + ":" + to_string(q)
+        si = si + 1
+    }
+    // 삽입 정렬 (점수 내림차순, seed 수 100 이하이므로 충분)
+    let sc_parts = scored.split("|")
+    let sc_n = sc_parts.len()
+    let mut sorted_seeds = ""
+    let mut used = ""
+    let mut placed = 0
+    while placed < sc_n {
+        let mut best_idx = 0 - 1
+        let mut best_score = 0.0 - 1.0
+        let mut fi = 0
+        while fi < sc_n {
+            if !pipe_contains(used, to_string(fi)) {
+                let entry = sc_parts[fi]
+                let ep = entry.split(":")
+                if ep.len() >= 2 {
+                    let sc = safe_float(ep[ep.len() - 1])
+                    if sc > best_score {
+                        best_score = sc
+                        best_idx = fi
+                    }
+                }
+            }
+            fi = fi + 1
+        }
+        if best_idx >= 0 {
+            let entry = sc_parts[best_idx]
+            let ep = entry.split(":")
+            let seed_val = ep[0]
+            if sorted_seeds.len() > 0 { sorted_seeds = sorted_seeds + "|" }
+            sorted_seeds = sorted_seeds + seed_val
+            if used.len() > 0 { used = used + "|" }
+            used = used + to_string(best_idx)
+        }
+        placed = placed + 1
+    }
+    return sorted_seeds
 }
 
 // ─── WAVE: 도메인 A의 EXACT → 인접 B → 귀환 간섭 seed ───
@@ -530,6 +597,20 @@ if mode == "info" {
     println("  math_atlas    : " + to_string(pipe_count(atlas)) + " hypothesis values")
     println("  anima seeds   : " + to_string(anima_n) + " cross-pollinated")
     println("  merged total  : " + to_string(pipe_count(merged)) + " unique seeds")
+    // 품질 분포
+    let mparts = merged.split("|")
+    let mut q_high = 0
+    let mut q_mid = 0
+    let mut q_low = 0
+    let mut qi = 0
+    while qi < mparts.len() {
+        let q = seed_quality(safe_float(mparts[qi]))
+        if q >= 0.8 { q_high = q_high + 1 }
+        else if q >= 0.3 { q_mid = q_mid + 1 }
+        else { q_low = q_low + 1 }
+        qi = qi + 1
+    }
+    println("  quality dist  : HIGH=" + to_string(q_high) + " MID=" + to_string(q_mid) + " LOW=" + to_string(q_low))
     println("========================================")
     println("")
     println("  modes:")

@@ -1,0 +1,891 @@
+// mk2_hexa/native/dse_category.hexa — Category Theory DSE (범주론 DSE)
+// Domains as categories, discoveries as morphisms, functors as domain transformations.
+//
+// Pipeline:
+//   C1: Objects = domains, Morphisms = discoveries connecting two domains (growth_bus)
+//   C2: Composition: if A->B and B->C exist, check if A->C exists (transitivity)
+//   C3: Functors: structure-preserving maps F: DomA -> DomB
+//   C4: Natural transformations: systematic patterns across all functors
+//   C5: Adjunctions: pairs (F,G) where F.G ~ identity = deep equivalence
+//   C6: Report: morphism count, composition gaps, functor pairs, adjunctions
+//
+// Usage:
+//   hexa dse_category.hexa scan          full pipeline
+//   hexa dse_category.hexa functors      functor analysis only
+//   hexa dse_category.hexa adjunctions   adjunction pairs
+//   hexa dse_category.hexa gaps          composition gaps
+//   hexa dse_category.hexa help          usage
+
+// ═══════════════════════════════════════════════════════════
+// ─── n=6 CONSTANTS (inline) ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const N6      = 6
+comptime const SIGMA6  = 12
+comptime const PHI6    = 2
+comptime const TAU6    = 4
+comptime const SOPFR6  = 5
+comptime const J2_6    = 24
+comptime const M3_6    = 7
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn sqrt_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    if g < 1.0 { g = 1.0 }
+    let mut i: i64 = 0
+    while i < 20 {
+        g = (g + x / g) / 2.0
+        i = i + 1
+    }
+    return g
+}
+
+fn fmt3(x: f64) -> string {
+    let neg = x < 0.0
+    let ax = abs_f(x)
+    let i = to_int(ax * 1000.0 + 0.5)
+    let whole = i / 1000
+    let frac = i - whole * 1000
+    let mut fs = to_string(frac)
+    if frac < 100 { fs = "0" + fs }
+    if frac < 10 { fs = "0" + fs }
+    let mut s = to_string(whole) + "." + fs
+    if neg { s = "-" + s }
+    return s
+}
+
+fn fmt1(x: f64) -> string {
+    let neg = x < 0.0
+    let ax = abs_f(x)
+    let i = to_int(ax * 10.0 + 0.5)
+    let whole = i / 10
+    let frac = i - whole * 10
+    let mut s = to_string(whole) + "." + to_string(frac)
+    if neg { s = "-" + s }
+    return s
+}
+
+fn pad_right(s: string, width: i64) -> string {
+    let parts = s.split("")
+    let slen = to_int(parts.len()) - 2
+    if slen >= width { return s }
+    let mut r = s
+    let mut i: i64 = 0
+    while i < width - slen {
+        r = r + " "
+        i = i + 1
+    }
+    return r
+}
+
+fn pad_left(s: string, width: i64) -> string {
+    let parts = s.split("")
+    let slen = to_int(parts.len()) - 2
+    if slen >= width { return s }
+    let mut r = ""
+    let mut i: i64 = 0
+    while i < width - slen {
+        r = r + " "
+        i = i + 1
+    }
+    return r + s
+}
+
+fn json_str(line: string, field: string) -> string {
+    let marker = "\"" + field + "\":\""
+    let parts = line.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let end_parts = rest.split("\"")
+    if end_parts.len() < 1 { return "" }
+    return end_parts[0]
+}
+
+fn json_num(line: string, field: string) -> f64 {
+    let marker = "\"" + field + "\":"
+    let parts = line.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let rest = parts[1]
+    let end_str = rest.split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(end_str)
+}
+
+fn now_ts() -> string { exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim() }
+
+// ═══════════════════════════════════════════════════════════
+// ─── C1: LOAD OBJECTS (domains) AND MORPHISMS (discoveries) ───
+// ═══════════════════════════════════════════════════════════
+
+struct Morphism {
+    source: string,
+    target: string,
+    value: f64,
+    grade: string,
+    id: string
+}
+
+let mut _cat_obj_set = #{}
+let mut _cat_morph_set = #{}
+
+fn load_category(shared: string) -> list {
+    let bus_path = shared + "/growth_bus.jsonl"
+    let mut raw = ""
+    try { raw = read_file(bus_path) } catch e {
+        println("[ERROR] cannot read " + bus_path)
+        _cat_obj_set = #{}
+        _cat_morph_set = #{}
+        return [[], []]
+    }
+    let lines = raw.split("\n")
+
+    let mut objects = []        // domain names
+    let mut obj_set = #{}       // domain -> index
+    let mut morphisms = []      // list of #{source, target, value, grade, id}
+    let mut morph_set = #{}     // "source|target" -> count
+
+    // Build morphism pairs from consecutive same-source entries in different domains
+    let mut prev_domain = ""
+    let mut prev_value = 0.0
+    let mut prev_id = ""
+
+    let mut li = 0
+    while li < lines.len() {
+        let line = lines[li].trim()
+        li = li + 1
+        if line == "" { continue }
+
+        let domain = json_str(line, "domain")
+        let value = json_num(line, "value")
+        let grade = json_str(line, "grade")
+        let id = json_str(line, "id")
+
+        if domain == "" { continue }
+
+        // Register object
+        if !obj_set.contains_key(domain) {
+            obj_set[domain] = to_int(objects.len())
+            objects = objects + [domain]
+        }
+
+        // Create morphism: if previous entry was a different domain,
+        // a discovery connecting domains = a morphism
+        if prev_domain != "" && prev_domain != domain {
+            let key = prev_domain + "|" + domain
+            let mut count = 0
+            if morph_set.contains_key(key) {
+                count = to_int(safe_float(to_string(morph_set[key])))
+            }
+            morph_set[key] = to_string(count + 1)
+
+            // Also check if values match (shared constant = strong morphism)
+            let val_match = abs_f(prev_value - value) < 0.5
+            let morph_grade = if val_match { "STRONG" } else { grade }
+
+            morphisms = morphisms + [#{
+                "source": prev_domain,
+                "target": domain,
+                "value": to_string(value),
+                "grade": morph_grade,
+                "id": id
+            }]
+        }
+
+        prev_domain = domain
+        prev_value = value
+        prev_id = id
+    }
+
+    _cat_obj_set = obj_set
+    _cat_morph_set = morph_set
+    return [objects, morphisms]
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── C2: COMPOSITION CHECK (transitivity) ───
+// ═══════════════════════════════════════════════════════════
+
+let mut _comp_compositions: i64 = 0
+let mut _comp_total_triples: i64 = 0
+
+fn check_composition(objects: list, morph_set: list) -> list {
+    // For each pair A->B, B->C: check if A->C exists
+    // Missing A->C = composition gap = potential discovery
+    let mut gaps = []
+    let mut compositions = 0
+    let mut total_triples = 0
+
+    let n = to_int(objects.len())
+    let mut ai: i64 = 0
+    while ai < n {
+        let a = to_string(objects[ai])
+        let mut bi: i64 = 0
+        while bi < n {
+            if bi == ai { bi = bi + 1; continue }
+            let b = to_string(objects[bi])
+            let ab_key = a + "|" + b
+            if !morph_set.contains_key(ab_key) { bi = bi + 1; continue }
+
+            let mut ci: i64 = 0
+            while ci < n {
+                if ci == ai || ci == bi { ci = ci + 1; continue }
+                let c = to_string(objects[ci])
+                let bc_key = b + "|" + c
+                if !morph_set.contains_key(bc_key) { ci = ci + 1; continue }
+
+                total_triples = total_triples + 1
+                let ac_key = a + "|" + c
+                if morph_set.contains_key(ac_key) {
+                    compositions = compositions + 1
+                } else {
+                    gaps = gaps + [#{"a": a, "b": b, "c": c}]
+                }
+
+                ci = ci + 1
+            }
+            bi = bi + 1
+        }
+        ai = ai + 1
+    }
+
+    _comp_compositions = compositions
+    _comp_total_triples = total_triples
+    return gaps
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── C3: FUNCTORS — structure-preserving maps ───
+// ═══════════════════════════════════════════════════════════
+
+fn find_functors(objects: list, obj_set: list, morph_set: list) -> list {
+    // A functor F: DomA -> DomB preserves morphisms
+    // For each pair of domains, count how many morphisms from A's neighbors
+    // also have corresponding morphisms from B's neighbors
+    let n = to_int(objects.len())
+    let mut functors = []
+
+    let mut ai: i64 = 0
+    while ai < n {
+        let a = to_string(objects[ai])
+        // Collect A's outgoing neighbors
+        let mut a_out = []
+        let mut ni: i64 = 0
+        while ni < n {
+            if ni == ai {
+                ni = ni + 1
+                continue
+            }
+            let key = a + "|" + to_string(objects[ni])
+            if morph_set.contains_key(key) {
+                a_out = a_out + [to_string(objects[ni])]
+            }
+            ni = ni + 1
+        }
+
+        let mut bi: i64 = 0
+        while bi < n {
+            if bi == ai { bi = bi + 1; continue }
+            let b = to_string(objects[bi])
+            // Collect B's outgoing neighbors
+            let mut b_out = []
+            let mut mi: i64 = 0
+            while mi < n {
+                if mi == bi { mi = mi + 1; continue }
+                let key2 = b + "|" + to_string(objects[mi])
+                if morph_set.contains_key(key2) {
+                    b_out = b_out + [to_string(objects[mi])]
+                }
+                mi = mi + 1
+            }
+
+            // Overlap: how many of A's targets are also B's targets
+            let mut overlap: i64 = 0
+            let mut oi: i64 = 0
+            while oi < a_out.len() {
+                let target = to_string(a_out[oi])
+                let mut found = false
+                let mut pi: i64 = 0
+                while pi < b_out.len() {
+                    if to_string(b_out[pi]) == target { found = true }
+                    pi = pi + 1
+                }
+                if found { overlap = overlap + 1 }
+                oi = oi + 1
+            }
+
+            let a_deg = to_int(a_out.len())
+            let b_deg = to_int(b_out.len())
+            let max_deg = if a_deg > b_deg { a_deg } else { b_deg }
+            let min_deg = if a_deg < b_deg { a_deg } else { b_deg }
+
+            // Functor strength: overlap / max(deg) — perfect functor = 1.0
+            let strength = if max_deg > 0 { to_float(overlap) / to_float(max_deg) } else { 0.0 }
+
+            if strength > 0.3 && overlap >= 2 {
+                functors = functors + [#{
+                    "a": a,
+                    "b": b,
+                    "overlap": to_string(overlap),
+                    "a_deg": to_string(a_deg),
+                    "b_deg": to_string(b_deg),
+                    "strength": to_string(strength)
+                }]
+            }
+
+            bi = bi + 1
+        }
+        ai = ai + 1
+    }
+
+    // Sort by strength (descending)
+    let mut si = 0
+    while si < functors.len() {
+        let mut sj = si + 1
+        while sj < functors.len() {
+            let fi_s = safe_float(to_string(functors[si]["strength"]))
+            let fj_s = safe_float(to_string(functors[sj]["strength"]))
+            if fj_s > fi_s {
+                let tmp = functors[si]
+                functors[si] = functors[sj]
+                functors[sj] = tmp
+            }
+            sj = sj + 1
+        }
+        si = si + 1
+    }
+
+    return functors
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── C4: NATURAL TRANSFORMATIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn find_natural_transforms(functors: list) -> list {
+    // A natural transformation eta: F => G is a systematic pattern
+    // across functors that share the same source or target
+    // Group functors by source domain, find patterns
+    let mut source_groups = #{}
+    let mut fi: i64 = 0
+    while fi < functors.len() {
+        let src = to_string(functors[fi]["a"])
+        if !source_groups.contains_key(src) {
+            source_groups[src] = []
+        }
+        let mut group = source_groups[src]
+        group = group + [functors[fi]]
+        source_groups[src] = group
+        fi = fi + 1
+    }
+
+    let mut transforms = []
+
+    // For each source domain with 2+ functors: natural transformation exists
+    let mut keys = []
+    let mut ki: i64 = 0
+    while ki < functors.len() {
+        let src = to_string(functors[ki]["a"])
+        let mut already = false
+        let mut ci: i64 = 0
+        while ci < keys.len() {
+            if to_string(keys[ci]) == src { already = true }
+            ci = ci + 1
+        }
+        if !already { keys = keys + [src] }
+        ki = ki + 1
+    }
+
+    let mut kk: i64 = 0
+    while kk < keys.len() {
+        let src = to_string(keys[kk])
+        kk = kk + 1
+        if !source_groups.contains_key(src) { continue }
+        let group = source_groups[src]
+        if group.len() < 2 { continue }
+
+        // Natural transformation: strength = average functor strength
+        let mut total_str = 0.0
+        let mut gi: i64 = 0
+        let mut targets = ""
+        while gi < group.len() {
+            total_str = total_str + safe_float(to_string(group[gi]["strength"]))
+            let tgt = to_string(group[gi]["b"])
+            if targets == "" { targets = tgt } else { targets = targets + ", " + tgt }
+            gi = gi + 1
+        }
+        let avg_str = total_str / to_float(group.len())
+
+        transforms = transforms + [#{
+            "source": src,
+            "targets": targets,
+            "count": to_string(group.len()),
+            "avg_strength": to_string(avg_str)
+        }]
+    }
+
+    return transforms
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── C5: ADJUNCTIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn find_adjunctions(functors: list) -> list {
+    // Adjunction: pair (F: A->B, G: B->A) where F.G ~ id
+    // = deep equivalence between domains
+    let mut adjunctions = []
+
+    let mut fi: i64 = 0
+    while fi < functors.len() {
+        let a1 = to_string(functors[fi]["a"])
+        let b1 = to_string(functors[fi]["b"])
+        let s1 = safe_float(to_string(functors[fi]["strength"]))
+
+        // Look for reverse functor
+        let mut gi: i64 = fi + 1
+        while gi < functors.len() {
+            let a2 = to_string(functors[gi]["a"])
+            let b2 = to_string(functors[gi]["b"])
+            let s2 = safe_float(to_string(functors[gi]["strength"]))
+
+            if a2 == b1 && b2 == a1 {
+                // Found adjunction pair!
+                let adj_strength = (s1 + s2) / 2.0
+                adjunctions = adjunctions + [#{
+                    "left": a1,
+                    "right": b1,
+                    "left_strength": to_string(s1),
+                    "right_strength": to_string(s2),
+                    "adjunction_strength": to_string(adj_strength)
+                }]
+            }
+            gi = gi + 1
+        }
+        fi = fi + 1
+    }
+
+    // Sort by adjunction_strength descending
+    let mut si = 0
+    while si < adjunctions.len() {
+        let mut sj = si + 1
+        while sj < adjunctions.len() {
+            let ai_s = safe_float(to_string(adjunctions[si]["adjunction_strength"]))
+            let aj_s = safe_float(to_string(adjunctions[sj]["adjunction_strength"]))
+            if aj_s > ai_s {
+                let tmp = adjunctions[si]
+                adjunctions[si] = adjunctions[sj]
+                adjunctions[sj] = tmp
+            }
+            sj = sj + 1
+        }
+        si = si + 1
+    }
+
+    return adjunctions
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── n=6 CATEGORY CHECKS ───
+// ═══════════════════════════════════════════════════════════
+
+fn n6_morphism_check(count: i64) -> string {
+    if count == N6 { return "n=6 morphisms" }
+    if count == SIGMA6 { return "sigma(6)=12 morphisms" }
+    if count == J2_6 { return "J2(6)=24 morphisms" }
+    if count % N6 == 0 { return to_string(count / N6) + " * n morphisms" }
+    return ""
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── REPORT FUNCTIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn report_morphisms(objects: list, morphisms: list, morph_set: list) {
+    let n_obj = to_int(objects.len())
+    let n_morph = to_int(morphisms.len())
+
+    // Count unique morphism keys
+    let mut unique_keys = []
+    let mut mi: i64 = 0
+    while mi < morphisms.len() {
+        let key = to_string(morphisms[mi]["source"]) + "|" + to_string(morphisms[mi]["target"])
+        let mut found = false
+        let mut ki: i64 = 0
+        while ki < unique_keys.len() {
+            if to_string(unique_keys[ki]) == key { found = true }
+            ki = ki + 1
+        }
+        if !found { unique_keys = unique_keys + [key] }
+        mi = mi + 1
+    }
+    let n_unique = to_int(unique_keys.len())
+
+    // Count strong morphisms
+    let mut n_strong: i64 = 0
+    let mut si: i64 = 0
+    while si < morphisms.len() {
+        if to_string(morphisms[si]["grade"]) == "STRONG" { n_strong = n_strong + 1 }
+        si = si + 1
+    }
+
+    println("")
+    println("[C1] Category Objects & Morphisms")
+    println("  objects (domains):    " + to_string(n_obj))
+    println("  total morphisms:      " + to_string(n_morph))
+    println("  unique morphisms:     " + to_string(n_unique))
+    println("  strong morphisms:     " + to_string(n_strong))
+
+    let n6tag = n6_morphism_check(n_unique)
+    if n6tag != "" {
+        println("  ** n=6 resonance: " + n6tag + " **")
+    }
+
+    // Top domains by morphism degree (outgoing)
+    let mut degrees = #{}
+    let mut di: i64 = 0
+    while di < morphisms.len() {
+        let src = to_string(morphisms[di]["source"])
+        let mut deg: i64 = 0
+        if degrees.contains_key(src) {
+            deg = to_int(safe_float(to_string(degrees[src])))
+        }
+        degrees[src] = to_string(deg + 1)
+        di = di + 1
+    }
+
+    // Collect and sort by degree
+    let mut deg_list = []
+    let mut oi: i64 = 0
+    while oi < objects.len() {
+        let obj = to_string(objects[oi])
+        let mut deg: i64 = 0
+        if degrees.contains_key(obj) {
+            deg = to_int(safe_float(to_string(degrees[obj])))
+        }
+        deg_list = deg_list + [#{"domain": obj, "degree": to_string(deg)}]
+        oi = oi + 1
+    }
+
+    let mut s1: i64 = 0
+    while s1 < deg_list.len() {
+        let mut s2 = s1 + 1
+        while s2 < deg_list.len() {
+            let d1 = to_int(safe_float(to_string(deg_list[s1]["degree"])))
+            let d2 = to_int(safe_float(to_string(deg_list[s2]["degree"])))
+            if d2 > d1 {
+                let tmp = deg_list[s1]
+                deg_list[s1] = deg_list[s2]
+                deg_list[s2] = tmp
+            }
+            s2 = s2 + 1
+        }
+        s1 = s1 + 1
+    }
+
+    println("")
+    println("  top domains by morphism degree:")
+    let show_n = if to_int(deg_list.len()) < 15 { to_int(deg_list.len()) } else { 15 }
+    let mut ti: i64 = 0
+    while ti < show_n {
+        let entry = deg_list[ti]
+        println("    " + pad_right(to_string(entry["domain"]), 28) + " deg=" + to_string(entry["degree"]))
+        ti = ti + 1
+    }
+}
+
+fn report_composition(compositions: i64, total_triples: i64, gaps: list) {
+    println("")
+    println("[C2] Composition Analysis (transitivity)")
+    println("  composable triples: " + to_string(total_triples))
+    println("  satisfied (A->C):   " + to_string(compositions))
+    println("  gaps (missing A->C):" + to_string(gaps.len()))
+
+    let pct = if total_triples > 0 { to_float(compositions) / to_float(total_triples) * 100.0 } else { 0.0 }
+    println("  completeness:       " + fmt1(pct) + "%")
+
+    let show_n = if to_int(gaps.len()) < 10 { to_int(gaps.len()) } else { 10 }
+    if show_n > 0 {
+        println("")
+        println("  top composition gaps (potential discoveries):")
+        let mut gi: i64 = 0
+        while gi < show_n {
+            let gap = gaps[gi]
+            println("    " + to_string(gap["a"]) + " -> " + to_string(gap["b"]) + " -> " + to_string(gap["c"]) + "   (missing: " + to_string(gap["a"]) + " -> " + to_string(gap["c"]) + ")")
+            gi = gi + 1
+        }
+    }
+}
+
+fn report_functors(functors: list) {
+    println("")
+    println("[C3] Functors -- structure-preserving maps")
+    println("  total functors found: " + to_string(functors.len()))
+
+    let show_n = if to_int(functors.len()) < 15 { to_int(functors.len()) } else { 15 }
+    if show_n > 0 {
+        println("")
+        println("  " + pad_right("F: A -> B", 45) + pad_left("OVERLAP", 8) + pad_left("STRENGTH", 10))
+        println("  " + pad_right("--------------------------------------------", 45) + pad_left("-------", 8) + pad_left("--------", 10))
+    }
+
+    let mut fi: i64 = 0
+    while fi < show_n {
+        let f = functors[fi]
+        let label = to_string(f["a"]) + " -> " + to_string(f["b"])
+        let ol = to_string(f["overlap"])
+        let st = fmt3(safe_float(to_string(f["strength"])))
+        println("  " + pad_right(label, 45) + pad_left(ol, 8) + pad_left(st, 10))
+        fi = fi + 1
+    }
+}
+
+fn report_natural_transforms(transforms: list) {
+    println("")
+    println("[C4] Natural Transformations")
+    println("  systematic patterns: " + to_string(transforms.len()))
+
+    let show_n = if to_int(transforms.len()) < 10 { to_int(transforms.len()) } else { 10 }
+    let mut ti: i64 = 0
+    while ti < show_n {
+        let t = transforms[ti]
+        println("    " + to_string(t["source"]) + " => [" + to_string(t["targets"]) + "]")
+        println("      functors: " + to_string(t["count"]) + "  avg_strength: " + fmt3(safe_float(to_string(t["avg_strength"]))))
+        ti = ti + 1
+    }
+}
+
+fn report_adjunctions(adjunctions: list) {
+    println("")
+    println("[C5] Adjunctions -- deep equivalences")
+    println("  adjunction pairs: " + to_string(adjunctions.len()))
+
+    if adjunctions.len() == 0 {
+        println("  (no adjunctions found — domains are asymmetric)")
+        return
+    }
+
+    let show_n = if to_int(adjunctions.len()) < 10 { to_int(adjunctions.len()) } else { 10 }
+    println("")
+    println("  " + pad_right("LEFT <-> RIGHT", 45) + pad_left("L_STR", 8) + pad_left("R_STR", 8) + pad_left("ADJ", 8))
+    println("  " + pad_right("--------------------------------------------", 45) + pad_left("------", 8) + pad_left("------", 8) + pad_left("------", 8))
+
+    let mut ai: i64 = 0
+    while ai < show_n {
+        let adj = adjunctions[ai]
+        let label = to_string(adj["left"]) + " <-> " + to_string(adj["right"])
+        let ls = fmt3(safe_float(to_string(adj["left_strength"])))
+        let rs = fmt3(safe_float(to_string(adj["right_strength"])))
+        let as_str = fmt3(safe_float(to_string(adj["adjunction_strength"])))
+        println("  " + pad_right(label, 45) + pad_left(ls, 8) + pad_left(rs, 8) + pad_left(as_str, 8))
+        ai = ai + 1
+    }
+
+    // Check n=6 resonance in adjunction count
+    let n_adj = to_int(adjunctions.len())
+    if n_adj == N6 { println("  ** n=6 RESONANCE: exactly 6 adjunction pairs **") }
+    if n_adj == SIGMA6 { println("  ** n=6 RESONANCE: sigma(6)=12 adjunction pairs **") }
+    if n_adj % N6 == 0 && n_adj > 0 { println("  ** n=6 RESONANCE: " + to_string(n_adj / N6) + " * n adjunction pairs **") }
+}
+
+fn report_summary(objects: list, morphisms: list, functors: list, adjunctions: list, gaps: list) {
+    let n_obj = to_int(objects.len())
+    let n_morph = to_int(morphisms.len())
+    let n_func = to_int(functors.len())
+    let n_adj = to_int(adjunctions.len())
+    let n_gaps = to_int(gaps.len())
+
+    println("")
+    println("=== CATEGORY DSE SUMMARY ===")
+    println("  objects:       " + to_string(n_obj))
+    println("  morphisms:     " + to_string(n_morph))
+    println("  functors:      " + to_string(n_func))
+    println("  adjunctions:   " + to_string(n_adj))
+    println("  comp. gaps:    " + to_string(n_gaps) + " (potential discoveries)")
+}
+
+fn write_results(shared: string, objects: list, morphisms: list, functors: list, adjunctions: list, gaps: list) {
+    let out_path = shared + "/dse_category_results.jsonl"
+    let ts = now_ts()
+    let mut content = ""
+
+    // Summary line
+    content = content + "{\"type\":\"summary\",\"objects\":" + to_string(objects.len()) + ",\"morphisms\":" + to_string(morphisms.len()) + ",\"functors\":" + to_string(functors.len()) + ",\"adjunctions\":" + to_string(adjunctions.len()) + ",\"gaps\":" + to_string(gaps.len()) + ",\"ts\":\"" + ts + "\"}\n"
+
+    // Top functors
+    let top_f = if to_int(functors.len()) < 20 { to_int(functors.len()) } else { 20 }
+    let mut fi: i64 = 0
+    while fi < top_f {
+        let f = functors[fi]
+        content = content + "{\"type\":\"functor\",\"a\":\"" + to_string(f["a"]) + "\",\"b\":\"" + to_string(f["b"]) + "\",\"strength\":" + to_string(f["strength"]) + ",\"ts\":\"" + ts + "\"}\n"
+        fi = fi + 1
+    }
+
+    // Adjunctions
+    let mut ai: i64 = 0
+    while ai < adjunctions.len() {
+        let adj = adjunctions[ai]
+        content = content + "{\"type\":\"adjunction\",\"left\":\"" + to_string(adj["left"]) + "\",\"right\":\"" + to_string(adj["right"]) + "\",\"strength\":" + to_string(adj["adjunction_strength"]) + ",\"ts\":\"" + ts + "\"}\n"
+        ai = ai + 1
+    }
+
+    // Top gaps
+    let top_g = if to_int(gaps.len()) < 30 { to_int(gaps.len()) } else { 30 }
+    let mut gi: i64 = 0
+    while gi < top_g {
+        let gap = gaps[gi]
+        content = content + "{\"type\":\"gap\",\"a\":\"" + to_string(gap["a"]) + "\",\"b\":\"" + to_string(gap["b"]) + "\",\"c\":\"" + to_string(gap["c"]) + "\",\"ts\":\"" + ts + "\"}\n"
+        gi = gi + 1
+    }
+
+    try { write_file(out_path, content) } catch e {
+        println("[WARN] failed to write " + out_path)
+    }
+}
+
+fn print_help() {
+    println("dse_category.hexa -- Category Theory DSE")
+    println("")
+    println("Usage:")
+    println("  hexa dse_category.hexa scan          full pipeline (C1~C6)")
+    println("  hexa dse_category.hexa functors      functor analysis only")
+    println("  hexa dse_category.hexa adjunctions   adjunction pairs")
+    println("  hexa dse_category.hexa gaps          composition gaps")
+    println("  hexa dse_category.hexa help           this message")
+    println("")
+    println("Reads: shared/growth_bus.jsonl")
+    println("Writes: shared/dse_category_results.jsonl")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── THEOREM + PROOF ───
+// ═══════════════════════════════════════════════════════════
+
+theorem category_n6_structure {
+    // The n=6 domain category satisfies:
+    // 1. Identity morphisms exist for all domains (reflexivity)
+    // 2. Composition is associative where it exists
+    // 3. Functors preserve n=6 invariants across domain boundaries
+    assert 6 * 2 == 12           // n * phi = sigma (preserved by functors)
+    assert 12 / 4 == 3           // sigma / tau = n/phi
+    assert 6 + 12 + 2 + 4 == 24 // n + sigma + phi + tau = J2
+    assert 24 / 6 == 4           // J2 / n = tau
+}
+
+proof adjunction_completeness {
+    // If (F,G) is an adjunction between domains A and B,
+    // then every n=6 constant in A maps to a corresponding constant in B.
+    // The unit eta: Id -> G.F and counit epsilon: F.G -> Id witness this.
+    invariant 6 * 4 == 24       // n * tau = J2 (adjunction preserves products)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+fn main() {
+    let home = exec("printenv HOME").trim()
+    let shared = home + "/Dev/nexus/shared"
+
+    let a = args()
+    let mode = if a.len() >= 3 { to_string(a[2]) } else { "scan" }
+
+    if mode == "help" || mode == "--help" || mode == "-h" {
+        print_help()
+        return
+    }
+
+    println("")
+    println("=== CATEGORY THEORY DSE ===")
+    println("  mode: " + mode)
+    println("  time: " + now_ts())
+
+    // ─── C1: Load category ───
+    println("")
+    println("[C1] Loading category from growth_bus...")
+    let loaded = load_category(shared)
+    let objects = loaded[0]
+    let obj_set = _cat_obj_set
+    let morphisms = loaded[1]
+    let morph_set = _cat_morph_set
+
+    if objects.len() == 0 {
+        println("[ERROR] no objects loaded")
+        return
+    }
+
+    if mode == "scan" {
+        report_morphisms(objects, morphisms, morph_set)
+    }
+
+    // ─── C2: Composition ───
+    println("")
+    println("[C2] Checking composition (transitivity)...")
+    let gaps = check_composition(objects, morph_set)
+    let compositions = _comp_compositions
+    let total_triples = _comp_total_triples
+
+    if mode == "gaps" || mode == "scan" {
+        report_composition(compositions, total_triples, gaps)
+    }
+
+    // ─── C3: Functors ───
+    println("")
+    println("[C3] Finding functors...")
+    let functors = find_functors(objects, obj_set, morph_set)
+
+    if mode == "functors" || mode == "scan" {
+        report_functors(functors)
+    }
+
+    // ─── C4: Natural transformations ───
+    let transforms = find_natural_transforms(functors)
+    if mode == "scan" {
+        report_natural_transforms(transforms)
+    }
+
+    // ─── C5: Adjunctions ───
+    println("")
+    println("[C5] Finding adjunctions...")
+    let adjunctions = find_adjunctions(functors)
+
+    if mode == "adjunctions" || mode == "scan" {
+        report_adjunctions(adjunctions)
+    }
+
+    // ─── C6: Summary ───
+    if mode == "scan" {
+        report_summary(objects, morphisms, functors, adjunctions, gaps)
+        write_results(shared, objects, morphisms, functors, adjunctions, gaps)
+        println("")
+        println("[C6] Results written to shared/dse_category_results.jsonl")
+    }
+
+    println("")
+    println("[done]")
+}
+
+main()

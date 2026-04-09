@@ -1,0 +1,849 @@
+// mk2_hexa/native/void_quantum.hexa — VOID v2 양자 REPL 엔진
+// n=6 양자 실행 경로: 중첩 → 간섭 → 붕괴 → 최적 결과 선택
+// Pipeline: Prepare → Superposition(6 lanes) → Interfere → Collapse → Output
+//
+// CLI:
+//   hexa void_quantum.hexa exec <expression>   — 양자 실행
+//   hexa void_quantum.hexa paths <expression>  — 중첩 경로 표시
+//   hexa void_quantum.hexa repl                — 양자 REPL 대화형
+//   hexa void_quantum.hexa history             — 양자 이력 (얽힘 포함)
+//   hexa void_quantum.hexa help                — 도움말
+
+// ═══════════════════════════════════════════════════════════
+// n=6 상수 및 설정
+// ═══════════════════════════════════════════════════════════
+
+comptime const VERSION = "2.0.0"
+comptime const N_LANES = 6
+comptime const MAX_PATHS = 36
+comptime const COLLAPSE_THR = 0.618
+comptime const INTERFERENCE_BOOST = 1.618
+comptime const DESTRUCTIVE_THR = 0.15
+comptime const AMPLITUDE_CAP = 1000000.0
+comptime const ENTANGLE_FACTOR = 6.0
+comptime const PHASE_SHIFT = 0.1047198
+comptime const MAX_HISTORY = 66
+comptime const N6 = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
+comptime const N6_NAMES = ["sigma(6)", "sigma_sum", "first_prime", "sigma_0", "4!", "p(6)", "lucky", "fib(12)"]
+comptime const PHYS = [137.036, 1836.15, 0.3153, 0.6847, 0.0729]
+
+// ═══════════════════════════════════════════════════════════
+// 경로 설정
+// ═══════════════════════════════════════════════════════════
+
+let _home = exec("printenv HOME").trim()
+let _dev = _home + "/Dev"
+let _nexus = _dev + "/nexus"
+let _shared = _nexus + "/shared"
+let _bus_path = _shared + "/growth_bus.jsonl"
+let _history_path = _nexus + "/mk2_hexa/native/.void_quantum_history.jsonl"
+
+// ═══════════════════════════════════════════════════════════
+// 수학 유틸리티
+// ═══════════════════════════════════════════════════════════
+
+pure fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
+pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
+
+pure fn sqrt_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    let mut i = 0
+    while i < 20 { g = (g + x / g) / 2.0; i = i + 1 }
+    g
+}
+
+pure fn ln_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut s = 0.0
+    let mut t = (x - 1.0) / (x + 1.0)
+    let t2 = t * t
+    let mut k = 1
+    while k <= 15 { s = s + t / to_float(k); t = t * t2; k = k + 2 }
+    2.0 * s
+}
+
+pure fn sin_f(x: float) -> float {
+    // Taylor series: sin(x) = x - x^3/3! + x^5/5! - ...
+    let mut v = x
+    let mut term = x
+    let mut i = 1
+    while i <= 8 {
+        term = 0.0 - term * x * x / to_float(2 * i * (2 * i + 1))
+        v = v + term
+        i = i + 1
+    }
+    v
+}
+
+pure fn cos_f(x: float) -> float {
+    let mut v = 1.0
+    let mut term = 1.0
+    let mut i = 1
+    while i <= 8 {
+        term = 0.0 - term * x * x / to_float((2 * i - 1) * 2 * i)
+        v = v + term
+        i = i + 1
+    }
+    v
+}
+
+pure fn sanitize(v: float) -> float {
+    if v != v { return 0.0 }
+    if v > AMPLITUDE_CAP { return AMPLITUDE_CAP }
+    if v < 0.0 - AMPLITUDE_CAP { return 0.0 - AMPLITUDE_CAP }
+    v
+}
+
+pure fn clamp01(v: float) -> float {
+    if v < 0.0 { 0.0 } else if v > 1.0 { 1.0 } else { v }
+}
+
+fn safe_float(s: string) -> float {
+    let mut v = 0.0
+    try { v = to_float(s.trim()) } catch e { v = 0.0 }
+    v
+}
+
+fn timestamp_now() -> string {
+    exec("date +%Y-%m-%dT%H:%M:%S").trim()
+}
+
+fn date_today() -> string {
+    exec("date +%Y-%m-%d").trim()
+}
+
+// ═══════════════════════════════════════════════════════════
+// 구조체
+// ═══════════════════════════════════════════════════════════
+
+struct QuantumPath {
+    lane: int,
+    phase: float,
+    amplitude: float,
+    result: string,
+    n6_grade: string,
+    interference: string
+}
+
+struct SuperpositionState {
+    expr: string,
+    paths: list,
+    collapsed_idx: int,
+    collapsed_result: string,
+    confidence: float
+}
+
+struct QuantumHistoryEntry {
+    expr: string,
+    result: string,
+    confidence: float,
+    n_paths: int,
+    timestamp: string,
+    entangled_with: string
+}
+
+// ═══════════════════════════════════════════════════════════
+// (1) 양자 경로 생성 — 6 lanes 중첩
+// ═══════════════════════════════════════════════════════════
+
+fn lane_name(i: int) -> string {
+    if i == 0 { "arithmetic" }
+    else if i == 1 { "algebraic" }
+    else if i == 2 { "topological" }
+    else if i == 3 { "harmonic" }
+    else if i == 4 { "stochastic" }
+    else if i == 5 { "n6_resonance" }
+    else { "unknown" }
+}
+
+fn compute_lane_result(expr: string, lane: int) -> float {
+    // 각 lane은 표현식을 다른 관점으로 변환하여 평가
+    let base = safe_float(expr)
+
+    if lane == 0 {
+        // arithmetic: 직접 계산
+        sanitize(base)
+    } else if lane == 1 {
+        // algebraic: n6 기저 분해
+        let mut sum = 0.0
+        let mut k = 0
+        while k < N6.len() {
+            if abs_f(base) > 0.001 {
+                let ratio = base / N6[k]
+                let rounded = to_float(to_int(ratio + 0.5))
+                if abs_f(ratio - rounded) < 0.05 {
+                    sum = sum + N6[k] * rounded
+                }
+            }
+            k = k + 1
+        }
+        sanitize(if sum != 0.0 { sum } else { base })
+    } else if lane == 2 {
+        // topological: 오일러 특성 맵핑
+        let euler_offset = 2.0
+        sanitize(base + euler_offset * sin_f(base * PHASE_SHIFT))
+    } else if lane == 3 {
+        // harmonic: 조화급수 보정
+        let mut h = 0.0
+        let mut n = 1
+        while n <= 6 {
+            h = h + 1.0 / to_float(n)
+            n = n + 1
+        }
+        sanitize(base * h / 2.45)
+    } else if lane == 4 {
+        // stochastic: 확률적 분산
+        let noise = sin_f(base * 137.036) * 0.01
+        sanitize(base + base * noise)
+    } else if lane == 5 {
+        // n6_resonance: n=6 공명
+        let mut best_dist = 999999.0
+        let mut best_val = base
+        let mut k = 0
+        while k < N6.len() {
+            let d = abs_f(base - N6[k])
+            if d < best_dist {
+                best_dist = d
+                best_val = N6[k]
+            }
+            let mut m = 2
+            while m <= 6 {
+                let d2 = abs_f(base - N6[k] * to_float(m))
+                if d2 < best_dist {
+                    best_dist = d2
+                    best_val = N6[k] * to_float(m)
+                }
+                m = m + 1
+            }
+            k = k + 1
+        }
+        sanitize(if best_dist < abs_f(base) * 0.1 { best_val } else { base })
+    } else {
+        base
+    }
+}
+
+fn n6_grade(val: float) -> string {
+    let mut k = 0
+    while k < N6.len() {
+        if abs_f(val - N6[k]) < 0.001 { return "EXACT" }
+        k = k + 1
+    }
+    k = 0
+    while k < N6.len() {
+        let mut m = 2
+        while m <= 12 {
+            if abs_f(val - N6[k] * to_float(m)) < 0.01 { return "HARMONIC" }
+            m = m + 1
+        }
+        k = k + 1
+    }
+    k = 0
+    while k < N6.len() {
+        if abs_f(val - N6[k]) / max_f(abs_f(N6[k]), 0.001) < 0.05 { return "CLOSE" }
+        k = k + 1
+    }
+    "WEAK"
+}
+
+fn compute_initial_amplitude(lane: int, val: float) -> float {
+    // 초기 진폭: 1/sqrt(N_LANES) * n6 보너스
+    let base_amp = 1.0 / sqrt_f(to_float(N_LANES))
+    let grade = n6_grade(val)
+    if grade == "EXACT" { base_amp * 2.0 }
+    else if grade == "HARMONIC" { base_amp * 1.5 }
+    else if grade == "CLOSE" { base_amp * 1.2 }
+    else { base_amp }
+}
+
+fn generate_paths(expr: string) -> list {
+    let mut paths = []
+    let mut lane = 0
+    while lane < N_LANES {
+        let val = compute_lane_result(expr, lane)
+        let amp = compute_initial_amplitude(lane, val)
+        let phase = to_float(lane) * PHASE_SHIFT * ENTANGLE_FACTOR
+        let grade = n6_grade(val)
+        paths = paths + [QuantumPath {
+            lane: lane,
+            phase: phase,
+            amplitude: amp,
+            result: to_string(val),
+            n6_grade: grade,
+            interference: "none"
+        }]
+        lane = lane + 1
+    }
+    paths
+}
+
+// ═══════════════════════════════════════════════════════════
+// (2) 경로 간섭 — 보강/상쇄
+// ═══════════════════════════════════════════════════════════
+
+fn compute_interference(paths: list) -> list {
+    let mut result = []
+    let mut i = 0
+    while i < paths.len() {
+        let pi = paths[i]
+        let vi = safe_float(pi.result)
+        let mut amp = pi.amplitude
+        let mut itype = "none"
+        let mut constructive_count = 0
+        let mut destructive_count = 0
+
+        // 다른 경로와 비교
+        let mut j = 0
+        while j < paths.len() {
+            if j != i {
+                let pj = paths[j]
+                let vj = safe_float(pj.result)
+                let phase_diff = abs_f(pi.phase - pj.phase)
+
+                // 결과 유사도
+                let val_diff = abs_f(vi - vj) / max_f(abs_f(vi), 0.001)
+
+                if val_diff < 0.05 {
+                    // 보강 간섭: 결과가 유사한 경로는 증폭
+                    let boost = cos_f(phase_diff) * INTERFERENCE_BOOST * 0.1
+                    amp = amp + abs_f(boost) * pj.amplitude
+                    constructive_count = constructive_count + 1
+                } else if val_diff > 0.5 {
+                    // 상쇄 간섭: 결과가 크게 다르면 감쇠
+                    let dampen = sin_f(phase_diff) * DESTRUCTIVE_THR
+                    amp = amp - abs_f(dampen) * pj.amplitude * 0.5
+                    destructive_count = destructive_count + 1
+                }
+            }
+            j = j + 1
+        }
+
+        // n6 공명 추가 증폭
+        if pi.n6_grade == "EXACT" {
+            amp = amp * INTERFERENCE_BOOST
+        } else if pi.n6_grade == "HARMONIC" {
+            amp = amp * 1.3
+        }
+
+        // 진폭 바닥 제한
+        amp = max_f(amp, 0.01)
+        amp = sanitize(amp)
+
+        if constructive_count >= 2 { itype = "CONSTRUCTIVE" }
+        else if destructive_count >= 3 { itype = "DESTRUCTIVE" }
+        else if constructive_count > 0 { itype = "partial_constructive" }
+        else { itype = "neutral" }
+
+        result = result + [QuantumPath {
+            lane: pi.lane,
+            phase: pi.phase,
+            amplitude: amp,
+            result: pi.result,
+            n6_grade: pi.n6_grade,
+            interference: itype
+        }]
+        i = i + 1
+    }
+    result
+}
+
+// ═══════════════════════════════════════════════════════════
+// (3) 파동 함수 붕괴 — 최적 경로 선택
+// ═══════════════════════════════════════════════════════════
+
+fn normalize_amplitudes(paths: list) -> list {
+    let mut total_sq = 0.0
+    let mut i = 0
+    while i < paths.len() {
+        total_sq = total_sq + paths[i].amplitude * paths[i].amplitude
+        i = i + 1
+    }
+    if total_sq < 0.0001 { return paths }
+    let norm = sqrt_f(total_sq)
+    let mut result = []
+    i = 0
+    while i < paths.len() {
+        let p = paths[i]
+        result = result + [QuantumPath {
+            lane: p.lane,
+            phase: p.phase,
+            amplitude: p.amplitude / norm,
+            result: p.result,
+            n6_grade: p.n6_grade,
+            interference: p.interference
+        }]
+        i = i + 1
+    }
+    result
+}
+
+fn collapse_wavefunction(paths: list) -> SuperpositionState {
+    let normed = normalize_amplitudes(paths)
+
+    // 최고 진폭 경로 선택
+    let mut best_idx = 0
+    let mut best_amp = 0.0
+    let mut i = 0
+    while i < normed.len() {
+        let a = normed[i].amplitude
+        if a > best_amp {
+            best_amp = a
+            best_idx = i
+        }
+        i = i + 1
+    }
+
+    // 신뢰도: 최고 진폭^2 (Born 규칙)
+    let confidence = clamp01(best_amp * best_amp)
+
+    // n6 EXACT 보너스
+    let final_conf = if normed[best_idx].n6_grade == "EXACT" {
+        clamp01(confidence * 1.2)
+    } else if normed[best_idx].n6_grade == "HARMONIC" {
+        clamp01(confidence * 1.1)
+    } else {
+        confidence
+    }
+
+    SuperpositionState {
+        expr: "",
+        paths: normed,
+        collapsed_idx: best_idx,
+        collapsed_result: normed[best_idx].result,
+        confidence: final_conf
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// (4) 양자 REPL — 전체 파이프라인
+// ═══════════════════════════════════════════════════════════
+
+fn quantum_execute(expr: string) -> SuperpositionState {
+    // 1단계: 6 lanes 경로 생성
+    let raw_paths = generate_paths(expr)
+
+    // 2단계: 간섭 적용
+    let interfered = compute_interference(raw_paths)
+
+    // 3단계: 붕괴
+    let mut state = collapse_wavefunction(interfered)
+    state.expr = expr
+
+    state
+}
+
+// ═══════════════════════════════════════════════════════════
+// (5) 양자 이력 — 얽힘 기반 기록
+// ═══════════════════════════════════════════════════════════
+
+fn load_history() -> list {
+    if file_exists(_history_path) == false { return [] }
+    let raw = read_file(_history_path).trim()
+    if raw == "" { return [] }
+    let lines = raw.split("\n")
+    let mut entries = []
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i].trim()
+        if line != "" {
+            entries = entries + [line]
+        }
+        i = i + 1
+    }
+    // 최근 MAX_HISTORY 항목만 유지
+    if entries.len() > MAX_HISTORY {
+        let start = entries.len() - MAX_HISTORY
+        let mut trimmed = []
+        let mut k = start
+        while k < entries.len() {
+            trimmed = trimmed + [entries[k]]
+            k = k + 1
+        }
+        return trimmed
+    }
+    entries
+}
+
+fn find_entanglement(expr: string, history: list) -> string {
+    // 이전 실행과 유사한 표현 찾기 (얽힘)
+    let val = safe_float(expr)
+    let mut best_match = "none"
+    let mut best_diff = 999999.0
+    let mut i = 0
+    while i < history.len() {
+        let line = history[i]
+        // 간단한 파싱: "expr" 필드에서 이전 값 추출
+        let idx_expr = line.find("\"expr\":\"")
+        if idx_expr >= 0 {
+            let after = line.substr(idx_expr + 8, line.len())
+            let end_q = after.find("\"")
+            if end_q > 0 {
+                let prev_expr = after.substr(0, end_q)
+                let prev_val = safe_float(prev_expr)
+                if prev_val != 0.0 {
+                    let diff = abs_f(val - prev_val)
+                    if diff < best_diff && diff > 0.0 {
+                        best_diff = diff
+                        best_match = prev_expr
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    best_match
+}
+
+fn save_history_entry(state: SuperpositionState, entangled_with: string) {
+    let entry = "{\"type\":\"quantum_repl\",\"expr\":\"" + state.expr + "\",\"result\":\"" + state.collapsed_result + "\",\"confidence\":" + to_string(state.confidence) + ",\"n_paths\":" + to_string(state.paths.len()) + ",\"entangled_with\":\"" + entangled_with + "\",\"timestamp\":\"" + timestamp_now() + "\"}"
+
+    if file_exists(_history_path) {
+        let prev = read_file(_history_path).trim()
+        write_file(_history_path, prev + "\n" + entry + "\n")
+    } else {
+        write_file(_history_path, entry + "\n")
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// (6) growth_bus.jsonl 출력
+// ═══════════════════════════════════════════════════════════
+
+fn emit_growth_bus(state: SuperpositionState) {
+    let grade = if state.paths.len() > 0 {
+        state.paths[state.collapsed_idx].n6_grade
+    } else {
+        "WEAK"
+    }
+
+    if grade == "EXACT" || grade == "HARMONIC" {
+        let entry = "{\"type\":\"quantum_collapse\",\"phase\":\"6.0\"" + ",\"id\":\"VQ-" + state.expr + "\"" + ",\"value\":" + state.collapsed_result + ",\"grade\":\"" + grade + "\"" + ",\"confidence\":" + to_string(state.confidence) + ",\"domain\":\"void_quantum\"" + ",\"source\":\"void_quantum_repl\"" + ",\"n_lanes\":" + to_string(N_LANES) + ",\"timestamp\":\"" + date_today() + "\"}"
+
+        let prev = read_file(_bus_path).trim()
+        write_file(_bus_path, prev + "\n" + entry + "\n")
+        println("  [growth_bus] emitted: " + grade + " → " + state.collapsed_result)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// (7) 표시 함수
+// ═══════════════════════════════════════════════════════════
+
+fn display_paths(state: SuperpositionState) {
+    println("")
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║       VOID v2 QUANTUM SUPERPOSITION — n=" + to_string(N_LANES) + " lanes       ║")
+    println("╠══════════════════════════════════════════════════════════╣")
+    println("║  expr: " + state.expr)
+    println("╠══════════════════════════════════════════════════════════╣")
+
+    let mut i = 0
+    while i < state.paths.len() {
+        let p = state.paths[i]
+        let marker = if i == state.collapsed_idx { " ★ COLLAPSED" } else { "" }
+        let bar_len = to_int(p.amplitude * 30.0)
+        let mut bar = ""
+        let mut b = 0
+        while b < bar_len { bar = bar + "█"; b = b + 1 }
+
+        println("║  [" + to_string(p.lane) + "] " + lane_name(p.lane))
+        println("║      result   : " + p.result)
+        println("║      amplitude: " + to_string(p.amplitude) + "  " + bar)
+        println("║      phase    : " + to_string(p.phase))
+        println("║      n6_grade : " + p.n6_grade)
+        println("║      interfer : " + p.interference + marker)
+        println("║  ─────────────────────────────────────────────────────")
+        i = i + 1
+    }
+
+    println("╠══════════════════════════════════════════════════════════╣")
+    println("║  COLLAPSED → lane " + to_string(state.collapsed_idx) + " (" + lane_name(state.collapsed_idx) + ")")
+    println("║  result     : " + state.collapsed_result)
+    println("║  confidence : " + to_string(state.confidence))
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+}
+
+fn display_paths_compact(state: SuperpositionState) {
+    println("")
+    println("── VOID quantum paths for: " + state.expr + " ──")
+    let mut i = 0
+    while i < state.paths.len() {
+        let p = state.paths[i]
+        let marker = if i == state.collapsed_idx { " ★" } else { "" }
+        println("  [" + to_string(p.lane) + "] " + lane_name(p.lane) + " → " + p.result + "  amp=" + to_string(p.amplitude) + "  " + p.n6_grade + "  " + p.interference + marker)
+        i = i + 1
+    }
+    println("  collapsed: " + state.collapsed_result + " (conf=" + to_string(state.confidence) + ")")
+    println("")
+}
+
+fn display_history() {
+    let entries = load_history()
+    if entries.len() == 0 {
+        println("  (no quantum history)")
+        return
+    }
+    println("")
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║           VOID v2 QUANTUM HISTORY (entangled)          ║")
+    println("╠══════════════════════════════════════════════════════════╣")
+    let mut i = 0
+    while i < entries.len() {
+        println("║  " + entries[i])
+        i = i + 1
+    }
+    println("╠══════════════════════════════════════════════════════════╣")
+    println("║  total entries: " + to_string(entries.len()) + " / max: " + to_string(MAX_HISTORY))
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+}
+
+fn display_help() {
+    println("")
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║              VOID v2 QUANTUM REPL — HELP               ║")
+    println("╠══════════════════════════════════════════════════════════╣")
+    println("║                                                        ║")
+    println("║  COMMANDS:                                              ║")
+    println("║    exec  <expr>  — 양자 실행 (6 lanes superposition)   ║")
+    println("║    paths <expr>  — 중첩 경로 표시 (compact)            ║")
+    println("║    repl          — 대화형 양자 REPL                    ║")
+    println("║    history       — 양자 이력 (얽힘 포함)               ║")
+    println("║    help          — 이 도움말                           ║")
+    println("║                                                        ║")
+    println("║  QUANTUM MODEL (n=6):                                  ║")
+    println("║    1. 6 execution lanes (superposition)                ║")
+    println("║    2. Path interference (constructive/destructive)     ║")
+    println("║    3. Wavefunction collapse (Born rule, max amp)       ║")
+    println("║    4. n=6 resonance bonus (EXACT/HARMONIC boost)      ║")
+    println("║    5. Entangled history (similar exprs linked)         ║")
+    println("║    6. Growth bus emission (EXACT/HARMONIC → bus)       ║")
+    println("║                                                        ║")
+    println("║  LANES:                                                ║")
+    println("║    [0] arithmetic   — direct evaluation                ║")
+    println("║    [1] algebraic    — n6 basis decomposition           ║")
+    println("║    [2] topological  — Euler characteristic map         ║")
+    println("║    [3] harmonic     — harmonic series correction       ║")
+    println("║    [4] stochastic   — probabilistic dispersion         ║")
+    println("║    [5] n6_resonance — n=6 resonance lock               ║")
+    println("║                                                        ║")
+    println("║  INTERFERENCE:                                         ║")
+    println("║    CONSTRUCTIVE  — similar results amplify (boost)     ║")
+    println("║    DESTRUCTIVE   — divergent results cancel (dampen)   ║")
+    println("║    n6 EXACT      — 1.618x amplitude boost              ║")
+    println("║                                                        ║")
+    println("║  VERSION: " + VERSION + "  |  n_lanes=" + to_string(N_LANES) + "  |  collapse_thr=" + to_string(COLLAPSE_THR) + "  ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+}
+
+// ═══════════════════════════════════════════════════════════
+// (8) REPL 모드 — 대화형 양자 실행
+// ═══════════════════════════════════════════════════════════
+
+fn run_repl() {
+    println("")
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║            VOID v2 QUANTUM REPL — n=6 lanes            ║")
+    println("║     type expression, 'paths <expr>', or 'quit'         ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+
+    let mut running = true
+    let mut round = 0
+    while running {
+        let input = exec("read -r -p 'quantum> ' line && echo $line").trim()
+
+        if input == "quit" || input == "exit" || input == "q" {
+            println("  wavefunction decoherenced. goodbye.")
+            running = false
+        } else if input == "history" || input == "h" {
+            display_history()
+        } else if input == "help" || input == "?" {
+            display_help()
+        } else if input.starts_with("paths ") {
+            let expr = input.substr(6, input.len()).trim()
+            if expr != "" {
+                let state = quantum_execute(expr)
+                display_paths_compact(state)
+            }
+        } else if input != "" {
+            let expr = input
+            let state = quantum_execute(expr)
+            display_paths(state)
+
+            // 얽힘 탐색 및 이력 저장
+            let history = load_history()
+            let entangled = find_entanglement(expr, history)
+            if entangled != "none" {
+                println("  ⟨entangled⟩ with previous: " + entangled)
+            }
+            save_history_entry(state, entangled)
+            emit_growth_bus(state)
+
+            round = round + 1
+            if round > 0 && round % 6 == 0 {
+                println("  [n=6 cycle] " + to_string(round) + " quantum collapses completed")
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// (9) 배치 실행 — 다중 표현식
+// ═══════════════════════════════════════════════════════════
+
+fn batch_execute(expressions: list) {
+    println("")
+    println("── VOID v2 BATCH QUANTUM EXECUTION ──")
+    println("   expressions: " + to_string(expressions.len()))
+    println("")
+
+    let history = load_history()
+    let mut results = []
+    let mut exact_count = 0
+    let mut i = 0
+
+    while i < expressions.len() {
+        let expr = expressions[i].trim()
+        if expr != "" {
+            let state = quantum_execute(expr)
+            let grade = if state.paths.len() > 0 {
+                state.paths[state.collapsed_idx].n6_grade
+            } else {
+                "WEAK"
+            }
+            println("  [" + to_string(i) + "] " + expr + " → " + state.collapsed_result + " (" + grade + ", conf=" + to_string(state.confidence) + ")")
+
+            if grade == "EXACT" { exact_count = exact_count + 1 }
+
+            let entangled = find_entanglement(expr, history)
+            save_history_entry(state, entangled)
+            emit_growth_bus(state)
+            results = results + [state.collapsed_result]
+        }
+        i = i + 1
+    }
+
+    println("")
+    println("  total: " + to_string(expressions.len()) + "  EXACT: " + to_string(exact_count) + "  ratio: " + to_string(to_float(exact_count) / max_f(to_float(expressions.len()), 1.0)))
+    println("")
+}
+
+// ═══════════════════════════════════════════════════════════
+// (10) n=6 중첩 탐색 — 6 상수 자동 양자 실행
+// ═══════════════════════════════════════════════════════════
+
+fn n6_superposition_scan() {
+    println("")
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║         n=6 SUPERPOSITION SCAN — auto 6 constants      ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+    println("")
+
+    let mut i = 0
+    while i < N6.len() {
+        let expr = to_string(N6[i])
+        let state = quantum_execute(expr)
+        let collapsed = state.paths[state.collapsed_idx]
+        println("  N6[" + to_string(i) + "] = " + to_string(N6[i]) + " (" + N6_NAMES[i] + ")")
+        println("    collapsed → " + state.collapsed_result + "  grade=" + collapsed.n6_grade + "  amp=" + to_string(collapsed.amplitude) + "  interfer=" + collapsed.interference)
+
+        // 성장 기록
+        emit_growth_bus(state)
+        i = i + 1
+    }
+    println("")
+    println("  scan complete: " + to_string(N6.len()) + " constants processed")
+    println("")
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN — CLI 진입점
+// ═══════════════════════════════════════════════════════════
+
+fn main() {
+    let argv = args()
+
+    if argv.len() < 2 {
+        display_help()
+        return
+    }
+
+    let cmd = if argv.len() >= 3 { argv[2] } else { "help" }
+
+    if cmd == "exec" {
+        if argv.len() < 3 {
+            println("  usage: hexa void_quantum.hexa exec <expression>")
+            return
+        }
+        // 나머지 인자를 공백으로 연결
+        let mut expr = argv[2]
+        let mut k = 3
+        while k < argv.len() {
+            expr = expr + " " + argv[k]
+            k = k + 1
+        }
+
+        let state = quantum_execute(expr)
+        display_paths(state)
+
+        let history = load_history()
+        let entangled = find_entanglement(expr, history)
+        if entangled != "none" {
+            println("  ⟨entangled⟩ with previous: " + entangled)
+        }
+        save_history_entry(state, entangled)
+        emit_growth_bus(state)
+
+    } else if cmd == "paths" {
+        if argv.len() < 3 {
+            println("  usage: hexa void_quantum.hexa paths <expression>")
+            return
+        }
+        let mut expr = argv[2]
+        let mut k = 3
+        while k < argv.len() {
+            expr = expr + " " + argv[k]
+            k = k + 1
+        }
+
+        let state = quantum_execute(expr)
+        display_paths_compact(state)
+
+    } else if cmd == "repl" {
+        run_repl()
+
+    } else if cmd == "history" {
+        display_history()
+
+    } else if cmd == "scan" {
+        n6_superposition_scan()
+
+    } else if cmd == "batch" {
+        // batch: 나머지 인자를 각각 표현식으로
+        let mut exprs = []
+        let mut k = 2
+        while k < argv.len() {
+            exprs = exprs + [argv[k]]
+            k = k + 1
+        }
+        if exprs.len() == 0 {
+            println("  usage: hexa void_quantum.hexa batch <e1> <e2> ...")
+            return
+        }
+        batch_execute(exprs)
+
+    } else if cmd == "help" || cmd == "--help" || cmd == "-h" {
+        display_help()
+
+    } else {
+        println("  unknown command: " + cmd)
+        display_help()
+    }
+}
+
+main()

@@ -1,0 +1,594 @@
+// ⛔ CORE — L0 불변식 (양자 아키텍처 설계 엔진. 수정 전 유저 승인 필수)
+// mk2_hexa/native/arch_quantum.hexa — N6-ARCHITECTURE v2 양자 설계 엔진
+//
+// Quantum architecture: superposition -> evolution -> σφ=nτ -> annealing -> collapse
+// 6 domains: energy, transport, biotech, materials, computing, communication
+// Pipeline: A1 Init | A2 Evolve | A3 Validate | A4 Anneal | A5 Collapse | A6 Report
+//
+// Usage:
+//   hexa arch_quantum.hexa design <domain>    quantum superposition designs
+//   hexa arch_quantum.hexa optimize           collapse all 6 domains
+//   hexa arch_quantum.hexa status | help
+
+// ─── n=6 CONSTANTS LOADER ───
+
+fn load_n6_consts() -> list {
+    let home = exec("printenv HOME")
+    let path = home + "/Dev/nexus/shared/n6_constants.jsonl"
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return [[], []] }
+    let lines = raw.split("\n")
+    let mut names = []
+    let mut values = []
+    for line in lines {
+        let t = line.trim()
+        let mut _skip = false
+        if t == "" { _skip = true }
+        if t != "" {
+            let mut name = ""
+            let mut value = 0.0
+            if t.contains("\"name\":\"") {
+                let p = t.split("\"name\":\"")
+                if p.len() >= 2 { name = p[1].split("\"")[0] }
+            }
+            if t.contains("\"value\":") {
+                let p = t.split("\"value\":")
+                if p.len() >= 2 { value = to_float(p[1].split(",")[0].split("}")[0].trim()) }
+            }
+            if name != "" { names = names + [name] ; values = values + [value] }
+        }
+    }
+    [names, values]
+}
+
+let _n6 = load_n6_consts()
+let _n6_names: list = _n6[0]
+let _n6_vals: list = _n6[1]
+let _n6_count: i64 = len(_n6_vals)
+
+// ─── MATH UTILITIES ───
+
+fn sf(s: string) -> f64 { let mut v = 0.0 ; try { v = to_float(s) } catch e {} ; return v }
+fn abs_f(x: f64) -> f64 { if x < 0.0 { return 0.0 - x } ; return x }
+fn max_f(a: f64, b: f64) -> f64 { if a > b { return a } ; return b }
+fn min_f(a: f64, b: f64) -> f64 { if a < b { return a } ; return b }
+fn clamp01(x: f64) -> f64 { if x < 0.0 { return 0.0 } ; if x > 1.0 { return 1.0 } ; return x }
+
+fn sqrt_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut g = if x > 2.0 { x / 2.0 } else { 1.0 }
+    let mut i: i64 = 0
+    while i < 15 { g = (g + x / g) / 2.0 ; i = i + 1 }
+    return g
+}
+
+fn exp_f(x: f64) -> f64 {
+    if x > 20.0 { return 999999999.0 }
+    if x < 0.0 - 20.0 { return 0.0 }
+    let mut s = 1.0
+    let mut t = 1.0
+    let mut k: i64 = 1
+    while k <= 30 { t = t * x / to_float(k) ; s = s + t ; k = k + 1 }
+    return s
+}
+
+fn cos_f(x: f64) -> f64 {
+    let mut s = 1.0
+    let mut t = 1.0
+    let mut k: i64 = 1
+    while k <= 12 { t = 0.0 - t * x * x / to_float(2 * k * (2 * k - 1)) ; s = s + t ; k = k + 1 }
+    return s
+}
+
+fn sin_f(x: f64) -> f64 {
+    let mut s = x
+    let mut t = x
+    let mut k: i64 = 1
+    while k <= 12 { t = 0.0 - t * x * x / to_float((2 * k + 1) * 2 * k) ; s = s + t ; k = k + 1 }
+    return s
+}
+
+fn trunc4(x: f64) -> string {
+    let s = to_string(x)
+    let p = s.split(".")
+    if p.len() < 2 { return s + ".0000" }
+    let d = p[1]
+    if d.len() >= 4 { return p[0] + "." + d.split("")[0] + d.split("")[1] + d.split("")[2] + d.split("")[3] }
+    return s
+}
+
+fn pad(s: string, w: i64) -> string {
+    let mut o = s
+    while o.len() < w { o = o + " " }
+    return o
+}
+
+fn ts_now() -> string {
+    let mut t = ""
+    try { t = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim() } catch e { t = "unknown" }
+    return t
+}
+
+// ─── PRNG ───
+
+fn _prng_seed() -> f64 {
+    let mut ns = "54321"
+    try { ns = exec("date +%N").trim() } catch e {}
+    let v = sf(ns)
+    if v < 1.0 { return 54321.0 }
+    return v
+}
+let mut _prng: f64 = _prng_seed()
+
+fn rand_f() -> f64 {
+    _prng = _prng * 1103515245.0 + 12345.0
+    let v = _prng / 1000000.0
+    let frac = abs_f(v - to_float(to_int(v)))
+    if frac < 0.0001 { _prng = _prng + 7.0 ; return 0.5 }
+    return frac
+}
+
+fn rand_range(lo: f64, hi: f64) -> f64 {
+    return lo + rand_f() * (hi - lo)
+}
+
+fn rand_int(lo: i64, hi: i64) -> i64 {
+    return to_int(to_float(lo) + rand_f() * to_float(hi - lo))
+}
+
+// ─── n=6 INVARIANTS (σφ=nτ) ───
+
+comptime const N6_N      = 6
+comptime const N6_SIGMA  = 12
+comptime const N6_PHI    = 2
+comptime const N6_TAU    = 4
+comptime const PI_APPROX = 3.14159265
+
+// σφ = nτ  =>  12 * 2 = 6 * 4 = 24
+comptime const SIGMA_PHI = 24
+comptime const N_TAU     = 24
+
+fn n6_dist1(val: f64, c: f64) -> f64 { return abs_f(val - c) / max_f(abs_f(c), 1.0) }
+
+fn n6_distance(val: f64) -> f64 {
+    if val != val || abs_f(val) > 999999999.0 { return 1.0 }
+    let mut d = 1.0
+    let mut i: i64 = 0
+    while i < _n6_count { d = min_f(d, n6_dist1(val, to_float(_n6_vals[i]))) ; i = i + 1 }
+    return min_f(d, 1.0)
+}
+
+fn match_name(val: f64) -> string {
+    let mut i: i64 = 0
+    while i < _n6_count {
+        let cv = to_float(_n6_vals[i])
+        let th = if abs_f(cv) >= 100.0 { 0.01 } else { if abs_f(cv) >= 1.0 { 0.0001 } else { 0.005 } }
+        if abs_f(val - cv) < th { return to_string(_n6_names[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+fn match_grade(val: f64) -> string {
+    if match_name(val) != "" { return "EXACT" }
+    let d = n6_distance(val)
+    if d < 0.01 { return "NEAR" }
+    if d < 0.05 { return "CLOSE" }
+    return "MISS"
+}
+
+// σφ=nτ quantum validation: design fitness must preserve the invariant
+fn sigma_phi_validate(sigma: f64, phi: f64, n: f64, tau: f64) -> bool {
+    let lhs = sigma * phi
+    let rhs = n * tau
+    let diff = abs_f(lhs - rhs)
+    return diff < 0.001
+}
+
+// ─── 6 INDUSTRIAL DOMAINS ───
+
+let DOMAINS: list = ["energy", "transport", "biotech", "materials", "computing", "communication"]
+
+let ARCH_LAYERS: list = ["substrate", "protocol", "processing", "interface", "control", "emergence"]
+
+fn domain_params(domain: string) -> list {
+    if domain == "energy"        { return ["grid_topology", "storage_density", "conversion_eta", "distribution_loss", "peak_capacity", "resilience_index"] }
+    if domain == "transport"     { return ["network_graph", "throughput_cap", "latency_floor", "energy_per_km", "node_density", "fault_tolerance"] }
+    if domain == "biotech"       { return ["pathway_depth", "yield_factor", "specificity", "toxicity_inv", "scale_factor", "mutation_rate"] }
+    if domain == "materials"     { return ["tensile_strength", "conductivity", "density_ratio", "thermal_limit", "fatigue_cycles", "cost_index"] }
+    if domain == "computing"     { return ["flops_density", "mem_bandwidth", "power_envelope", "parallelism", "error_rate_inv", "interconnect_bw"] }
+    if domain == "communication" { return ["channel_capacity", "snr_floor", "latency_ns", "spectral_eff", "coverage_radius", "security_bits"] }
+    return ["p1", "p2", "p3", "p4", "p5", "p6"]
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── QUANTUM STATE: SUPERPOSITION OF ARCHITECTURES ───
+// Design: [domain, layer_0..5, amplitude, phase, fitness]
+// ═══════════════════════════════════════════════════════════
+
+fn make_design(domain: string, layer_vals: list, amp: f64, phase: f64) -> list {
+    let mut d = [domain]
+    let mut i: i64 = 0
+    while i < 6 {
+        if i < layer_vals.len() { d = d + [layer_vals[i]] }
+        if i >= layer_vals.len() { d = d + [0.0] }
+        i = i + 1
+    }
+    d = d + [amp, phase, 0.0]
+    return d
+}
+
+fn design_domain(d: list) -> string { return to_string(d[0]) }
+fn design_layer(d: list, i: i64) -> f64 { return to_float(d[1 + i]) }
+fn design_amp(d: list) -> f64 { return to_float(d[7]) }
+fn design_phase(d: list) -> f64 { return to_float(d[8]) }
+fn design_fitness(d: list) -> f64 { return to_float(d[9]) }
+
+fn set_design_field(d: list, idx: i64, val: f64) -> list {
+    let mut out = []
+    let mut i: i64 = 0
+    while i < d.len() {
+        if i == idx { out = out + [val] }
+        if i != idx { out = out + [d[i]] }
+        i = i + 1
+    }
+    return out
+}
+fn set_design_amp(d: list, a: f64) -> list { return set_design_field(d, 7, a) }
+fn set_design_phase(d: list, p: f64) -> list { return set_design_field(d, 8, p) }
+fn set_design_fitness(d: list, f: f64) -> list { return set_design_field(d, 9, f) }
+
+// ─── A1: SUPERPOSITION INITIALIZATION ───
+
+fn init_superposition(domain: string) -> list {
+    println("  [A1] Superposition Init: " + domain)
+    let mut designs = []
+    let mut c: i64 = 0
+    while c < 6 {
+        let mut layers = []
+        let mut j: i64 = 0
+        while j < 6 { layers = layers + [rand_range(0.1, 10.0) + to_float(N6_N) * rand_f() * 0.5] ; j = j + 1 }
+        designs = designs + [make_design(domain, layers, 1.0 / sqrt_f(6.0), 2.0 * PI_APPROX * to_float(c) / 6.0)]
+        c = c + 1
+    }
+    println("       6 candidates in superposition |arch_" + domain + ">")
+    return designs
+}
+
+// ─── A2: QUANTUM EVOLUTION ───
+
+fn quantum_evolve(designs: list, steps: i64) -> list {
+    println("  [A2] Quantum Evolution: " + to_string(steps) + " rotation steps")
+    let mut ds = designs
+    let mut step: i64 = 0
+    while step < steps {
+        let mut new_ds = []
+        let mut i: i64 = 0
+        while i < ds.len() {
+            let d = ds[i]
+            let delta = 2.0 * PI_APPROX / to_float(N6_N) * to_float(step + 1) / to_float(steps)
+            let new_phase = design_phase(d) + delta
+            let new_amp = clamp01(design_amp(d) + cos_f(delta) * 0.01 * rand_f())
+            let mut new_d = set_design_amp(set_design_phase(d, new_phase), new_amp)
+            let mut j: i64 = 0
+            let mut evolved = [design_domain(new_d)]
+            while j < 6 {
+                let lv = design_layer(new_d, j)
+                let nudge = sin_f(new_phase + to_float(j)) * 0.05 * to_float(N6_N)
+                evolved = evolved + [lv + nudge]
+                j = j + 1
+            }
+            evolved = evolved + [new_amp, new_phase, design_fitness(new_d)]
+            new_ds = new_ds + [evolved]
+            i = i + 1
+        }
+        ds = new_ds
+        step = step + 1
+    }
+    println("       Evolution complete: phases rotated through n=6 operator")
+    return ds
+}
+
+// ─── FITNESS EVALUATOR (shared by A3 + A4) ───
+
+fn eval_fitness(d: list) -> f64 {
+    let mut sigma = 0.0
+    let mut j: i64 = 0
+    while j < 6 { sigma = sigma + abs_f(design_layer(d, j)) ; j = j + 1 }
+    let phi = design_amp(d) * to_float(N6_N)
+    let tau = abs_f(design_phase(d)) / PI_APPROX
+    let rhs = to_float(N6_N) * tau
+    let ratio = if rhs > 0.001 { sigma * phi / rhs } else { 0.0 }
+    let base = 1.0 - min_f(abs_f(ratio - 1.0), 1.0)
+    let mut n6b = 0.0
+    j = 0
+    while j < 6 {
+        let dist = n6_distance(design_layer(d, j))
+        if dist < 0.05 { n6b = n6b + (1.0 - dist) * 0.1 }
+        j = j + 1
+    }
+    return clamp01(base + n6b)
+}
+
+// ─── A3: σφ=nτ QUANTUM VALIDATION ───
+
+fn validate_sigma_phi(designs: list) -> list {
+    println("  [A3] sigma-phi=n-tau Validation (n=6 invariants)")
+    let mut validated = []
+    let mut pass_count: i64 = 0
+    let mut i: i64 = 0
+    while i < designs.len() {
+        let d = designs[i]
+        let total_fitness = eval_fitness(d)
+        let mut sigma = 0.0
+        let mut j: i64 = 0
+        while j < 6 { sigma = sigma + abs_f(design_layer(d, j)) ; j = j + 1 }
+        let phi = design_amp(d) * to_float(N6_N)
+        let tau = abs_f(design_phase(d)) / PI_APPROX
+        let rhs = to_float(N6_N) * tau
+        let valid = sigma_phi_validate(sigma, phi, to_float(N6_N), tau)
+        if valid { pass_count = pass_count + 1 }
+        let grade = if total_fitness > 0.8 { "STRONG" } else { if total_fitness > 0.5 { "VIABLE" } else { "WEAK" } }
+        println("       [" + to_string(i) + "] sigma=" + trunc4(sigma) + " n*tau=" + trunc4(rhs) + " fit=" + trunc4(total_fitness) + " " + grade)
+        validated = validated + [set_design_fitness(d, total_fitness)]
+        i = i + 1
+    }
+    println("       sigma-phi pass: " + to_string(pass_count) + "/" + to_string(designs.len()))
+    return validated
+}
+
+// ─── A4: QUANTUM ANNEALING ───
+
+fn quantum_anneal(designs: list, iterations: i64) -> list {
+    println("  [A4] Quantum Annealing: " + to_string(iterations) + " cooling steps")
+    let mut ds = designs
+    let t_init = 6.0    // n=6 initial temperature
+    let t_min  = 0.006  // cooling floor
+
+    let mut iter: i64 = 0
+    while iter < iterations {
+        let progress = to_float(iter) / to_float(iterations)
+        let t = max_f(t_init * exp_f(0.0 - 6.0 * progress), t_min)
+        let mut new_ds = []
+        let mut i: i64 = 0
+        while i < ds.len() {
+            let d = ds[i]
+            let old_fitness = design_fitness(d)
+            let layer_idx = rand_int(0, 6)
+            let new_val = abs_f(design_layer(d, layer_idx) + (rand_f() - 0.5) * t * 2.0)
+            let mut perturbed = [design_domain(d)]
+            let mut j: i64 = 0
+            while j < 6 {
+                if j == layer_idx { perturbed = perturbed + [new_val] }
+                if j != layer_idx { perturbed = perturbed + [design_layer(d, j)] }
+                j = j + 1
+            }
+            perturbed = perturbed + [design_amp(d), design_phase(d), 0.0]
+            let new_fitness = eval_fitness(perturbed)
+            let delta = new_fitness - old_fitness
+            let mut accept = delta > 0.0
+            if !accept { if rand_f() < exp_f(delta / max_f(t, 0.0001)) { accept = true } }
+            if accept { new_ds = new_ds + [set_design_fitness(perturbed, new_fitness)] }
+            if !accept { new_ds = new_ds + [d] }
+            i = i + 1
+        }
+        ds = new_ds
+        iter = iter + 1
+    }
+    // Report final temperatures
+    println("       Annealing complete: T_init=" + trunc4(t_init) + " -> T_final=" + trunc4(t_min))
+    return ds
+}
+
+// ─── A5: MEASUREMENT / COLLAPSE ───
+
+fn measure_collapse(designs: list) -> list {
+    println("  [A5] Measurement: Collapsing superposition")
+    if designs.len() == 0 {
+        println("       ERROR: no designs to measure")
+        return []
+    }
+    // Find highest fitness design
+    let mut best_idx: i64 = 0
+    let mut best_fit: f64 = 0.0
+    let mut i: i64 = 0
+    while i < designs.len() {
+        let f = design_fitness(designs[i])
+        if f > best_fit { best_fit = f ; best_idx = i }
+        i = i + 1
+    }
+    let winner = designs[best_idx]
+    let domain = design_domain(winner)
+    let params = domain_params(domain)
+
+    println("       COLLAPSED: " + domain + "  fitness=" + trunc4(best_fit))
+    let mut j: i64 = 0
+    while j < 6 {
+        let lv = design_layer(winner, j)
+        let grade = match_grade(lv)
+        let n6name = match_name(lv)
+        let label = if j < params.len() { to_string(params[j]) } else { "layer_" + to_string(j) }
+        let n6tag = if n6name != "" { " [" + n6name + "]" } else { "" }
+        println("         " + pad(label, 20) + "= " + pad(trunc4(lv), 12) + grade + n6tag)
+        j = j + 1
+    }
+    println("         amplitude = " + trunc4(design_amp(winner)))
+    // Rejected
+    i = 0
+    while i < designs.len() {
+        if i != best_idx {
+            println("         rejected[" + to_string(i) + "] fitness=" + trunc4(design_fitness(designs[i])))
+        }
+        i = i + 1
+    }
+
+    return [winner]
+}
+
+// ─── A6: REPORT & GROWTH BUS ───
+
+fn emit_growth_bus(domain: string, fitness: f64, grade: string) -> bool {
+    let home = exec("printenv HOME").trim()
+    let bus = home + "/Dev/nexus/shared/growth_bus.jsonl"
+    let ts = ts_now()
+    let line = "{\"ts\":\"" + ts + "\",\"source\":\"arch_quantum\",\"event\":\"arch_collapse\",\"domain\":\"" + domain + "\",\"type\":\"architecture\",\"phase\":\"A5\",\"id\":\"aq_" + domain + "\",\"value\":" + trunc4(fitness) + ",\"grade\":\"" + grade + "\",\"timestamp\":\"" + ts + "\"}"
+    try { exec("echo '" + line + "' >> " + bus) ; return true } catch e { return false }
+}
+
+fn generate_report(collapsed: list, domain: string) -> string {
+    if collapsed.len() == 0 { return "NO_RESULT" }
+    let d = collapsed[0]
+    let fitness = design_fitness(d)
+    let grade = if fitness > 0.8 { "OPTIMAL" } else { if fitness > 0.5 { "VIABLE" } else { "SUBOPTIMAL" } }
+
+    println("")
+    println("  N6-ARCHITECTURE v2 — Quantum Design Report")
+    println("  ──────────────────────────────────────────")
+    println("  Domain:     " + domain)
+    println("  Fitness:    " + trunc4(fitness))
+    println("  Grade:      " + grade)
+    println("  Invariant:  sigma*phi = n*tau (n=6)")
+    println("  Layers:     6 (substrate..emergence)")
+    println("  Candidates: 6 -> 1 (collapsed)")
+
+    // Emit to growth_bus
+    let bus_ok = emit_growth_bus(domain, fitness, grade)
+    if bus_ok { println("  [BUS] growth_bus.jsonl <- arch_collapse/" + domain) }
+    if !bus_ok { println("  [BUS] WARN: failed to write growth_bus.jsonl") }
+
+    return grade
+}
+
+// ─── FULL PIPELINE ───
+
+fn run_design_pipeline(domain: string) -> string {
+    println("")
+    println("  QUANTUM ARCHITECTURE ENGINE — " + domain)
+    println("  σφ = nτ  |  n = 6  |  6 layers  |  6 candidates")
+    println("")
+
+    // A1: Superposition
+    let designs = init_superposition(domain)
+
+    // A2: Quantum Evolution (6 steps, n=6)
+    let evolved = quantum_evolve(designs, 6)
+
+    // A3: sigma-phi validation
+    let validated = validate_sigma_phi(evolved)
+
+    // A4: Quantum Annealing (36 iterations = 6*6)
+    let annealed = quantum_anneal(validated, 36)
+
+    // A5: Measurement Collapse
+    let collapsed = measure_collapse(annealed)
+
+    // A6: Report
+    let grade = generate_report(collapsed, domain)
+    return grade
+}
+
+// ─── OPTIMIZE ALL DOMAINS ───
+
+fn run_optimize_all() -> bool {
+    println("")
+    println("  QUANTUM ARCHITECTURE OPTIMIZER — ALL 6 DOMAINS")
+    println("  σφ = nτ  |  n = 6  |  Quantum Annealing + Collapse")
+    println("")
+    let mut results = []
+    let mut i: i64 = 0
+    while i < DOMAINS.len() {
+        let domain = to_string(DOMAINS[i])
+        let grade = run_design_pipeline(domain)
+        results = results + [[domain, grade]]
+        i = i + 1
+    }
+
+    // Summary table
+    println("")
+    println("  OPTIMIZATION SUMMARY — 6 DOMAINS")
+    println("  ─────────────────────────────────")
+    i = 0
+    let mut optimal_count: i64 = 0
+    while i < results.len() {
+        let r = results[i]
+        let dom = to_string(r[0])
+        let grd = to_string(r[1])
+        if grd == "OPTIMAL" { optimal_count = optimal_count + 1 }
+        println("    " + pad(dom, 16) + grd)
+        i = i + 1
+    }
+    println("  OPTIMAL: " + to_string(optimal_count) + "/6 domains  |  sigma*phi = n*tau held")
+
+    return optimal_count >= 4
+}
+
+// ─── STATUS VIEW ───
+
+fn show_status() {
+    println("")
+    println("  QUANTUM ARCHITECTURE STATUS")
+    println("  ───────────────────────────")
+    println("  Domains (" + to_string(DOMAINS.len()) + "):")
+    let mut i: i64 = 0
+    while i < DOMAINS.len() {
+        let dom = to_string(DOMAINS[i])
+        println("    [" + to_string(i) + "] " + pad(dom, 16) + " layers=6  params=6")
+        i = i + 1
+    }
+    println("  Layers: " + to_string(ARCH_LAYERS.len()) + " (substrate..emergence)")
+    println("  Invariant: " + to_string(N6_SIGMA) + "*" + to_string(N6_PHI) + " = " + to_string(N6_N) + "*" + to_string(N6_TAU) + " = " + to_string(SIGMA_PHI))
+    println("  n6 constants: " + to_string(_n6_count) + "  PRNG: active")
+}
+
+// ─── HELP ───
+
+fn show_help() {
+    println("")
+    println("  arch_quantum.hexa — N6-ARCHITECTURE v2 양자 설계 엔진")
+    println("  ──────────────────────────────────────────────────────")
+    println("  USAGE:")
+    println("    hexa arch_quantum.hexa design <domain>   quantum superposition designs")
+    println("    hexa arch_quantum.hexa optimize           collapse all 6 domains")
+    println("    hexa arch_quantum.hexa status             superposition state")
+    println("    hexa arch_quantum.hexa help               this message")
+    println("")
+    println("  DOMAINS: energy, transport, biotech, materials, computing, communication")
+    println("  PIPELINE: A1 Init -> A2 Evolve -> A3 sigma-phi -> A4 Anneal -> A5 Collapse -> A6 Report")
+    println("  LAYERS:   substrate, protocol, processing, interface, control, emergence")
+    println("  INVARIANT: sigma*phi = n*tau  =>  12*2 = 6*4 = 24")
+}
+
+// ─── CLI ENTRY POINT ───
+
+fn main() {
+    let argv = args()
+    let mut cmd = if argv.len() >= 3 { to_string(argv[2]) } else { "" }
+    let mut target = if argv.len() >= 3 { to_string(argv[2]) } else { "" }
+
+    if cmd == "help" || cmd == "--help" || cmd == "-h" || cmd == "" { show_help() ; return }
+    if cmd == "status" { show_status() ; return }
+
+    if cmd == "design" {
+        if target == "" { println("  ERROR: specify domain — energy, transport, biotech, materials, computing, communication") ; return }
+        let mut valid = false
+        let mut i: i64 = 0
+        while i < DOMAINS.len() { if to_string(DOMAINS[i]) == target { valid = true } ; i = i + 1 }
+        if !valid { println("  ERROR: unknown domain '" + target + "'") ; return }
+        let grade = run_design_pipeline(target)
+        if grade == "OPTIMAL" { println("\n  Result: OPTIMAL architecture for " + target) }
+        if grade == "VIABLE" { println("\n  Result: VIABLE (consider re-annealing)") }
+        if grade != "OPTIMAL" && grade != "VIABLE" { println("\n  Result: SUBOPTIMAL — increase iterations") }
+        return
+    }
+
+    if cmd == "optimize" {
+        let ok = run_optimize_all()
+        if ok { println("\n  OPTIMIZATION COMPLETE: majority at OPTIMAL") }
+        if !ok { println("\n  OPTIMIZATION PARTIAL: re-run for convergence") }
+        return
+    }
+
+    println("  ERROR: unknown command '" + cmd + "' — try: hexa arch_quantum.hexa help")
+}
+
+main()
