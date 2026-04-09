@@ -2899,6 +2899,222 @@ if mode == "crossref" || mode == "교차검증" {
     tensor_blowup_crossref()
 }
 
+// ─── wave (파동) 빈공간 탐색 ───
+fn wave_gap_scan() {
+    println("╔══════════════════════════════════════════════╗")
+    println("║  WAVE GAP SCAN — 파동 빈공간 탐색           ║")
+    println("╚══════════════════════════════════════════════╝")
+    println("")
+
+    // 1) discovery_log.jsonl tail -5000 → 도메인별 발견 수 집계
+    let mut raw_disc = ""
+    try { raw_disc = exec("tail -5000 " + discovery_log) } catch err {
+        println("  [오류] discovery_log 읽기 실패: " + err.to_string())
+        return
+    }
+    let disc_lines = raw_disc.trim().split("\n")
+
+    // 도메인 카운트 (배열 기반 — 하드코딩 아닌 동적 수집)
+    let mut dom_names = []
+    let mut dom_counts = []
+    let mut dom_exact = []
+
+    let mut di = 0
+    while di < len(disc_lines) {
+        let line = disc_lines[di].trim()
+        if len(line) > 0 {
+            // "domain":"xxx" 파싱
+            let mut dname = ""
+            if line.contains("\"domain\":\"") {
+                let after = line.split("\"domain\":\"")
+                if len(after) >= 2 {
+                    let rest = after[1].split("\"")
+                    if len(rest) >= 1 { dname = rest[0] }
+                }
+            }
+            // "sector":"xxx" fallback
+            if len(dname) == 0 && line.contains("\"sector\":\"") {
+                let after2 = line.split("\"sector\":\"")
+                if len(after2) >= 2 {
+                    let rest2 = after2[1].split("\"")
+                    if len(rest2) >= 1 { dname = rest2[0] }
+                }
+            }
+            if len(dname) > 0 {
+                let is_exact = line.contains("\"EXACT\"")
+                // 기존 배열에서 찾기
+                let mut found = false
+                let mut fi = 0
+                while fi < len(dom_names) {
+                    if dom_names[fi] == dname {
+                        dom_counts[fi] = dom_counts[fi] + 1
+                        if is_exact { dom_exact[fi] = dom_exact[fi] + 1 }
+                        found = true
+                    }
+                    fi = fi + 1
+                }
+                if !found {
+                    dom_names.push(dname)
+                    dom_counts.push(1)
+                    if is_exact { dom_exact.push(1) } else { dom_exact.push(0) }
+                }
+            }
+        }
+        di = di + 1
+    }
+
+    let total_domains = len(dom_names)
+    println("  스캔 도메인 수: " + to_string(total_domains))
+    if total_domains == 0 {
+        println("  [경고] 발견 기록 없음 — discovery_log 확인 필요")
+        return
+    }
+
+    // 2) growth_bus.jsonl tail -100 → 최근 활성 도메인
+    let mut raw_bus = ""
+    try { raw_bus = exec("tail -100 " + growth_bus) } catch err {}
+    let bus_lines = raw_bus.trim().split("\n")
+
+    let mut active_doms = []
+    let mut bi = 0
+    while bi < len(bus_lines) {
+        let bline = bus_lines[bi].trim()
+        if len(bline) > 0 && bline.contains("\"domain\":\"") {
+            let bafter = bline.split("\"domain\":\"")
+            if len(bafter) >= 2 {
+                let brest = bafter[1].split("\"")
+                if len(brest) >= 1 {
+                    let bdom = brest[0]
+                    let mut already = false
+                    let mut ai = 0
+                    while ai < len(active_doms) {
+                        if active_doms[ai] == bdom { already = true }
+                        ai = ai + 1
+                    }
+                    if !already { active_doms.push(bdom) }
+                }
+            }
+        }
+        bi = bi + 1
+    }
+    println("  최근 활성 도메인: " + to_string(len(active_doms)) + "개")
+    println("")
+
+    // 3) 빈공간 판별 — 상위 대비 하위 20%
+    // 최대 발견 수 산출
+    let mut max_count = 0
+    let mut mi = 0
+    while mi < len(dom_counts) {
+        if dom_counts[mi] > max_count { max_count = dom_counts[mi] }
+        mi = mi + 1
+    }
+    let threshold = max_count / 5  // 상위 대비 20%
+
+    let mut gap_names = []
+    let mut gap_counts = []
+    let mut gap_exact = []
+    let mut gi = 0
+    while gi < len(dom_names) {
+        if dom_counts[gi] <= threshold {
+            gap_names.push(dom_names[gi])
+            gap_counts.push(dom_counts[gi])
+            gap_exact.push(dom_exact[gi])
+        }
+        gi = gi + 1
+    }
+
+    println("  빈공간 임계값: " + to_string(threshold) + " (최대 " + to_string(max_count) + "의 20%)")
+    println("  빈공간 도메인: " + to_string(len(gap_names)) + "개")
+    println("")
+
+    // 4) 교차 빈공간 점수 계산 — 두 빈공간이 모두 비어있으면 우선순위 UP
+    println("  ┌──────────────────────────────────────────────────────────────┐")
+    println("  │  교차 빈공간 우선순위 (둘 다 비어있으면 ★ UP)              │")
+    println("  ├──────────────────────────────────────────────────────────────┤")
+
+    let mut cross_d1 = []
+    let mut cross_d2 = []
+    let mut cross_score = []
+
+    let mut ci = 0
+    while ci < len(gap_names) {
+        let mut cj = ci + 1
+        while cj < len(gap_names) {
+            // 교차 점수 = (threshold - count_i) + (threshold - count_j)
+            // 둘 다 적을수록 점수 높음
+            let score = (threshold - gap_counts[ci]) + (threshold - gap_counts[cj])
+            cross_d1.push(gap_names[ci])
+            cross_d2.push(gap_names[cj])
+            cross_score.push(score)
+            cj = cj + 1
+        }
+        ci = ci + 1
+    }
+
+    // 점수 내림차순 정렬 (선택 정렬)
+    let mut si = 0
+    while si < len(cross_score) {
+        let mut best = si
+        let mut sj = si + 1
+        while sj < len(cross_score) {
+            if cross_score[sj] > cross_score[best] { best = sj }
+            sj = sj + 1
+        }
+        if best != si {
+            let tmp_s = cross_score[si]; cross_score[si] = cross_score[best]; cross_score[best] = tmp_s
+            let tmp_d1 = cross_d1[si]; cross_d1[si] = cross_d1[best]; cross_d1[best] = tmp_d1
+            let tmp_d2 = cross_d2[si]; cross_d2[si] = cross_d2[best]; cross_d2[best] = tmp_d2
+        }
+        si = si + 1
+    }
+
+    // 상위 20개 출력
+    let show_max = 20
+    let show_count = if len(cross_score) < show_max { len(cross_score) } else { show_max }
+    let mut wi = 0
+    while wi < show_count {
+        let rank_str = to_string(wi + 1)
+        let pad = if wi + 1 < 10 { " " } else { "" }
+        println("  │ " + pad + rank_str + ". " + cross_d1[wi] + " x " + cross_d2[wi] + "  score=" + to_string(cross_score[wi]) + " ★")
+        wi = wi + 1
+    }
+    println("  └──────────────────────────────────────────────────────────────┘")
+    println("")
+
+    // 5) 단일 빈공간 테이블
+    println("  ┌──────────────────────────────────────────────────────────────┐")
+    println("  │  빈공간 도메인 목록                                         │")
+    println("  ├──────────────────────────────────────────────────────────────┤")
+    let mut ti = 0
+    while ti < len(gap_names) {
+        let active_mark = ""
+        let mut ai2 = 0
+        while ai2 < len(active_doms) {
+            if active_doms[ai2] == gap_names[ti] { active_mark = " [활성]" }
+            ai2 = ai2 + 1
+        }
+        let tpad = if ti + 1 < 10 { " " } else { "" }
+        println("  │ " + tpad + to_string(ti + 1) + ". " + gap_names[ti] + "  발견=" + to_string(gap_counts[ti]) + " EXACT=" + to_string(gap_exact[ti]) + active_mark)
+        ti = ti + 1
+    }
+    println("  └──────────────────────────────────────────────────────────────┘")
+    println("")
+
+    // 6) growth_bus 기록
+    let mut ts = "?"
+    try { ts = exec("date +%Y-%m-%dT%H:%M:%S") } catch err {}
+    let bus_entry = "{\"source\":\"gap_finder_wave\",\"timestamp\":\"" + ts.trim() + "\",\"phase\":\"wave_gap\",\"status\":\"gaps=" + to_string(len(gap_names)) + " cross_pairs=" + to_string(len(cross_score)) + " threshold=" + to_string(threshold) + "\"}"
+    try { append_file(growth_bus, bus_entry + "\n") } catch err {}
+
+    println("  growth_bus 기록 완료")
+    println("  권고: 교차 빈공간 상위 쌍에 대해 blowup 교차 탐색 실행")
+    println("        hexa blowup.hexa <domain1> 3 → hexa blowup.hexa <domain2> 3")
+}
+
+if mode == "wave" || mode == "파동" {
+    wave_gap_scan()
+}
+
 if mode == "help" {
     println("╔══════════════════════════════════════════════╗")
     println("║  GAP FINDER — 미지의 영역 탐지기            ║")
@@ -2929,6 +3145,8 @@ if mode == "help" {
     println("  hexa gap_finder.hexa 모듈러증명    = mod3 (한글)")
     println("  hexa gap_finder.hexa crossref     텐서 분해 × blowup 코롤러리 교차검증 → 공리 후보")
     println("  hexa gap_finder.hexa 교차검증      = crossref (한글)")
+    println("  hexa gap_finder.hexa wave         파동 빈공간 탐색 (교차 빈공간 우선순위)")
+    println("  hexa gap_finder.hexa 파동          = wave (한글)")
     println("")
     println("다른 프로젝트에서 사용:")
     println("  hexa=$home/Dev/hexa-lang/target/release/hexa")

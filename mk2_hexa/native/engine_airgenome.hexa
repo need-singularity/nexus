@@ -14,7 +14,9 @@ comptime const goal = "L6e 돌파, 게놈 1000+ 축적"
 let home = exec("printenv HOME")
 let dev = home + "/Dev"
 let project_dir = dev + "/airgenome"
-let genomes_log = project_dir + "/genomes.log"
+let genomes_index = project_dir + "/forge/genomes.index.jsonl"
+let genomes_dir = project_dir + "/forge/genomes"
+let sampling_log = project_dir + "/genomes.log"
 let forge_state = project_dir + "/forge/state.json"
 let bus_file = dev + "/nexus/shared/growth_bus.jsonl"
 let state_path = dev + "/nexus/shared/engine_airgenome_state.json"
@@ -66,10 +68,6 @@ fn timestamp() -> string {
     r.trim()
 }
 
-fn read_file_safe(path: string) -> string {
-    try { return read_file(path) } catch e { return "" }
-}
-
 fn file_exists_check(path: string) -> bool {
     let mut r = ""
     try { r = to_string(exec("test -f " + path + " && echo 1")) } catch e {}
@@ -80,6 +78,11 @@ fn dir_exists_check(path: string) -> bool {
     let mut r = ""
     try { r = to_string(exec("test -d " + path + " && echo 1")) } catch e {}
     r.trim() == "1"
+}
+
+fn read_file_safe(path: string) -> string {
+    if !file_exists_check(path) { return "" }
+    try { return read_file(path) } catch e { return "" }
 }
 
 // ─── JSON field extraction ───
@@ -128,6 +131,12 @@ fn append_bus(phase: string, status: string, detail: string) {
 // ─── DATA COLLECTION ───
 // ═══════════════════════════════════════════════════════════
 
+struct ForgeState {
+    active: bool,
+    pid: i64,
+    last_scan: string
+}
+
 struct Metrics {
     genome_count: i64,
     forge_active: bool,
@@ -138,24 +147,37 @@ struct Metrics {
 }
 
 fn count_genomes() -> i64 {
-    if !file_exists_check(genomes_log) { return 0 }
-    let mut result = "0"
-    try {
-        result = exec("bash -c wc -l < " + genomes_log)
-    } catch e {}
-    return safe_int(result.trim())
+    // Primary: count .genome files in forge/genomes/
+    if dir_exists_check(genomes_dir) {
+        let mut result = "0"
+        try {
+            result = exec("bash -c 'ls " + genomes_dir + "/*.genome 2>/dev/null | wc -l'")
+        } catch e {}
+        let n = safe_int(result.trim())
+        if n > 0 { return n }
+    }
+    // Fallback: count lines in index jsonl
+    if file_exists_check(genomes_index) {
+        let mut result = "0"
+        try {
+            result = exec("bash -c 'wc -l < " + genomes_index + "'")
+        } catch e {}
+        let n = safe_int(result.trim())
+        if n > 0 { return n }
+    }
+    return 0
 }
 
-fn read_forge_state() {
+fn read_forge_state() -> ForgeState {
     let content = read_file_safe(forge_state)
-    if content == "" { return [false, 0, ""] }
+    if content == "" { return ForgeState { active: false, pid: 0, last_scan: "" } }
 
     let active_str = json_str(content, "active")
     let active = active_str == "true" || content.contains("\"active\": true") || content.contains("\"active\":true")
     let pid = json_int(content, "pid")
     let last_scan = json_str(content, "last_scan")
 
-    return [active, pid, last_scan]
+    return ForgeState { active: active, pid: pid, last_scan: last_scan }
 }
 
 fn check_forge_alive(pid: i64) -> bool {
@@ -184,9 +206,9 @@ fn collect_metrics() -> Metrics {
 
     let genomes = count_genomes()
     let forge = read_forge_state()
-    let forge_active = forge[0]
-    let forge_pid = forge[1]
-    let last_scan = forge[2]
+    let forge_active = forge.active
+    let forge_pid = forge.pid
+    let last_scan = forge.last_scan
 
     // Verify pid is actually alive
     let actually_active = if forge_active { check_forge_alive(forge_pid) } else { false }
@@ -237,12 +259,17 @@ fn classify(m: Metrics, health: f64) -> string {
 // ─── EVOLVE — Track genome growth rate ───
 // ═══════════════════════════════════════════════════════════
 
-fn load_prev_state() {
+struct PrevState {
+    genomes: i64,
+    rate: f64
+}
+
+fn load_prev_state() -> PrevState {
     let content = read_file_safe(state_path)
-    if content == "" { return [0, 0.0] }
+    if content == "" { return PrevState { genomes: 0, rate: 0.0 } }
     let prev_genomes = json_int(content, "genome_count")
     let prev_rate = json_float(content, "genome_rate")
-    return [prev_genomes, prev_rate]
+    return PrevState { genomes: prev_genomes, rate: prev_rate }
 }
 
 fn save_state(m: Metrics, health: f64, rate: f64) {
@@ -252,10 +279,15 @@ fn save_state(m: Metrics, health: f64, rate: f64) {
     } catch e {}
 }
 
-fn calc_evolve(m: Metrics) {
+struct EvolveResult {
+    rate: f64,
+    report: string
+}
+
+fn calc_evolve(m: Metrics) -> EvolveResult {
     let prev = load_prev_state()
-    let prev_genomes = prev[0]
-    let prev_rate = prev[1]
+    let prev_genomes = prev.genomes
+    let prev_rate = prev.rate
 
     let delta = m.genome_count - prev_genomes
     // Exponential moving average for rate
@@ -280,7 +312,7 @@ fn calc_evolve(m: Metrics) {
         report = report + " ETA~" + to_string(eta) + " ticks"
     }
 
-    return [new_rate, report]
+    return EvolveResult { rate: new_rate, report: report }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -305,7 +337,7 @@ fn do_ps_sampling(rounds: i64) {
                 let line = lines[j].trim()
                 if line.len() > 3 {
                     let entry = ts + " | round=" + to_string(i) + " | " + line
-                    try { append_file(genomes_log, entry + "\n") } catch e {}
+                    try { append_file(sampling_log, entry + "\n") } catch e {}
                 }
                 j = j + 1
             }
@@ -321,7 +353,7 @@ fn tick_goal_near(m: Metrics) {
     // Pattern analysis on accumulated genomes
     println("  Running pattern analysis on genome corpus...")
     let analysis = try {
-        exec("bash -c cd " + project_dir + " && wc -l " + genomes_log + " && sort " + genomes_log + " | uniq -c | sort -rn | head -10")
+        exec("bash -c cd " + project_dir + " && wc -l " + sampling_log + " && sort " + sampling_log + " | uniq -c | sort -rn | head -10")
     } catch e {
         "analysis error"
     }
@@ -356,7 +388,7 @@ fn tick_default(m: Metrics) {
 
     // Adaptive: increase rounds if rate is low
     let prev = load_prev_state()
-    let prev_rate = prev[1]
+    let prev_rate = prev.rate
     let rounds = if prev_rate < 2.0 { 3 } else { sampling_rounds_default }
 
     do_ps_sampling(rounds)
@@ -404,7 +436,7 @@ fn mode_status() {
     println("")
 
     let evo = calc_evolve(m)
-    println(evo[1])
+    println(evo.report)
 }
 
 fn mode_tick() {
@@ -443,9 +475,9 @@ fn mode_tick() {
 
     // Evolve tracking
     let evo = calc_evolve(m)
-    let rate = evo[0]
+    let rate = evo.rate
     println("")
-    println(evo[1])
+    println(evo.report)
     save_state(m, health, rate)
 
     // Bus record
@@ -460,7 +492,7 @@ fn mode_report() {
     let health = calc_health(m)
     let class = classify(m, health)
     let evo = calc_evolve(m)
-    let rate = evo[0]
+    let rate = evo.rate
 
     println("# " + personality + " Engine Report")
     println("## " + timestamp())
@@ -475,7 +507,7 @@ fn mode_report() {
     println("")
     println("**Status**: " + class)
     println("**Health**: " + to_string(health))
-    println("**" + evo[1] + "**")
+    println("**" + evo.report + "**")
     println("")
 
     // ETA calculation

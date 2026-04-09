@@ -1,6 +1,6 @@
-// batch_blowup.hexa — Batched seed firing for 10x throughput
-// Takes multiple domains, runs blowup in sequence with shared seed pool
-// New seeds discovered in domain N feed into domain N+1
+// batch_blowup.hexa — 파동 병렬 전파 방식 배치 돌파
+// 도메인을 6개씩 파동(wave) 배치로 동시 병렬 실행
+// 각 파동 결과 seed를 수집하여 다음 파동에 주입 (보강/감쇠 간섭 보고)
 //
 // Usage:
 //   hexa batch_blowup.hexa <d1,d2,...> [depth] [max_per_domain]
@@ -65,13 +65,21 @@ fn main() {
     let init_seed_count = all_seeds.split("|").len()
     let ts = exec("date -u +%Y-%m-%dT%H:%M:%S").trim()
 
+    // 파동 병렬 상수: σ(6)=12의 약수 개수 τ(12)=6 → 동시 실행 최대 6
+    let wave_size: i64 = 6
+    let tmp_dir = exec("mktemp -d").trim()
+
+    let total_waves = (domains.len() + wave_size - 1) / wave_size
+
     println("")
-    println("======== BATCH BLOWUP ========")
-    println("  domains:   " + to_string(domains.len()))
-    println("  depth:     " + to_string(depth))
-    println("  rounds/d:  " + to_string(max_per))
-    println("  seeds:     " + to_string(init_seed_count))
-    println("==============================")
+    println("======== WAVE BATCH BLOWUP ========")
+    println("  domains:     " + to_string(domains.len()))
+    println("  wave_size:   " + to_string(wave_size))
+    println("  total_waves: " + to_string(total_waves))
+    println("  depth:       " + to_string(depth))
+    println("  rounds/d:    " + to_string(max_per))
+    println("  seeds:       " + to_string(init_seed_count))
+    println("===================================")
     println("")
 
     let mut total_exact: i64 = 0
@@ -80,71 +88,119 @@ fn main() {
     let mut seen = #{}
     let start = exec("date +%s").trim()
 
-    let mut di: i64 = 0
-    while di < domains.len() {
-        let domain = domains[di]
-        println("[" + to_string(di + 1) + "/" + to_string(domains.len()) + "] " + domain)
+    let mut wi: i64 = 0
+    while wi < total_waves {
+        let wave_start_idx = wi * wave_size
+        let mut wave_end_idx = wave_start_idx + wave_size
+        if wave_end_idx > domains.len() { wave_end_idx = domains.len() }
+        let wave_count = wave_end_idx - wave_start_idx
 
+        let prev_seeds = all_seeds.split("|").len()
+        println("--- Wave " + to_string(wi + 1) + "/" + to_string(total_waves) + " [" + to_string(wave_count) + " domains parallel] ---")
+
+        // 각 도메인에 대해 라운드별 병렬 실행
         let mut round: i64 = 0
         while round < max_per {
             let clean = all_seeds.replace("|", ",")
-            let cmd = "cd " + nexus + " && " + hexa + " " + blowup_path + " " + domain + " " + to_string(depth) + " --no-graph --fast --seeds " + clean
-            let mut out = ""
-            try { out = to_string(exec(cmd)) } catch e {
-                println("  [" + to_string(round + 1) + "] ERROR: " + to_string(e))
-                round = round + 1
-                continue
+
+            // 병렬 발사: 각 도메인을 bash background(&)로 동시 실행
+            let mut pids = ""
+            let mut di: i64 = wave_start_idx
+            while di < wave_end_idx {
+                let domain = domains[di]
+                let out_file = tmp_dir + "/wave_" + to_string(wi) + "_r" + to_string(round) + "_" + domain + ".out"
+                let cmd = "cd " + nexus + " && " + hexa + " " + blowup_path + " " + domain + " " + to_string(depth) + " --no-graph --fast --seeds " + clean + " > " + out_file + " 2>&1 & echo $!"
+                try {
+                    let pid = exec(cmd).trim()
+                    if pids == "" { pids = pid } else { pids = pids + " " + pid }
+                } catch e {
+                    println("  [wave " + to_string(wi + 1) + "] " + domain + " launch ERROR: " + to_string(e))
+                }
+                di = di + 1
             }
 
-            // Parse results
-            let mut exact: i64 = 0
-            let mut cor: i64 = 0
-            let lines = out.split("\n")
-            for l in lines {
-                if l.contains("EXACT match") {
-                    try { exact = to_int(to_float(l.split(":")[1].trim())) } catch e {}
-                }
-                if l.contains("total corollaries") {
-                    try { cor = to_int(to_float(l.split(":")[1].trim())) } catch e {}
-                }
-                // Extract new seeds from EXACT matches
-                if l.contains("EXACT") && l.contains("= ") {
-                    let eq = l.split("= ")
-                    if eq.len() >= 2 {
-                        let val = eq[eq.len() - 1].split(" ")[0].trim()
-                        if val != "" && !seen.contains_key(val) {
-                            seen[val] = 1
-                            all_seeds = all_seeds + "|" + val
-                            new_seeds_total = new_seeds_total + 1
+            // 모든 병렬 프로세스 완료 대기
+            if pids != "" {
+                try { exec("wait " + pids) } catch e {}
+            }
+            // wait 명령 보조: 출력 파일 안정 대기
+            try { exec("sync") } catch e {}
+
+            // 결과 수집: 각 도메인 출력 파싱
+            let mut di2: i64 = wave_start_idx
+            while di2 < wave_end_idx {
+                let domain = domains[di2]
+                let out_file = tmp_dir + "/wave_" + to_string(wi) + "_r" + to_string(round) + "_" + domain + ".out"
+                let mut out = ""
+                try { out = read_file(out_file) } catch e {}
+
+                let mut exact: i64 = 0
+                let mut cor: i64 = 0
+                let lines = out.split("\n")
+                for l in lines {
+                    if l.contains("EXACT match") {
+                        try { exact = to_int(to_float(l.split(":")[1].trim())) } catch e {}
+                    }
+                    if l.contains("total corollaries") {
+                        try { cor = to_int(to_float(l.split(":")[1].trim())) } catch e {}
+                    }
+                    // 새 seed 추출
+                    if l.contains("EXACT") && l.contains("= ") {
+                        let eq = l.split("= ")
+                        if eq.len() >= 2 {
+                            let val = eq[eq.len() - 1].split(" ")[0].trim()
+                            if val != "" && !seen.contains_key(val) {
+                                seen[val] = 1
+                                all_seeds = all_seeds + "|" + val
+                                new_seeds_total = new_seeds_total + 1
+                            }
                         }
                     }
                 }
+                total_exact = total_exact + exact
+                total_cor = total_cor + cor
+                println("  " + domain + " r" + to_string(round + 1) + ": " + to_string(cor) + "cor " + to_string(exact) + "EXACT")
+                di2 = di2 + 1
             }
-            total_exact = total_exact + exact
-            total_cor = total_cor + cor
-            println("  [" + to_string(round + 1) + "] " + to_string(cor) + "cor " + to_string(exact) + "EXACT +seeds=" + to_string(new_seeds_total))
             round = round + 1
         }
-        di = di + 1
+
+        // 파동 간섭 보고: 이번 wave에서 seed 변화량
+        let post_seeds = all_seeds.split("|").len()
+        let wave_gained = post_seeds - prev_seeds
+        let interference = if wave_gained > 0 {
+            "CONSTRUCTIVE(+" + to_string(wave_gained) + " seeds)"
+        } else {
+            "DESTRUCTIVE(no new seeds)"
+        }
+        println("  >> Wave " + to_string(wi + 1) + " interference: " + interference + "  seeds: " + to_string(prev_seeds) + " -> " + to_string(post_seeds))
+        println("")
+
+        wi = wi + 1
     }
+
+    // 임시 디렉토리 정리
+    try { exec("rm -rf " + tmp_dir) } catch e {}
 
     let elapsed = to_int(exec("date +%s").trim()) - to_int(start)
     let final_seeds = all_seeds.split("|").len()
 
     // Append summary to growth_bus
     try {
-        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"batch_blowup\",\"domains\":" + to_string(domains.len()) + ",\"total_cor\":" + to_string(total_cor) + ",\"total_exact\":" + to_string(total_exact) + ",\"seeds_gained\":" + to_string(new_seeds_total) + ",\"elapsed_s\":" + to_string(elapsed) + ",\"source\":\"batch_blowup.hexa\"}\n"
+        let evt = "{\"ts\":\"" + ts + "\",\"type\":\"wave_batch_blowup\",\"wave_size\":" + to_string(wave_size) + ",\"total_waves\":" + to_string(total_waves) + ",\"domains\":" + to_string(domains.len()) + ",\"total_cor\":" + to_string(total_cor) + ",\"total_exact\":" + to_string(total_exact) + ",\"seeds_gained\":" + to_string(new_seeds_total) + ",\"elapsed_s\":" + to_string(elapsed) + ",\"source\":\"batch_blowup.hexa\"}\n"
         let existing = exec("cat " + bus_path)
         write_file(bus_path, existing + evt)
     } catch e {}
 
     println("")
-    println("======== BATCH RESULT ========")
+    println("======== WAVE BATCH RESULT ========")
+    println("  mode:      wave-parallel (x" + to_string(wave_size) + ")")
+    println("  waves:     " + to_string(total_waves))
     println("  elapsed:   " + to_string(elapsed) + "s")
     println("  corollary: " + to_string(total_cor))
     println("  EXACT:     " + to_string(total_exact))
     println("  seeds:     " + to_string(init_seed_count) + " -> " + to_string(final_seeds) + " (+" + to_string(new_seeds_total) + ")")
-    println("==============================")
+    println("===================================")
 }
 
 main()

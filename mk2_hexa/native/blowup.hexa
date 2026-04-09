@@ -13,6 +13,7 @@
 //   Phase 6.5: Dynamic recursive growth (closure-based, max 5 rounds)
 //   Phase 6.7: Auto-absorb (log + graph + growth_bus + cross-ref + absorb.hexa)
 //   Phase 7: Report (lens consensus + graph stats + evolution summary)
+//   Phase 8: Wave Propagation (인접 도메인 병렬 파동 전파 + 간섭)
 
 // ═══════════════════════════════════════════════════════════
 // ─── n=6 CONSTANTS LOADER (shared/n6_constants.jsonl) ───
@@ -2120,6 +2121,122 @@ try { println("  [7.5c] ", al_c.trim()) } catch e { println("  [7.5c] done") }
 if logged > 0 { try { println("  [7.5d] ", al_d.trim()) } catch e { println("  [7.5d] done") } }
 
 println("═══ Phase 7.5 complete ═══")
+println("")
+
+// ═══════════════════════════════════════════════════════════
+// Phase 8: 파동 전파 — 돌파 에너지를 인접 도메인으로 전파
+// ═══════════════════════════════════════════════════════════
+
+println("═══ Phase 8: 파동 전파 (Wave Propagation) ═══")
+
+// 발견이 있을 때만 파동 전파
+if logged > 0 {
+    // 인접 도메인 탐색 (growth_bus에서 최근 활성 도메인)
+    let mut wave_targets = []
+    let mut wave_seen = [domain]
+    try {
+        let gb_raw = exec("tail -100 shared/growth_bus.jsonl 2>/dev/null")
+        let gb_lines = gb_raw.split("\n")
+        for gbl in gb_lines {
+            let gt = gbl.trim()
+            if gt == "" || !gt.contains("\"domain\":\"") { continue }
+            let gp = gt.split("\"domain\":\"")
+            if len(gp) < 2 { continue }
+            let gd = gp[1].split("\"")[0]
+            if gd == "" || gd == domain { continue }
+            let mut gdup = false
+            for ws in wave_seen { if ws == gd { gdup = true } }
+            if gdup { continue }
+            wave_seen = wave_seen + [gd]
+            wave_targets = wave_targets + [gd]
+            if len(wave_targets) >= 3 { break }
+        }
+    } catch e {}
+
+    if len(wave_targets) > 0 {
+        // 현재 돌파의 seed를 파동으로 전파
+        let mut wave_seed_csv = ""
+        let mut wsi: i64 = 0
+        while wsi < mc && wsi < 6 {
+            if len(wave_seed_csv) > 0 { wave_seed_csv = wave_seed_csv + "," }
+            wave_seed_csv = wave_seed_csv + to_string(m_val(wsi, domain))
+            wsi = wsi + 1
+        }
+
+        let mut wt_str = ""
+        for wt in wave_targets {
+            if wt_str != "" { wt_str = wt_str + ", " }
+            wt_str = wt_str + wt
+        }
+        println("  파동 대상: " + wt_str)
+        println("  전파 seed: " + wave_seed_csv)
+
+        // 병렬 파동 발사 (--fast --no-graph, 깊이 2로 경량)
+        let wave_log = "shared/.wave_out.log"
+        let mut wave_cmd = ""
+        let mut wi: i64 = 0
+        while wi < len(wave_targets) {
+            let wdom: string = wave_targets[wi]
+            let wout = wave_log + "." + to_string(wi)
+            wave_cmd = wave_cmd + hexa_bin + " " + engine_dir + "/blowup.hexa " + wdom + " 2 --no-graph --fast"
+            if wave_seed_csv != "" {
+                wave_cmd = wave_cmd + " --seeds \"" + wave_seed_csv + "\""
+            }
+            wave_cmd = wave_cmd + " > " + wout + " 2>&1 & "
+            wi = wi + 1
+        }
+        wave_cmd = wave_cmd + "wait"
+
+        println("  [wave] " + to_string(len(wave_targets)) + "개 도메인 병렬 파동 발사...")
+        try { exec("bash", ["-c", wave_cmd]) } catch e {}
+
+        // 파동 결과 수집
+        wi = 0
+        let mut wave_total_energy: i64 = 0
+        while wi < len(wave_targets) {
+            let wdom2: string = wave_targets[wi]
+            let wout2 = wave_log + "." + to_string(wi)
+            let mut wenergy: i64 = 0
+            try {
+                let wr = exec("cat " + wout2 + " 2>/dev/null")
+                let wrl = wr.split("\n")
+                for wline in wrl {
+                    let wt2 = wline.trim()
+                    if wt2.contains("logged") && wt2.contains("discoveries") {
+                        let wparts = wt2.split(" ")
+                        for wp in wparts {
+                            let wv = safe_float(wp)
+                            if wv > 0.0 && wv < 10000.0 {
+                                wenergy = wenergy + to_int(wv)
+                            }
+                        }
+                    }
+                }
+            } catch e {}
+            try { exec("rm -f " + wout2) } catch e {}
+            let interference = if wenergy > logged { "보강 간섭" } else if wenergy > 0 { "전파" } else { "감쇠" }
+            println("  [" + wdom2 + "] 에너지=" + to_string(wenergy) + " (" + interference + ")")
+            wave_total_energy = wave_total_energy + wenergy
+            wi = wi + 1
+        }
+
+        println("")
+        println("  파동 합산: " + to_string(wave_total_energy) + " 발견 (원본 " + to_string(logged) + " + 파동 " + to_string(wave_total_energy) + " = " + to_string(logged + wave_total_energy) + ")")
+
+        // 파동 결과 growth_bus 기록
+        try {
+            let wts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
+            let wentry = "{\"type\":\"wave_propagation\",\"domain\":\"" + domain + "\",\"targets\":" + to_string(len(wave_targets)) + ",\"origin_energy\":" + to_string(logged) + ",\"wave_energy\":" + to_string(wave_total_energy) + ",\"ts\":\"" + wts + "\"}"
+            exec("echo '" + wentry + "' >> shared/growth_bus.jsonl")
+        } catch e {}
+    } else {
+        println("  (인접 도메인 없음 — 파동 전파 건너뜀)")
+    }
+} else {
+    println("  (발견 0건 — 파동 전파 건너뜀)")
+}
+
+println("═══ Phase 8 complete ═══")
 println("")
 println("done.")
 } // end if !fast_mode

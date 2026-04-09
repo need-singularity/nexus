@@ -8,7 +8,9 @@ comptime const dst_dir = "../n6-architecture/docs"
 comptime const dst = "../n6-architecture/docs/reality_map.json"
 
 fn main(args: list) {
+    print("[sync_reality_map] start")
     let cmd = if args.len() > 1 { args[1] } else { "sync" }
+    print("[sync_reality_map] cmd=" + cmd)
 
     if cmd == "check" {
         check_sync()
@@ -79,9 +81,15 @@ pure fn extract_field(text: string, field: string) -> string {
     if after.len() < 2 { return "?" }
     let val = after[1].trim()
     if val.starts_with("\"") {
-        let end = val[1..].find("\"")
-        return val[1..end+1]
+        let rest = val.substring(1, val.len())
+        let end = rest.index_of("\"")
+        if end < 0 { return "?" }
+        return rest.substring(0, end)
     }
-    let end = val.find_any([",", "}", "\n"])
-    return val[0..end].trim()
+    let e1 = val.index_of(",")
+    let e2 = val.index_of("}")
+    let e3 = val.index_of("\n")
+    let cands = [e1, e2, e3, val.len()].filter(fn(x) -> bool { x >= 0 })
+    let end = cands.min()
+    return val.substring(0, end).trim()
 }

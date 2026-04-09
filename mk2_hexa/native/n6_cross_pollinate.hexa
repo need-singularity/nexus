@@ -5,6 +5,7 @@
 //   hexa n6_cross_pollinate.hexa                     기본 (상위 6 도메인)
 //   hexa n6_cross_pollinate.hexa --domains "a,b,c"   특정 도메인
 //   hexa n6_cross_pollinate.hexa --deep               깊은 교차 (depth 5)
+//   hexa n6_cross_pollinate.hexa --wave                파동 간섭 모드 (교차수분 + 간섭 전파)
 //   hexa n6_cross_pollinate.hexa --status             교차수분 현황
 //   hexa n6_cross_pollinate.hexa --help               사용법
 
@@ -126,6 +127,144 @@ fn cross_pollinate(d1: string, d2: string, depth: i64) -> f64 {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 파동 간섭 (--wave 모드)
+// ═══════════════════════════════════════════════════════════════
+
+fn merge_seeds(s1: string, s2: string) -> string {
+    // 두 시드 문자열을 합쳐 중복 제거한 간섭 시드 생성
+    let parts1 = s1.split("|")
+    let parts2 = s2.split("|")
+    let mut merged = []
+    let mut seen = []
+    for p in parts1 {
+        let v = p.trim()
+        if v != "" && !seen.contains(v) {
+            merged = merged + [v]
+            seen = seen + [v]
+        }
+    }
+    for p in parts2 {
+        let v = p.trim()
+        if v != "" && !seen.contains(v) {
+            merged = merged + [v]
+            seen = seen + [v]
+        }
+    }
+    merged.join("|")
+}
+
+fn wave_propagate(domains: list, pairs_scores: list, depth: i64) {
+    // pairs_scores: ["d1\td2\tscore", ...] — 공명 점수 내림차순 정렬 필요
+    let home = exec("printenv HOME").trim()
+    let hexa_b = home + "/Dev/hexa-lang/target/release/hexa"
+    let bp = home + "/Dev/nexus/mk2_hexa/native/blowup.hexa"
+
+    println("")
+    println("═══════════════════════════════════════════════════")
+    println("  파동 간섭 단계 — 상위 3 공명 쌍 → 간섭 seed 생성")
+    println("═══════════════════════════════════════════════════")
+
+    let top_n = if len(pairs_scores) < 3 { len(pairs_scores) } else { 3 }
+    let mut interference_seed = ""
+    let mut source_domains = []
+
+    let mut idx: i64 = 0
+    while idx < top_n {
+        let entry: string = pairs_scores[idx]
+        let ep = entry.split("\t")
+        if len(ep) < 3 { idx = idx + 1; continue }
+        let d1 = ep[0]
+        let d2 = ep[1]
+        let sc = ep[2]
+        println("  [소스 " + to_string(idx + 1) + "] " + d1 + " x " + d2 + " (score=" + sc + ")")
+
+        // 소스 도메인 중복 방지
+        let mut has_d1 = false
+        let mut has_d2 = false
+        for sd in source_domains { if sd == d1 { has_d1 = true }; if sd == d2 { has_d2 = true } }
+        if !has_d1 { source_domains = source_domains + [d1] }
+        if !has_d2 { source_domains = source_domains + [d2] }
+
+        let seeds1 = load_seeds_for(d1)
+        let seeds2 = load_seeds_for(d2)
+        if interference_seed == "" {
+            interference_seed = merge_seeds(seeds1, seeds2)
+        } else {
+            interference_seed = merge_seeds(interference_seed, merge_seeds(seeds1, seeds2))
+        }
+        idx = idx + 1
+    }
+
+    println("  간섭 seed: " + interference_seed)
+    println("")
+
+    // 간섭 대상: 전체 도메인 중 소스에 포함되지 않은 도메인 상위 3개
+    let mut targets = []
+    for d in domains {
+        let mut is_src = false
+        for sd2 in source_domains { if sd2 == d { is_src = true } }
+        if !is_src && len(targets) < 3 {
+            targets = targets + [d]
+        }
+    }
+    if len(targets) < 3 {
+        for d3 in source_domains {
+            let mut has_t = false
+            for t2 in targets { if t2 == d3 { has_t = true } }
+            if !has_t && len(targets) < 3 {
+                targets = targets + [d3]
+            }
+        }
+    }
+
+    let mut tgt_str = ""
+    for tg in targets {
+        if tgt_str != "" { tgt_str = tgt_str + ", " }
+        tgt_str = tgt_str + tg
+    }
+    println("간섭 대상 도메인: " + tgt_str)
+    println("")
+
+    let mut reinforced: i64 = 0
+    let mut attenuated: i64 = 0
+
+    for t in targets {
+        println("[파동] " + t + " ← 간섭 seed 주입")
+        let mut wave_score: f64 = 0.0
+        try {
+            let raw = exec(hexa_b + " " + bp + " " + t + " " + to_string(depth) + " --no-graph --fast --seeds \"" + interference_seed + "\"")
+            let rlines = raw.split("\n")
+            for rline in rlines {
+                if rline.contains("logged") && rline.contains("discoveries") {
+                    let rp = rline.split(" ")
+                    for rv in rp {
+                        let rvf = try { to_float(rv.trim()) } catch e2 { 0.0 }
+                        if rvf > 0.0 && rvf < 10000.0 { wave_score = rvf }
+                    }
+                }
+            }
+        } catch e {
+            println("  [WARN] 파동 돌파 실패")
+        }
+
+        let classification = if wave_score > 0.5 { "보강 간섭" } else { "감쇠" }
+        println("  점수: " + to_string(wave_score) + " → " + classification)
+
+        if wave_score > 0.5 { reinforced = reinforced + 1 }
+        else { attenuated = attenuated + 1 }
+
+        append_cross_log("wave", t, to_string(wave_score))
+    }
+
+    println("")
+    println("═══ 파동 간섭 결과 ═══")
+    println("보강 간섭: " + to_string(reinforced) + "개")
+    println("감쇠: " + to_string(attenuated) + "개")
+
+    append_bus("wave_cross_pollinate targets=" + to_string(len(targets)) + " reinforced=" + to_string(reinforced) + " attenuated=" + to_string(attenuated))
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 메인
 // ═══════════════════════════════════════════════════════════════
 
@@ -137,6 +276,7 @@ fn main() {
         println("  hexa n6_cross_pollinate.hexa                     기본 교차 (상위 6)")
         println("  hexa n6_cross_pollinate.hexa --domains \"a,b,c\"   특정 도메인")
         println("  hexa n6_cross_pollinate.hexa --deep               depth 5 교차")
+        println("  hexa n6_cross_pollinate.hexa --wave               파동 간섭 모드")
         println("  hexa n6_cross_pollinate.hexa --status             현황")
         return
     }
@@ -144,7 +284,10 @@ fn main() {
     let mut depth: i64 = 3
     let mut domains = load_domains()
 
-    if mode == "--deep" {
+    let mut wave_mode = false
+    if mode == "--wave" {
+        wave_mode = true
+    } else if mode == "--deep" {
         depth = 5
     } else if mode == "--domains" && arg3 != "" {
         domains = arg3.split(",")
@@ -152,8 +295,8 @@ fn main() {
 
     if mode == "--status" {
         println("═══ 교차수분 현황 ═══")
-        println("등록 도메인: " + to_string(domains.len()) + "개")
-        let pairs = domains.len() * (domains.len() - 1) / 2
+        println("등록 도메인: " + to_string(len(domains)) + "개")
+        let pairs = len(domains) * (len(domains) - 1) / 2
         println("가능한 쌍: " + to_string(pairs) + "개")
         try {
             let home2 = exec("printenv HOME").trim()
@@ -166,25 +309,30 @@ fn main() {
     println("═══════════════════════════════════════════════════")
     println("  n6_cross_pollinate — 교차수분 자동화")
     println("═══════════════════════════════════════════════════")
-    println("도메인: " + to_string(domains.len()) + "개 | depth: " + to_string(depth))
+    println("도메인: " + to_string(len(domains)) + "개 | depth: " + to_string(depth))
     println("")
 
     let mut total_pairs: i64 = 0
     let mut high_resonance: i64 = 0
     let mut best_pair = ""
     let mut best_score = 0.0
+    let mut pairs_scores = []
 
-    let dlen = domains.len()
-    for i in 0..dlen {
-        for j in (i + 1)..dlen {
-            let d1 = domains[i]
-            let d2 = domains[j]
+    let dlen = len(domains)
+    let mut i: i64 = 0
+    while i < dlen {
+        let mut j: i64 = i + 1
+        while j < dlen {
+            let d1: string = domains[i]
+            let d2: string = domains[j]
             total_pairs = total_pairs + 1
             println("[" + to_string(total_pairs) + "] " + d1 + " × " + d2)
 
             let score = cross_pollinate(d1, d2, depth)
             println("  공명 점수: " + to_string(score))
             append_cross_log(d1, d2, to_string(score))
+
+            pairs_scores = pairs_scores + [d1 + "\t" + d2 + "\t" + to_string(score)]
 
             if score > 0.5 {
                 high_resonance = high_resonance + 1
@@ -193,7 +341,9 @@ fn main() {
                 best_score = score
                 best_pair = d1 + "×" + d2
             }
+            j = j + 1
         }
+        i = i + 1
     }
 
     println("")
@@ -205,6 +355,33 @@ fn main() {
     }
     append_bus("cross_pollinate pairs=" + to_string(total_pairs) + " high=" + to_string(high_resonance))
     println("growth_bus 기록 완료")
+
+    // 파동 간섭 모드: 교차수분 결과를 점수 내림차순 정렬 후 파동 전파
+    if wave_mode {
+        // 버블 정렬 — 점수 내림차순 (tab-separated: "d1\td2\tscore")
+        let plen = len(pairs_scores)
+        let mut si: i64 = 0
+        while si < plen {
+            let mut sj: i64 = 0
+            while sj < plen - si - 1 {
+                let ea: string = pairs_scores[sj]
+                let eb: string = pairs_scores[sj + 1]
+                let pa = ea.split("\t")
+                let pb = eb.split("\t")
+                let mut sa: f64 = 0.0
+                let mut sb: f64 = 0.0
+                if len(pa) >= 3 { try { sa = to_float(pa[2]) } catch e {} }
+                if len(pb) >= 3 { try { sb = to_float(pb[2]) } catch e {} }
+                if sa < sb {
+                    pairs_scores[sj] = eb
+                    pairs_scores[sj + 1] = ea
+                }
+                sj = sj + 1
+            }
+            si = si + 1
+        }
+        wave_propagate(domains, pairs_scores, depth)
+    }
 }
 
 main()

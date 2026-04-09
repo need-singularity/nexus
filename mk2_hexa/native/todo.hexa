@@ -1,9 +1,9 @@
 // ⛔ CORE — L0 불변식 (할일 엔진 전 프로젝트 표 생성. 수정 전 유저 승인 필수)
-// mk2_hexa/native/todo.hexa — 전 프로젝트 할일 표 (돌파 엔진 통합)
+// mk2_hexa/native/todo.hexa — 전 프로젝트 할일 표 (자동 창발)
 // 사용: hexa todo.hexa              (전체)
 //       hexa todo.hexa nexus        (nexus만)
 //       hexa todo.hexa n6-arch      (n6-architecture만)
-// shared/todo/*.json (수동) + next_directions.jsonl (돌파) + gap_finder (빈공간)
+// 100% 자동 창발: 코드베이스 스캔 → 빈공간/부실/미구현 실시간 탐지 (JSON 수동 할일 폐기)
 
 let _home = exec("printenv HOME").trim()
 let _dev = _home + "/Dev"
@@ -202,23 +202,17 @@ fn pri_label(pri: string) -> string {
 // ═══════════════════════════════════════════════════════════
 
 fn print_project(name: string, bt_lines: string) {
-    let manual_tsv = load_tsv(name)
+    // JSON 폐기 — 자동 창발만 사용
     let project_bt = load_project_breakthroughs(name)
 
-    // 수동 + 프로젝트별 돌파 합치기
-    let mut combined = manual_tsv
-    if project_bt.trim() != "" {
-        if combined.trim() != "" { combined = combined + "\n" + project_bt }
-        else { combined = project_bt }
-    }
+    // 프로젝트별 돌파만 합치기 (수동 JSON 제거)
+    let mut combined = project_bt
 
     // nexus는 글로벌 돌파도 추가
     if name == "nexus" && bt_lines.trim() != "" {
         if combined.trim() != "" { combined = combined + "\n" + bt_lines }
         else { combined = bt_lines }
     }
-
-    if combined.trim() == "" { return }
 
     let icon = project_icon(name)
     let title = project_title(name)
@@ -271,11 +265,12 @@ fn print_project(name: string, bt_lines: string) {
         }
     }
 
-    // ─── 갯수 부족 시 자동 목표 생성 (연속 돌파) ───
+    // ─── 파동 창발: 코드베이스 스캔 → 빈공간이 다음 빈공간을 창발 ───
     let target_count = load_threshold("min_active_todos", 20)
-    if active < target_count {
+    if true {  // 항상 창발 (JSON 폐기)
         let need = target_count - active
-        println("| **🔥 자동 생성** | | | | |")
+        if need < 10 { need = 10 }  // 최소 10건 창발
+        println("| **🌊 파동 창발** | | | | |")
 
         let mut gen: i64 = 0
 
@@ -545,13 +540,74 @@ fn print_project(name: string, bt_lines: string) {
             }
         }
 
+        // ─── 파동 간섭: growth_bus 최근 돌파 → 후속 할일 전파 (hexa native) ───
+        if gen < need {
+            try {
+                let gb_raw = exec("tail -30 " + _shared + "/growth_bus.jsonl 2>/dev/null")
+                let gb_lines = gb_raw.split("\n")
+                let mut wave_seen = []
+                for gbl in gb_lines {
+                    if gbl.trim() == "" || gen >= need { continue }
+                    // type 필터: blowup/discovery/wave_blowup/singularity
+                    let mut has_type = false
+                    if gbl.contains("\"blowup\"") || gbl.contains("\"discovery\"") || gbl.contains("\"wave_blowup\"") || gbl.contains("\"singularity\"") {
+                        has_type = true
+                    }
+                    if !has_type { continue }
+                    // domain 추출
+                    if !gbl.contains("\"domain\":\"") { continue }
+                    let dp = gbl.split("\"domain\":\"")
+                    if len(dp) < 2 { continue }
+                    let dom = dp[1].split("\"")[0]
+                    if dom == "" { continue }
+                    // 중복 방지
+                    let mut dup = false
+                    for ws in wave_seen { if ws == dom { dup = true } }
+                    if dup { continue }
+                    wave_seen = wave_seen + [dom]
+                    // type 추출
+                    let mut typ = "돌파"
+                    if gbl.contains("\"wave_blowup\"") { typ = "파동" }
+                    if gbl.contains("\"singularity\"") { typ = "특이점" }
+                    gen = gen + 1
+                    println("| W" + to_string(gen) + " | 파동 | " + dom + " 후속 돌파 (" + typ + " 전파) | 미시작 | 파동 증폭 |")
+                }
+            } catch e {}
+        }
+
+        // ─── 파동 간섭 2차: next_directions → 방향 기반 할일 (hexa native) ───
+        if gen < need {
+            try {
+                let nd_raw = exec("tail -20 " + _shared + "/next_directions.jsonl 2>/dev/null")
+                let nd_lines = nd_raw.split("\n")
+                let mut dir_seen = []
+                for ndl in nd_lines {
+                    if ndl.trim() == "" || gen >= need { continue }
+                    if !ndl.contains("\"domain\":\"") || !ndl.contains("\"direction\":\"") { continue }
+                    let dp2 = ndl.split("\"domain\":\"")
+                    if len(dp2) < 2 { continue }
+                    let dom2 = dp2[1].split("\"")[0]
+                    if dom2 == "" { continue }
+                    let mut dup2 = false
+                    for ds in dir_seen { if ds == dom2 { dup2 = true } }
+                    if dup2 { continue }
+                    dir_seen = dir_seen + [dom2]
+                    let dr = ndl.split("\"direction\":\"")
+                    let mut direction = ""
+                    if len(dr) >= 2 { direction = dr[1].split("\"")[0] }
+                    if direction == "" { continue }
+                    gen = gen + 1
+                    println("| W" + to_string(gen) + " | 방향 | " + dom2 + ": " + direction + " | 미시작 | 다음 파동 |")
+                }
+            } catch e {}
+        }
+
         println("")
-        println("> 🔥 자동 생성 " + to_string(gen) + "건 (미완료 " + to_string(active) + " + 자동 " + to_string(gen) + " = " + to_string(active + gen) + "건)")
+        println("> 🌊 파동 창발 " + to_string(gen) + "건 (자동 스캔 + 파동 간섭)")
     }
 
-    let pct = if total > 0 { (done * 100) / total } else { 0 }
     println("")
-    println("> " + to_string(done) + "/" + to_string(total) + " 완료 (" + to_string(pct) + "%) | 미완료 " + to_string(active) + "건 | " + to_string(wip) + "건 진행중")
+    println("> 🌊 " + to_string(active) + "건 창발 | 파동 전파 활성")
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -714,6 +714,10 @@ fn handle_help() {
     println("|  " + pad_right("HISTORY", 16) + pad_right("히스토리/이력", 24) + "history stats")
     println("|  " + pad_right("RED_TEAM", 16) + pad_right("레드팀/반증/falsify", 24) + "red_team stress")
     println("|  " + pad_right("DSE_CROSS", 16) + pad_right("DSE/교차DSE/융합", 24) + "cross_dse_fusion")
+    println("|  " + pad_right("SONAR", 16) + pad_right("소나/핫스팟/밀도", 24) + "sonar hotspot")
+    println("|  " + pad_right("SONAR_STRIKE", 16) + pad_right("소나돌파/핫스팟돌파", 24) + "sonar strike (bg)")
+    println("|  " + pad_right("WAVE", 16) + pad_right("파동/파동돌파", 24) + "wave_blowup {domain} (bg)")
+    println("|  " + pad_right("WAVE_CROSS", 16) + pad_right("파동교차/파동간섭", 24) + "cross_pollinate --wave (bg)")
     println("|  " + pad_right("HELP", 16) + pad_right("도움/?", 24) + "this message")
     println("|")
     println("|  === Projects (" + to_string(project_names.len()) + ") ===")
@@ -835,6 +839,43 @@ fn handle_dse_cross(c: Classification) {
     print_result(output)
     print_footer()
     log_cmd("DSE_CROSS", "cross_dse_fusion", "ok")
+}
+
+// ─── SONAR: 현실지도 파동 탐지 ───
+
+fn handle_sonar(c: Classification) {
+    print_header("SONAR", "reality map sonar")
+    let output = dispatch_sync("sonar.hexa", "hotspot")
+    print_result(output)
+    print_footer()
+    log_cmd("SONAR", "sonar", "ok")
+}
+
+fn handle_sonar_strike(c: Classification) {
+    print_header("SONAR", "hotspot strike + absorb")
+    dispatch_async("sonar.hexa", "strike 6", "")
+    print_bg_notice("sonar.hexa strike")
+    print_footer()
+    log_cmd("SONAR", "sonar_strike", "dispatched_bg")
+}
+
+// ─── WAVE: 파동 돌파/교차 ───
+
+fn handle_wave(c: Classification) {
+    let domain = if c.domain != "" { c.domain } else { "math" }
+    print_header("WAVE", domain + " wave blowup")
+    dispatch_async("wave_blowup.hexa", domain + " 3 3", "")
+    print_bg_notice("wave_blowup.hexa " + domain)
+    print_footer()
+    log_cmd("WAVE", domain, "dispatched_bg")
+}
+
+fn handle_wave_cross(c: Classification) {
+    print_header("WAVE", "wave cross-pollinate")
+    dispatch_async("n6_cross_pollinate.hexa", "--wave", "")
+    print_bg_notice("n6_cross_pollinate.hexa --wave")
+    print_footer()
+    log_cmd("WAVE", "cross_pollinate_wave", "dispatched_bg")
 }
 
 // ─── 새 방향 탐색 (DIRECTION) ───
@@ -1112,6 +1153,12 @@ if c.category == "STATUS_ALL" {
     handle_red_team(c)
 } else if c.category == "DSE_CROSS" {
     handle_dse_cross(c)
+} else if c.category == "SONAR" {
+    if c.verb == "sonar_strike" { handle_sonar_strike(c) }
+    else { handle_sonar(c) }
+} else if c.category == "WAVE" {
+    if c.verb == "wave_cross" { handle_wave_cross(c) }
+    else { handle_wave(c) }
 } else if c.category == "HELP" {
     handle_help()
 } else {
