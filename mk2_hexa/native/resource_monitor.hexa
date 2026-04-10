@@ -1,0 +1,270 @@
+// resource_monitor.hexa — 자원 유휴 모니터링 + 자동 작업 할당
+//
+// Vast.ai / Hetzner / Ubuntu / RunPod 유휴 감지 시 대기 작업 자동 디스패치
+// R2: 모든 설정 shared/infrastructure.json에서 동적 로드
+
+intent "resource_monitor: detect idle compute resources and auto-dispatch queued tasks" {
+    keywords: ["monitor", "idle", "vast", "hetzner", "ubuntu", "dispatch", "resource"]
+    category: "infrastructure"
+    outputs: ["host_status_table", "dispatched_tasks", "cost_report"]
+}
+
+// ─── 설정 ───
+let INFRA_PATH      = "shared/infrastructure.json"
+let TODO_PATH       = "shared/todo/"
+let GROWTH_BUS      = "shared/growth_bus.jsonl"
+let POLL_INTERVAL_S = 60
+let IDLE_THRESHOLD_S = 300   // 5분 이상 유휴 → 작업 할당
+
+// ─── 호스트 상태 구조 ───
+struct HostStatus {
+    alias:       str
+    reachable:   bool
+    load_1m:     f64
+    gpu_util:    f64      // -1 if no GPU
+    idle_secs:   i64
+    running_jobs: i64
+    capacity:    str       // "cpu_only" | "gpu" | "gpu_multi"
+}
+
+// ─── 대기 작업 구조 ───
+struct QueuedTask {
+    project:    str
+    task_id:    str
+    desc:       str
+    requires:   str       // "cpu" | "gpu_1x" | "gpu_4x" | "gpu_h100"
+    priority:   str       // "CRITICAL" | "IMPORTANT" | "NICE"
+    script:     str       // 실행 경로
+}
+
+// ─── 프로브: SSH 기반 호스트 상태 수집 ───
+fn probe_host(alias: str, ssh_cmd: str) -> HostStatus {
+    // ssh {alias} 'uptime; nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null || echo -1'
+    let cmd = ssh_cmd + " 'cat /proc/loadavg 2>/dev/null; echo ::SEP::; nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null || echo NO_GPU; echo ::SEP::; ps aux | wc -l'"
+    let result = shell(cmd, timeout: 10)
+
+    if result.exit_code != 0 {
+        return HostStatus {
+            alias: alias, reachable: false, load_1m: -1.0,
+            gpu_util: -1.0, idle_secs: -1, running_jobs: 0,
+            capacity: "unreachable"
+        }
+    }
+
+    let parts = result.stdout.split("::SEP::")
+    let load = parse_load(parts[0])
+    let gpu = parse_gpu(parts[1])
+    let procs = parse_int(parts[2].trim())
+
+    let idle = if load < 0.5 and gpu < 5.0 { IDLE_THRESHOLD_S + 1 } else { 0 }
+    let cap = if gpu >= 0.0 { "gpu" } else { "cpu_only" }
+
+    return HostStatus {
+        alias: alias, reachable: true, load_1m: load,
+        gpu_util: gpu, idle_secs: idle, running_jobs: procs,
+        capacity: cap
+    }
+}
+
+fn parse_load(raw: str) -> f64 {
+    // /proc/loadavg: "0.15 0.22 0.18 1/234 12345"
+    let first = raw.trim().split(" ")[0]
+    return parse_float(first)
+}
+
+fn parse_gpu(raw: str) -> f64 {
+    if raw.trim() == "NO_GPU" { return -1.0 }
+    // "23 %" or "23"
+    let val = raw.trim().replace(" %", "").replace("%", "")
+    return parse_float(val)
+}
+
+// ─── 대기 작업 큐 수집 ───
+fn collect_queue() -> [QueuedTask] {
+    let queue = []
+    let projects = ["anima", "hexa-lang", "airgenome", "n6-architecture", "void", "papers"]
+
+    for proj in projects {
+        let path = TODO_PATH + proj + ".json"
+        let data = json_load(path)
+        let tasks = data.get("tasks", [])
+
+        for t in tasks {
+            if t.get("status", "") in ["미시작", "⏳진행중", "분석완료"] {
+                let req = infer_resource_requirement(t)
+                queue.push(QueuedTask {
+                    project: proj,
+                    task_id: str(t.get("id", 0)),
+                    desc: t.get("task", ""),
+                    requires: req,
+                    priority: t.get("pri", "NICE"),
+                    script: t.get("script", "")
+                })
+            }
+        }
+    }
+
+    // 우선순위 정렬: CRITICAL > IMPORTANT > NICE > BACKLOG
+    queue.sort_by(|a, b| priority_rank(a.priority) - priority_rank(b.priority))
+    return queue
+}
+
+fn priority_rank(pri: str) -> i64 {
+    if pri == "CRITICAL"  { return 0 }
+    if pri == "IMPORTANT" { return 1 }
+    if pri == "NICE"      { return 2 }
+    return 3  // BACKLOG
+}
+
+fn infer_resource_requirement(task: map) -> str {
+    let desc = task.get("task", "").lower()
+    let gpu = task.get("gpu", "")
+
+    if "h100" in gpu or "h100" in desc       { return "gpu_h100" }
+    if "4×4090" in gpu or "4x4090" in desc   { return "gpu_4x" }
+    if "4090" in gpu or "gpu" in desc         { return "gpu_1x" }
+    if "학습" in desc or "training" in desc   { return "gpu_1x" }
+    return "cpu"
+}
+
+// ─── 매칭: 유휴 호스트 ↔ 대기 작업 ───
+fn match_and_dispatch(hosts: [HostStatus], queue: [QueuedTask]) -> [map] {
+    let dispatched = []
+    let available = hosts.filter(|h| h.reachable and h.idle_secs > IDLE_THRESHOLD_S)
+
+    for host in available {
+        for task in queue {
+            if task in dispatched.map(|d| d.task) { continue }
+
+            if can_run(host, task) {
+                let action = {
+                    "host": host.alias,
+                    "task": task.desc,
+                    "project": task.project,
+                    "requires": task.requires,
+                    "priority": task.priority,
+                    "action": "dispatch"
+                }
+                dispatched.push(action)
+
+                // growth_bus 이벤트 기록
+                let event = {
+                    "type": "resource_dispatch",
+                    "host": host.alias,
+                    "task": task.desc,
+                    "timestamp": now_iso()
+                }
+                jsonl_append(GROWTH_BUS, event)
+
+                break  // 호스트당 1 작업
+            }
+        }
+    }
+
+    return dispatched
+}
+
+fn can_run(host: HostStatus, task: QueuedTask) -> bool {
+    if task.requires == "cpu"     { return true }
+    if task.requires == "gpu_1x"  { return host.capacity in ["gpu", "gpu_multi"] }
+    if task.requires == "gpu_4x"  { return host.capacity == "gpu_multi" }
+    if task.requires == "gpu_h100" { return false }  // 클라우드 전용
+    return false
+}
+
+// ─── 상태 테이블 출력 ───
+fn print_status(hosts: [HostStatus], dispatched: [map]) {
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║  RESOURCE MONITOR — " + now_iso()[:19] + "                  ║")
+    println("╠══════════╦═══════╦════════╦═════════╦═════════╦════════╣")
+    println("║ Host     ║ Reach ║ Load   ║ GPU%    ║ Idle    ║ Cap    ║")
+    println("╠══════════╬═══════╬════════╬═════════╬═════════╬════════╣")
+
+    for h in hosts {
+        let reach = if h.reachable { "✅" } else { "❌" }
+        let load = if h.load_1m >= 0.0 { fmt("{:.1f}", h.load_1m) } else { "N/A" }
+        let gpu = if h.gpu_util >= 0.0 { fmt("{:.0f}%", h.gpu_util) } else { "—" }
+        let idle = if h.idle_secs > IDLE_THRESHOLD_S { "🟢IDLE" } else { "🔴BUSY" }
+        println(fmt("║ {:<8} ║ {}    ║ {:<6} ║ {:<7} ║ {:<7} ║ {:<6} ║",
+            h.alias, reach, load, gpu, idle, h.capacity))
+    }
+
+    println("╚══════════╩═══════╩════════╩═════════╩═════════╩════════╝")
+
+    if dispatched.len() > 0 {
+        println("\n📋 DISPATCHED:")
+        for d in dispatched {
+            println(fmt("  → {} on {} [{}] {}", d.task[:50], d.host, d.priority, d.requires))
+        }
+    } else {
+        println("\n  (유휴 자원 없음 또는 대기 작업 없음)")
+    }
+}
+
+// ─── Vast.ai 전용: API 상태 확인 ───
+fn probe_vast() -> HostStatus {
+    // vastai show instances --raw
+    let result = shell("vastai show instances --raw 2>/dev/null || echo '{}'", timeout: 15)
+    let data = json_parse(result.stdout)
+
+    if data == {} or data.len() == 0 {
+        return HostStatus {
+            alias: "vast.ai", reachable: false, load_1m: 0.0,
+            gpu_util: 0.0, idle_secs: 999999, running_jobs: 0,
+            capacity: "gpu_multi"
+        }
+    }
+
+    let inst = data[0]
+    let state = inst.get("cur_state", "stopped")
+    let gpu_util = inst.get("gpu_util", 0.0)
+
+    return HostStatus {
+        alias: "vast.ai",
+        reachable: state == "running",
+        load_1m: inst.get("cpu_util", 0.0),
+        gpu_util: gpu_util,
+        idle_secs: if state == "running" and gpu_util < 5.0 { 999999 } else { 0 },
+        running_jobs: if state == "running" { 1 } else { 0 },
+        capacity: "gpu_multi"
+    }
+}
+
+// ─── 메인 루프 ───
+fn main() {
+    let infra = json_load(INFRA_PATH)
+    let hosts_config = [
+        { "alias": "htz",  "ssh": "ssh hetzner" },
+        { "alias": "ubu",  "ssh": "ssh ubu" },
+    ]
+
+    println("🔍 Resource Monitor starting — poll every " + str(POLL_INTERVAL_S) + "s")
+
+    // 단일 스캔 모드 (--once) 또는 루프 모드
+    let once = args().contains("--once")
+
+    loop {
+        let hosts = []
+
+        // SSH 호스트 프로브
+        for cfg in hosts_config {
+            hosts.push(probe_host(cfg.alias, cfg.ssh))
+        }
+
+        // Vast.ai 프로브
+        hosts.push(probe_vast())
+
+        // 대기 작업 수집
+        let queue = collect_queue()
+
+        // 매칭 + 디스패치
+        let dispatched = match_and_dispatch(hosts, queue)
+
+        // 상태 출력
+        print_status(hosts, dispatched)
+
+        if once { break }
+
+        sleep(POLL_INTERVAL_S)
+    }
+}
