@@ -1,0 +1,232 @@
+// mk2_hexa/native/go_loop.hexa — 'go' 명령어 100% 골화 루프
+// 사용: hexa go_loop.hexa              (기본: 최대 50 사이클)
+//       hexa go_loop.hexa 100          (최대 100 사이클)
+//       hexa go_loop.hexa --dry        (측정만, 실행 안 함)
+//
+// 동작:
+//   1. 전 프로젝트 convergence 스캔 → 골화율 측정
+//   2. 골화율 < 100% → stable 승격 + failed 해소 시도
+//   3. go (병렬 TODO 실행) 발사
+//   4. 반복 → 100% 도달 시 종료
+
+let _home = exec("printenv HOME").trim()
+let _dev = _home + "/Dev"
+let _shared = _dev + "/nexus/shared"
+let _conv_dir = _shared + "/convergence"
+let _hexa_bin = _dev + "/hexa-lang/target/release/hexa"
+let _engine_dir = _dev + "/nexus/mk2_hexa/native"
+let _date = exec("date '+%Y-%m-%d %H:%M:%S'").trim()
+
+// ─── 인자 파싱 ───
+let mut max_cycles: i64 = 50
+let mut dry_run = false
+let _args = args()
+if _args.len() > 1 {
+    for a in _args {
+        if a == "--dry" || a == "-d" { dry_run = true }
+        else {
+            try {
+                let n = to_int(to_float(a.trim()))
+                if n > 0 { max_cycles = n }
+            } catch e {}
+        }
+    }
+}
+
+// ─── 골화율 측정 ───
+fn measure_ossification() -> string {
+    let py = "/usr/bin/python3 -c 'import json,os,glob; conv_dir=\"" + _conv_dir + "\"; total_o=0; total_s=0; total_f=0; details=[]; [exec(\"d=json.load(open(f));o=len([k for k in d.get(chr(111)+chr(115)+chr(115)+chr(105)+chr(102)+chr(105)+chr(101)+chr(100),{}) if k!=chr(95)+chr(100)+chr(101)+chr(115)+chr(99)+chr(114)+chr(105)+chr(112)+chr(116)+chr(105)+chr(111)+chr(110)]);s=len([k for k in d.get(chr(115)+chr(116)+chr(97)+chr(98)+chr(108)+chr(101),{}) if k!=chr(95)+chr(100)+chr(101)+chr(115)+chr(99)+chr(114)+chr(105)+chr(112)+chr(116)+chr(105)+chr(111)+chr(110)]);fc=sum(len([k for k in d.get(sec,{}) if k!=chr(95)+chr(100)+chr(101)+chr(115)+chr(99)+chr(114)+chr(105)+chr(112)+chr(116)+chr(105)+chr(111)+chr(110)]) for sec in [chr(102)+chr(97)+chr(105)+chr(108)+chr(101)+chr(100),chr(119)+chr(111)+chr(114)+chr(107)+chr(97)+chr(114)+chr(111)+chr(117)+chr(110)+chr(100),chr(104)+chr(97)+chr(114)+chr(100)+chr(119)+chr(97)+chr(114)+chr(101)+chr(95)+chr(108)+chr(105)+chr(109)+chr(105)+chr(116)+chr(101)+chr(100)]);total_o[0]+=o;total_s[0]+=s;total_f[0]+=fc;details.append(os.path.basename(f).replace(chr(46)+chr(106)+chr(115)+chr(111)+chr(110),chr(32))+chr(58)+str(o)+chr(47)+str(o+s+fc))\") for f in sorted(glob.glob(os.path.join(conv_dir,chr(42)+chr(46)+chr(106)+chr(115)+chr(111)+chr(110))))]; t=total_o[0]+total_s[0]+total_f[0]; pct=round(total_o[0]/t*100,1) if t>0 else 0; print(str(total_o[0])+chr(124)+str(total_s[0])+chr(124)+str(total_f[0])+chr(124)+str(t)+chr(124)+str(pct)+chr(124)+chr(44).join(details))' 2>/dev/null"
+    let mut result = ""
+    try { result = exec(py).trim() } catch e {}
+    return result
+}
+
+// That approach is too complex with chr() escaping. Use a helper script instead.
+
+// ─── Python 헬퍼 생성 ───
+fn write_helpers() {
+    let helper_dir = _engine_dir + "/.go_loop_helpers"
+    try { exec("mkdir -p " + helper_dir) } catch e {}
+
+    let measure_py = "import json,os,glob,sys\nconv_dir = sys.argv[1]\ntotal_o = 0; total_s = 0; total_f = 0\ndetails = []\nfor f in sorted(glob.glob(os.path.join(conv_dir, '*.json'))):\n    name = os.path.basename(f).replace('.json','')\n    d = json.load(open(f))\n    o = len([k for k in d.get('ossified',{}) if not k.startswith('_')])\n    s = len([k for k in d.get('stable',{}) if not k.startswith('_')])\n    f_count = 0\n    for sec in ['failed','workaround','hardware_limited']:\n        f_count += len([k for k in d.get(sec,{}) if not k.startswith('_') and isinstance(d.get(sec,{})[k],dict)])\n    total_o += o; total_s += s; total_f += f_count\n    details.append(f'{name}:{o}/{o+s+f_count}')\ntotal = total_o + total_s + total_f\npct = round(total_o/total*100,1) if total > 0 else 0\nprint(f'{total_o}|{total_s}|{total_f}|{total}|{pct}|{chr(44).join(details)}')\n"
+    try { write_file(helper_dir + "/measure.py", measure_py) } catch e {}
+
+    let promote_py = "import json,os,glob,sys,datetime\nconv_dir = sys.argv[1]\npromoted = []\ntoday = datetime.date.today().isoformat()\nfor f in glob.glob(os.path.join(conv_dir, '*.json')):\n    name = os.path.basename(f).replace('.json','')\n    d = json.load(open(f))\n    stable = d.get('stable',{})\n    keys = [k for k in stable if k != '_description']\n    if not keys: continue\n    for k in list(keys):\n        entry = stable.pop(k)\n        entry['ossified_at'] = today\n        entry['promoted_from'] = 'go_loop_auto'\n        d.setdefault('ossified',{})[k] = entry\n        promoted.append(f'{name}/{k}')\n    json.dump(d, open(f,'w'), indent=2, ensure_ascii=False)\nprint(chr(10).join(promoted) if promoted else 'none')\n"
+    try { write_file(helper_dir + "/promote.py", promote_py) } catch e {}
+
+    let failed_py = "import json,os,glob,sys\nconv_dir = sys.argv[1]\nitems = []\nfor f in sorted(glob.glob(os.path.join(conv_dir, '*.json'))):\n    name = os.path.basename(f).replace('.json','')\n    d = json.load(open(f))\n    for sec in ['failed','workaround','hardware_limited']:\n        for k,v in d.get(sec,{}).items():\n            if k.startswith('_') or not isinstance(v,dict): continue\n            reason = v.get('value','') or v.get('note','')\n            items.append(f'{name}/{k}: {reason}')\nprint(chr(10).join(items) if items else 'none')\n"
+    try { write_file(helper_dir + "/failed.py", failed_py) } catch e {}
+}
+
+// ─── 초기화 ───
+write_helpers()
+let _helper = _engine_dir + "/.go_loop_helpers"
+
+// ─── 래퍼 함수 ───
+fn measure() -> string {
+    let mut r = ""
+    try { r = exec("/usr/bin/python3 " + _helper + "/measure.py " + _conv_dir + " 2>/dev/null").trim() } catch e {}
+    return r
+}
+
+fn promote() -> string {
+    let mut r = ""
+    try { r = exec("/usr/bin/python3 " + _helper + "/promote.py " + _conv_dir + " 2>/dev/null").trim() } catch e {}
+    return r
+}
+
+fn get_failed() -> string {
+    let mut r = ""
+    try { r = exec("/usr/bin/python3 " + _helper + "/failed.py " + _conv_dir + " 2>/dev/null").trim() } catch e {}
+    return r
+}
+
+fn run_go() -> string {
+    let mut out = ""
+    try { out = exec(_hexa_bin + " " + _engine_dir + "/todo.hexa 2>/dev/null") } catch e {}
+    return out
+}
+
+fn log_growth(cycle: i64, pct: string, promoted: string) {
+    let ts = exec("date -u '+%Y-%m-%dT%H:%M:%SZ'").trim()
+    let promo_safe = promoted.replace("\n", ";").replace("\"", "'")
+    let entry = "{\"ts\":\"" + ts + "\",\"event\":\"go_loop\",\"cycle\":" + to_string(cycle) + ",\"ossification_pct\":" + pct + ",\"promoted\":\"" + promo_safe + "\"}"
+    try { append_file(_shared + "/growth_bus.jsonl", entry + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── 메인 루프 ───
+// ═══════════════════════════════════════════════════════════
+
+println("╔══════════════════════════════════════════════════╗")
+println("║  GO-LOOP — 100% 골화 수렴 엔진                  ║")
+println("╚══════════════════════════════════════════════════╝")
+println("")
+println("시작: " + _date)
+println("최대 사이클: " + to_string(max_cycles))
+if dry_run { println("모드: DRY RUN (측정만)") }
+println("")
+
+// 초기 측정
+let init = measure()
+let init_parts = init.split("|")
+let mut init_pct = "0"
+if init_parts.len() >= 5 { init_pct = init_parts[4] }
+println("── 초기 골화율: " + init_pct + "% ──")
+if init_parts.len() >= 6 {
+    let details = init_parts[5].split(",")
+    for d in details {
+        println("  " + d.replace(":", " → "))
+    }
+}
+println("")
+
+// failed 항목 표시
+let failed = get_failed()
+if failed != "none" && failed != "" {
+    println("⚠ 미골화 (failed/workaround/hardware_limited):")
+    let fl = failed.split("\n")
+    for f in fl {
+        if f.trim() != "" { println("  ✗ " + f) }
+    }
+    println("")
+}
+
+if init_pct == "100.0" || init_pct == "100" {
+    println("✓ 이미 100% 골화 — 루프 불필요")
+} else {
+    let mut cycle: i64 = 0
+    let mut done = false
+
+    while cycle < max_cycles && !done {
+        cycle = cycle + 1
+        let ts = exec("date '+%H:%M:%S'").trim()
+        println("━━━ 사이클 " + to_string(cycle) + "/" + to_string(max_cycles) + " [" + ts + "] ━━━")
+
+        // 1) stable → ossified 승격
+        let promoted = if dry_run { "none" } else { promote() }
+        if promoted != "none" && promoted != "" {
+            let plines = promoted.split("\n")
+            println("  ↑ 승격 " + to_string(plines.len()) + "건:")
+            for p in plines {
+                if p.trim() != "" { println("    ✓ " + p) }
+            }
+        }
+
+        // 2) go 실행 (dry_run 아닐 때)
+        if !dry_run {
+            println("  ▶ go 실행 중...")
+            let go_out = run_go()
+            let go_lines = go_out.split("\n")
+            let mut summary_count: i64 = 0
+            for gl in go_lines {
+                let g = gl.trim()
+                if g.contains("✅") || g.contains("완료") || g.contains("PASS") {
+                    summary_count = summary_count + 1
+                }
+            }
+            if summary_count > 0 {
+                println("  ✓ 완료 항목: " + to_string(summary_count) + "건")
+            }
+        }
+
+        // 3) 재측정
+        let m = measure()
+        let parts = m.split("|")
+        let mut pct = "0"
+        let mut o_count = "0"
+        let mut total = "0"
+        if parts.len() >= 5 {
+            o_count = parts[0]
+            total = parts[3]
+            pct = parts[4]
+        }
+        println("  골화율: " + pct + "% (" + o_count + "/" + total + ")")
+
+        // 성장 버스 기록
+        log_growth(cycle, pct, promoted)
+
+        // 4) 100% 도달 체크
+        if pct == "100.0" || pct == "100" {
+            println("")
+            println("╔══════════════════════════════════════════════════╗")
+            println("║  ★ 100% 골화 달성! — 사이클 " + to_string(cycle) + "              ║")
+            println("╚══════════════════════════════════════════════════╝")
+            done = true
+        }
+
+        // 5) dry_run이면 1회만 / stable=0이면 조기 종료
+        if dry_run { done = true }
+        if !done && parts.len() >= 2 && parts[1] == "0" {
+            let remaining = get_failed()
+            if remaining != "none" && remaining != "" {
+                println("  ⚠ failed만 잔존 — 수동 해소 필요:")
+                let rl = remaining.split("\n")
+                for r in rl {
+                    if r.trim() != "" { println("    ✗ " + r) }
+                }
+                println("  ■ stable=0, failed " + parts[2] + "건 → 루프 종료")
+                done = true
+            }
+        }
+
+        println("")
+    }
+
+    if !done {
+        println("■ 최대 사이클 도달 (" + to_string(max_cycles) + ") — 100% 미달성")
+    }
+}
+
+// 최종 상태
+println("")
+let final_m = measure()
+let final_parts = final_m.split("|")
+let mut final_pct = "0"
+if final_parts.len() >= 5 { final_pct = final_parts[4] }
+println("── 최종 골화율: " + final_pct + "% ──")
+let end_date = exec("date '+%Y-%m-%d %H:%M:%S'").trim()
+println("종료: " + end_date)
+
+// 헬퍼 정리
+try { exec("rm -rf " + _helper) } catch e {}
