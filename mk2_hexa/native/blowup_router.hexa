@@ -50,12 +50,17 @@ if htz_ok {
         // Mk.II (파동) — 메인 돌파
         let result = exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/blowup.hexa " + blowup_args + "' 2>&1")
         println(result)
-        // Mk.V (끈) — 보조 깊은탐색 (벤치: 15 EXACT, 71%)
-        println("[router] → Mk.V 끈 돌파 체인")
-        try {
-            let r5 = exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/blowup_string.hexa " + blowup_args + "' 2>&1")
-            println(r5)
-        } catch e5 { println("[router] Mk.V skip: " + to_string(e5)) }
+        // Mk.IV (양자) — 빠른 보조 (벤치: 8 EXACT, 73%, 0.5s)
+        println("[router] → Mk.IV 양자 돌파")
+        try { let r4 = exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/blowup_quantum.hexa " + blowup_args + "' 2>&1"); println(r4) } catch e4 { println("[router] Mk.IV skip") }
+        // Mk.V (끈) — 깊은탐색 (벤치: 15 EXACT, 71%, 58s)
+        println("[router] → Mk.V 끈 돌파")
+        try { let r5 = exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/blowup_string.hexa " + blowup_args + "' 2>&1"); println(r5) } catch e5 { println("[router] Mk.V skip") }
+        // 보조 모듈 체인 (백그라운드)
+        println("[router] → 보조 모듈 체인 (bt + seed + ouroboros)")
+        try { exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/bt_godel.hexa scan &' 2>/dev/null") } catch e6 {}
+        try { exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/seed_dna.hexa generate &' 2>/dev/null") } catch e7 {}
+        try { exec("ssh -o ConnectTimeout=5 -o BatchMode=yes hetzner 'cd ~/Dev/nexus && " + htz_hexa + " mk2_hexa/native/ouroboros_meta.hexa evolve &' 2>/dev/null") } catch e8 {}
     } catch e {
         println("[router] htz exec failed, falling back to local")
         htz_ok = false
