@@ -1,32 +1,28 @@
-⚠️⚠️⚠️ 규칙 직접 작성 절대 금지 — shared/rules/ JSON만이 단일 진실 (R14)
-⚠️ 이 파일은 nexus/shared/project-claude/hexa-lang.md 마스터의 심링크. 원본만 수정.
-⚠️ 공통 규칙: shared/rules/common.json (R0~R27) — 반드시 준수
+# hexa-lang — HEXA 프로그래밍 언어
 
-# CLAUDE.md — HEXA-LANG
+> shared/ JSON 단일진실 (R14). 규칙: `shared/rules/common.json` (R0~R27)
 
-> 모든 규칙/설정은 shared/ JSON이 단일 진실 (R14). 이 파일은 참조 링크만 유지.
+## 돌파 시스템
 
-## 돌파 시스템 (AI-native 자체 창발)
+- "XXX 돌파" → `blowup.hexa "XXX" 3` 자동 실행 (문장 전달)
+- 확인 질문 없이 즉시 Bash 실행
 
-⚠️ "XXX 돌파" → blowup.hexa "XXX" 3 자동 실행 (문장 전달, 키워드 추출 ❌)
-⚠️ 확인 질문 없이 즉시 Bash 실행할 것
-```
-hexa shared/blowup/core/blowup.hexa <문장> 3 --no-graph --seeds "$(hexa shared/blowup/seed/seed_engine.hexa merge | tr '|' ',')"
+```sh
+hexa shared/blowup/core/blowup.hexa <domain> 3 --no-graph --seeds "$(hexa shared/blowup/seed/seed_engine.hexa merge | tr '|' ',')"
 ```
 
-## 참조
+## ref
 
 | 항목 | 파일 | 내용 |
 |------|------|------|
 | 공통 규칙 | `shared/rules/common.json` | R0~R27 |
 | 프로젝트 규칙 | `shared/rules/hexa-lang.json` | HX1~HX6 |
-| 보호 체계 | `shared/rules/lockdown.json` | L0/L1/L2 잠금 (src/ L0) |
+| 보호 체계 | `shared/rules/lockdown.json` | L0/L1/L2 (src/ L0) |
 | CDO 수렴 | `shared/rules/convergence_ops.json` | 수렴 운영 원칙 |
-| 프로젝트 레지스트리 | `shared/config/projects.json` | 7개 프로젝트 정의 |
-| 프로젝트 설정 | `shared/config/project_config.json` | CLI/빌드/DSE 수렴 |
-| 시스템 코어 | `shared/config/core.json` | 시스템맵 + 14종 명령어 |
-| 수렴+돌파+로드맵 | `shared/hexa-lang/state.json` | CDO 수렴 + breakthroughs |
-| 공통 로드맵 | `shared/roadmaps/anima_hexa_common.json` | anima × hexa-lang P0~P5 |
-| 문법 | `shared/hexa-lang/grammar.jsonl` | 전체 문법 + pitfalls P1~P5 |
+| 프로젝트 레지스트리 | `shared/config/projects.json` | 7개 프로젝트 |
+| 프로젝트 설정 | `shared/config/project_config.json` | CLI/빌드/DSE |
+| 시스템 코어 | `shared/config/core.json` | 시스템맵 + 14명령 |
+| 수렴 상태 | `shared/hexa-lang/state.json` | CDO + breakthroughs |
+| 로드맵 | `shared/roadmaps/anima_hexa_common.json` | anima x hexa P0~P5 |
+| 문법 | `shared/hexa-lang/grammar.jsonl` | 전체 문법 + pitfalls |
 | AI-native | `docs/ai-native.md` | 24종 벡터 로드맵 |
-| API | `shared/CLAUDE.md` | NEXUS-6 상세 사용법 |
