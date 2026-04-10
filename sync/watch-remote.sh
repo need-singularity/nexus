@@ -13,7 +13,7 @@ WATCH_PATHS=(
   "$SHARED/reality_map_live.json"
   "$SHARED/growth_bus.jsonl"
   "$SHARED/dse_cross_results.json"
-  "$SHARED/n6_mirror"
+  "$SHARED/n6/docs"
 )
 
 echo "[watch-remote] monitoring ${#WATCH_PATHS[@]} paths → sync-remote $TARGET"
