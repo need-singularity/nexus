@@ -1,0 +1,301 @@
+// engine_hexa_lang.hexa — "Mathematician" (수학자) 엔진
+// hexa-lang 프로젝트: 테스트 800+, 이머전스 100% 수렴
+// 사용: hexa engine_hexa_lang.hexa status|tick|report
+
+// ═══════════════════════════════════════════════════════════
+// ─── CONSTANTS ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const version = "1.0.0"
+comptime const project = "hexa_lang"
+comptime const personality = "Mathematician"
+comptime const goal = "테스트 800+, 이머전스 100% 수렴"
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/hexa-lang"
+let metrics_path = project_dir + "/config/eso_metrics.json"
+let patterns_path = project_dir + "/config/emergence_patterns.json"
+let bus_file = dev + "/nexus/shared/growth_bus.jsonl"
+let state_path = dev + "/nexus/shared/engine_hexa_lang_state.json"
+
+comptime const test_goal = 800
+comptime const emergence_target = 1.0
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(s.trim()) } catch e {}
+    return v
+}
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn timestamp() -> string {
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
+    r.trim()
+}
+
+fn read_file_safe(path: string) -> string {
+    try { return read_file(path) } catch e { return "" }
+}
+
+fn file_exists_check(path: string) -> bool {
+    let mut r = ""
+    try { r = to_string(exec("test -f " + path + " && echo 1")) } catch e {}
+    r.trim() == "1"
+}
+
+// ─── JSON field extraction ───
+
+fn json_float(content: string, field: string) -> f64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let after = parts[1]
+    // skip past ":"
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0.0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(val_str)
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_int(val_str)
+}
+
+// ─── Growth bus ───
+
+fn append_bus(phase: string, status: string, detail: string) {
+    let ts = timestamp()
+    let line = "{\"source\":\"" + project + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(bus_file, line + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA COLLECTION ───
+// ═══════════════════════════════════════════════════════════
+
+struct Metrics {
+    test_count: i64,
+    test_pass: i64,
+    test_fail: i64,
+    emergence_density: f64,
+    convergence_round: i64,
+    pattern_count: i64,
+    build_ok: bool
+}
+
+fn count_tests() {
+    // Run cargo test in hexa-lang dir, parse results
+    let mut result = ""
+    try {
+        exec("bash -c cd " + project_dir + " && cargo test 2>&1 | tail -5")
+    } catch e {
+        ""
+    }
+
+    // Parse: "test result: ok. X passed; Y failed;"
+    let mut total: i64 = 0
+    let mut passed: i64 = 0
+    let mut failed: i64 = 0
+
+    if result.contains("passed") {
+        let parts = result.split("passed")
+        if parts.len() >= 1 {
+            // work backwards from "passed" to find the number
+            let before = parts[0]
+            let tokens = before.split(" ")
+            let mut i = tokens.len() - 1
+            while i >= 0 {
+                let n = safe_int(tokens[i])
+                if n > 0 {
+                    passed = n
+                    break
+                }
+                i = i - 1
+            }
+        }
+    }
+
+    if result.contains("failed") {
+        let parts = result.split("failed")
+        if parts.len() >= 1 {
+            let before = parts[0]
+            let tokens = before.split(" ")
+            let mut i = tokens.len() - 1
+            while i >= 0 {
+                let n = safe_int(tokens[i])
+                if n >= 0 {
+                    failed = n
+                    break
+                }
+                i = i - 1
+            }
+        }
+    }
+
+    total = passed + failed
+    return [total, passed, failed]
+}
+
+fn read_emergence_metrics() {
+    let content = read_file_safe(metrics_path)
+    if content == "" { return [0.0, 0] }
+    let density = json_float(content, "emergence_density")
+    let round = json_int(content, "convergence_round")
+    return [density, round]
+}
+
+fn read_pattern_count() -> i64 {
+    let content = read_file_safe(patterns_path)
+    if content == "" { return 0 }
+    // Count entries by counting occurrences of a key field
+    let parts = content.split("\"pattern\"")
+    let count = parts.len() - 1
+    if count < 0 { return 0 }
+    return count
+}
+
+fn collect_metrics() -> Metrics {
+    let tests = count_tests()
+    let emergence = read_emergence_metrics()
+    let patterns = read_pattern_count()
+
+    let build_ok = tests[0] > 0 && tests[2] == 0
+
+    Metrics {
+        test_count: tests[0],
+        test_pass: tests[1],
+        test_fail: tests[2],
+        emergence_density: emergence[0],
+        convergence_round: emergence[1],
+        pattern_count: patterns,
+        build_ok: build_ok
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── HEALTH CALCULATION ───
+// ═══════════════════════════════════════════════════════════
+
+fn calc_health(m: Metrics) -> f64 {
+    // 40% test progress toward 800
+    let test_ratio = clamp01(to_float(m.test_count) / to_float(test_goal))
+    let test_score = test_ratio * 0.4
+
+    // 20% no failures
+    let fail_score = if m.test_fail == 0 { 0.2 } else { 0.2 * max_f(0.0, 1.0 - to_float(m.test_fail) / 10.0) }
+
+    // 25% emergence density toward 1.0
+    let emergence_score = clamp01(m.emergence_density / emergence_target) * 0.25
+
+    // 15% pattern accumulation (100 patterns = full)
+    let pattern_score = clamp01(to_float(m.pattern_count) / 100.0) * 0.15
+
+    return clamp01(test_score + fail_score + emergence_score + pattern_score)
+}
+
+fn classify(m: Metrics, health: f64) -> string {
+    if m.test_fail > 0 { return "STAGNANT" }
+    if m.emergence_density >= 0.95 && m.test_count >= test_goal { return "BREAKTHROUGH" }
+    if m.test_count >= to_int(to_float(test_goal) * 0.9) || m.emergence_density >= 0.9 { return "GOAL_NEAR" }
+    if health >= 0.3 { return "HEALTHY" }
+    return "STAGNANT"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── EVOLVE — Track growth rates ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_prev_state() {
+    let content = read_file_safe(state_path)
+    if content == "" { return [0, 0, 0.0] }
+    let prev_tests = json_int(content, "test_count")
+    let prev_patterns = json_int(content, "pattern_count")
+    let prev_density = json_float(content, "emergence_density")
+    return [prev_tests, prev_patterns, prev_density]
+}
+
+fn save_state(m: Metrics, health: f64) {
+    let content = "{\n" + "  \"test_count\": " + to_string(m.test_count) + ",\n" + "  \"test_pass\": " + to_string(m.test_pass) + ",\n" + "  \"test_fail\": " + to_string(m.test_fail) + ",\n" + "  \"emergence_density\": " + to_string(m.emergence_density) + ",\n" + "  \"convergence_round\": " + to_string(m.convergence_round) + ",\n" + "  \"pattern_count\": " + to_string(m.pattern_count) + ",\n" + "  \"health\": " + to_string(health) + ",\n" + "  \"timestamp\": \"" + timestamp() + "\"\n" + "}\n"
+    try {
+        result = exec("bash -c cat > " + state_path + " << 'JSONEOF'\n" + content + "JSONEOF")
+    } catch e {}
+}
+
+fn evolve_report(m: Metrics) -> string {
+    let prev = load_prev_state()
+    let test_delta = m.test_count - prev[0]
+    let pattern_delta = m.pattern_count - prev[1]
+    let density_delta = m.emergence_density - prev[2]
+
+    let mut report = "evolve:"
+    if test_delta > 0 {
+        report = report + " tests+" + to_string(test_delta)
+    } else if test_delta == 0 {
+        report = report + " tests=stale"
+    } else {
+        report = report + " tests" + to_string(test_delta) + "(regression!)"
+    }
+
+    if pattern_delta > 0 {
+        report = report + " patterns+" + to_string(pattern_delta)
+    }
+
+    if abs_f(density_delta) > 0.001 {
+        if density_delta > 0.0 {
+            report = report + " density+" + to_string(density_delta)
+        } else {
+            report = report + " density" + to_string(density_delta)
+        }
+    }
+
+    return report
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── TICK ACTIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn tick_priority_fix(m: Metrics) {
+    println("[TICK] Priority fix cycle — " + to_string(m.test_fail) + " failures detected")
+    append_bus("tick", "fix_cycle", to_string(m.test_fail) + " test failures")
+
+    // Re-run cargo build to surface errors
+    let build_out = try {

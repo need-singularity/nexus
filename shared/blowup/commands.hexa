@@ -1,0 +1,1166 @@
+// ⛔ CORE — L0 불변식 (24종 명령 라우터. 수정 전 유저 승인 필수)
+// command_router.hexa -- nexus 중앙 지휘 라우터
+// 자연어 입력 -> 3단 게이트 파싱 -> 모듈 디스패치 -> 결과 출력
+// 사용: hexa command_router.hexa "<자연어 입력>"
+// 예시: hexa command_router.hexa "anima 상태"
+//       hexa command_router.hexa "전체 리포트"
+//       hexa command_router.hexa "수학 돌파"
+
+comptime const version = "2.0.0"
+
+// ─── 경로 설정 (env 기반, 하드코딩 금지) ───
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let hexa_bin = dev + "/hexa-lang/target/release/hexa"
+let engine_dir = dev + "/nexus/mk2_hexa/native"
+let shared_dir = dev + "/nexus/shared"
+let aliases_file = shared_dir + "/cmd_aliases.jsonl"
+let domains_file = shared_dir + "/bt_domains.jsonl"
+let projects_file = shared_dir + "/projects.json"
+let project_aliases_file = shared_dir + "/project_aliases.jsonl"
+let n6_constants_file = shared_dir + "/n6_constants.jsonl"
+let log_file = shared_dir + "/cmd_router.log"
+
+// ─── 유틸 (선행 정의) ───
+
+fn read_file_safe(path: string) -> string {
+    try {
+        return read_file(path)
+    } catch e {
+        return ""
+    }
+}
+
+// ─── 프로젝트 레지스트리 (projects.json에서 동적 로드) ───
+
+fn load_projects() {
+    // projects.json에서 "projects" 키 아래의 각 프로젝트를 파싱
+    // 각 키가 display name, "root" 필드가 internal name
+    let raw = read_file_safe(projects_file)
+    if raw == "" { return [[], []] }
+    let mut names = []
+    let mut displays = []
+    // "root": "..." 패턴으로 internal name 추출
+    // 각 프로젝트 블록: "DISPLAY": { "root": "NAME", ...
+    // 간이 파싱: "projects" 섹션에서 최상위 키 + root 필드 추출
+    let lines = raw.split("\n")
+    let mut in_projects = false
+    let mut brace_depth = 0
+    let mut current_display = ""
+    for line in lines {
+        let trimmed = line.trim()
+        // "projects": { 진입
+        if trimmed.contains("\"projects\"") && trimmed.contains("{") {
+            in_projects = true
+            brace_depth = 0
+            continue
+        }
+        if !in_projects { continue }
+        // 중괄호 깊이 추적 (문자열 직접 순회 불가 → count 방식)
+        let open_count = trimmed.split("{").len() - 1
+        let close_count = trimmed.split("}").len() - 1
+        brace_depth = brace_depth + open_count - close_count
+        // depth 1에서 키 발견 = 프로젝트명 (display)
+        if brace_depth == 1 && trimmed.contains("\":") && !trimmed.contains("\"root\"") {
+            // "TECS-L": { 패턴
+            let parts = trimmed.split("\"")
+            if parts.len() >= 2 {
+                let key = parts[1]
+                if key != "" && key != "_meta" && !key.contains("_comment") {
+                    current_display = key
+                }
+            }
+        }
+        // "root": "..." 패턴
+        if trimmed.contains("\"root\":") && current_display != "" {
+            let rp = trimmed.split("\"root\":")
+            if rp.len() >= 2 {
+                let rv = rp[1].trim()
+                let rp2 = rv.split("\"")
+                if rp2.len() >= 2 {
+                    let root_name = rp2[1]
+                    // root를 _로 정규화 (- → _)
+                    let internal = root_name.replace("-", "_").replace("/", "_")
+                    names = names + [internal]
+                    displays = displays + [current_display]
+                    current_display = ""
+                }
+            }
+        }
+        // projects 블록 종료
+        if brace_depth <= 0 && in_projects && names.len() > 0 {
+            break
+        }
+    }
+    [names, displays]
+}
+
+let _proj_data = load_projects()
+let project_names = if _proj_data.len() >= 2 && _proj_data[0].len() > 0 { _proj_data[0] } else { [] }
+let project_display = if _proj_data.len() >= 2 && _proj_data[1].len() > 0 { _proj_data[1] } else { [] }
+
+// ─── 유틸 ───
+
+fn timestamp() -> string {
+    exec("date +%Y-%m-%dT%H:%M:%S").trim()
+}
+
+fn pad_right(s: string, width: int) -> string {
+    let mut out = s
+    while out.len() < width { out = out + " " }
+    out
+}
+
+fn log_cmd(classification: string, target: string, result_summary: string) {
+    let ts = timestamp()
+    let line = "{\"ts\":\"" + ts + "\",\"class\":\"" + classification + "\",\"target\":\"" + target + "\",\"result\":\"" + result_summary + "\"}"
+    try { append_file(log_file, line + "\n") } catch e {}
+}
+
+// ─── Gate 1: cmd_aliases.jsonl 에서 명령 동사 매칭 ───
+
+struct AliasEntry {
+    verb: string,
+    aliases: list,
+    category: string
+}
+
+fn cmd_to_category(cmd: string) -> string {
+    // cmd_aliases.jsonl의 "category" 필드에서 동적 매핑
+    let raw = read_file_safe(aliases_file)
+    if raw != "" {
+        let lines = raw.split("\n")
+        for line in lines {
+            if line.trim() == "" { continue }
+            // cmd 필드 매칭
+            let mut line_cmd = ""
+            if line.contains("\"cmd\":\"") {
+                let p = line.split("\"cmd\":\"")
+                if p.len() >= 2 {
+                    line_cmd = p[1].split("\"")[0]
+                }
+            }
+            if line_cmd == cmd {
+                // category 필드 추출
+                if line.contains("\"category\":\"") {
+                    let cp = line.split("\"category\":\"")
+                    if cp.len() >= 2 {
+                        return cp[1].split("\"")[0]
+                    }
+                }
+            }
+        }
+    }
+    "HELP"
+}
+
+fn load_aliases() {
+    let raw = read_file_safe(aliases_file)
+    if raw == "" { return [] }
+    let lines = raw.split("\n")
+    let mut entries = []
+    for line in lines {
+        if line.trim() != "" {
+            // 간이 JSON 파싱 (split 기반) — cmd_aliases.jsonl 형식:
+            // {"cmd":"status","keywords":["상태","status",...]}
+            let mut cmd = ""
+            let mut aliases = []
+
+            // cmd 필드
+            if line.contains("\"cmd\":\"") {
+                let p = line.split("\"cmd\":\"")
+                if p.len() >= 2 {
+                    cmd = p[1].split("\"")[0]
+                }
+            }
+            // keywords 배열
+            if line.contains("\"keywords\":[") {
+                let p = line.split("\"keywords\":[")
+                if p.len() >= 2 {
+                    let body = p[1].split("]")[0]
+                    let items = body.split(",")
+                    for item in items {
+                        let clean = item.trim().replace("\"", "")
+                        if clean != "" {
+                            aliases = aliases + [clean]
+                        }
+                    }
+                }
+            }
+            if cmd != "" {
+                let category = cmd_to_category(cmd)
+                entries = entries + [AliasEntry { verb: cmd, aliases: aliases, category: category }]
+            }
+        }
+    }
+    entries
+}
+
+fn match_verb(input: string, entries) -> string {
+    // 정확한 카테고리 매칭 — 가장 긴 별칭부터 매칭 (다어절 우선)
+    let lower = input
+    let mut best_cat = ""
+    let mut best_len = 0
+    for entry in entries {
+        for alias in entry.aliases {
+            if lower.contains(alias) && alias.len() > best_len {
+                best_cat = entry.category
+                best_len = alias.len()
+            }
+        }
+    }
+    best_cat
+}
+
+// ─── Gate 2: 프로젝트명 매칭 ───
+
+fn load_project_aliases() {
+    // shared/project_aliases.jsonl에서 [[alias, project], ...] 동적 로드
+    let raw = read_file_safe(project_aliases_file)
+    if raw == "" { return [] }
+    let lines = raw.split("\n")
+    let mut pairs = []
+    for line in lines {
+        if line.trim() == "" { continue }
+        let mut alias_val = ""
+        let mut project_val = ""
+        if line.contains("\"alias\":\"") {
+            let p = line.split("\"alias\":\"")
+            if p.len() >= 2 {
+                alias_val = p[1].split("\"")[0]
+            }
+        }
+        if line.contains("\"project\":\"") {
+            let p = line.split("\"project\":\"")
+            if p.len() >= 2 {
+                project_val = p[1].split("\"")[0]
+            }
+        }
+        if alias_val != "" && project_val != "" {
+            pairs = pairs + [[alias_val, project_val]]
+        }
+    }
+    pairs
+}
+
+fn match_project(input: string) -> string {
+    let lower = input
+    // project_aliases.jsonl에서 동적 매핑 (자연어 → 내부명)
+    let aliases_map = load_project_aliases()
+    let mut best_name = ""
+    let mut best_len = 0
+    for pair in aliases_map {
+        let alias = pair[0]
+        let name = pair[1]
+        if lower.contains(alias) && alias.len() > best_len {
+            best_name = name
+            best_len = alias.len()
+        }
+    }
+    best_name
+}
+
+// ─── n6 상수 로더 (n6_constants.jsonl에서 동적 로드) ───
+
+fn load_n6_constants() {
+    // [sigma, phi, tau, n, sopfr, M3] 순서로 반환
+    // 기본값 (파일 로드 실패 시 방어)
+    let mut sigma = 12
+    let mut phi = 2
+    let mut tau = 4
+    let mut n_val = 6
+    let mut sopfr = 5
+    let mut m3 = 3
+
+    let raw = read_file_safe(n6_constants_file)
+    if raw != "" {
+        let lines = raw.split("\n")
+        for line in lines {
+            if line.trim() == "" { continue }
+            let mut name = ""
+            let mut value = 0
+            // name 필드
+            if line.contains("\"name\":\"") {
+                let p = line.split("\"name\":\"")
+                if p.len() >= 2 {
+                    name = p[1].split("\"")[0]
+                }
+            }
+            // value 필드 (정수)
+            if line.contains("\"value\":") {
+                let p = line.split("\"value\":")
+                if p.len() >= 2 {
+                    let num_str = p[1].split(",")[0].split("}")[0].trim()
+                    value = to_int(num_str)
+                }
+            }
+            if name == "sigma" { sigma = value }
+            if name == "phi" { phi = value }
+            if name == "tau" { tau = value }
+            if name == "n" { n_val = value }
+            if name == "sopfr" { sopfr = value }
+            if name == "M3" { m3 = value }
+        }
+    }
+    [sigma, phi, tau, n_val, sopfr, m3]
+}
+
+// ─── Gate 3: bt_domains.jsonl 에서 도메인 키워드 매칭 ───
+
+fn match_domain(input: string) -> string {
+    let raw = read_file_safe(domains_file)
+    if raw == "" { return "math" }
+    let lines = raw.split("\n")
+    let lower = input
+    let mut best_domain = ""
+    let mut best_len = 0
+
+    for line in lines {
+        if line.trim() != "" {
+            let mut d_name = ""
+            if line.contains("\"domain\":\"") {
+                let p = line.split("\"domain\":\"")
+                if p.len() >= 2 {
+                    d_name = p[1].split("\"")[0]
+                }
+            }
+            if d_name != "" {
+                if line.contains("\"keywords\":[") {
+                    let kw_parts = line.split("\"keywords\":[")
+                    if kw_parts.len() >= 2 {
+                        let kw_body = kw_parts[1].split("]")[0]
+                        let kw_items = kw_body.split(",")
+                        for kp in kw_items {
+                            let kw_clean = kp.trim().replace("\"", "")
+                            if kw_clean != "" && lower.contains(kw_clean) && kw_clean.len() > best_len {
+                                best_domain = d_name
+                                best_len = kw_clean.len()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if best_domain == "" { "math" } else { best_domain }
+}
+
+// ─── 분류 엔진 (3단 게이트 결합) ───
+
+struct Classification {
+    category: string,   // STATUS_ALL, STATUS_ONE, BREAKTHROUGH, ...
+    project: string,    // 프로젝트명 (없으면 "")
+    domain: string,     // 도메인 (없으면 "math")
+    raw_input: string
+}
+
+fn classify(input: string) -> Classification {
+    let entries = load_aliases()
+    let verb_cat = match_verb(input, entries)
+    let project = match_project(input)
+    let domain = match_domain(input)
+
+    // "전체" 키워드 체크
+    let is_all = input.contains("전체") || input.contains("all") || input.contains("모든")
+
+    let mut category = ""
+
+    // 분류 로직: 동사 카테고리 + 프로젝트 존재 여부로 최종 결정
+    if verb_cat == "STATUS" && is_all {
+        category = "STATUS_ALL"
+    } else if verb_cat == "STATUS" && project != "" {
+        category = "STATUS_ONE"
+    } else if verb_cat == "STATUS" {
+        category = "STATUS_ALL"
+    } else if verb_cat == "BREAKTHROUGH" && (input.contains("다음") || input.contains("방향") || input.contains("제시") || input.contains("next") || domain == "next_breakthrough") {
+        category = "NEXT_BREAKTHROUGH"
+    } else if verb_cat == "BREAKTHROUGH" {
+        category = "BREAKTHROUGH"
+    } else if verb_cat == "CROSSFEED" {
+        category = "CROSSFEED"
+    } else if verb_cat == "H100" {
+        category = "H100"
+    } else if verb_cat == "ABSORB" {
+        category = "ABSORB"
+    } else if verb_cat == "GROWTH" {
+        category = "GROWTH"
+    } else if verb_cat == "GAP" {
+        category = "GAP"
+    } else if verb_cat == "ALIEN" {
+        category = "ALIEN"
+    } else if verb_cat == "TICK" && project != "" {
+        category = "TICK"
+    } else if verb_cat == "TICK" {
+        category = "STATUS_ALL"
+    } else if verb_cat == "CYCLE" {
+        category = "CYCLE"
+    } else if verb_cat == "CHECK" {
+        category = "CHECK"
+    } else if verb_cat == "EXPLORE" {
+        category = "EXPLORE"
+    } else if verb_cat == "DIRECTION" {
+        category = "DIRECTION"
+    } else if verb_cat == "EXPLORE_EMPTY" {
+        category = "EXPLORE_EMPTY"
+    } else if domain == "next_breakthrough" {
+        category = "NEXT_BREAKTHROUGH"
+    } else if domain == "hexa_direction" && verb_cat == "" {
+        category = "DIRECTION"
+    } else if domain == "empty_space" && verb_cat == "" {
+        category = "EXPLORE_EMPTY"
+    } else if verb_cat == "SEED" {
+        category = "SEED"
+    } else if verb_cat == "AUDIT" {
+        category = "AUDIT"
+    } else if verb_cat == "VERIFY" {
+        category = "VERIFY"
+    } else if verb_cat == "BRIDGE" {
+        category = "BRIDGE"
+    } else if verb_cat == "HEAL" {
+        category = "HEAL"
+    } else if verb_cat == "HISTORY" {
+        category = "HISTORY"
+    } else if verb_cat == "RED_TEAM" {
+        category = "RED_TEAM"
+    } else if verb_cat == "DSE_CROSS" {
+        category = "DSE_CROSS"
+    } else if verb_cat == "HELP" {
+        category = "HELP"
+    } else if project != "" {
+        // 동사 없이 프로젝트명만 → 상태 조회
+        category = "STATUS_ONE"
+    } else {
+        category = "HELP"
+    }
+
+    Classification {
+        category: category,
+        project: project,
+        domain: domain,
+        raw_input: input
+    }
+}
+
+// ─── 결과 포맷터 ───
+
+fn print_header(classification: string, target: string) {
+    println("")
+    println("+" + pad_right("", 46) + "+")
+    println("|  NEXUS COMMAND" + pad_right("", 32) + "|")
+    println("|  " + pad_right("cmd: " + classification, 44) + "|")
+    println("|  " + pad_right("target: " + target, 44) + "|")
+    println("+" + pad_right("", 46) + "+")
+}
+
+fn print_footer() {
+    println("+" + pad_right("", 46) + "+")
+    println("")
+}
+
+fn print_result(output: string) {
+    let lines = output.split("\n")
+    for line in lines {
+        println("|  " + line)
+    }
+}
+
+fn print_bg_notice(module: string) {
+    println("|  >> background dispatch: " + module)
+    println("|  >> log: shared/cmd_router.log")
+}
+
+// ─── 결과 정규화 (텍스트→JSON) ───
+
+fn extract_number_after(text: string, keyword: string) -> string {
+    // keyword 뒤의 첫 번째 숫자(정수 또는 소수)를 추출
+    if !text.contains(keyword) { return "" }
+    let parts = text.split(keyword)
+    if parts.len() < 2 { return "" }
+    let after = parts[1].trim()
+    // ": N" 또는 "= N" 또는 " N" 패턴
+    let clean = after.replace(":", " ").replace("=", " ").trim()
+    let tokens = clean.split(" ")
+    for tok in tokens {
+        let t = tok.trim().replace(",", "").replace("%", "")
+        if t == "" { continue }
+        // 숫자인지 확인 (첫 문자가 0-9 또는 .)
+        let first = t[0]
+        if first == "0" || first == "1" || first == "2" || first == "3" || first == "4" || first == "5" || first == "6" || first == "7" || first == "8" || first == "9" || first == "." {
+            return t
+        }
+    }
+    ""
+}
+
+fn normalize_result(raw: string) -> string {
+    // 비표준 텍스트에서 discoveries, laws, health 숫자 추출
+    let mut discoveries = extract_number_after(raw, "discover")
+    if discoveries == "" { discoveries = extract_number_after(raw, "found") }
+    if discoveries == "" { discoveries = extract_number_after(raw, "발견") }
+
+    let mut laws = extract_number_after(raw, "law")
+    if laws == "" { laws = extract_number_after(raw, "rule") }
+    if laws == "" { laws = extract_number_after(raw, "법칙") }
+
+    let mut health = extract_number_after(raw, "health")
+    if health == "" { health = extract_number_after(raw, "상태") }
+    if health == "" { health = extract_number_after(raw, "score") }
+
+    // 숫자 기본값
+    let d_val = if discoveries != "" { discoveries } else { "0" }
+    let l_val = if laws != "" { laws } else { "0" }
+    let h_val = if health != "" { health } else { "0.0" }
+
+    // raw 문자열 이스케이프 (큰따옴표, 줄바꿈 제거)
+    let safe_raw = raw.replace("\"", "'").replace("\n", " ").replace("\r", "")
+    // 200자로 자르기
+    let truncated = if safe_raw.len() > 200 { safe_raw.substring(0, 200) } else { safe_raw }
+
+    "{\"discoveries\":" + d_val + ",\"laws\":" + l_val + ",\"health\":" + h_val + ",\"raw\":\"" + truncated + "\"}"
+}
+
+// ─── 디스패치 (동기) ───
+
+fn dispatch_sync(module: string, mode: string) -> string {
+    let path = engine_dir + "/" + module
+    let mut result = ""
+    try {
+        result = exec(hexa_bin, [path, mode])
+    } catch e {
+        result = "ERROR: " + to_string(e)
+    }
+
+    // 결과 정규화 + 구조화 로그 기록
+    let normalized = normalize_result(result)
+    let ts = timestamp()
+    let structured_log = "{\"ts\":\"" + ts + "\",\"module\":\"" + module + "\",\"mode\":\"" + mode + "\",\"result\":" + normalized + "}"
+    try { append_file(log_file, structured_log + "\n") } catch e {}
+
+    result
+}
+
+// ─── 디스패치 (비동기 — 장시간 명령) ───
+
+fn dispatch_async(module: string, mode: string, extra_args: string) {
+    let path = engine_dir + "/" + module
+    let cmd = hexa_bin + " " + path + " " + mode + " " + extra_args + " >> " + log_file + " 2>&1 &"
+    try {
+        exec("bash", ["-c", cmd])
+    } catch e {}
+}
+
+// ─── 명령별 실행 핸들러 ───
+
+fn handle_status_all(c: Classification) {
+    print_header("STATUS_ALL", "all projects")
+    let output = dispatch_sync("nexus_hub.hexa", "report")
+    print_result(output)
+    print_footer()
+    log_cmd("STATUS_ALL", "all", "ok")
+}
+
+fn handle_status_one(c: Classification) {
+    let target = c.project
+    print_header("STATUS_ONE", target)
+    let module = "engine_" + target + ".hexa"
+    let output = dispatch_sync(module, "status")
+    print_result(output)
+    print_footer()
+    log_cmd("STATUS_ONE", target, "ok")
+}
+
+fn handle_breakthrough(c: Classification) {
+    let domain = c.domain
+    print_header("BREAKTHROUGH", domain)
+
+    // seed 취득
+    let mut seeds = ""
+    try {
+        seeds = exec(hexa_bin, [engine_dir + "/seed_engine.hexa", "merge"]).trim()
+    } catch e {}
+
+    let extra = if seeds != "" { "--no-graph --seeds \"" + seeds + "\"" } else { "--no-graph" }
+
+    // 비동기 실행 (장시간)
+    dispatch_async("blowup.hexa", domain + " 3", extra)
+    print_bg_notice("blowup.hexa " + domain)
+    print_footer()
+    log_cmd("BREAKTHROUGH", domain, "dispatched_bg")
+}
+
+fn handle_crossfeed(c: Classification) {
+    print_header("CROSSFEED", "all projects")
+    let output = dispatch_sync("cross_project.hexa", "resonance")
+    print_result(output)
+    print_footer()
+    log_cmd("CROSSFEED", "all", "ok")
+}
+
+fn handle_h100(c: Classification) {
+    print_header("H100", "GPU/training")
+    let output = dispatch_sync("anima_loop.hexa", "status")
+    print_result(output)
+    print_footer()
+    log_cmd("H100", "anima_loop", "ok")
+}
+
+fn handle_absorb(c: Classification) {
+    print_header("ABSORB", "discovery absorption")
+    let output = dispatch_sync("absorb.hexa", "tick")
+    print_result(output)
+    print_footer()
+    log_cmd("ABSORB", "absorb", "ok")
+}
+
+fn handle_growth(c: Classification) {
+    print_header("GROWTH", "trend analysis")
+    let output = dispatch_sync("nexus_hub.hexa", "status")
+    print_result(output)
+    print_footer()
+    log_cmd("GROWTH", "all", "ok")
+}
+
+fn handle_gap(c: Classification) {
+    print_header("GAP", "unexplored regions")
+    let output = dispatch_sync("gap_finder.hexa", "scan")
+    print_result(output)
+    print_footer()
+    log_cmd("GAP", "gap_finder", "ok")
+}
+
+fn handle_alien(c: Classification) {
+    print_header("ALIEN", "alien index distribution")
+    let output = dispatch_sync("alien_index.hexa", "--distribution")
+    print_result(output)
+    print_footer()
+    log_cmd("ALIEN", "alien_index", "ok")
+}
+
+fn handle_tick(c: Classification) {
+    let target = c.project
+    print_header("TICK", target)
+    let module = "engine_" + target + ".hexa"
+    // 비동기 실행 (장시간)
+    dispatch_async(module, "tick", "")
+    print_bg_notice(module)
+    print_footer()
+    log_cmd("TICK", target, "dispatched_bg")
+}
+
+fn handle_cycle(c: Classification) {
+    print_header("CYCLE", "full singularity cycle")
+    // 비동기 — breakthrough.hexa --converge
+    let bt = dev + "/nexus/mk2_hexa/native/breakthrough.hexa"
+    let cmd = "cd " + dev + "/nexus && " + dev + "/hexa-lang/target/release/hexa " + bt + " --converge >> " + log_file + " 2>&1 &"
+    try { exec("bash", ["-c", cmd]) } catch e {}
+    print_bg_notice("breakthrough.hexa --converge")
+    print_footer()
+    log_cmd("CYCLE", "all", "dispatched_bg")
+}
+
+fn handle_check(c: Classification) {
+    let target = if c.project != "" { c.project } else { "nexus" }
+    print_header("CHECK", target)
+    let module = "engine_" + target + ".hexa"
+    let output = dispatch_sync(module, "status")
+    print_result(output)
+    print_footer()
+    log_cmd("CHECK", target, "ok")
+}
+
+fn handle_explore(c: Classification) {
+    let domain = c.domain
+    print_header("EXPLORE", domain)
+    let output = dispatch_sync("deep_scan.hexa", "scan")
+    print_result(output)
+    print_footer()
+    log_cmd("EXPLORE", domain, "ok")
+}
+
+fn handle_help() {
+    println("")
+    println("+" + pad_right("", 58) + "+")
+    println("|  NEXUS COMMAND ROUTER v" + version + pad_right("", 33) + "|")
+    println("+" + pad_right("", 58) + "+")
+    println("|")
+    println("|  Usage: hexa command_router.hexa \"<natural language>\"")
+    println("|")
+    println("|  === Commands ===")
+    println("|")
+    println("|  " + pad_right("Category", 16) + pad_right("Keywords", 24) + "Action")
+    println("|  " + pad_right("--------", 16) + pad_right("--------", 24) + "------")
+    println("|  " + pad_right("STATUS_ALL", 16) + pad_right("전체 상태/리포트", 24) + "nexus_hub report")
+    println("|  " + pad_right("STATUS_ONE", 16) + pad_right("{project} 상태", 24) + "engine_{name} status")
+    println("|  " + pad_right("BREAKTHROUGH", 16) + pad_right("돌파/blowup+도메인", 24) + "blowup {domain} 3")
+    println("|  " + pad_right("CROSSFEED", 16) + pad_right("교차수분/resonance", 24) + "cross_project resonance")
+    println("|  " + pad_right("H100", 16) + pad_right("H100/학습/훈련", 24) + "anima_loop status")
+    println("|  " + pad_right("ABSORB", 16) + pad_right("흡수/등록", 24) + "absorb tick")
+    println("|  " + pad_right("GROWTH", 16) + pad_right("성장/추이", 24) + "nexus_hub status")
+    println("|  " + pad_right("GAP", 16) + pad_right("갭/미탐색", 24) + "gap_finder scan")
+    println("|  " + pad_right("ALIEN", 16) + pad_right("alien/외계인 지수", 24) + "alien_index --distribution")
+    println("|  " + pad_right("TICK", 16) + pad_right("{project} tick", 24) + "engine_{name} tick (bg)")
+    println("|  " + pad_right("CYCLE", 16) + pad_right("사이클/cycle", 24) + "breakthrough --converge (bg)")
+    println("|  " + pad_right("CHECK", 16) + pad_right("체크/검증", 24) + "engine_{name} status")
+    println("|  " + pad_right("EXPLORE", 16) + pad_right("탐색/스캔", 24) + "deep_scan scan")
+    println("|  " + pad_right("DIRECTION", 16) + pad_right("방향/새방향/next", 24) + "hexa 새 방향 제시")
+    println("|  " + pad_right("EXPLORE_EMPTY", 16) + pad_right("빈공간/미지/DFS", 24) + "gap+deep+n6 위상변환")
+    println("|  " + pad_right("NEXT_BT", 16) + pad_right("다음돌파/돌파방향", 24) + "discovery+gap 교차 추천")
+    println("|  " + pad_right("SEED", 16) + pad_right("시드/seed/merge", 24) + "seed_engine merge")
+    println("|  " + pad_right("AUDIT", 16) + pad_right("bt감사/검산", 24) + "red_team bt-report")
+    println("|  " + pad_right("VERIFY", 16) + pad_right("검증값/verify", 24) + "verifier")
+    println("|  " + pad_right("BRIDGE", 16) + pad_right("브릿지/연결상태", 24) + "bridge_ensure")
+    println("|  " + pad_right("HEAL", 16) + pad_right("치유/heal/복구", 24) + "auto_healer tick")
+    println("|  " + pad_right("HISTORY", 16) + pad_right("히스토리/이력", 24) + "history stats")
+    println("|  " + pad_right("RED_TEAM", 16) + pad_right("레드팀/반증/falsify", 24) + "red_team stress")
+    println("|  " + pad_right("DSE_CROSS", 16) + pad_right("DSE/교차DSE/융합", 24) + "cross_dse_fusion")
+    println("|  " + pad_right("SONAR", 16) + pad_right("소나/핫스팟/밀도", 24) + "sonar hotspot")
+    println("|  " + pad_right("SONAR_STRIKE", 16) + pad_right("소나돌파/핫스팟돌파", 24) + "sonar strike (bg)")
+    println("|  " + pad_right("WAVE", 16) + pad_right("파동/파동돌파", 24) + "wave_blowup {domain} (bg)")
+    println("|  " + pad_right("WAVE_CROSS", 16) + pad_right("파동교차/파동간섭", 24) + "cross_pollinate --wave (bg)")
+    println("|  " + pad_right("HELP", 16) + pad_right("도움/?", 24) + "this message")
+    println("|")
+    println("|  === Projects (" + to_string(project_names.len()) + ") ===")
+    println("|")
+    let mut i = 0
+    while i < project_names.len() {
+        println("|    " + pad_right(project_names[i], 16) + project_display[i])
+        i = i + 1
+    }
+    println("|")
+    println("|  === Domains (bt_domains.jsonl) ===")
+    println("|")
+    let raw = read_file_safe(domains_file)
+    if raw != "" {
+        let lines = raw.split("\n")
+        for line in lines {
+            if line.trim() != "" {
+                if line.contains("\"domain\":\"") {
+                    let p = line.split("\"domain\":\"")
+                    if p.len() >= 2 {
+                        let d = p[1].split("\"")[0]
+                        println("|    " + d)
+                    }
+                }
+            }
+        }
+    }
+    println("|")
+    println("|  === Examples ===")
+    println("|")
+    println("|    hexa command_router.hexa \"전체 상태\"")
+    println("|    hexa command_router.hexa \"anima 상태\"")
+    println("|    hexa command_router.hexa \"수학 돌파\"")
+    println("|    hexa command_router.hexa \"교차수분\"")
+    println("|    hexa command_router.hexa \"H100 학습 현황\"")
+    println("|    hexa command_router.hexa \"갭 스캔\"")
+    println("|    hexa command_router.hexa \"외계인 지수 분포\"")
+    println("|    hexa command_router.hexa \"nexus tick\"")
+    println("|    hexa command_router.hexa \"전체 사이클\"")
+    println("|")
+    println("+" + pad_right("", 58) + "+")
+}
+
+// ─── SEED: 시드 엔진 교차수분 ───
+
+fn handle_seed(c: Classification) {
+    print_header("SEED", "seed merge")
+    let output = dispatch_sync("seed_engine.hexa", "merge")
+    print_result(output)
+    print_footer()
+    log_cmd("SEED", "seed_engine", "ok")
+}
+
+// ─── AUDIT: bt 감사/검산 ───
+
+fn handle_audit(c: Classification) {
+    print_header("AUDIT", "bt-report")
+    let output = dispatch_sync("red_team.hexa", "bt-report")
+    print_result(output)
+    print_footer()
+    log_cmd("AUDIT", "red_team", "ok")
+}
+
+// ─── VERIFY: 가설/값 검증 ───
+
+fn handle_verify(c: Classification) {
+    print_header("VERIFY", "verification")
+    let output = dispatch_sync("verifier.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("VERIFY", "verifier", "ok")
+}
+
+// ─── BRIDGE: 연결 상태 확인 ───
+
+fn handle_bridge(c: Classification) {
+    print_header("BRIDGE", "connection check")
+    let output = dispatch_sync("bridge_ensure.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("BRIDGE", "bridge_ensure", "ok")
+}
+
+// ─── HEAL: 자가치유/복구 ───
+
+fn handle_heal(c: Classification) {
+    print_header("HEAL", "auto-heal tick")
+    let output = dispatch_sync("auto_healer.hexa", "tick")
+    print_result(output)
+    print_footer()
+    log_cmd("HEAL", "auto_healer", "ok")
+}
+
+// ─── HISTORY: 이력/렌즈 통계 ───
+
+fn handle_history(c: Classification) {
+    print_header("HISTORY", "stats")
+    let output = dispatch_sync("history.hexa", "stats")
+    print_result(output)
+    print_footer()
+    log_cmd("HISTORY", "history", "ok")
+}
+
+// ─── RED_TEAM: 적대적 검증/반증 ───
+
+fn handle_red_team(c: Classification) {
+    print_header("RED_TEAM", "stress test")
+    let output = dispatch_sync("red_team.hexa", "stress")
+    print_result(output)
+    print_footer()
+    log_cmd("RED_TEAM", "red_team", "ok")
+}
+
+// ─── DSE_CROSS: 교차 DSE 도메인 융합 ───
+
+fn handle_dse_cross(c: Classification) {
+    print_header("DSE_CROSS", "cross-domain fusion")
+    let output = dispatch_sync("cross_dse_fusion.hexa", "")
+    print_result(output)
+    print_footer()
+    log_cmd("DSE_CROSS", "cross_dse_fusion", "ok")
+}
+
+// ─── SONAR: 현실지도 파동 탐지 ───
+
+fn handle_sonar(c: Classification) {
+    print_header("SONAR", "reality map sonar")
+    let output = dispatch_sync("sonar.hexa", "hotspot")
+    print_result(output)
+    print_footer()
+    log_cmd("SONAR", "sonar", "ok")
+}
+
+fn handle_sonar_strike(c: Classification) {
+    print_header("SONAR", "hotspot strike + absorb")
+    dispatch_async("sonar.hexa", "strike 6", "")
+    print_bg_notice("sonar.hexa strike")
+    print_footer()
+    log_cmd("SONAR", "sonar_strike", "dispatched_bg")
+}
+
+// ─── WAVE: 파동 돌파/교차 ───
+
+fn handle_wave(c: Classification) {
+    let domain = if c.domain != "" { c.domain } else { "math" }
+    print_header("WAVE", domain + " wave blowup")
+    dispatch_async("blowup.hexa", domain + " 3", "")
+    print_bg_notice("blowup.hexa " + domain)
+    print_footer()
+    log_cmd("WAVE", domain, "dispatched_bg")
+}
+
+fn handle_wave_cross(c: Classification) {
+    print_header("WAVE", "wave cross-pollinate")
+    dispatch_async("n6_cross_pollinate.hexa", "--wave", "")
+    print_bg_notice("n6_cross_pollinate.hexa --wave")
+    print_footer()
+    log_cmd("WAVE", "cross_pollinate_wave", "dispatched_bg")
+}
+
+// ─── 새 방향 탐색 (DIRECTION) ───
+
+fn handle_direction(c: Classification) {
+    println("")
+    println("+" + pad_right("", 46) + "+")
+    println("|  HEXA-LANG 새 방향" + pad_right("", 27) + "|")
+    println("+" + pad_right("", 46) + "+")
+    println("|  1. Self-hosting — HEXA로 HEXA 컴파일러" + pad_right("", 5) + "|")
+    println("|  2. LSP 서버 — IDE 자동완성/진단" + pad_right("", 12) + "|")
+    println("|  3. WASM 최적화 — 웹 실행 성능" + pad_right("", 13) + "|")
+    println("|  4. 패키지 매니저 — 의존성 관리" + pad_right("", 12) + "|")
+    println("|  5. 다른 프로젝트 연동 — n6/anima" + pad_right("", 9) + "|")
+    println("+" + pad_right("", 46) + "+")
+    println("")
+    log_cmd("DIRECTION", "hexa_lang", "displayed")
+}
+
+// ─── 빈공간 DFS 탐색 (EXPLORE_EMPTY) ───
+
+fn handle_explore_empty(c: Classification) {
+    print_header("EXPLORE_EMPTY", "empty space DFS")
+
+    // 1. gap_finder scan
+    let gap_finder_path = engine_dir + "/gap_finder.hexa"
+    let mut gap_result = ""
+    try {
+        gap_result = exec(hexa_bin, [gap_finder_path, "scan"])
+    } catch e {
+        gap_result = "ERROR: gap_finder — " + to_string(e)
+    }
+    println("|  [gap_finder scan]")
+    print_result(gap_result)
+    println("|")
+
+    // 2. deep_scan explore (6중 탐색)
+    let deep_scan_path = engine_dir + "/deep_scan.hexa"
+    let mut deep_result = ""
+    try {
+        deep_result = exec(hexa_bin, [deep_scan_path, "explore"])
+    } catch e {
+        deep_result = "ERROR: deep_scan — " + to_string(e)
+    }
+    println("|  [deep_scan explore]")
+    print_result(deep_result)
+    println("|")
+
+    // 3. n6 위상변환: 빈공간 값을 n6 기저로 변환 시도
+    println("|  [n6 위상변환 — 빈공간 → 기저(σ,φ,τ,n,sopfr,M3)]")
+    // n6_constants.jsonl에서 동적 로드
+    let n6c = load_n6_constants()
+    let sigma = n6c[0]   // sigma
+    let phi = n6c[1]     // phi
+    let tau = n6c[2]     // tau
+    let n = n6c[3]       // n
+    let sopfr = n6c[4]   // sopfr
+    let m3 = n6c[5]      // M3
+
+    // gap 결과에서 빈 상수/도메인 추출 시도
+    let gap_lines = gap_result.split("\n")
+    let mut transform_count = 0
+    for gl in gap_lines {
+        let trimmed = gl.trim()
+        if trimmed == "" { continue }
+        // 숫자가 포함된 줄에서 값 추출
+        let tokens = trimmed.split(" ")
+        for tok in tokens {
+            let t = tok.trim().replace(",", "").replace(":", "")
+            if t == "" { continue }
+            let first = t[0]
+            if first == "0" || first == "1" || first == "2" || first == "3" || first == "4" || first == "5" || first == "6" || first == "7" || first == "8" || first == "9" {
+                // 간이 n6 기저 변환
+                if transform_count < 10 {
+                    println("|    gap_value " + t + " → σ/φ = " + to_string(sigma) + "/" + to_string(phi) + " = 6, τ+sopfr = " + to_string(tau) + "+" + to_string(sopfr) + " = 9")
+                    transform_count = transform_count + 1
+                }
+                break
+            }
+        }
+    }
+    if transform_count == 0 {
+        println("|    (변환 대상 없음 — gap 결과에서 수치 미검출)")
+    }
+
+    print_footer()
+    log_cmd("EXPLORE_EMPTY", "gap+deep+n6", "ok")
+}
+
+// ─── 다음 돌파 방향 제시 (NEXT_BREAKTHROUGH) ───
+
+fn handle_next_breakthrough(c: Classification) {
+    print_header("NEXT_BREAKTHROUGH", "direction recommendation")
+
+    // 1. discovery_log 최근 50건에서 도메인 빈도 추출
+    let log_path = shared_dir + "/discovery_log.jsonl"
+    let raw_log = read_file_safe(log_path)
+    let mut domain_counts = []    // [[domain, count], ...]
+    let mut domain_names = []
+
+    if raw_log != "" {
+        let log_lines = raw_log.split("\n")
+        // 최근 50건만 (뒤에서)
+        let total = log_lines.len()
+        let start_idx = if total > 50 { total - 50 } else { 0 }
+        let mut idx = 0
+        for ll in log_lines {
+            if idx >= start_idx && ll.trim() != "" {
+                // domain 필드 추출
+                if ll.contains("\"domain\":\"") {
+                    let dp = ll.split("\"domain\":\"")
+                    if dp.len() >= 2 {
+                        let dname = dp[1].split("\"")[0]
+                        // 카운트 증가
+                        let mut found = false
+                        let mut di = 0
+                        while di < domain_names.len() {
+                            if domain_names[di] == dname {
+                                domain_counts[di] = domain_counts[di] + 1
+                                found = true
+                            }
+                            di = di + 1
+                        }
+                        if !found {
+                            domain_names = domain_names + [dname]
+                            domain_counts = domain_counts + [1]
+                        }
+                    }
+                }
+            }
+            idx = idx + 1
+        }
+    }
+
+    // 2. gap_finder scan에서 미커버 도메인 추출
+    let gap_finder_path = engine_dir + "/gap_finder.hexa"
+    let mut gap_result = ""
+    try {
+        gap_result = exec(hexa_bin, [gap_finder_path, "scan"])
+    } catch e {
+        gap_result = ""
+    }
+
+    let mut gap_domains = []
+    if gap_result != "" {
+        let gap_lines = gap_result.split("\n")
+        for gl in gap_lines {
+            let trimmed = gl.trim()
+            if trimmed != "" {
+                // domain 키워드 추출
+                if trimmed.contains("domain") || trimmed.contains("gap") || trimmed.contains("uncovered") {
+                    // 도메인명 추출 시도
+                    if trimmed.contains("\"") {
+                        let parts = trimmed.split("\"")
+                        let mut pi = 0
+                        for p in parts {
+                            if p != "" && p != "domain" && p != ":" && p != "gap" && p.len() > 2 {
+                                let mut already = false
+                                for gd in gap_domains {
+                                    if gd == p { already = true }
+                                }
+                                if !already {
+                                    gap_domains = gap_domains + [p]
+                                }
+                            }
+                            pi = pi + 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 결과 출력
+    println("|")
+    println("|  +" + pad_right("", 48) + "+")
+    println("|  | 다음 돌파 방향" + pad_right("", 33) + "|")
+    println("|  +" + pad_right("", 48) + "+")
+
+    let mut rec_num = 1
+
+    // 활발한 도메인 (최근 발견 빈도 상위)
+    let mut best_idx = -1
+    let mut best_count = 0
+    let mut di = 0
+    while di < domain_names.len() {
+        if domain_counts[di] > best_count {
+            best_count = domain_counts[di]
+            best_idx = di
+        }
+        di = di + 1
+    }
+    if best_idx >= 0 {
+        println("|  | " + to_string(rec_num) + ". [" + domain_names[best_idx] + "] — 근거: 최근 " + to_string(best_count) + "건 발견" + pad_right("", 5) + "|")
+        rec_num = rec_num + 1
+    }
+
+    // 빈공간 도메인
+    if gap_domains.len() > 0 {
+        println("|  | " + to_string(rec_num) + ". [" + gap_domains[0] + "] — 근거: 빈공간 " + to_string(gap_domains.len()) + "개" + pad_right("", 8) + "|")
+        rec_num = rec_num + 1
+    }
+
+    // 교차수분 후보: 활발 + 빈공간 조합
+    if best_idx >= 0 && gap_domains.len() > 0 {
+        let cross_name = domain_names[best_idx] + " x " + gap_domains[0]
+        println("|  | " + to_string(rec_num) + ". [" + cross_name + "] — 근거: 교차수분 가능" + pad_right("", 3) + "|")
+        rec_num = rec_num + 1
+    }
+
+    // 추천이 하나도 없을 경우
+    if rec_num == 1 {
+        println("|  | (discovery_log / gap_finder 데이터 부족)" + pad_right("", 6) + "|")
+    }
+
+    println("|  +" + pad_right("", 48) + "+")
+    println("|")
+
+    print_footer()
+    log_cmd("NEXT_BREAKTHROUGH", "direction", "ok")
+}
+
+// ─── CLI 진입점 ───
+
+let a = args()
+let input = if a.len() >= 3 { a[2] } else { "help" }
+
+let c = classify(input)
+
+if c.category == "STATUS_ALL" {
+    handle_status_all(c)
+} else if c.category == "STATUS_ONE" {
+    handle_status_one(c)
+} else if c.category == "BREAKTHROUGH" {
+    handle_breakthrough(c)
+} else if c.category == "CROSSFEED" {
+    handle_crossfeed(c)
+} else if c.category == "H100" {
+    handle_h100(c)
+} else if c.category == "ABSORB" {
+    handle_absorb(c)
+} else if c.category == "GROWTH" {
+    handle_growth(c)
+} else if c.category == "GAP" {
+    handle_gap(c)
+} else if c.category == "ALIEN" {
+    handle_alien(c)
+} else if c.category == "TICK" {
+    handle_tick(c)
+} else if c.category == "CYCLE" {
+    handle_cycle(c)
+} else if c.category == "CHECK" {
+    handle_check(c)
+} else if c.category == "EXPLORE" {
+    handle_explore(c)
+} else if c.category == "DIRECTION" {
+    handle_direction(c)
+} else if c.category == "EXPLORE_EMPTY" {
+    handle_explore_empty(c)
+} else if c.category == "NEXT_BREAKTHROUGH" {
+    handle_next_breakthrough(c)
+} else if c.category == "SEED" {
+    handle_seed(c)
+} else if c.category == "AUDIT" {
+    handle_audit(c)
+} else if c.category == "VERIFY" {
+    handle_verify(c)
+} else if c.category == "BRIDGE" {
+    handle_bridge(c)
+} else if c.category == "HEAL" {
+    handle_heal(c)
+} else if c.category == "HISTORY" {
+    handle_history(c)
+} else if c.category == "RED_TEAM" {
+    handle_red_team(c)
+} else if c.category == "DSE_CROSS" {
+    handle_dse_cross(c)
+} else if c.category == "SONAR" {
+    if c.verb == "sonar_strike" { handle_sonar_strike(c) }
+    else { handle_sonar(c) }
+} else if c.category == "WAVE" {
+    if c.verb == "wave_cross" { handle_wave_cross(c) }
+    else { handle_wave(c) }
+} else if c.category == "HELP" {
+    handle_help()
+} else {
+    handle_help()
+}

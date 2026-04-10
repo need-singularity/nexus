@@ -1,0 +1,142 @@
+// mk2_hexa/native/blowup_guard.hexa
+// 정상 돌파 보호용 가드 — 이전 /tmp/blowup_guard.sh 의 치명 버그 대체.
+//
+// 버그 원인(구):
+//   pgrep -f "blowup.hexa" 는 ssh/bash wrapper/cmdline 에 문자열만 포함되면
+//   모두 카운트. 임계값 2 로 SIGKILL → 정상 돌파 10초마다 살해.
+//
+// 개선:
+//   R1  HEXA-FIRST: .hexa 로 재작성
+//   R17 부모 사망 감지: PPID kill -0 실패 시 자동 종료
+//   R19 모든 에러 명시 출력
+//   P2  exec 는 단일 문자열
+//   P5  printenv HOME + 상대경로
+//
+// 사용: hexa blowup_guard.hexa            — 단발 체크
+//       hexa blowup_guard.hexa loop       — 30초 주기 상주
+//
+// ⚠️ 기존 /tmp/blowup_guard.sh.disabled 는 참조용 보존 (삭제 금지)
+
+let _home = exec("printenv HOME").trim()
+let _hexa_bin = _home + "/Dev/hexa-lang/target/release/hexa"
+
+// 임계값: 과민 방지 (구 2 → 4)
+let _blowup_max = 4
+let _bt_max = 2
+
+// SIGTERM grace (초)
+let _grace = 5
+
+// ───────────────────────────────────────────────
+// 정확 매칭: pgrep -xf 로 전체 cmdline 이 hexa 바이너리로 시작하고
+// 해당 엔진을 실행 중인 프로세스만 카운트. ssh/bash -c wrapper 제외.
+// ───────────────────────────────────────────────
+
+fn count_engine(engine: string) -> int {
+    // pgrep -f + grep 조합 (hexa 바이너리 경로 시작 + 해당 engine.hexa 포함)
+    // wrapper(sh -c, bash -c, ssh) 는 첫 토큰이 hexa 가 아니므로 제외
+    let cmd = "ps -eo pid,comm,args 2>/dev/null | awk '$2==\"hexa\" && /" + engine + "\\.hexa/ {c++} END{print c+0}'"
+    let mut out = "0"
+    try { out = exec(cmd).trim() } catch e {
+        println("[blowup_guard] ERROR count_engine(" + engine + "): " + to_string(e))
+        return 0
+    }
+    let mut n = 0
+    try { n = out.to_int() } catch e {
+        println("[blowup_guard] ERROR parse count '" + out + "': " + to_string(e))
+        return 0
+    }
+    return n
+}
+
+fn pids_of(engine: string) -> string {
+    // 정확 매칭된 PID 만 공백 구분으로 반환
+    let cmd = "ps -eo pid,comm,args 2>/dev/null | awk '$2==\"hexa\" && /" + engine + "\\.hexa/ {print $1}' | tr '\\n' ' '"
+    let mut out = ""
+    try { out = exec(cmd).trim() } catch e {
+        println("[blowup_guard] ERROR pids_of(" + engine + "): " + to_string(e))
+        return ""
+    }
+    return out
+}
+
+fn term_then_kill(engine: string, max: int) {
+    let n = count_engine(engine)
+    if n <= max { return }
+
+    let pids = pids_of(engine)
+    println("[blowup_guard] WARN " + engine + " count=" + to_string(n) + " > " + to_string(max) + " pids=" + pids)
+    println("[blowup_guard] phase1 SIGTERM → " + pids)
+
+    // 오래된 순으로 초과분만 종료 (age threshold: etimes > 300s 만 후보)
+    // SIGTERM 143 방지: fresh router fallback 보호 (age-based selector)
+    let over = n - max
+    let trim_cmd = "ps -eo pid,etimes,comm,args 2>/dev/null | awk '$3==\"hexa\" && /" + engine + "\\.hexa/ && $2+0 > 300 {print $2,$1}' | sort -rn | head -n " + to_string(over) + " | awk '{print $2}'"
+    let mut targets = ""
+    try { targets = exec(trim_cmd).trim() } catch e {
+        println("[blowup_guard] ERROR select targets: " + to_string(e))
+        return
+    }
+    if targets == "" { return }
+
+    let flat = targets.replace("\n", " ")
+    try { exec("kill -TERM " + flat + " 2>&1") } catch e {
+        println("[blowup_guard] ERROR SIGTERM: " + to_string(e))
+    }
+
+    // grace 대기
+    try { exec("sleep " + to_string(_grace)) } catch e {}
+
+    // 살아있는 것만 SIGKILL
+    for pid in flat.split(" ") {
+        if pid == "" { continue }
+        let mut alive = ""
+        try { alive = exec("kill -0 " + pid + " 2>&1 && echo Y || echo N").trim() } catch e {
+            println("[blowup_guard] ERROR kill -0 " + pid + ": " + to_string(e))
+            continue
+        }
+        if alive == "Y" {
+            println("[blowup_guard] phase2 SIGKILL " + pid)
+            try { exec("kill -KILL " + pid + " 2>&1") } catch e {
+                println("[blowup_guard] ERROR SIGKILL " + pid + ": " + to_string(e))
+            }
+        }
+    }
+}
+
+fn one_pass() {
+    term_then_kill("blowup", _blowup_max)
+    term_then_kill("breakthrough", _bt_max)
+}
+
+// ───────────────────────────────────────────────
+// 메인
+// ───────────────────────────────────────────────
+
+let args = exec("echo \"$@\"")  // placeholder — hexa-lang 은 ARGV 접근을 별도 제공
+let mut mode = "once"
+try {
+    let argv_raw = exec("ps -o args= -p $$ 2>/dev/null").trim()
+    if argv_raw.contains("loop") { mode = "loop" }
+} catch e {}
+
+if mode == "loop" {
+    let ppid = exec("echo $PPID").trim()
+    println("[blowup_guard] loop start ppid=" + ppid + " blowup_max=" + to_string(_blowup_max) + " bt_max=" + to_string(_bt_max))
+    let mut i = 0
+    while i < 100000 {
+        // R17 부모 사망 시 자동 종료
+        let mut alive = "N"
+        try { alive = exec("kill -0 " + ppid + " 2>/dev/null && echo Y || echo N").trim() } catch e {}
+        if alive != "Y" {
+            println("[blowup_guard] parent ppid=" + ppid + " gone → exit")
+            break
+        }
+        one_pass()
+        try { exec("sleep 30") } catch e {}
+        i = i + 1
+    }
+} else {
+    one_pass()
+    println("[blowup_guard] once done")
+}
