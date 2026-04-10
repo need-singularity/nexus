@@ -32,9 +32,30 @@ while i < argc {
 
 // htz 접속 시도 (이미 htz에서 실행 중이면 skip)
 let mut htz_ok = false
+let mut _on_htz = false
 let mut _gate_local = ""
 try { _gate_local = exec("printenv GATE_LOCAL 2>/dev/null").trim() } catch e {}
-if _gate_local != "1" {
+// Self-detection: 이미 htz에서 실행 중인지 확인 (shell에서 소문자 정규화)
+// 1) hostname 기반  2) /etc/hosts 의 "Hetzner" 문자열  3) NEXUS_ON_HTZ=1 env
+let mut _hn = ""
+try { _hn = exec("(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null) | tr 'A-Z' 'a-z'").trim() } catch eh {}
+if _hn == "hetzner" || _hn == "htz" || _hn.contains("hetzner") || _hn.contains("htz") || _hn.starts_with("het-") || _hn.starts_with("anima-ax") || _hn.starts_with("anima-") {
+    _on_htz = true
+}
+if _on_htz == false {
+    let mut _htag = ""
+    try { _htag = exec("grep -li hetzner /etc/hosts /etc/motd 2>/dev/null | head -1").trim() } catch eht {}
+    if _htag != "" { _on_htz = true }
+}
+if _on_htz == false {
+    let mut _envtag = ""
+    try { _envtag = exec("printenv NEXUS_ON_HTZ 2>/dev/null").trim() } catch ee {}
+    if _envtag == "1" { _on_htz = true }
+}
+if _on_htz {
+    // 이미 htz 위 — ssh probe skip, 로컬 실행으로 진행 (fallback 메시지 없이)
+    println("[router] → htz (local, already on host)")
+} else if _gate_local != "1" {
     try {
         let probe = exec("ssh -o ConnectTimeout=3 -o BatchMode=yes hetzner 'echo ok' 2>/dev/null").trim()
         if probe == "ok" { htz_ok = true }
@@ -68,8 +89,12 @@ if htz_ok {
 }
 
 if htz_ok == false {
-    // 로컬 fallback — hexa 경로 동적 탐색
-    println("[router] → local fallback (htz unreachable)")
+    // 로컬 실행 — hexa 경로 동적 탐색
+    if _on_htz {
+        println("[router] → local exec on htz")
+    } else {
+        println("[router] → local fallback (htz unreachable)")
+    }
     let home = exec("printenv HOME").trim()
     let mut hexa = ""
     try {
