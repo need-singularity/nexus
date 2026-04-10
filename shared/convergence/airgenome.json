@@ -1,7 +1,7 @@
 {
   "_meta": {
     "project": "airgenome",
-    "updated": "2026-04-08T22:10",
+    "updated": "2026-04-10",
     "strategy": "ossified/stable/failed"
   },
   "ossified": {
@@ -22,9 +22,9 @@
       "value": "hook 체인 인프라 — 래퍼 3개 + bootstrap + 9 hook 스크립트 + lock 경로 보호",
       "protected_files": [
         "~/.hx/bin/hexa",
-        "~/.hx/bin/python3",
-        "~/Dev/hexa-lang/target/release/hexa",
-        "~/Dev/hexa-lang/target/release/hexa-bin-actual",
+        
+        "nexus/shared/bin/hexa",
+        "nexus/shared/hooks/hook-entry.sh",
         "nexus/shared/hooks/bootstrap.sh",
         "nexus/shared/hooks/nexus-banner.sh",
         "nexus/shared/hooks/nexus-prompt-scan.sh",
@@ -40,13 +40,13 @@
     },
     "SYMLINK_INTERCEPT": {
       "status": "PASS",
-      "value": "target/release/hexa → ~/.hx/bin/hexa 심링크. 원본=hexa-bin-actual. 전 프로젝트 32개 파일 코드 변경 0으로 게이트 자동 통과",
+      "value": "target/release/hexa → ~/.hx/bin/hexa 심링크. resolver 심링크. 레거시 호환. 신규는 shared/bin/hexa 직접",
       "threshold": "절대경로 호출 100% 게이트 통과",
       "protected_files": [
         "~/Dev/hexa-lang/target/release/hexa (symlink)",
         "~/Dev/hexa-lang/target/release/hexa-bin-actual (원본)"
       ],
-      "invariant": "심링크 제거/원본 덮어쓰기 금지. cargo build --release 시 hexa-bin-actual로 복사 필요"
+      "invariant": "심링크 제거 금지. 레거시 호환. 신규는 shared/bin/hexa resolver"
     },
     "AG2_PATTERN_GATE": {
       "status": "PASS",
@@ -63,11 +63,11 @@
     },
     "HOOK_HEXA_PORT": {
       "status": "PASS",
-      "value": "hook python3→순수 hexa 포팅 완료. HEXA=hexa-bin-actual(안정)",
+      "value": "hook python3→순수 hexa 포팅 완료. HEXA=shared/bin/hexa(resolver)",
       "threshold": "hook python3 호출 0개",
-      "invariant": "hook에서 python3 wrapper/hexa-lang/hexa(self-hosted) 호출 금지 — hang 원인. hexa-bin-actual만 사용",
-      "binary": "~/Dev/hexa-lang/target/release/hexa-bin-actual",
-      "settings": "~/.claude/settings.json (모든 command에 hexa-bin-actual)",
+      "invariant": "hook에서 python3 wrapper 호출 금지 — hang 원인. shared/bin/hexa resolver 또는 hook-entry.sh 경유",
+      "binary": "nexus/shared/hooks/hook-entry.sh",
+      "settings": "~/.claude/settings.json (모든 command에 hook-entry.sh 경유)",
       "protected_hooks": [
         "nexus-banner.hexa",
         "nexus-pre-tool.hexa",
@@ -170,18 +170,21 @@
     "CL_HEXA_RESOLVER": {
       "id": "CL_HEXA_RESOLVER",
       "ossified_at": "2026-04-10T17:00:18",
-      "rule": "cl 런처 + 모든 프로젝트는 hexa 바이너리 경로를 shared/bin/hexa resolver로 통합. 외부 단일 경로 하드코딩 절대 금지.",
+      "rule": "cl 런처 + 모든 hook + 전 프로젝트는 shared/bin/hexa resolver 또는 hook-entry.sh 경유. 하드코딩 절대 금지.",
       "resolver_path": "/Users/ghost/Dev/nexus/shared/bin/hexa",
       "resolver_chain": [
         "$HEXA_BIN env override",
-        "$HOME/.hx/bin/hexa (gate wrapper, ubu/htz offload)",
-        "$HOME/Dev/hexa-lang/target/release/hexa",
-        "$HOME/Dev/hexa-lang/target/release/hexa-bin-actual",
+        "$HOME/Dev/hexa-lang/hexa (로컬 실바이너리 우선)",
         "$HOME/.cargo/bin/hexa",
+        "$HOME/.hx/bin/hexa (gate wrapper)",
+        "$HOME/Dev/hexa-lang/target/release/hexa (레거시 fallback)",
         "command -v -a hexa (PATH, self-loop 회피)"
       ],
       "fixed_files": [
-        "airgenome/cl (line 23 hardcoded → 동적 resolver)"
+        "airgenome/cl (동적 resolver)",
+        "airgenome/.claude/settings.json (hook-entry.sh 래퍼)",
+        "nexus/shared/hooks/*.hexa 13개 + *.sh 8개 일괄",
+        "nexus/shared/hooks/hook-entry.sh (신규 guard) → 동적 resolver)"
       ],
       "verification": {
         "shared_resolver_exists": true,
