@@ -1,0 +1,176 @@
+// mk2_hexa/native/verify/verify_h414_constants.hexa
+// Ported from tecs-l/verify/verify_h414_constants.py (LOC 215)
+// Ported 2026-04-10 iter6
+//
+// H-414: Is log_3(2) ~ 1 - 1/e a real connection?
+// Texas Sharpshooter Monte Carlo over a pool of "nice" constants.
+// Port uses deterministic LCG instead of random.seed(42).
+
+let pi_v = 3.141592653589793
+let e_v = 2.718281828459045
+let ln2_v = log(2.0)
+let ln3_v = log(3.0)
+
+fn f_abs(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn f_max(a: float, b: float) -> float {
+    if a > b { a } else { b }
+}
+
+// Constant pool (33 entries)
+let pool = [0.5, 1.0 / 3.0, 1.0 / 6.0, 1.0 / e_v, ln2_v, ln3_v, log(4.0 / 3.0), pi_v / 6.0, pi_v / 4.0, pi_v / 3.0, pi_v / 2.0, pi_v, e_v, sqrt(2.0), sqrt(3.0), sqrt(5.0), (1.0 + sqrt(5.0)) / 2.0, ln2_v / ln3_v, 1.0 - 1.0 / e_v, 0.5772156649, 1.0 / sqrt(2.0 * pi_v), e_v / pi_v, 2.0 / pi_v, log(pi_v), 1.0 / ln2_v, log(10.0) / ln2_v, 0.9159655941, 0.6627434193, 0.26149721, 1.2020569031, 2.0 * pi_v, e_v * e_v, 1.0 / pi_v]
+
+// LCG deterministic RNG
+let mut rng_state = 42
+fn next_rng() -> int {
+    rng_state = (rng_state * 1103515245 + 12345) % 2147483648
+    rng_state
+}
+
+fn rand_idx(n: int) -> int {
+    let r = next_rng()
+    let m = r % n
+    if m < 0 { m + n } else { m }
+}
+
+println("======================================================================")
+println("  H-414 Verification: Texas Sharpshooter + Constant Analysis")
+println("======================================================================")
+
+let n_pool = len(pool)
+let target_diff = 0.0019
+let n_trials = 100000
+let mut count_close = 0
+let mut t = 0
+while t < n_trials {
+    let i = rand_idx(n_pool)
+    let mut j = rand_idx(n_pool)
+    if j == i {
+        j = (j + 1) % n_pool
+    }
+    let c1 = pool[i]
+    let c2 = pool[j]
+    if c1 > 0.0 {
+        if c2 > 0.0 {
+            let rel = f_abs(c1 - c2) / f_max(c1, c2)
+            if rel < target_diff {
+                count_close = count_close + 1
+            }
+        }
+    }
+    t = t + 1
+}
+
+let p_value = to_float(count_close) / to_float(n_trials)
+let p_corrected = p_value * 528.0
+let p_display = if p_corrected > 1.0 { 1.0 } else { p_corrected }
+
+println("")
+println("  Texas Sharpshooter (" + to_string(n_trials) + " trials, LCG seed=42):")
+println("    target rel diff       = " + to_string(target_diff * 100.0) + "%")
+println("    p(random near-miss)   = " + to_string(p_value))
+println("    pairs C(33,2)         = 528")
+println("    Bonferroni-corrected  = " + to_string(p_display))
+if p_corrected < 0.01 {
+    println("    --> SIGNIFICANT")
+} else {
+    if p_corrected < 0.05 {
+        println("    --> MARGINALLY SIGNIFICANT")
+    } else {
+        println("    --> NOT SIGNIFICANT")
+    }
+}
+
+// ---- info flow sweep ----
+println("")
+println("======================================================================")
+println("  INFO FLOW vs ACTIVE RATIO SWEEP")
+println("======================================================================")
+
+let log2_3 = ln3_v / ln2_v
+let log3_2 = 1.0 / log2_3
+let one_minus_inv_e = 1.0 - 1.0 / e_v
+let eff_bits = 1.56
+let bit_ratio = eff_bits / log2_3
+
+println("  log_3(2) = " + to_string(log3_2))
+println("  1 - 1/e  = " + to_string(one_minus_inv_e))
+println("  effective_bits = " + to_string(eff_bits) + " bit_ratio = " + to_string(bit_ratio))
+
+let mut best_log_diff = 999.0
+let mut best_log_pct = 0
+let mut best_e_diff = 999.0
+let mut best_e_pct = 0
+
+let mut active_pct = 30
+while active_pct < 95 {
+    let ar = to_float(active_pct) / 100.0
+    let info_flow = bit_ratio * ar
+    let diff_log = f_abs(info_flow - log3_2)
+    let diff_e = f_abs(info_flow - one_minus_inv_e)
+    if diff_log < best_log_diff {
+        best_log_diff = diff_log
+        best_log_pct = active_pct
+    }
+    if diff_e < best_e_diff {
+        best_e_diff = diff_e
+        best_e_pct = active_pct
+    }
+    println("  active=" + to_string(active_pct) + "% I=" + to_string(1.0 - ar) + " flow=" + to_string(info_flow) + " dLog=" + to_string(diff_log) + " dE=" + to_string(diff_e))
+    active_pct = active_pct + 5
+}
+
+println("")
+println("  best match log_3(2): active=" + to_string(best_log_pct) + "% diff=" + to_string(best_log_diff))
+println("  best match 1-1/e:   active=" + to_string(best_e_pct) + "% diff=" + to_string(best_e_diff))
+
+let exact_ar_log = log3_2 / bit_ratio
+let exact_ar_e = one_minus_inv_e / bit_ratio
+println("  exact ar for log_3(2) = " + to_string(exact_ar_log * 100.0) + "%  I=" + to_string(1.0 - exact_ar_log))
+println("  exact ar for 1-1/e    = " + to_string(exact_ar_e * 100.0) + "%  I=" + to_string(1.0 - exact_ar_e))
+
+// ---- constant relationship analysis ----
+println("")
+println("======================================================================")
+println("  CONSTANT RELATIONSHIP ANALYSIS")
+println("======================================================================")
+
+let diff_lc = f_abs(log3_2 - one_minus_inv_e)
+let rel_lc = diff_lc / one_minus_inv_e
+println("  log_3(2)       = " + to_string(log3_2))
+println("  1 - 1/e        = " + to_string(one_minus_inv_e))
+println("  absolute diff  = " + to_string(diff_lc))
+println("  relative diff  = " + to_string(rel_lc * 100.0) + "%")
+println("  log_3(2) / (1-1/e) = " + to_string(log3_2 / one_minus_inv_e))
+
+// Near-miss pairs scan over tecs constant mini-pool
+let tn = ["1/2", "1/3", "1/6", "1/e", "ln(4/3)", "1-1/e", "log_3(2)", "log_2(3)", "e/pi", "2/pi", "pi/6", "5/6", "gamma", "1/sqrt(2pi)"]
+let tv = [0.5, 1.0 / 3.0, 1.0 / 6.0, 1.0 / e_v, log(4.0 / 3.0), 1.0 - 1.0 / e_v, log3_2, log2_3, e_v / pi_v, 2.0 / pi_v, pi_v / 6.0, 5.0 / 6.0, 0.5772156649, 1.0 / sqrt(2.0 * pi_v)]
+
+println("")
+println("  Near-miss pairs (< 3% relative diff):")
+let mut ii = 0
+while ii < len(tn) {
+    let mut jj = ii + 1
+    while jj < len(tn) {
+        let va = tv[ii]
+        let vb = tv[jj]
+        if va > 0.0 {
+            if vb > 0.0 {
+                let rd = f_abs(va - vb) / f_max(va, vb)
+                if rd < 0.03 {
+                    println("    " + tn[ii] + " vs " + tn[jj] + "  " + to_string(va) + " " + to_string(vb) + "  rd=" + to_string(rd * 100.0) + "%")
+                }
+            }
+        }
+        jj = jj + 1
+    }
+    ii = ii + 1
+}
+
+println("")
+println("======================================================================")
+println("  Verification complete")
+println("======================================================================")

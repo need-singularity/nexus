@@ -1,0 +1,108 @@
+// mk2_hexa/native/verify/verify_h455_h460.hexa
+// Ported from tecs-l/verify/verify_h455_h460.py (LOC 142)
+// Ported 2026-04-10 iter6
+//
+// H-CX-455: sqrt(3) * ln(4/3) =? 1/2   (near-miss, not exact)
+// H-CX-460: sqrt(sigma(n)/n) = sqrt(2) for perfect n (tautological)
+
+let e_v = 2.718281828459045
+
+fn f_abs(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+// sigma: sum of all divisors of n (integer, sqrt bound)
+fn sigma(n: int) -> int {
+    let mut s = 0
+    let mut i = 1
+    while i * i <= n {
+        if n % i == 0 {
+            s = s + i
+            let q = n / i
+            if q != i { s = s + q }
+        }
+        i = i + 1
+    }
+    s
+}
+
+println("======================================================================")
+println("H-CX-455: sqrt(3) * ln(4/3) =? 1/2")
+println("======================================================================")
+
+let gz_width = log(4.0 / 3.0)
+let sqrt3 = sqrt(3.0)
+let product = sqrt3 * gz_width
+let target = 0.5
+println("  ln(4/3)           = " + to_string(gz_width))
+println("  sqrt(3)           = " + to_string(sqrt3))
+println("  sqrt(3)*ln(4/3)   = " + to_string(product))
+println("  target 1/2        = " + to_string(target))
+println("  diff              = " + to_string(product - target))
+println("  rel err (%)       = " + to_string(f_abs(product - target) / target * 100.0))
+
+let exact_width = 1.0 / (2.0 * sqrt3)
+println("")
+println("  If exact: width = 1/(2*sqrt(3)) = " + to_string(exact_width))
+println("  actual ln(4/3)                    = " + to_string(gz_width))
+println("  diff                              = " + to_string(exact_width - gz_width))
+
+let upper_exact = 0.5
+let lower_exact = upper_exact - exact_width
+let center_exact = (upper_exact + lower_exact) / 2.0
+println("  hypothetical upper  = " + to_string(upper_exact))
+println("  hypothetical lower  = " + to_string(lower_exact))
+println("  hypothetical center = " + to_string(center_exact))
+println("  1/e                 = " + to_string(1.0 / e_v))
+println("  center - 1/e        = " + to_string(center_exact - 1.0 / e_v))
+
+let e_check = exp(sqrt3 / 6.0)
+println("")
+println("  Identity check: e^(sqrt(3)/6) =? 4/3")
+println("    e^(sqrt(3)/6) = " + to_string(e_check))
+println("    4/3           = " + to_string(4.0 / 3.0))
+println("    rel err (%)   = " + to_string(f_abs(e_check - 4.0 / 3.0) / (4.0 / 3.0) * 100.0))
+println("  Verdict: near-miss, NOT identity.")
+
+println("")
+println("======================================================================")
+println("H-CX-460: sqrt(sigma(n)/n) = sqrt(2) for perfect numbers")
+println("======================================================================")
+
+let perfects = [6, 28, 496, 8128, 33550336]
+let mut i = 0
+while i < len(perfects) {
+    let n = perfects[i]
+    let sig = sigma(n)
+    let s = sig - n
+    let ratio = to_float(sig) / to_float(n)
+    let sr = sqrt(ratio)
+    let ok = if s == n { "YES" } else { "NO" }
+    println("  n=" + to_string(n) + " sigma=" + to_string(sig) + " s=" + to_string(s) + " sigma/n=" + to_string(ratio) + " sqrt=" + to_string(sr) + " perfect=" + ok)
+    i = i + 1
+}
+println("  sqrt(2) = " + to_string(sqrt(2.0)))
+
+println("")
+println("--- k-perfect extension: sigma(n) = k*n, sqrt ratio = sqrt(k) ---")
+
+// Flattened (k,n) pairs to avoid nested arrays
+let ks = [2, 2, 2, 2, 3, 3, 3, 4, 4]
+let ns = [6, 28, 496, 8128, 120, 672, 523776, 30240, 32760]
+let mut j = 0
+while j < len(ks) {
+    let k = ks[j]
+    let n = ns[j]
+    let sig = sigma(n)
+    let ratio = to_float(sig) / to_float(n)
+    let sr = sqrt(ratio)
+    let sk = sqrt(to_float(k))
+    let match_ok = if f_abs(sr - sk) < 0.000000001 { "YES" } else { "NO" }
+    println("  k=" + to_string(k) + " n=" + to_string(n) + " sigma=" + to_string(sig) + " sqrt(sigma/n)=" + to_string(sr) + " sqrt(k)=" + to_string(sk) + " " + match_ok)
+    j = j + 1
+}
+
+println("")
+println("SUMMARY:")
+println("  H-CX-455: near-miss (not exact)")
+println("  H-CX-460: true but tautological (follows from sigma(n)=2n definition)")

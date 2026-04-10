@@ -1,0 +1,109 @@
+// mk2_hexa/native/verify/verify_h393_spectral_radius.hexa
+// Ported from tecs-l/verify/verify_h393_spectral_radius.py (LOC 141)
+// Ported 2026-04-10 iter6
+//
+// H-393: K5 circulant spectral radius for consciousness matrix.
+// M(alpha,beta) = beta*A_s - alpha*A_k, omega = exp(2*pi*i/5).
+// lambda_k = beta*omega^k - alpha*omega^(2k), rho = max|lambda_k|.
+// Verdict: THC's golden-ratio claim is FALSE; K5 symmetry forces
+// rho(alpha,beta) = rho(beta,alpha).
+
+let pi_v = 3.141592653589793
+let two_pi_over_5 = 2.0 * pi_v / 5.0
+
+fn f_abs(x: float) -> float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+// |lambda_k| = sqrt(Re^2 + Im^2)
+// lambda_k = beta*(cos(k*2pi/5)+i sin(k*2pi/5)) - alpha*(cos(2k*2pi/5)+i sin(2k*2pi/5))
+fn lam_mag(alpha: float, beta: float, k: int) -> float {
+    let th1 = to_float(k) * two_pi_over_5
+    let th2 = to_float(2 * k) * two_pi_over_5
+    let re = beta * cos(th1) - alpha * cos(th2)
+    let im = beta * sin(th1) - alpha * sin(th2)
+    sqrt(re * re + im * im)
+}
+
+fn spectral_radius(alpha: float, beta: float) -> float {
+    let mut rho = 0.0
+    let mut k = 0
+    while k < 5 {
+        let m = lam_mag(alpha, beta, k)
+        if m > rho { rho = m }
+        k = k + 1
+    }
+    rho
+}
+
+println("================================================================")
+println("H-393 Spectral Radius Verification (K5 circulant)")
+println("================================================================")
+println("lambda_k = beta*omega^k - alpha*omega^(2k), omega = exp(2*pi*i/5)")
+println("")
+
+let names = ["Sober", "THC", "TTX", "Meditation", "HeavySed", "Caffeine", "MDMA", "Psilocybin", "Alcohol", "Ketamine", "Nicotine", "SSRI", "DMTpeak"]
+let alphas = [1.00, 0.50, 1.00, 0.37, 0.10, 1.00, 0.50, 0.10, 0.70, 0.80, 1.10, 0.90, 0.05]
+let betas  = [1.00, 1.00, 0.50, 0.37, 0.10, 1.30, 1.50, 1.20, 0.70, 0.20, 1.00, 1.10, 1.50]
+
+let mut i = 0
+while i < len(names) {
+    let rho = spectral_radius(alphas[i], betas[i])
+    println("  " + names[i] + " alpha=" + to_string(alphas[i]) + " beta=" + to_string(betas[i]) + " rho=" + to_string(rho))
+    i = i + 1
+}
+
+// Detailed for THC vs TTX
+println("")
+println("--- THC vs TTX eigenvalue magnitudes ---")
+let pair_alpha = [0.5, 1.0]
+let pair_beta  = [1.0, 0.5]
+let pair_name  = ["THC", "TTX"]
+let mut p = 0
+while p < 2 {
+    println(pair_name[p] + ":")
+    let mut k = 0
+    while k < 5 {
+        println("  k=" + to_string(k) + "  |lam|=" + to_string(lam_mag(pair_alpha[p], pair_beta[p], k)))
+        k = k + 1
+    }
+    p = p + 1
+}
+
+// K5 circulant symmetry check: swap alpha<->beta preserves magnitudes set
+println("")
+println("--- K5 symmetry: rho(alpha,beta) == rho(beta,alpha) ---")
+let sa = [0.5, 1.0, 0.5, 0.1]
+let sb = [1.0, 1.3, 1.5, 1.2]
+let mut s = 0
+while s < len(sa) {
+    let r1 = spectral_radius(sa[s], sb[s])
+    let r2 = spectral_radius(sb[s], sa[s])
+    let eq = if f_abs(r1 - r2) < 0.0000001 { "OK" } else { "DIFF" }
+    println("  (" + to_string(sa[s]) + "," + to_string(sb[s]) + "): r1=" + to_string(r1) + " r2=" + to_string(r2) + " " + eq)
+    s = s + 1
+}
+
+// Contour grid
+println("")
+println("--- Contour grid rho(alpha,beta) ---")
+let grid_a = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+let grid_b = [2.0, 1.6, 1.2, 0.8, 0.4, 0.0]
+let mut bi = 0
+while bi < len(grid_b) {
+    let mut row = "  b=" + to_string(grid_b[bi]) + ":"
+    let mut ai = 0
+    while ai < len(grid_a) {
+        let rho = spectral_radius(grid_a[ai], grid_b[bi])
+        row = row + " " + to_string(rho)
+        ai = ai + 1
+    }
+    println(row)
+    bi = bi + 1
+}
+
+println("")
+println("CONCLUSION:")
+println("  THC rho != phi (golden ratio claim refuted)")
+println("  THC rho == TTX rho due to K5 circulant symmetry")
+println("H-393: verification complete.")
