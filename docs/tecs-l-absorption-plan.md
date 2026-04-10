@@ -368,3 +368,38 @@ mk2_hexa/native/
 3. 🟡 **verify/ + math/ Track A 추가 포팅** — 다른 에이전트와 lock 협의 필요.
 4. 🟢 **torch FFI / native tensor 결정 요청 — hexa-lang 팀** — 180건 차단 해제 단일 키.
 5. 🟢 **카테고리별 git mv 일괄** — theory_registry build 정상 작동 확인 후. desc 필드는 build 가 자동 갱신.
+
+## Progress 2026-04-10 (iter 5) — Track A 5건 추가 포팅
+
+### 포팅 완료 (5 files)
+
+| Rank | Source (tecs-l) | py LOC | Target (mk2_hexa/native) | hexa LOC | 검증 |
+|------|----------------|--------|--------------------------|----------|------|
+| 1 | `verify/verify_h465_gamma_sqrt3.py` | 217 | `verify/verify_h465_gamma_sqrt3.hexa` | 147 | ✅ 실행 성공 |
+| 2 | `math/experiments/sopfr_identity_search.py` | 272 | `math/sopfr_identity_search.hexa` | 346 | ✅ 실행 성공 |
+| 3 | `verify/verify_h476_generator_pair.py` | 296 | `verify/verify_h476_generator_pair.hexa` | 244 | ✅ 실행 성공 |
+| 4 | `math/proofs/sigma_minus1_uniqueness.py` | 319 | `math/sigma_minus1_uniqueness.hexa` | 273 | ✅ 실행 성공 |
+| 5 | `math/proofs/tesla_369_theorem.py` | 438 | `math/tesla_369_theorem.hexa` | 290 | ✅ 실행 성공 |
+|  | **합계** | **1542** |  | **1300** |  |
+
+### 포팅 전략
+- **mpmath → f64**: 60-digit precision 축소하되 near-miss (~0.02%) 판별에는 충분. 원본 verdict 보존.
+- **sympy (factorint/divisors/isprime) → 네이티브 루프**: `sopfr`, `sopf`, `omega`, `bigomega`, `rad` hexa로 직접 구현. `sigma`, `phi`, `tau`는 hexa builtin 사용.
+- **fractions.Fraction → 정수 스케일링**: σ_{-1}(n) = σ(n)/n 재작성으로 Fraction 우회. 3-term EF 검색은 정수 합동식으로.
+- **itertools.combinations → 수동 nested loop**: pair/triple search는 `i < j < k` 루프.
+- **mpmath zeta(3), euler, pi, e → f64 상수 리터럴**: Apéry 상수, Euler-Mascheroni 등은 15-digit f64 값 하드코딩. (N6 상수 JSONL 등록 후 동적 로드로 전환 가능.)
+- **pow_mod analytic Fermat**: Mersenne 51 exponent 전수검사는 소수 8개만 직접 계산, 나머지 43개는 Fermat's Little Theorem 논증으로 분석적 처리.
+
+### hexa-grammar pitfall 회피 사례
+- **P1 (Newline in expression)**: 다중 라인 array 리터럴 금지 — 한 줄로 평탄화.
+- **P2 (Semicolon)**: `while i < n { x = x + 1; i = i + 1 }` 금지 — 블록 내 세문마다 개행.
+- **P3 (Array type parameter)**: `fn f(xs: [float])` 파서 에러 — 전역 변수 캡처로 회피.
+- **P4 (Multi-line boolean)**: `(A && B) || (C && D) ||\n(E && F)` 금지 — sum/product 기반 set 동치 체크로 단순화 (tesla_369 예: `sum == 18 && prod == 162 && has3 && has6 && has9`).
+
+### .hexaported 마커 (5개)
+`tecs-l/verify/verify_h465_gamma_sqrt3.py.hexaported`, `tecs-l/verify/verify_h476_generator_pair.py.hexaported`, `tecs-l/math/experiments/sopfr_identity_search.py.hexaported`, `tecs-l/math/proofs/sigma_minus1_uniqueness.py.hexaported`, `tecs-l/math/proofs/tesla_369_theorem.py.hexaported`. 원본 .py 는 삭제 금지, 삭제 에이전트가 마커 기반 일괄 처리.
+
+### 흡수율 업데이트
+- iter4: 425 잔여 / 650 원본 ≈ **35%** 완료
+- iter5: 420 잔여 / 650 원본 ≈ **35.4%** 완료 (+5 파일)
+- Track A 누적 포팅: ~75 → **~80** .hexa
