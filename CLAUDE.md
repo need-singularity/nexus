@@ -1,21 +1,17 @@
 <!-- L0 CORE — 수정 금지 -->
-# CLAUDE.md — NEXUS-6 중앙 허브
+# nexus — NEXUS-6 중앙 허브
 
-> 모든 규칙/설정은 shared/ JSON이 단일 진실 (R14). 이 파일은 참조 링크만 유지.
+R14: shared/ JSON 단일진실, 이 파일은 참조만.
+🛑 tecs-l 흡수중 (2026-04-10): tecs-l/ → mk2_hexa/native/{verify,math,engines,experiments}. Track A 진행/B 보류. 로드맵: docs/tecs-l-absorption-plan.md
 
-> 🛑 **tecs-l 흡수 진행 중** (2026-04-10): tecs-l/ 는 독립 리포가 아닌 nexus 흡수 대상. Track A 진행 / Track B 보류. 신규 작업은 `mk2_hexa/native/{verify,math,engines,experiments}/*.hexa` 로. 로드맵: `docs/tecs-l-absorption-plan.md`
-
-## 참조
-
-| 항목 | 파일 | 내용 |
-|------|------|------|
-| 보호 체계 | `shared/core-lockdown.json` | L0/L1/L2 코어 잠금 (L0 37개) |
-| 절대 규칙 | `shared/absolute_rules.json` | R1~R21 공통 + 프로젝트별 (NX/AN/N6/PP/HX/VD/CT/AG) |
-| 프로젝트 레지스트리 | `shared/projects.json` | 7개 프로젝트 정의 + 번들/검증 스키마 |
-| 프로젝트 설정 | `shared/project_config.json` | CLI 명령어 구문 / 관례 / 리소스 보호 |
-| 시스템 코어 | `shared/core.json` | 시스템맵 + 14종 명령어 + 폴더 구조 |
-| 수렴 | `shared/convergence/nexus.json` | CDO 수렴 상태 |
-| 수렴 운영 | `shared/convergence_ops.json` | CDO 수렴 운영 원칙 |
-| 렌즈 | `shared/lens_registry.json` | 397종 망원경 레지스트리 |
-| 문법 | `shared/hexa_grammar.jsonl` | hexa-lang 전체 문법 + pitfalls P1~P5 |
-| API | `shared/CLAUDE.md` | NEXUS-6 상세 사용법 |
+ref:
+  lock      shared/config/core-lockdown.json     L0/L1/L2 (L0 37)
+  rules     shared/config/absolute_rules.json    R1~R21 + NX/AN/N6/PP/HX/VD/CT/AG
+  registry  shared/config/projects.json          7프로젝트 + 번들/검증
+  cfg       shared/config/project_config.json    CLI/관례/리소스
+  core      shared/config/core.json              시스템맵+14명령+폴더
+  conv      shared/convergence/nexus.json
+  conv-ops  shared/config/convergence_ops.json
+  lenses    shared/config/lens_registry.json     397종
+  grammar   shared/config/hexa_grammar.jsonl     hexa-lang+pitfalls P1~P5
+  api       shared/CLAUDE.md
