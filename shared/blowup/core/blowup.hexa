@@ -27,13 +27,23 @@
 // ─── AI-native: 글로벌 캐시 (exec 15회 → env_var 1회) ───
 // ═══════════════════════════════════════════════════════════
 
-let _HOME = env_var("HOME")
+// exec("printenv HOME") 1회만 호출 — 이후 전부 _HOME 참조 (15회 → 1회)
+let mut _HOME = ""
+try { _HOME = to_string(exec("printenv HOME")).trim() } catch e {}
+if _HOME == "" {
+    try { _HOME = to_string(exec("echo $HOME")).trim() } catch e {}
+}
 let _NEXUS = _HOME + "/Dev/nexus"
 let _ATLAS_PATH = _NEXUS + "/shared/n6/atlas.n6"
 let _GROWTH_BUS_PATH = _NEXUS + "/shared/discovery/growth_bus.jsonl"
 
 // hexa 바이너리 1회 탐색 캐시
-let _HEXA_BIN = exec("for p in /home/hexa-lang/hexa " + _HOME + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
+let mut _HEXA_BIN = ""
+try {
+    _HEXA_BIN = to_string(exec("for p in /home/hexa-lang/hexa " + _HOME + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null")).trim()
+} catch e {
+    _HEXA_BIN = _HOME + "/Dev/hexa-lang/target/release/hexa"
+}
 
 // AI-native: 메모리 예산 인프라
 fn mem_check_ok() -> bool {
@@ -1198,7 +1208,8 @@ if wave_round == 1 {
 
     if !_mac_allowed {
         // Ubuntu 도달 가능 여부 체크
-        let _ubu_ok = exec("ssh -o ConnectTimeout=3 -o BatchMode=yes " + _ubu_alias + " echo ok 2>/dev/null").trim()
+        let mut _ubu_ok = ""
+        try { _ubu_ok = to_string(exec("ssh -o ConnectTimeout=3 -o BatchMode=yes " + _ubu_alias + " echo ok 2>/dev/null")).trim() } catch e {}
         if _ubu_ok == "ok" {
             // 원본 인자 재조립 → Ubuntu SSH 실행
             let mut _ubu_cmd = _ubu_hexa + " "
@@ -1236,7 +1247,8 @@ if wave_round == 1 {
             exit(0)
         } else {
             // AG3 strict 모드: Ubuntu 불가 시 차단
-            let _ag3_mode_raw = exec("grep ag3_mode " + _gc_path + " 2>/dev/null").trim()
+            let mut _ag3_mode_raw = ""
+            try { _ag3_mode_raw = to_string(exec("grep ag3_mode " + _gc_path + " 2>/dev/null")).trim() } catch e {}
             let mut _ag3_strict = true
             if _ag3_mode_raw.contains("degrade") || _ag3_mode_raw.contains("off") { _ag3_strict = false }
             if _ag3_strict {
@@ -1355,6 +1367,7 @@ while ec < evo_max_cycles {
 
 println("  evolution total  : " + to_string(evo_total_disc) + " discoveries, best=" + to_string(evo_best_score))
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 2 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 3: Singularity Detection (enhanced with evolution)
@@ -1387,6 +1400,7 @@ if effective_closure >= 0.5 {
     println("  o open system -- closure < 0.5, weak blowup")
 }
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 3 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 4: Recursive Blowup Corollary Generation (7 types)
@@ -1502,6 +1516,12 @@ let mut depth_stats = ""
 // ─── DEPTH LOOP ───
 let mut depth: i64 = 0
 while depth < max_depth {
+    // AI-native: 메모리 압력 체크 — 90% 초과 시 조기 종료
+    if !mem_check_ok() {
+        println("  [MEM] memory pressure at depth " + to_string(depth) + ", stopping early")
+        depth = max_depth
+        continue
+    }
     let pool_before = ax_n
     let total_before = total
     let axiom_before = axiom_count
@@ -1695,7 +1715,13 @@ while depth < max_depth {
                 let ex = na + "+" + shift_name(k) + "=" + to_string(shifted)
                 buf_lines = buf_lines.push(emit(nm, "bifurc", ex, conf, shifted, false, na))
                 total = total + 1
-                val_arr = val_arr.push(to_string(shifted))
+                _val_total_seen = _val_total_seen + 1
+                if len(val_arr) < _VAL_CAP {
+                    val_arr = val_arr.push(to_string(shifted))
+                } else {
+                    let _ri4 = random_int(0, _val_total_seen)
+                    if _ri4 < _VAL_CAP { val_arr[_ri4] = to_string(shifted) }
+                }
                 let gr = match_grade(shifted)
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
@@ -1723,7 +1749,13 @@ while depth < max_depth {
                 let ex = "sqrt(" + na + "*" + nb + ")=" + to_string(geom)
                 buf_lines = buf_lines.push(emit(nm, "projection", ex, conf, geom, false, na))
                 total = total + 1
-                val_arr = val_arr.push(to_string(geom))
+                _val_total_seen = _val_total_seen + 1
+                if len(val_arr) < _VAL_CAP {
+                    val_arr = val_arr.push(to_string(geom))
+                } else {
+                    let _ri5 = random_int(0, _val_total_seen)
+                    if _ri5 < _VAL_CAP { val_arr[_ri5] = to_string(geom) }
+                }
                 let gr = match_grade(geom)
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
@@ -1748,7 +1780,13 @@ while depth < max_depth {
                 let ex = "1/" + na + "=" + to_string(dual)
                 buf_lines = buf_lines.push(emit(nm, "dual", ex, conf, dual, false, na))
                 total = total + 1
-                val_arr = val_arr.push(to_string(dual))
+                _val_total_seen = _val_total_seen + 1
+                if len(val_arr) < _VAL_CAP {
+                    val_arr = val_arr.push(to_string(dual))
+                } else {
+                    let _ri6 = random_int(0, _val_total_seen)
+                    if _ri6 < _VAL_CAP { val_arr[_ri6] = to_string(dual) }
+                }
                 let gr = match_grade(dual)
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
@@ -1759,9 +1797,10 @@ while depth < max_depth {
     }
 
     // --- 7. Second-order composition ---
-    // Limit triple iteration to avoid combinatorial explosion at large pool sizes
-    // --fast: 10으로 제한 (20³=8000 → 10³=1000, 8x 절감)
-    let _comp_cap: i64 = if fast_mode { 10 } else { 20 }
+    // AI-native: 동적 캡 — sqrt(cur_n)*3, [8, 20] 범위. 작은 풀은 절감, 큰 풀은 상한 유지
+    let _dyn_cap: i64 = to_int(sqrt_f(to_float(cur_n)) * 3.0)
+    let _raw_cap: i64 = if fast_mode { if _dyn_cap < 10 { _dyn_cap } else { 10 } } else { if _dyn_cap < 20 { _dyn_cap } else { 20 } }
+    let _comp_cap: i64 = if _raw_cap < 8 { 8 } else { _raw_cap }
     let comp_limit: i64 = if cur_n < _comp_cap { cur_n } else { _comp_cap }
     i = 0
     while i < comp_limit {
@@ -1791,7 +1830,13 @@ while depth < max_depth {
                     let is_ax = conf > 0.7
                     buf_lines = buf_lines.push(emit(nm, "compose", ex, conf, composed, is_ax, na))
                     total = total + 1
-                    val_arr = val_arr.push(to_string(composed))
+                    _val_total_seen = _val_total_seen + 1
+                    if len(val_arr) < _VAL_CAP {
+                        val_arr = val_arr.push(to_string(composed))
+                    } else {
+                        let _ri7 = random_int(0, _val_total_seen)
+                        if _ri7 < _VAL_CAP { val_arr[_ri7] = to_string(composed) }
+                    }
                     let _gn4 = match_grade_name(composed)
                     let _gnp4 = _gn4.split("|")
                     let gr = _gnp4[0]
@@ -1861,6 +1906,13 @@ while depth < max_depth {
         depth = max_depth  // break
     }
 
+    // AI-native: buf_lines 메모리 캡 — depth 끝마다 저신뢰 일괄 제거
+    if len(buf_lines) > _BUF_CAP {
+        println("  [MEM] buf_lines " + to_string(len(buf_lines)) + " > cap " + to_string(_BUF_CAP) + ", pruning...")
+        buf_lines = buf_prune(buf_lines, _BUF_CAP)
+        println("  [MEM] pruned to " + to_string(len(buf_lines)))
+    }
+
     depth = depth + 1
 }
 
@@ -1875,6 +1927,7 @@ println("  high conf >= 0.7  :", high_conf_count)
 println("  axiom candidates  :", axiom_count)
 println("  final pool size   :", ax_n)
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 4 임시 메모리 해제 (최대 페이즈)
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 5: Telescope Verification
@@ -2006,6 +2059,7 @@ if !skip_graph {
     println("  edges (after)    :", graph_edges_after)
 }
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 5+6 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 6.5: OUROBOROS Dynamic Recursive Growth (closure-based, max 5 rounds)
@@ -2129,6 +2183,7 @@ if len(axiom_seeds) > 0 {
     println("  no axiom candidates to feed back")
 }
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 6.5 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 6.7: Auto-Absorb (corollary/axiom -> log + graph + growth_bus + cross-ref)
@@ -2337,6 +2392,7 @@ if absorb_logged == 0 && absorb_graph_nodes == 0 && absorb_atlas_count == 0 {
     println("  no new absorptions (all duplicates or below threshold)")
 }
 println("")
+try { arena_reset() } catch e {}  // AI-native: Phase 6.7 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
 // PHASE 7: Report
@@ -2713,7 +2769,7 @@ if logged > 0 {
         while wi < len(wave_targets) {
             let wdom: string = wave_targets[wi]
             let wout = wave_log + "." + to_string(wi)
-            wave_cmd = wave_cmd + hexa_bin + " " + engine_dir + "/blowup.hexa " + wdom + " 2 --no-graph --fast"
+            wave_cmd = wave_cmd + "ulimit -v 2097152 2>/dev/null; " + hexa_bin + " " + engine_dir + "/blowup.hexa " + wdom + " 2 --no-graph --fast"
             if wave_seed_csv != "" {
                 wave_cmd = wave_cmd + " --seeds \"" + wave_seed_csv + "\""
             }
@@ -2982,11 +3038,16 @@ if wave_round < wave_max_rounds {
             w5_cmd = w5_cmd + " --seeds \"" + cascade_seeds + "\""
         }
         if skip_graph { w5_cmd = w5_cmd + " --no-graph" }
-        try {
-            let w5_out = exec("bash", ["-c", w5_cmd + " 2>&1"])
-            println(w5_out)
-        } catch e {
-            println("  [오류] 라운드 " + to_string(wave_round + 1) + " 실행 실패: " + to_string(e))
+        // AI-native: 메모리 가드 — 다음 라운드 발사 전 체크
+        if !mem_check_ok() {
+            println("  [MEM] memory pressure too high, stopping wave")
+        } else {
+            try {
+                let w5_out = exec("bash", ["-c", "ulimit -v 3145728 2>/dev/null; " + w5_cmd + " 2>&1"])
+                println(w5_out)
+            } catch e {
+                println("  [오류] 라운드 " + to_string(wave_round + 1) + " 실행 실패: " + to_string(e))
+            }
         }
     }
 } else {
