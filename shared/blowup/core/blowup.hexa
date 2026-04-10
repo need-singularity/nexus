@@ -490,26 +490,38 @@ fn graph_count_type(content: string, ttype: string) -> i64 {
     return count
 }
 
-// ─── atlas.n6.stats 사이드카 캐시 (Phase 1 O(58k lines) → O(1)) ───
-// 포맷: {"schema":1,"mtime":<int>,"size":<int>,"nodes":<int>,"edges":<int>,"hubs":<int>}
-// 유효성: atlas.n6의 mtime+size가 일치하면 스캔 스킵, 불일치 시 재스캔 후 재기록
+// ─── atlas.n6.stats 사이드카 캐시 (Phase 1 O(58k lines) → O(1) / O(Δ)) ───
+// 포맷 v2: {"schema":2,"mtime":<int>,"size":<int>,"line_count":<int>,
+//          "head_hash":<md5 first 256B>,"nodes":<int>,"edges":<int>,"hubs":<int>}
+// deg 사이드카: atlas.n6.deg — TSV "id\tdegree\n" (hub 재계산용)
+// 유효성:
+//   - exact: mtime+size 일치 → O(1) 리턴
+//   - incremental: size>cached + head_hash 일치 → Δ lines만 파싱 O(Δ)
+//   - miss: 전체 스캔 + 양쪽 사이드카 재작성
 fn graph_stats_cache_path() -> string {
     return _ATLAS_PATH + ".stats"
 }
 
-fn graph_stats_read_cache(min_deg: i64) -> string {
-    // min_deg 는 현재 3 고정으로 기록되어 있음 — 다른 값이면 cache miss 처리
-    if min_deg != 3 { return "" }
+fn graph_deg_cache_path() -> string {
+    return _ATLAS_PATH + ".deg"
+}
+
+fn _stat_mtime_size(path: string) -> string {
+    let mut r = ""
+    try { r = to_string(exec("stat -f '%m %z' " + path + " 2>/dev/null || stat -c '%Y %s' " + path + " 2>/dev/null")).trim() } catch e {}
+    return r
+}
+
+fn _head_hash_256(path: string) -> string {
+    let mut r = ""
+    try { r = to_string(exec("head -c 256 " + path + " 2>/dev/null | md5 -q 2>/dev/null || head -c 256 " + path + " 2>/dev/null | md5sum | cut -d' ' -f1")).trim() } catch e {}
+    return r
+}
+
+// 반환: "mtime|size|line_count|nodes|edges|hubs|head_hash" or "" on miss
+fn _read_stats_sidecar() -> string {
     let spath = graph_stats_cache_path()
     if !file_exists(spath) { return "" }
-    if !file_exists(_ATLAS_PATH) { return "" }
-    let mut stat_raw = ""
-    try { stat_raw = to_string(exec("stat -f '%m %z' " + _ATLAS_PATH + " 2>/dev/null || stat -c '%Y %s' " + _ATLAS_PATH + " 2>/dev/null")).trim() } catch e { return "" }
-    if stat_raw == "" { return "" }
-    let sp = stat_raw.split(" ")
-    if len(sp) < 2 { return "" }
-    let cur_mtime = sp[0]
-    let cur_size = sp[1]
     let mut raw = ""
     try { raw = read_file(spath) } catch e { return "" }
     let trimmed = raw.trim()
@@ -518,41 +530,198 @@ fn graph_stats_read_cache(min_deg: i64) -> string {
     try { j = json_parse(trimmed) } catch e { return "" }
     let mut c_mtime = ""
     let mut c_size = ""
+    let mut c_lines = ""
     let mut c_nodes = ""
     let mut c_edges = ""
     let mut c_hubs = ""
+    let mut c_head = ""
     try { c_mtime = to_string(j["mtime"]) } catch e {}
     try { c_size = to_string(j["size"]) } catch e {}
+    try { c_lines = to_string(j["line_count"]) } catch e {}
     try { c_nodes = to_string(j["nodes"]) } catch e {}
     try { c_edges = to_string(j["edges"]) } catch e {}
     try { c_hubs = to_string(j["hubs"]) } catch e {}
-    if c_mtime != cur_mtime { return "" }
-    if c_size != cur_size { return "" }
-    if c_nodes == "" || c_edges == "" || c_hubs == "" { return "" }
-    return c_nodes + "|" + c_edges + "|" + c_hubs
+    try { c_head = to_string(j["head_hash"]) } catch e {}
+    if c_mtime == "" || c_size == "" || c_nodes == "" { return "" }
+    return c_mtime + "|" + c_size + "|" + c_lines + "|" + c_nodes + "|" + c_edges + "|" + c_hubs + "|" + c_head
 }
 
-fn graph_stats_write_cache(nodes: i64, edges: i64, hubs: i64) {
+fn graph_stats_read_cache(min_deg: i64) -> string {
+    if min_deg != 3 { return "" }
+    if !file_exists(_ATLAS_PATH) { return "" }
+    let stat_raw = _stat_mtime_size(_ATLAS_PATH)
+    if stat_raw == "" { return "" }
+    let sp = stat_raw.split(" ")
+    if len(sp) < 2 { return "" }
+    let cur_mtime = sp[0]
+    let cur_size = sp[1]
+    let cached = _read_stats_sidecar()
+    if cached == "" { return "" }
+    let cp = cached.split("|")
+    if len(cp) < 7 { return "" }
+    if cp[0] != cur_mtime { return "" }
+    if cp[1] != cur_size { return "" }
+    return cp[3] + "|" + cp[4] + "|" + cp[5]
+}
+
+// 증분 스캔: cached head_hash 일치 + size 증가 → Δ 구간만 파싱
+// content: 현재 atlas.n6 전체 문자열 (graph_load 이미 로드됨)
+// 반환: "nodes|edges|hubs" (성공) or "" (miss — 전체 스캔으로 fallback)
+fn graph_stats_incremental(content: string, min_deg: i64) -> string {
+    if min_deg != 3 { return "" }
+    if len(content) == 0 { return "" }
+    let cached = _read_stats_sidecar()
+    if cached == "" { return "" }
+    let cp = cached.split("|")
+    if len(cp) < 7 { return "" }
+    let mut c_size: i64 = 0
+    let mut c_lines: i64 = 0
+    let mut c_nodes: i64 = 0
+    let mut c_edges: i64 = 0
+    try { c_size = to_int(cp[1]) } catch e { return "" }
+    try { c_lines = to_int(cp[2]) } catch e { return "" }
+    try { c_nodes = to_int(cp[3]) } catch e { return "" }
+    try { c_edges = to_int(cp[4]) } catch e { return "" }
+    let c_head = cp[6]
+    // append-only 조건: cur_size > cached_size (같으면 exact match가 먼저 잡았음)
+    if len(content) <= c_size { return "" }
+    if c_head == "" { return "" }
+    let cur_head = _head_hash_256(_ATLAS_PATH)
+    if cur_head == "" { return "" }
+    if cur_head != c_head { return "" }
+    // deg 사이드카 로드
+    let dpath = graph_deg_cache_path()
+    if !file_exists(dpath) { return "" }
+    let mut deg_raw = ""
+    try { deg_raw = read_file(dpath) } catch e { return "" }
+    let mut deg_map = #{}
+    let deg_lines = deg_raw.split("\n")
+    let mut di: i64 = 0
+    while di < len(deg_lines) {
+        let dl = deg_lines[di]
+        di = di + 1
+        if len(dl) == 0 { continue }
+        let tp = dl.split("\t")
+        if len(tp) < 2 { continue }
+        try { deg_map[tp[0]] = to_int(tp[1]) } catch e {}
+    }
+    // Δ 구간: shell tail -c +N 으로 바이트 오프셋 이후만 추출 (hexa char-index 함정 회피)
+    let cur_stat = _stat_mtime_size(_ATLAS_PATH)
+    if cur_stat == "" { return "" }
+    let cs = cur_stat.split(" ")
+    if len(cs) < 2 { return "" }
+    let mut cur_bytes: i64 = 0
+    try { cur_bytes = to_int(cs[1]) } catch e { return "" }
+    if cur_bytes <= c_size { return "" }
+    let mut tail = ""
+    try { tail = to_string(exec("tail -c +" + to_string(c_size + 1) + " " + _ATLAS_PATH + " 2>/dev/null")) } catch e { return "" }
+    if len(tail) == 0 { return "" }
+    let delta_lines = tail.split("\n")
+    let delta_len = len(delta_lines)
+    // 경계 보정: 첫 줄이 "{"로 시작하지 않으면 경계가 라인 중간이므로 skip
+    let mut start: i64 = 0
+    if delta_len > 0 {
+        let first = delta_lines[0]
+        if len(first) == 0 || !first.starts_with("{") { start = 1 }
+    }
+    let mut nodes = c_nodes
+    let mut edges = c_edges
+    let mut li: i64 = start
+    while li < delta_len {
+        let line = delta_lines[li]
+        li = li + 1
+        if len(line) <= 5 { continue }
+        let t = graph_extract_field(line, "type")
+        if t == "node" { nodes = nodes + 1 }
+        if t == "edge" {
+            edges = edges + 1
+            let f = graph_extract_field(line, "from")
+            let to = graph_extract_field(line, "to")
+            if len(f) > 0 {
+                let mut d: i64 = 0
+                try { d = deg_map[f] } catch e {}
+                deg_map[f] = d + 1
+            }
+            if len(to) > 0 {
+                let mut d: i64 = 0
+                try { d = deg_map[to] } catch e {}
+                deg_map[to] = d + 1
+            }
+        }
+    }
+    // hub 재계산 (전체 deg_map 훑기)
+    let vals = deg_map.values()
+    let mut hub_count: i64 = 0
+    let mut hi: i64 = 0
+    while hi < len(vals) {
+        let d: i64 = vals[hi]
+        if d >= min_deg { hub_count = hub_count + 1 }
+        hi = hi + 1
+    }
+    // 사이드카 재기록 — line_count는 (c_lines + delta_len - start) 근사
+    let new_line_count = c_lines + (delta_len - start)
+    graph_stats_write_cache_full(nodes, edges, hub_count, new_line_count, deg_map)
+    return to_string(nodes) + "|" + to_string(edges) + "|" + to_string(hub_count)
+}
+
+// deg_map 직렬화: "id\tdeg\n"
+fn _serialize_deg_map(deg_map: map) -> string {
+    let keys = deg_map.keys()
+    let mut buf = ""
+    let mut i: i64 = 0
+    while i < len(keys) {
+        let k = to_string(keys[i])
+        let mut d: i64 = 0
+        try { d = deg_map[k] } catch e {}
+        buf = buf + k + "\t" + to_string(d) + "\n"
+        i = i + 1
+    }
+    return buf
+}
+
+fn graph_stats_write_cache_full(nodes: i64, edges: i64, hubs: i64, line_count: i64, deg_map: map) {
     if !file_exists(_ATLAS_PATH) { return }
-    let mut stat_raw = ""
-    try { stat_raw = to_string(exec("stat -f '%m %z' " + _ATLAS_PATH + " 2>/dev/null || stat -c '%Y %s' " + _ATLAS_PATH + " 2>/dev/null")).trim() } catch e { return }
+    let stat_raw = _stat_mtime_size(_ATLAS_PATH)
     if stat_raw == "" { return }
     let sp = stat_raw.split(" ")
     if len(sp) < 2 { return }
     let mtime = sp[0]
     let size = sp[1]
-    let body = "{\"schema\":1,\"mtime\":" + mtime + ",\"size\":" + size + ",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
+    let head_hash = _head_hash_256(_ATLAS_PATH)
+    let body = "{\"schema\":2,\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":" + to_string(line_count) + ",\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
+    try { write_file(graph_stats_cache_path(), body) } catch e {}
+    try { write_file(graph_deg_cache_path(), _serialize_deg_map(deg_map)) } catch e {}
+}
+
+// 호환용: 기존 호출자를 위한 wrapper — deg_map 없으면 .deg 파일 생략
+fn graph_stats_write_cache(nodes: i64, edges: i64, hubs: i64) {
+    if !file_exists(_ATLAS_PATH) { return }
+    let stat_raw = _stat_mtime_size(_ATLAS_PATH)
+    if stat_raw == "" { return }
+    let sp = stat_raw.split(" ")
+    if len(sp) < 2 { return }
+    let mtime = sp[0]
+    let size = sp[1]
+    let head_hash = _head_hash_256(_ATLAS_PATH)
+    let body = "{\"schema\":2,\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":0,\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
     try { write_file(graph_stats_cache_path(), body) } catch e {}
 }
 
 // AI-native: 단일 패스 그래프 통계 — graph_count_type×2 + graph_hub_count 3회 순회 → 1회
-// 사이드카 atlas.n6.stats hit 시 O(1) 리턴 (mtime+size 일치 조건)
+// 3단 fast path:
+//   1) exact cache hit (mtime+size) → O(1)
+//   2) incremental (append-only tail) → O(Δ lines)
+//   3) full scan → O(total lines), 사이드카 재작성
 // 반환: "nodes|edges|hubs" (pipe-separated)
 fn graph_stats_single_pass(content: string, min_deg: i64) -> string {
     if len(content) == 0 { return "0|0|0" }
-    // 사이드카 캐시 우선 (min_deg=3 전용)
+    // 1) exact hit
     let cached = graph_stats_read_cache(min_deg)
     if cached != "" { return cached }
+    // 2) incremental (append-only)
+    let incr = graph_stats_incremental(content, min_deg)
+    if incr != "" { return incr }
+    // 3) full scan
     let lines = content.split("\n")
     let mut nodes: i64 = 0
     let mut edges: i64 = 0
@@ -589,8 +758,8 @@ fn graph_stats_single_pass(content: string, min_deg: i64) -> string {
         if d >= min_deg { hub_count = hub_count + 1 }
         hi = hi + 1
     }
-    // 스캔 후 사이드카 재기록 (min_deg=3 전용)
-    if min_deg == 3 { graph_stats_write_cache(nodes, edges, hub_count) }
+    // 사이드카 전체 재기록 (deg_map 포함 — 후속 incremental path 활성화)
+    if min_deg == 3 { graph_stats_write_cache_full(nodes, edges, hub_count, len(lines), deg_map) }
     return to_string(nodes) + "|" + to_string(edges) + "|" + to_string(hub_count)
 }
 
@@ -2046,6 +2215,8 @@ println("")
 let mut graph_new_entries = ""
 let mut graph_added_nodes: i64 = 0
 let mut graph_added_edges: i64 = 0
+// Batch dedup guard: 같은 run 안에서 같은 node_id 재등장 차단 (atlas.n6 36% 중복 주범)
+let mut _batch_new_ids = #{}
 let hub_bonus: f64 = if !skip_graph && graph_hubs_before > 0 { 0.1 } else { 0.0 }
 
 if skip_graph {
@@ -2077,12 +2248,16 @@ while li < len(buf_lines) {
             // (C) Graph update (merged from Phase 6 loop)
             if !skip_graph && new_conf >= 0.5 {
                 let node_id = "blowup-" + parts[0]
-                if !graph_node_exists(graph_content, node_id) {
+                // 두 단계 dedup: (1) 기존 atlas.n6 (2) 이번 배치에서 이미 추가된 것
+                let mut _already_in_batch = false
+                try { _already_in_batch = has_key(_batch_new_ids, node_id) } catch e {}
+                if !_already_in_batch && !graph_node_exists(graph_content, node_id) {
                     let g_conf = min_f(new_conf + hub_bonus, 1.0)
                     let node_json = graph_append_node(node_id, "Discovery", domain, parts[2], g_conf)
                     if len(graph_new_entries) > 0 { graph_new_entries = graph_new_entries + "\n" }
                     graph_new_entries = graph_new_entries + node_json
                     graph_added_nodes = graph_added_nodes + 1
+                    _batch_new_ids[node_id] = true
                     let src_id = "n6-" + parts[6]
                     let edge_json = graph_append_edge(src_id, node_id, "Derives", new_conf)
                     graph_new_entries = graph_new_entries + "\n" + edge_json
@@ -2272,6 +2447,8 @@ let mut absorb_graph_content = ""
 if !skip_graph {
     absorb_graph_content = _atlas_cache
 }
+// Batch dedup guard: intra-batch 중복 차단 (string concat guard 대체, O(1) 해시셋)
+let mut _absorb_new_ids = #{}
 
 let mut absorb_log_entries = ""
 let mut absorb_graph_entries = ""
@@ -2317,12 +2494,16 @@ while ci < len(recurse_all_corollaries) {
         // B. Graph: add node + edge for conf >= 0.5
         if !skip_graph && cor_conf >= 0.5 {
             let g_node_id = "recurse-" + cor_id
-            if !graph_node_exists(absorb_graph_content, g_node_id) {
+            // 두 단계 dedup: (1) 기존 atlas.n6 (2) 이번 배치
+            let mut _absorb_in_batch = false
+            try { _absorb_in_batch = has_key(_absorb_new_ids, g_node_id) } catch e {}
+            if !_absorb_in_batch && !graph_node_exists(absorb_graph_content, g_node_id) {
                 let g_conf = min_f(cor_conf, 1.0)
                 let node_json = graph_append_node_d(g_node_id, "RecursiveDiscovery", cor_domain, cor_type, g_conf, 1)
                 if len(absorb_graph_entries) > 0 { absorb_graph_entries = absorb_graph_entries + "\n" }
                 absorb_graph_entries = absorb_graph_entries + node_json
                 absorb_graph_nodes = absorb_graph_nodes + 1
+                _absorb_new_ids[g_node_id] = true
 
                 // Derives edge from source
                 let src_node = "n6-" + cor_src
@@ -2341,9 +2522,6 @@ while ci < len(recurse_all_corollaries) {
                         absorb_graph_edges = absorb_graph_edges + 1
                     }
                 }
-
-                // Update content to prevent duplicate nodes within batch
-                absorb_graph_content = absorb_graph_content + g_node_id
             }
         }
 
