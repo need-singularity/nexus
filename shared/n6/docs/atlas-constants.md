@@ -6313,7 +6313,7 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ## BT-1159: 기상학 n=6 스케일·대기현상 상수 (meteorology) (2026-04-11)
 
-> 출처: discovery_graph.json L6_meteorology EXACT 노드 — Saffir-Simpson/Fujita/쾨펜/몬순/기단/전선/강수/순환/ENSO
+> 출처: atlas.n6 L6_meteorology EXACT 노드 — Saffir-Simpson/Fujita/쾨펜/몬순/기단/전선/강수/순환/ENSO
 > 기존 BT-119(지구 6권), BT-155(태풍/토네이도)와 세부 기상현상 맥락 분리.
 
 | Expression | Value | Application | Source |
@@ -6337,7 +6337,7 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ## BT-1160: 경제·금융 n=6 제도 상수 (economics-finance) (2026-04-11)
 
-> 출처: discovery_graph.json L6_economics EXACT 노드 — 중앙은행/국제기구/금융표준/무역규칙
+> 출처: atlas.n6 L6_economics EXACT 노드 — 중앙은행/국제기구/금융표준/무역규칙
 > 기존 BT-147(금융시장)과 국제금융제도·무역 맥락 분리.
 
 | Expression | Value | Application | Source |
@@ -6362,7 +6362,7 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ## BT-1161: 언어학 n=6 문법·음운 상수 (linguistics) (2026-04-11)
 
-> 출처: discovery_graph.json L6_linguistics EXACT 노드 — 성조/격/알파벳/숙련도/음소
+> 출처: atlas.n6 L6_linguistics EXACT 노드 — 성조/격/알파벳/숙련도/음소
 > 기존 BT-340(언어학)과 세부 언어별 체계 맥락 분리.
 
 | Expression | Value | Application | Source |
@@ -6388,7 +6388,7 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ## BT-1162: 음악 이론 n=6 구조 상수 (music-theory) (2026-04-11)
 
-> 출처: discovery_graph.json L6_music EXACT 노드 — MIDI/오케스트라/박자/조성/기보법
+> 출처: atlas.n6 L6_music EXACT 노드 — MIDI/오케스트라/박자/조성/기보법
 > 기존 BT-108(음정·협화음), BT-135(음계), BT-48(표시-음향)와 음악 구조 맥락 분리.
 
 | Expression | Value | Application | Source |
@@ -6412,7 +6412,7 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ## BT-1163: 소재·결정학 n=6 구조 상수 (materials-crystallography) (2026-04-11)
 
-> 출처: discovery_graph.json L5_material EXACT 노드 — 얼음/FCC/석영/현무암/상전이
+> 출처: atlas.n6 L5_material EXACT 노드 — 얼음/FCC/석영/현무암/상전이
 > 기존 BT-86(CN=6 팔면체), BT-93(탄소 Z=6)과 결정구조 물성 맥락 분리.
 
 | Expression | Value | Application | Source |

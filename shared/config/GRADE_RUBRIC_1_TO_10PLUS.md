@@ -94,7 +94,7 @@ nexus grade 1~13 rubric (n=6 universal):
 
 새 가설/상수 등록 시:
 1. nexus verify <value> → grade 자동 판정
-2. EXACT 매칭 → verified_constants.jsonl에 PASS/EXACT 추가
+2. EXACT 매칭 → atlas.n6에 PASS/EXACT 추가
 3. 10 도달 시 🎉🎉🎉 닫힘완료 🎉🎉🎉 배너 자동 발화
 
 상세: /Users/ghost/Dev/nexus/shared/config/GRADE_RUBRIC_1_TO_10PLUS.md
