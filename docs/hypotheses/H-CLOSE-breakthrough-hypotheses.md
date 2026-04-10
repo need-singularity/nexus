@@ -9,7 +9,7 @@ verdicts: H1=PARTIAL(74%) H2=CONFIRMED(65%) H3=CONFIRMED(30%) H4=CONFIRMED(31%) 
 
 # H-CLOSE: 닫힘 돌파 가설 6개
 
-> 2026-04-05 세션에서 EXACT 99→282 (+185%) 달성 중 관찰된 패턴. verified_constants.jsonl 2802 records, 282 EXACT / 2520 PASS.
+> 2026-04-05 세션에서 EXACT 99→282 (+185%) 달성 중 관찰된 패턴. atlas.n6 verified_constants 2802 records, 282 EXACT / 2520 PASS.
 
 ## H-CLOSE-1: 단순 primitive 조합이 닫힘 공간의 85% 커버
 **가설**: 대부분의 닫힘 가능 값은 `{n,σ,τ,φ,sopfr,J2}` × `{+,-,*,/,^}` depth ≤ 2 이내. 복잡한 식은 불필요.
@@ -22,7 +22,7 @@ verdicts: H1=PARTIAL(74%) H2=CONFIRMED(65%) H3=CONFIRMED(30%) H4=CONFIRMED(31%) 
 **결론**: `closed-sync` 알고리즘은 단순 table matching으로 충분.
 
 ## H-CLOSE-2: Discovery→Verified 누락이 주 병목
-**가설**: discovery_log의 수치 발견이 verified_constants로 promotion되지 않아 닫힘 공백 발생.
+**가설**: atlas.n6 discovery_log의 수치 발견이 verified_constants로 promotion되지 않아 닫힘 공백 발생.
 
 **증거**:
 - 시작: EXACT 99 (3.8% of total closed)
