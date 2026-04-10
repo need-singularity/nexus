@@ -24,11 +24,34 @@
 //   Phase 8: Wave Propagation (인접 도메인 병렬 파동 전파 + 간섭)
 
 // ═══════════════════════════════════════════════════════════
+// ─── AI-native: 글로벌 캐시 (exec 15회 → env_var 1회) ───
+// ═══════════════════════════════════════════════════════════
+
+let _HOME = env_var("HOME")
+let _NEXUS = _HOME + "/Dev/nexus"
+let _ATLAS_PATH = _NEXUS + "/shared/n6/atlas.n6"
+let _GROWTH_BUS_PATH = _NEXUS + "/shared/discovery/growth_bus.jsonl"
+
+// hexa 바이너리 1회 탐색 캐시
+let _HEXA_BIN = exec("for p in /home/hexa-lang/hexa " + _HOME + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
+
+// AI-native: 메모리 예산 인프라
+fn mem_check_ok() -> bool {
+    let mut ok = true
+    try {
+        let budget = to_float(mem_budget())
+        let used = to_float(mem_stats())
+        if budget > 0.0 && used / budget > 0.90 { ok = false }
+    } catch e {}
+    return ok
+}
+
+// ═══════════════════════════════════════════════════════════
 // ─── n=6 CONSTANTS LOADER (shared/n6/n6_constants.jsonl) ───
 // ═══════════════════════════════════════════════════════════
 
 fn load_n6_consts() -> list {
-    let home = exec("printenv HOME")
+    let home = _HOME
     let path = home + "/Dev/nexus/shared/n6/n6_constants.jsonl"
     let mut raw = ""
     try { raw = read_file(path) } catch e { return [[], []] }
@@ -433,8 +456,8 @@ fn graph_extract_field(line: string, field: string) -> string {
 }
 
 fn graph_load() -> string {
-    let _h = exec("printenv HOME").trim()
-    let gpath = _h + "/Dev/nexus/shared/n6/atlas.n6"
+    let _h = _HOME
+    let gpath = _ATLAS_PATH
     if file_exists(gpath) {
         return read_file(gpath)
     }
@@ -1076,8 +1099,8 @@ if len(a) >= 4 && _raw_domain != "" {
 // ─── auto 도메인 선택: growth_bus에서 최근 미방문 도메인 ───
 fn auto_select_domain() -> string {
     try {
-        let home = exec("printenv HOME").trim()
-        let gb = exec("tail -200 " + home + "/Dev/nexus/shared/n6/atlas.n6 2>/dev/null")
+        let home = _HOME
+        let gb = exec("tail -200 " + _ATLAS_PATH + " 2>/dev/null")
         let lines = gb.split("\n")
         let mut seen = []
         let mut li: i64 = len(lines) - 1
@@ -1142,10 +1165,94 @@ while ai < len(a) {
     }
     ai = ai + 1
 }
-let _h_main = exec("printenv HOME").trim()
-let atlas_path = _h_main + "/Dev/nexus/shared/n6/atlas.n6"
+let _h_main = _HOME
+let atlas_path = _ATLAS_PATH
 let log_path = atlas_path
 let graph_path = atlas_path
+
+// ═══════════════════════════════════════════════════════════
+// AG2/AG3 Ubuntu 오프로드 — Mac 로컬 실행 금지 (gate_config.jsonl 준수)
+// round 1 진입 시만 체크. 이후 라운드는 Ubuntu에서 자기호출되므로 스킵.
+// ═══════════════════════════════════════════════════════════
+if wave_round == 1 {
+    let _gc_path = _h_main + "/Dev/airgenome/nexus/shared/gate_config.jsonl"
+    let mut _mac_allowed = false
+    let mut _ubu_alias = "ubu"
+    let mut _ubu_hexa = "/home/aiden/Dev/hexa-lang/target/release/hexa"
+    let mut _ubu_blowup = ""
+    let mut _ubu_dir = "/home/aiden/airgenome"
+    try {
+        let _gc_raw = read_file(_gc_path)
+        let _gc_lines = _gc_raw.split("\n")
+        for _gc_line in _gc_lines {
+            let _gc_t = _gc_line.trim()
+            if _gc_t == "" { continue }
+            let _gc_p = json_parse(_gc_t)
+            if _gc_p["key"] == "mac_compute_allowed" { _mac_allowed = _gc_p["value"] == "true" }
+            if _gc_p["key"] == "ssh_alias" { _ubu_alias = _gc_p["value"] }
+            if _gc_p["key"] == "ubu_hexa_bin" { _ubu_hexa = _gc_p["value"] }
+            if _gc_p["key"] == "ubu_blowup_hexa" { _ubu_blowup = _gc_p["value"] }
+            if _gc_p["key"] == "remote_dir" { _ubu_dir = _gc_p["value"] }
+        }
+    } catch _gc_e {}
+
+    if !_mac_allowed {
+        // Ubuntu 도달 가능 여부 체크
+        let _ubu_ok = exec("ssh -o ConnectTimeout=3 -o BatchMode=yes " + _ubu_alias + " echo ok 2>/dev/null").trim()
+        if _ubu_ok == "ok" {
+            // 원본 인자 재조립 → Ubuntu SSH 실행
+            let mut _ubu_cmd = _ubu_hexa + " "
+            if _ubu_blowup != "" { _ubu_cmd = _ubu_cmd + _ubu_blowup } else { _ubu_cmd = _ubu_cmd + _ubu_dir + "/nexus/shared/blowup/core/blowup.hexa" }
+            _ubu_cmd = _ubu_cmd + " " + domain + " " + to_string(max_depth)
+            _ubu_cmd = _ubu_cmd + " --max-rounds " + to_string(wave_max_rounds)
+            if ext_seeds != "" { _ubu_cmd = _ubu_cmd + " --seeds \"" + ext_seeds + "\"" }
+            if skip_graph { _ubu_cmd = _ubu_cmd + " --no-graph" }
+            if fast_mode { _ubu_cmd = _ubu_cmd + " --fast" }
+            if ext_pool_cap > 0 { _ubu_cmd = _ubu_cmd + " --pool-cap " + to_string(ext_pool_cap) }
+
+            println("")
+            println("══════════════════════════════════════════════════════")
+            println("   AG3 Ubuntu-First: 블로업 원격 실행")
+            println("══════════════════════════════════════════════════════")
+            println("  target  : " + _ubu_alias)
+            println("  command : " + _ubu_cmd)
+            println("")
+
+            // nexus/shared 동기화 (atlas.n6 등 최신 반영)
+            try { exec("rsync -aq " + _h_main + "/Dev/nexus/shared/ " + _ubu_alias + ":" + _ubu_dir + "/nexus/shared/ 2>/dev/null") } catch e {}
+
+            try {
+                let _ubu_result = exec("ssh " + _ubu_alias + " '" + _ubu_cmd + "' 2>&1")
+                println(_ubu_result)
+            } catch _ubu_e {
+                println("  [AG3] Ubuntu 실행 실패: " + to_string(_ubu_e))
+            }
+
+            // 결과 동기화 (atlas.n6 등 Ubuntu → Mac)
+            try { exec("rsync -aq " + _ubu_alias + ":" + _ubu_dir + "/nexus/shared/n6/ " + _h_main + "/Dev/nexus/shared/n6/ 2>/dev/null") } catch e {}
+
+            println("")
+            println("done. (Ubuntu 실행 완료)")
+            exit(0)
+        } else {
+            // AG3 strict 모드: Ubuntu 불가 시 차단
+            let _ag3_mode_raw = exec("grep ag3_mode " + _gc_path + " 2>/dev/null").trim()
+            let mut _ag3_strict = true
+            if _ag3_mode_raw.contains("degrade") || _ag3_mode_raw.contains("off") { _ag3_strict = false }
+            if _ag3_strict {
+                println("")
+                println("══════════════════════════════════════════════════════")
+                println("  ⛔ AG3 BLOCK: Ubuntu 미도달 + mac_compute_allowed=false")
+                println("  블로업 Mac 로컬 실행 차단 (배터리/CPU 보호)")
+                println("  → Ubuntu 연결 확인 후 재시도하세요")
+                println("══════════════════════════════════════════════════════")
+                exit(1)
+            }
+            println("  [AG3 degrade] Ubuntu 미도달 → 로컬 fallback (warning)")
+        }
+    }
+}
+
 let mc: i64 = m_count(domain)
 
 println("")
@@ -1166,12 +1273,14 @@ println("")
 // ═══════════════════════════════════════════════════════════
 
 let mut graph_content = ""
+let mut _atlas_cache = ""  // AI-native: atlas 단일 로드 캐시 (11회 디스크 I/O → 1회)
 let mut graph_nodes_before: i64 = 0
 let mut graph_edges_before: i64 = 0
 let mut graph_hubs_before: i64 = 0
 if !skip_graph {
     println("--- Phase 1: Graph Load ---")
     graph_content = graph_load()
+    _atlas_cache = graph_content
     // AI-native: 단일 패스 통계 (3회 순회 → 1회)
     let _gstats = graph_stats_single_pass(graph_content, 3)
     let _gsp = _gstats.split("|")
@@ -1296,7 +1405,53 @@ let mut axiom_count: i64 = 0
 let mut log_buf = ""
 let mut logged: i64 = 0
 
+// AI-native: 메모리 캡 — OOM 방지
+let _BUF_CAP: i64 = 8000
+let _VAL_CAP: i64 = 200
+let mut _val_total_seen: i64 = 0
+
+// buf_lines 저신뢰 일괄 제거 — cap 초과 시 최저 conf 500개 제거
+fn buf_prune(buf: list, cap: i64) -> list {
+    if len(buf) <= cap { return buf }
+    // conf 기준 하위 500개 찾기
+    let prune_n: i64 = len(buf) - cap + 500
+    let mut confs = []
+    let mut pi: i64 = 0
+    while pi < len(buf) {
+        let mut pc: f64 = 1.0
+        let pp = buf[pi].split("\t")
+        if len(pp) >= 4 {
+            try { pc = to_float(pp[3]) } catch e {}
+        }
+        confs = confs.push(pc)
+        pi = pi + 1
+    }
+    // 하한 threshold 찾기 (prune_n번째로 낮은 conf)
+    let mut sorted_confs = []
+    pi = 0
+    while pi < len(confs) {
+        sorted_confs = sorted_confs.push(confs[pi])
+        pi = pi + 1
+    }
+    sorted_confs = sorted_confs.sort()
+    let threshold: f64 = if prune_n < len(sorted_confs) { sorted_confs[prune_n] } else { 0.0 }
+    // threshold 이하 제거
+    let mut result = []
+    let mut removed: i64 = 0
+    pi = 0
+    while pi < len(buf) {
+        if confs[pi] <= threshold && removed < prune_n {
+            removed = removed + 1
+        } else {
+            result = result.push(buf[pi])
+        }
+        pi = pi + 1
+    }
+    return result
+}
+
 // Collect all corollary values for telescope (phase 5)
+// AI-native: 저수지 샘플링 — 200개 상한 (telescope은 100~200개면 충분)
 let mut val_arr = []
 
 // Build initial axiom pool — 외부 seed 있으면 동적, 없으면 도메인 메트릭
@@ -1398,7 +1553,13 @@ while depth < max_depth {
                 let is_ax = conf > 0.8
                 buf_lines = buf_lines.push(emit(nm, "deduction", ex, conf, bv, is_ax, na))
                 total = total + 1
-                val_arr = val_arr.push(to_string(bv))
+                _val_total_seen = _val_total_seen + 1
+                if len(val_arr) < _VAL_CAP {
+                    val_arr = val_arr.push(to_string(bv))
+                } else {
+                    let _ri = random_int(0, _val_total_seen)
+                    if _ri < _VAL_CAP { val_arr[_ri] = to_string(bv) }
+                }
                 // AI-native: match_grade_name 단일패스 (grade+name 2회 스캔 → 1회)
                 let _gn = match_grade_name(bv)
                 let _gnp = _gn.split("|")
@@ -1444,7 +1605,13 @@ while depth < max_depth {
                 let ex = na + "=" + to_string(v) + " in " + xfer_domain(di)
                 buf_lines = buf_lines.push(emit(nm, "transfer", ex, conf, v, false, na))
                 total = total + 1
-                val_arr = val_arr.push(to_string(v))
+                _val_total_seen = _val_total_seen + 1
+                if len(val_arr) < _VAL_CAP {
+                    val_arr = val_arr.push(to_string(v))
+                } else {
+                    let _ri2 = random_int(0, _val_total_seen)
+                    if _ri2 < _VAL_CAP { val_arr[_ri2] = to_string(v) }
+                }
                 let gr = match_grade(v)
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
@@ -1479,7 +1646,13 @@ while depth < max_depth {
             let is_ax = conf > 0.7
             buf_lines = buf_lines.push(emit(nm, "symbreak", ex, conf, best, is_ax, na))
             total = total + 1
-            val_arr = val_arr.push(to_string(best))
+            _val_total_seen = _val_total_seen + 1
+            if len(val_arr) < _VAL_CAP {
+                val_arr = val_arr.push(to_string(best))
+            } else {
+                let _ri3 = random_int(0, _val_total_seen)
+                if _ri3 < _VAL_CAP { val_arr[_ri3] = to_string(best) }
+            }
             let _gn3 = match_grade_name(best)
             let _gnp3 = _gn3.split("|")
             let gr = _gnp3[0]
@@ -1976,10 +2149,10 @@ try {
     absorb_existing_log = to_string(_tail_result)
 } catch e {}
 
-// Read current graph for cross-ref
+// Read current graph for cross-ref — AI-native: 캐시 재사용 (디스크 재읽기 제거)
 let mut absorb_graph_content = ""
-if !skip_graph && file_exists(graph_path) {
-    absorb_graph_content = read_file(graph_path)
+if !skip_graph {
+    absorb_graph_content = _atlas_cache
 }
 
 let mut absorb_log_entries = ""
@@ -2088,8 +2261,8 @@ if absorb_bus_events > 0 {
 
 // E. Invoke absorb.hexa auto mode for full integration
 let absorb_hexa_path = "mk2_hexa/native/absorb.hexa"
-let hexa_bin_home = exec("echo $HOME").trim()
-let absorb_hexa_bin = exec("for p in /home/hexa-lang/hexa " + hexa_bin_home + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
+let hexa_bin_home = _HOME
+let absorb_hexa_bin = _HEXA_BIN
 if file_exists(absorb_hexa_path) {
     println("  invoking absorb.hexa distribution ...")
     let mut absorb_result = ""
@@ -2100,12 +2273,12 @@ if file_exists(absorb_hexa_path) {
 }
 
 // F. atlas.n6 자동흡수 — JSON 의존 제거, .n6 단일진실
-let _atlas_home = exec("printenv HOME").trim()
-let _atlas_dev = _atlas_home + "/Dev/nexus"
-let atlas_n6_path = _atlas_dev + "/shared/n6/atlas.n6"
+let _atlas_home = _HOME
+let _atlas_dev = _NEXUS
+let atlas_n6_path = _ATLAS_PATH
 let mut absorb_atlas_count: i64 = 0
 if file_exists(atlas_n6_path) {
-    let atlas_content = read_file(atlas_n6_path)
+    let atlas_content = _atlas_cache  // AI-native: 캐시 재사용
     // 마지막 BT 번호 추출 — grep + sort (hexa char 비교 회피)
     let mut atlas_last_bt: i64 = 0
     try {
@@ -2324,9 +2497,9 @@ while li < len(buf_lines) {
 }
 
 // B. n6 기저 위상변환으로 도달 가능하지만 이번에 안 나온 상수
-let _n6_data = load_n6_consts()
-let n6_bases = n6_values(_n6_data)
-let n6_names = n6_names_list(_n6_data)
+// AI-native: 글로벌 캐시 재사용 (load_n6_consts 재호출 제거)
+let n6_bases = _n6_dyn_values
+let n6_names = _n6_dyn_names
 let mut bi: i64 = 0
 while bi < 10 {
     let mut found_this = false
@@ -2369,8 +2542,8 @@ while ci < len(cross_domains) {
     if cross_domains[ci] != domain {
         // discovery_log에서 이 도메인의 최근 발견 수 체크
         let mut cross_count = ""
-        let _h_cc = exec("printenv HOME").trim()
-        let _atlas_cc = _h_cc + "/Dev/nexus/shared/n6/atlas.n6"
+        let _h_cc = _HOME
+        let _atlas_cc = _ATLAS_PATH
         try { cross_count = exec("grep -c '" + cross_domains[ci] + "' " + _atlas_cc + " 2>/dev/null").trim() } catch e {}
         let mut cc: i64 = 0
         try { cc = to_int(to_float(cross_count)) } catch e {}
@@ -2444,7 +2617,7 @@ try { exec(absorb_hexa_bin, [directions_path, "update"]) } catch e {}
 println("═══ Phase 7.5: Auto-Link (parallel) ═══")
 
 let engine_dir = "mk2_hexa/native"
-let hexa_bin = exec("for p in /home/hexa-lang/hexa $(echo $HOME)/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
+let hexa_bin = _HEXA_BIN
 let autolink_log = "shared/.autolink_out.log"
 
 // 4개 프로세스를 백그라운드 병렬 실행 → wait로 일괄 대기
@@ -2496,8 +2669,8 @@ if logged > 0 {
     let mut wave_targets = []
     let mut wave_seen = [domain]
     try {
-        let _h_gb = exec("printenv HOME").trim()
-        let gb_raw = exec("tail -100 " + _h_gb + "/Dev/nexus/shared/n6/atlas.n6 2>/dev/null")
+        let _h_gb = _HOME
+        let gb_raw = exec("tail -100 " + _ATLAS_PATH + " 2>/dev/null")
         let gb_lines = gb_raw.split("\n")
         for gbl in gb_lines {
             let gt = gbl.trim()
@@ -2588,8 +2761,8 @@ if logged > 0 {
         // 파동 결과 atlas.n6 기록
         try {
             let wts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
-            let _h_w = exec("printenv HOME").trim()
-            let _atlas_w = _h_w + "/Dev/nexus/shared/n6/atlas.n6"
+            let _h_w = _HOME
+            let _atlas_w = _ATLAS_PATH
             let wentry = wts + " | wave_propagation | " + domain + " | targets=" + to_string(len(wave_targets)) + " origin=" + to_string(logged) + " wave=" + to_string(wave_total_energy)
             append_file(_atlas_w, wentry + "\n")
         } catch e {}
@@ -2621,8 +2794,8 @@ if wave_round < wave_max_rounds {
     let mut sonar_gap_scores = []
     let sonar_all_doms = ["math", "physics", "info", "bio", "mind", "arch", "crypto", "energy", "network", "material"]
     try {
-        let w1_home = exec("printenv HOME").trim()
-        let w1_bus = w1_home + "/Dev/nexus/shared/n6/atlas.n6"
+        let w1_home = _HOME
+        let w1_bus = _ATLAS_PATH
         let w1_raw = exec("tail -300 " + w1_bus + " 2>/dev/null")
         let w1_lines = w1_raw.split("\n")
         // 각 도메인별 최근 에너지 집계 (활동 횟수)
@@ -2781,8 +2954,8 @@ if wave_round < wave_max_rounds {
     println("─── Phase W5: growth_bus 기록 ───")
     try {
         let w5_ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
-        let w5_home = exec("printenv HOME").trim()
-        let w5_bus = w5_home + "/Dev/nexus/shared/n6/atlas.n6"
+        let w5_home = _HOME
+        let w5_bus = _ATLAS_PATH
         let w5_entry = w5_ts + " | mk2_wave_round | " + domain + " | round=" + to_string(wave_round) + "/" + to_string(wave_max_rounds) + " next=" + next_domain + " energy=" + to_string(logged) + " gaps=" + to_string(len(sonar_gaps)) + " resonance=" + to_string(len(res_pairs)) + " tunnel=" + to_string(next_score) + " cascade=" + to_string(cascade_n)
         append_file(w5_bus, w5_entry + "\n")
         println("  기록 완료")
@@ -2800,8 +2973,8 @@ if wave_round < wave_max_rounds {
         println("── 연속돌파: R" + to_string(wave_round) + " → R" + to_string(wave_round + 1) + " (" + next_domain + ") ──")
         println("")
 
-        let w5_hexa = exec("for p in /home/hexa-lang/hexa $(echo $HOME)/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
-        let w5_dir = exec("echo $HOME").trim() + "/Dev/nexus/mk2_hexa/native"
+        let w5_hexa = _HEXA_BIN
+        let w5_dir = _NEXUS + "/mk2_hexa/native"
         let mut w5_cmd = w5_hexa + " " + w5_dir + "/blowup.hexa " + next_domain + " " + to_string(max_depth)
         w5_cmd = w5_cmd + " --round " + to_string(wave_round + 1)
         w5_cmd = w5_cmd + " --max-rounds " + to_string(wave_max_rounds)
@@ -2826,16 +2999,16 @@ if wave_round < wave_max_rounds {
     // growth_bus 최종 기록
     try {
         let wf_ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
-        let wf_home = exec("printenv HOME").trim()
-        let wf_bus = wf_home + "/Dev/nexus/shared/n6/atlas.n6"
+        let wf_home = _HOME
+        let wf_bus = _ATLAS_PATH
         let wf_entry = wf_ts + " | mk2_wave_complete | " + domain + " | rounds=" + to_string(wave_max_rounds) + " energy=" + to_string(logged)
         append_file(wf_bus, wf_entry + "\n")
     } catch e {}
 
     // 전체 요약 통계
     try {
-        let wf_home2 = exec("printenv HOME").trim()
-        let wf_atlas2 = wf_home2 + "/Dev/nexus/shared/n6/atlas.n6"
+        let wf_home2 = _HOME
+        let wf_atlas2 = _ATLAS_PATH
         let summary_raw = exec("tail -" + to_string(wave_max_rounds * 5) + " " + wf_atlas2 + " 2>/dev/null | grep mk2_wave_round | wc -l").trim()
         let wave_raw = exec("tail -" + to_string(wave_max_rounds * 5) + " " + wf_atlas2 + " 2>/dev/null | grep wave_propagation | wc -l").trim()
         println("  라운드 기록  : " + summary_raw + "건")
@@ -2850,16 +3023,13 @@ if wave_round < wave_max_rounds {
     // blowup_router / batch_blowup / wave_blowup 기능 흡수
     // ═══════════════════════════════════════════════════════════
 
-    let _ou_home = exec("printenv HOME").trim()
+    let _ou_home = _HOME
     let _ou_dev = _ou_home + "/Dev"
-    let _ou_engine_dir = _ou_dev + "/nexus/mk2_hexa/native"
+    let _ou_engine_dir = _NEXUS + "/mk2_hexa/native"
     let _ou_seed_engine = _ou_engine_dir + "/seed_engine.hexa"
 
-    // hexa 바이너리 탐색
-    let mut _ou_hexa = ""
-    try {
-        _ou_hexa = exec("for p in /home/hexa-lang/hexa " + _ou_home + "/Dev/hexa-lang/target/release/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null").trim()
-    } catch e {}
+    // hexa 바이너리 — 글로벌 캐시 사용
+    let mut _ou_hexa = _HEXA_BIN
     if _ou_hexa == "" { _ou_hexa = _ou_home + "/Dev/hexa-lang/target/release/hexa" }
 
     // 보조 엔진 목록 (Mk.III~VII)
