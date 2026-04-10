@@ -1,33 +1,53 @@
 #!/bin/bash
 # shared/bin/hexa — hexa 바이너리 resolver (외부 의존 없음)
 # 어떤 프로젝트에서도 이 스크립트로 호출하면 자동으로 가용 hexa를 찾아 exec.
-# 우선순위: 환경변수 → ~/.hx/bin (gate wrapper) → 로컬 빌드 → ubu/htz fallback
+# 우선순위: 환경변수 → 로컬 실바이너리 → gate wrapper → 기타 fallback
 # L0 준수: 전역 ~/.claude 미수정. 모든 hexa 호출이 shared 통과.
 
 set -e
 
+SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
+
+pick_exec() {
+    local cand real
+    cand="$1"
+    [ -n "$cand" ] || return 1
+    [ -x "$cand" ] || return 1
+    real="$(realpath "$cand" 2>/dev/null || echo "$cand")"
+    [ "$real" = "$SELF" ] && return 1
+    printf '%s\n' "$cand"
+    return 0
+}
+
 # 1. HEXA_BIN env var override (테스트/디버깅)
-if [ -n "$HEXA_BIN" ] && [ -x "$HEXA_BIN" ]; then
-    exec "$HEXA_BIN" "$@"
+if cand="$(pick_exec "$HEXA_BIN")"; then
+    exec "$cand" "$@"
 fi
 
-# 2. ~/.hx/bin/hexa (gate wrapper — Ubu/htz 오프로드 포함)
-if [ -x "$HOME/.hx/bin/hexa" ]; then
-    exec "$HOME/.hx/bin/hexa" "$@"
-fi
-
-# 3. 로컬 cargo build (Mac)
+# 2. 로컬 단일 바이너리 우선
 for p in \
-    "$HOME/Dev/hexa-lang/target/release/hexa" \
-    "$HOME/Dev/hexa-lang/target/release/hexa-bin-actual" \
+    "$HOME/Dev/hexa-lang/hexa" \
     "$HOME/.cargo/bin/hexa" ; do
-    if [ -x "$p" ]; then
-        exec "$p" "$@"
+    if cand="$(pick_exec "$p")"; then
+        exec "$cand" "$@"
     fi
 done
 
-# 4. PATH 탐색 (이 스크립트 자신은 shared/bin/hexa로 등록될 수 있어 self-loop 회피)
-SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
+# 3. ~/.hx/bin/hexa (gate wrapper — Ubu/htz 오프로드 포함)
+if cand="$(pick_exec "$HOME/.hx/bin/hexa")"; then
+    exec "$cand" "$@"
+fi
+
+# 4. 레거시/빌드 산출물
+for p in \
+    "$HOME/Dev/hexa-lang/target/release/hexa" \
+    "$HOME/Dev/hexa-lang/target/release/hexa-bin-actual" ; do
+    if cand="$(pick_exec "$p")"; then
+        exec "$cand" "$@"
+    fi
+done
+
+# 5. PATH 탐색 (self-loop 회피)
 for cand in $(command -v -a hexa 2>/dev/null); do
     real="$(realpath "$cand" 2>/dev/null || echo "$cand")"
     if [ "$real" != "$SELF" ] && [ -x "$cand" ]; then
