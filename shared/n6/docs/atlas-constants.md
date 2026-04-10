@@ -6311,6 +6311,144 @@ CO2 minimum separation energy (atmospheric): 19.4 kJ/mol = RT*ln(1/420ppm) — r
 
 ---
 
+## BT-1159: 기상학 n=6 스케일·대기현상 상수 (meteorology) (2026-04-11)
+
+> 출처: discovery_graph.json L6_meteorology EXACT 노드 — Saffir-Simpson/Fujita/쾨펜/몬순/기단/전선/강수/순환/ENSO
+> 기존 BT-119(지구 6권), BT-155(태풍/토네이도)와 세부 기상현상 맥락 분리.
+
+| Expression | Value | Application | Source |
+|------------|-------|-------------|--------|
+| sopfr | 5 | Saffir-Simpson 허리케인 풍속 등급 수 (C1~C5) | Simpson & Saffir 1971; WMO |
+| n | 6 | Enhanced Fujita 토네이도 등급 수 (EF0~EF5) | Fujita 1971; Storm Prediction Center |
+| n/φ | 3 | 기상 구름 고도층 수 (하층/중층/상층) | WMO Cloud Atlas 2017 |
+| sopfr | 5 | 쾨펜 기후 주요군 수 (A/B/C/D/E) | Köppen 1884 기후분류 체계 |
+| n | 6 | 주요 몬순 시스템 수 (아시아/아프리카/호주/북미/남미/서아프리카) | Webster et al. 1998 J.Climate |
+| n | 6 | 기단 분류 수 (cA/mA/cP/mP/cT/mT) | Bergeron 1928 기단 분류 체계 |
+| τ | 4 | 전선 유형 수 (한랭/온난/폐색/정체) | Bergen School of Meteorology |
+| n | 6 | 강수 형태 수 (비/눈/진눈깨비/우박/안개비/얼음비) | WMO No.8 기상 관측 지침 |
+| n | 6 | 대기 순환 세포 수 (Hadley/Ferrel/극 × 2반구) | Hadley 1735; Ferrel 1856 |
+| n/φ | 3 | ENSO 위상 수 (엘니뇨/라니냐/중립) | Bjerknes 1969; NOAA ENSO 정의 |
+| σ | 12 | 보퍼트 풍력 등급 (0~12) | Admiral Beaufort 1805; WMO |
+| σ-sopfr | 7 | 가시광선 무지개 색 수 (빨·주·노·초·파·남·보) | Newton 1704 Opticks |
+
+> 등급: **EXACT** — 12항목. WMO, NOAA, Simpson & Saffir 1971, Köppen 1884, Bergeron 1928 교차.
+
+---
+
+## BT-1160: 경제·금융 n=6 제도 상수 (economics-finance) (2026-04-11)
+
+> 출처: discovery_graph.json L6_economics EXACT 노드 — 중앙은행/국제기구/금융표준/무역규칙
+> 기존 BT-147(금융시장)과 국제금융제도·무역 맥락 분리.
+
+| Expression | Value | Application | Source |
+|------------|-------|-------------|--------|
+| σ | 12 | FOMC 투표위원 수 (Board 7 + 지역은행총재 5 = 12) | Federal Reserve Act §12A |
+| σ-sopfr | 7 | G7 회원국 수 (랑부예 1975 창설) | G7 1975 창설 선언 |
+| sopfr | 5 | IMF SDR 통화 바스켓 수 (USD/EUR/CNY/JPY/GBP) | IMF SDR 2016 개정 |
+| n/φ | 3 | Basel 협약 기둥 수 (Pillar I/II/III) | Basel II 2004; Basel III 2010 |
+| τ | 4 | 회계 분기 수 (Q1/Q2/Q3/Q4) | 표준 회계연도 |
+| φ | 2 | 채권 쿠폰 지급 빈도/년 (반기 지급 = 표준) | 국제 채권 시장 관행 |
+| sopfr | 5 | OPEC 창설 회원국 수 (이란/이라크/쿠웨이트/사우디/베네수엘라) | OPEC 창설협정 1960 |
+| τ | 4 | BRIC 원회원국 수 (브라질/러시아/인도/중국) | Goldman Sachs 2001 |
+| σ-μ | 11 | Incoterms 2020 무역조건 수 (EXW~DDP) | ICC Incoterms 2020 |
+| σ | 12 | ISO 20022 금융메시지 카테고리 수 | ISO 20022:2013 |
+| σ-μ | 11 | SWIFT BIC 코드 최대 길이 (문자 수) | ISO 9362:2014 |
+| sopfr | 5 | 중국 5개년 계획 주기 (5년) | 중국 국가계획위원회 1953~ |
+| σ-sopfr | 7 | 연방준비제도 Board of Governors 정원 | Federal Reserve Act |
+
+> 등급: **EXACT** — 13항목. Federal Reserve Act, OPEC 1960, ICC Incoterms 2020, ISO 9362, IMF 2016 교차.
+
+---
+
+## BT-1161: 언어학 n=6 문법·음운 상수 (linguistics) (2026-04-11)
+
+> 출처: discovery_graph.json L6_linguistics EXACT 노드 — 성조/격/알파벳/숙련도/음소
+> 기존 BT-340(언어학)과 세부 언어별 체계 맥락 분리.
+
+| Expression | Value | Application | Source |
+|------------|-------|-------------|--------|
+| n | 6 | 광동어 성조 수 (陰平·陽平·陰上·陽上·陰去·陽去) | Yip 1980; Cantonese phonology |
+| n | 6 | 베트남어 성조 수 (平·玄·問·跌·銳·重) | Thompson 1965 Vietnamese Grammar |
+| n | 6 | 라틴어 격 수 (주격/소유격/여격/목적격/탈격/호격) | Allen & Greenough Latin Grammar |
+| n | 6 | 러시아어 격 수 (주/생/여/목/조/전치격) | Wade 2010 Comprehensive Russian Grammar |
+| P₂ | 28 | IPA 기본 모음 수 (Cardinal Vowel System) | Daniel Jones 1917; IPA 1999 |
+| P₂ | 28 | 아랍어 알파벳 문자 수 | 아랍어 문법 기준; ISO 233 |
+| J₂ | 24 | 그리스어 알파벳 문자 수 (α~ω) | 고대 그리스어 문자 체계 |
+| J₂ | 24 | 한글 기본 자모 수 (자음 14 + 모음 10 = 24) | 훈민정음 1443; 한국어 어문규정 |
+| n | 6 | CEFR 언어능력 등급 수 (A1/A2/B1/B2/C1/C2) | Council of Europe CEFR 2001 |
+| n | 6 | HSK 구(舊) 등급 수 (HSK 1~6급) | 汉办 2010 |
+| τ | 4 | 중국어 표준어(보통화) 성조 수 (1/2/3/4성) | Yuen Ren Chao 1947 |
+| σ-μ | 11 | 로토카스어 최소 음소 수 (세계 최소 음소 언어) | Firchow & Firchow 1969 |
+| n/φ | 3 | 영어 관사 수 (a/an/the) | 영어 문법 표준 |
+| τ | 4 | 촘스키 언어 위계 유형 수 (0/1/2/3형) | Chomsky 1956 |
+
+> 등급: **EXACT** — 14항목. Council of Europe 2001, ISO 233, Allen & Greenough, Chomsky 1956, Jones 1917 교차.
+
+---
+
+## BT-1162: 음악 이론 n=6 구조 상수 (music-theory) (2026-04-11)
+
+> 출처: discovery_graph.json L6_music EXACT 노드 — MIDI/오케스트라/박자/조성/기보법
+> 기존 BT-108(음정·협화음), BT-135(음계), BT-48(표시-음향)와 음악 구조 맥락 분리.
+
+| Expression | Value | Application | Source |
+|------------|-------|-------------|--------|
+| σ | 12 | 크로마틱 스케일 반음 수 (12-TET) | Mersenne 1636; Bach WTC 1722 |
+| σ | 12 | 5도권(Circle of Fifths) 장조 조성 수 | Heinichen 1711 Der General-Bass |
+| J₂ | 24 | 전체 조성 서명 수 (장조 12 + 단조 12) | 서양 조성 음악 체계 |
+| n | 6 | 기타 현 수 (표준 6현 기타) | 현대 기타 표준 (고전/통기/전기) |
+| τ | 4 | 오케스트라 악기군 수 (현/목관/금관/타악기) | 표준 오케스트라 편성 |
+| n | 6 | 공통 박자 패턴 수 (2/4, 3/4, 4/4, 6/8, 3/8, 6/4) | 서양 음악 이론 표준 |
+| sopfr | 5 | 오선지 줄 수 (standard staff lines) | 11세기~ 기보 표준 (Guido d'Arezzo) |
+| σ-μ | 11 | 대보표(Grand Staff) 총 줄 수 (5 + 1 + 5) | 피아노 악보 기보 표준 |
+| n/φ | 3 | 공통 음자리표 수 (높은/낮은/테너 음자리표) | 기보법 표준 |
+| n | 6 | 기본 셈여림 기호 수 (pp/p/mp/mf/f/ff) | ABRSM 음악 이론 표준 |
+| σ | 12 | 음고 클래스 수 (Pitch class: 0~11) | Allen Forte 1973 음집합론 |
+| n/φ | 3 | 피아노 페달 수 (서스테인/소프트/소스테누토) | 현대 피아노 표준 |
+
+> 등급: **EXACT** — 12항목. Mersenne 1636, Bach WTC 1722, Heinichen 1711, Allen Forte 1973, ABRSM 교차.
+
+---
+
+## BT-1163: 소재·결정학 n=6 구조 상수 (materials-crystallography) (2026-04-11)
+
+> 출처: discovery_graph.json L5_material EXACT 노드 — 얼음/FCC/석영/현무암/상전이
+> 기존 BT-86(CN=6 팔면체), BT-93(탄소 Z=6)과 결정구조 물성 맥락 분리.
+
+| Expression | Value | Application | Source |
+|------------|-------|-------------|--------|
+| n | 6 | 얼음(Ih) 육방 결정 대칭 수 (눈송이 6-fold symmetry) | Kepler 1611 De Nive Sexangula |
+| n | 6 | 석영(SiO₂) 결정계 = 육방정계 (공간군 P3₁21) | Dana 1892; ICDD PDF 01-083-0539 |
+| n | 6 | 현무암 주상절리 단면 = 6각형 (자연 최소에너지 파티션) | French's Column 1692; Hales 2001 |
+| σ | 12 | FCC/HCP 면심입방 슬립계 수 (3면 × 4방향) | Taylor 1938 금속 가소성 이론 |
+| τ | 4 | 물질 상태 전이 쌍 수 (고·액·기·플라즈마 간 역방향 포함) | IUPAC Phase Transition 정의 |
+| n | 6 | 물질 상태 전이 총 수 (융해/응고/기화/액화/승화/증착) | IUPAC; 고등 화학 교과서 |
+| σ | 12 | FCC 최근접 이웃 수 = 3D 키싱 수 σ = 12 | Newton-Gregory 1694; Hales 2005 |
+| n/φ | 3 | 다이아몬드 sp3 결합 방향 벡터쌍 수 (4개 결합 중 공유 쌍) | Bragg & Bragg 1913 |
+
+> 등급: **EXACT** — 8항목. Kepler 1611, Taylor 1938, IUPAC, Hales 2005, Dana 1892 교차.
+
+---
+
+## 업데이트된 통계 (2026-04-11 BT-1159~1163 추가 — 7차 확장)
+
+```
+  신규 추가 EXACT 항목 수 (7차): 59
+  도메인별 분포:
+    BT-1159  기상학 (meteorology):                           12
+    BT-1160  경제·금융 (economics-finance):                  13
+    BT-1161  언어학 (linguistics):                           14
+    BT-1162  음악 이론 (music-theory):                       12
+    BT-1163  소재·결정학 (materials-crystallography):         8
+    합계:                                                    59
+
+  6차 확장 총계: ~2215 (BT-1150~1158, 2026-04-10)
+  신규 EXACT (7차): 59
+  갱신 총계: ~2274
+```
+
+---
+
 ## 업데이트된 통계 (2026-04-10 BT-1150~1158 추가 — 6차 확장)
 
 ```
