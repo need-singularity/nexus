@@ -1,5 +1,6 @@
 // ⛔ CORE — L0 불변식 (블로업 엔진 9-phase 특이점 파이프라인. 수정 전 유저 승인 필수)
 // ⚠️ 로드맵: shared/config/roadmaps/blowup.json (Mk.I~VII 진화 계보)
+// 📊 골화기록: shared/blowup/core/blowup.json (AI-native 성능 최적화 — 창발 보존)
 // mk2_hexa/native/blowup.hexa — Mk.II 파동 연속돌파 엔진 (hexa-native)
 //
 // Mk.II 기본 동작: 파동 연속돌파 (6라운드, 자동 도메인 회전)
@@ -455,6 +456,49 @@ fn graph_count_type(content: string, ttype: string) -> i64 {
     return count
 }
 
+// AI-native: 단일 패스 그래프 통계 — graph_count_type×2 + graph_hub_count 3회 순회 → 1회
+// 반환: "nodes|edges|hubs" (pipe-separated)
+fn graph_stats_single_pass(content: string, min_deg: i64) -> string {
+    if len(content) == 0 { return "0|0|0" }
+    let lines = content.split("\n")
+    let mut nodes: i64 = 0
+    let mut edges: i64 = 0
+    let mut deg_map = #{}
+    let mut li: i64 = 0
+    while li < len(lines) {
+        let line = lines[li]
+        if len(line) > 5 {
+            let t = graph_extract_field(line, "type")
+            if t == "node" { nodes = nodes + 1 }
+            if t == "edge" {
+                edges = edges + 1
+                let f = graph_extract_field(line, "from")
+                let to = graph_extract_field(line, "to")
+                if len(f) > 0 {
+                    let mut d: i64 = 0
+                    try { d = deg_map[f] } catch e {}
+                    deg_map[f] = d + 1
+                }
+                if len(to) > 0 {
+                    let mut d: i64 = 0
+                    try { d = deg_map[to] } catch e {}
+                    deg_map[to] = d + 1
+                }
+            }
+        }
+        li = li + 1
+    }
+    let vals = deg_map.values()
+    let mut hub_count: i64 = 0
+    let mut hi: i64 = 0
+    while hi < len(vals) {
+        let d: i64 = vals[hi]
+        if d >= min_deg { hub_count = hub_count + 1 }
+        hi = hi + 1
+    }
+    return to_string(nodes) + "|" + to_string(edges) + "|" + to_string(hub_count)
+}
+
 // Find hub node IDs (degree >= min_deg) — O(edges) using native Map (hashmap)
 fn graph_hub_count(content: string, min_deg: i64) -> i64 {
     if len(content) == 0 { return 0 }
@@ -563,11 +607,13 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             let mut best_mut = sv
             let mut best_conf: f64 = evo_verify(sv)
 
+            // AI-native: 전 전략 보존, EXACT(>=0.99) 시 조기탈출만 추가 (창발 유지)
+
             // strategy 0: parameter shift (dynamic — n6_constants 전체, --fast: 8개 제한)
             let _shift_cap: i64 = if fast_mode { 8 } else { 16 }
             let shift_limit: i64 = if _n6_dyn_count < _shift_cap { _n6_dyn_count } else { _shift_cap }
             let mut shi: i64 = 0
-            while shi < shift_limit {
+            while shi < shift_limit && best_conf < 0.99 {
                 let shifted = evo_mutate_shift(sv, shi)
                 let sc = evo_verify(shifted)
                 if sc > best_conf {
@@ -578,15 +624,17 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             }
 
             // strategy 1: inversion
-            let inv = evo_mutate_invert(sv)
-            let inv_sc = evo_verify(inv)
-            if inv_sc > best_conf {
-                best_conf = inv_sc
-                best_mut = inv
+            if best_conf < 0.99 {
+                let inv = evo_mutate_invert(sv)
+                let inv_sc = evo_verify(inv)
+                if inv_sc > best_conf {
+                    best_conf = inv_sc
+                    best_mut = inv
+                }
             }
 
             // strategy 2: combination with next seed
-            if si + 1 < len(parts) {
+            if best_conf < 0.99 && si + 1 < len(parts) {
                 let mut sv2: f64 = 0.0
                 try { sv2 = to_float(parts[si + 1]) } catch e { sv2 = 0.0 }
                 if abs_f(sv2) > 0.0000000001 {
@@ -600,61 +648,69 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             }
 
             // strategy 3: domain transfer (scale by novelty factor)
-            let novelty = 1.0 / sqrt_f(to_float(if cycle_num > 0 { cycle_num } else { 1 }))
-            let xfer = sv * (1.0 + novelty * 0.1)
-            let xfer_sc = evo_verify(xfer)
-            if xfer_sc > best_conf {
-                best_conf = xfer_sc
-                best_mut = xfer
+            if best_conf < 0.99 {
+                let novelty = 1.0 / sqrt_f(to_float(if cycle_num > 0 { cycle_num } else { 1 }))
+                let xfer = sv * (1.0 + novelty * 0.1)
+                let xfer_sc = evo_verify(xfer)
+                if xfer_sc > best_conf {
+                    best_conf = xfer_sc
+                    best_mut = xfer
+                }
             }
 
             // strategy 4: simulated annealing — temperature-scaled random walk
-            let temperature = 1.0 / (1.0 + to_float(cycle_num))
-            let sa_shift = sv * temperature * 0.05
-            let sa_plus = sv + sa_shift
-            let sa_minus = sv - sa_shift
-            let sa_plus_sc = evo_verify(sa_plus)
-            let sa_minus_sc = evo_verify(sa_minus)
-            if sa_plus_sc > best_conf {
-                best_conf = sa_plus_sc
-                best_mut = sa_plus
-            }
-            if sa_minus_sc > best_conf {
-                best_conf = sa_minus_sc
-                best_mut = sa_minus
+            if best_conf < 0.99 {
+                let temperature = 1.0 / (1.0 + to_float(cycle_num))
+                let sa_shift = sv * temperature * 0.05
+                let sa_plus = sv + sa_shift
+                let sa_minus = sv - sa_shift
+                let sa_plus_sc = evo_verify(sa_plus)
+                let sa_minus_sc = evo_verify(sa_minus)
+                if sa_plus_sc > best_conf {
+                    best_conf = sa_plus_sc
+                    best_mut = sa_plus
+                }
+                if sa_minus_sc > best_conf {
+                    best_conf = sa_minus_sc
+                    best_mut = sa_minus
+                }
             }
 
             // strategy 5: golden crossover — blend with distant seed (Fibonacci weighting)
-            let phi = 1.618033989
-            let distant_idx = if si + 3 < len(parts) { si + 3 } else { 0 }
-            let mut sv_dist: f64 = 0.0
-            try { sv_dist = to_float(parts[distant_idx]) } catch e { sv_dist = 0.0 }
-            if abs_f(sv_dist) > 0.0000000001 {
-                let golden_blend = sv * (phi / (1.0 + phi)) + sv_dist * (1.0 / (1.0 + phi))
-                let gb_sc = evo_verify(golden_blend)
-                if gb_sc > best_conf {
-                    best_conf = gb_sc
-                    best_mut = golden_blend
+            if best_conf < 0.99 {
+                let phi = 1.618033989
+                let distant_idx = if si + 3 < len(parts) { si + 3 } else { 0 }
+                let mut sv_dist: f64 = 0.0
+                try { sv_dist = to_float(parts[distant_idx]) } catch e { sv_dist = 0.0 }
+                if abs_f(sv_dist) > 0.0000000001 {
+                    let golden_blend = sv * (phi / (1.0 + phi)) + sv_dist * (1.0 / (1.0 + phi))
+                    let gb_sc = evo_verify(golden_blend)
+                    if gb_sc > best_conf {
+                        best_conf = gb_sc
+                        best_mut = golden_blend
+                    }
                 }
             }
 
             // strategy 6: harmonic resonance — test n=6 divisor multiples/fractions
-            let divisors = [1.0, 2.0, 3.0, 6.0]
-            let mut di2: i64 = 0
-            while di2 < 4 {
-                let harm_mul = sv * divisors[di2]
-                let harm_div = sv / divisors[di2]
-                let hm_sc = evo_verify(harm_mul)
-                let hd_sc = evo_verify(harm_div)
-                if hm_sc > best_conf {
-                    best_conf = hm_sc
-                    best_mut = harm_mul
+            if best_conf < 0.99 {
+                let divisors = [1.0, 2.0, 3.0, 6.0]
+                let mut di2: i64 = 0
+                while di2 < 4 {
+                    let harm_mul = sv * divisors[di2]
+                    let harm_div = sv / divisors[di2]
+                    let hm_sc = evo_verify(harm_mul)
+                    let hd_sc = evo_verify(harm_div)
+                    if hm_sc > best_conf {
+                        best_conf = hm_sc
+                        best_mut = harm_mul
+                    }
+                    if hd_sc > best_conf {
+                        best_conf = hd_sc
+                        best_mut = harm_div
+                    }
+                    di2 = di2 + 1
                 }
-                if hd_sc > best_conf {
-                    best_conf = hd_sc
-                    best_mut = harm_div
-                }
-                di2 = di2 + 1
             }
 
             if best_conf > best_score { best_score = best_conf }
@@ -1111,9 +1167,12 @@ let mut graph_hubs_before: i64 = 0
 if !skip_graph {
     println("--- Phase 1: Graph Load ---")
     graph_content = graph_load()
-    graph_nodes_before = graph_count_type(graph_content, "node")
-    graph_edges_before = graph_count_type(graph_content, "edge")
-    graph_hubs_before = graph_hub_count(graph_content, 3)
+    // AI-native: 단일 패스 통계 (3회 순회 → 1회)
+    let _gstats = graph_stats_single_pass(graph_content, 3)
+    let _gsp = _gstats.split("|")
+    try { graph_nodes_before = to_int(_gsp[0]) } catch e {}
+    try { graph_edges_before = to_int(_gsp[1]) } catch e {}
+    try { graph_hubs_before = to_int(_gsp[2]) } catch e {}
     println("  file             : shared/discovery/discovery_graph.json")
     println("  nodes (before)   :", graph_nodes_before)
     println("  edges (before)   :", graph_edges_before)
@@ -1335,15 +1394,17 @@ while depth < max_depth {
                 buf_lines = buf_lines.push(emit(nm, "deduction", ex, conf, bv, is_ax, na))
                 total = total + 1
                 val_arr = val_arr.push(to_string(bv))
-                let gr = match_grade(bv)
+                // AI-native: match_grade_name 단일패스 (grade+name 2회 스캔 → 1회)
+                let _gn = match_grade_name(bv)
+                let _gnp = _gn.split("|")
+                let gr = _gnp[0]
+                let _matched_name = if len(_gnp) > 1 { _gnp[1] } else { "" }
                 if gr == "EXACT" { exact_count = exact_count + 1 }
                 if gr == "NEAR" { near_count = near_count + 1 }
                 if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
                 if is_ax {
                     axiom_count = axiom_count + 1
-                    // Candidate for pool expansion
-                    let cand_name = match_name(bv)
-                    let cand_label = if cand_name != "" { cand_name } else { nm }
+                    let cand_label = if _matched_name != "" { _matched_name } else { nm }
                     if !hset_has(ax_name_set, cand_label) && !hset_has(new_ax_set, cand_label) {
                         new_ax_name_arr = new_ax_name_arr.push(cand_label)
                         new_ax_set[cand_label] = 1
@@ -1351,12 +1412,10 @@ while depth < max_depth {
                         new_ax_n = new_ax_n + 1
                     }
                 }
-                // EXACT matches also become axiom candidates regardless of conf
                 if gr == "EXACT" && !is_ax {
-                    let cand_name2 = match_name(bv)
-                    if cand_name2 != "" && !hset_has(ax_name_set, cand_name2) && !hset_has(new_ax_set, cand_name2) {
-                        new_ax_name_arr = new_ax_name_arr.push(cand_name2)
-                        new_ax_set[cand_name2] = 1
+                    if _matched_name != "" && !hset_has(ax_name_set, _matched_name) && !hset_has(new_ax_set, _matched_name) {
+                        new_ax_name_arr = new_ax_name_arr.push(_matched_name)
+                        new_ax_set[_matched_name] = 1
                         new_ax_val_arr = new_ax_val_arr.push(bv)
                         new_ax_n = new_ax_n + 1
                     }
@@ -1416,14 +1475,16 @@ while depth < max_depth {
             buf_lines = buf_lines.push(emit(nm, "symbreak", ex, conf, best, is_ax, na))
             total = total + 1
             val_arr = val_arr.push(to_string(best))
-            let gr = match_grade(best)
+            let _gn3 = match_grade_name(best)
+            let _gnp3 = _gn3.split("|")
+            let gr = _gnp3[0]
+            let _mn3 = if len(_gnp3) > 1 { _gnp3[1] } else { "" }
             if gr == "EXACT" { exact_count = exact_count + 1 }
             if gr == "NEAR" { near_count = near_count + 1 }
             if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
             if is_ax {
                 axiom_count = axiom_count + 1
-                let cand_name = match_name(best)
-                let cand_label = if cand_name != "" { cand_name } else { nm }
+                let cand_label = if _mn3 != "" { _mn3 } else { nm }
                 if !hset_has(ax_name_set, cand_label) && !hset_has(new_ax_set, cand_label) {
                     new_ax_name_arr = new_ax_name_arr.push(cand_label)
                     new_ax_set[cand_label] = 1
@@ -1432,10 +1493,9 @@ while depth < max_depth {
                 }
             }
             if gr == "EXACT" && !is_ax {
-                let cand_name2 = match_name(best)
-                if cand_name2 != "" && !hset_has(ax_name_set, cand_name2) && !hset_has(new_ax_set, cand_name2) {
-                    new_ax_name_arr = new_ax_name_arr.push(cand_name2)
-                    new_ax_set[cand_name2] = 1
+                if _mn3 != "" && !hset_has(ax_name_set, _mn3) && !hset_has(new_ax_set, _mn3) {
+                    new_ax_name_arr = new_ax_name_arr.push(_mn3)
+                    new_ax_set[_mn3] = 1
                     new_ax_val_arr = new_ax_val_arr.push(best)
                     new_ax_n = new_ax_n + 1
                 }
@@ -1541,7 +1601,9 @@ while depth < max_depth {
                 let prod2 = vb * vc
                 let composed = prod1 * prod2
 
+                // AI-native: 중간적 조기가지치기 — c1 낮으면 conf도 낮음 (O(n³) 절감)
                 let c1 = n6_conf(prod1)
+                if c1 >= 0.05 {
                 let c2 = n6_conf(prod2)
                 let conf = c1 * c2 * n6_conf(composed)
 
@@ -1552,14 +1614,16 @@ while depth < max_depth {
                     buf_lines = buf_lines.push(emit(nm, "compose", ex, conf, composed, is_ax, na))
                     total = total + 1
                     val_arr = val_arr.push(to_string(composed))
-                    let gr = match_grade(composed)
+                    let _gn4 = match_grade_name(composed)
+                    let _gnp4 = _gn4.split("|")
+                    let gr = _gnp4[0]
+                    let _mn4 = if len(_gnp4) > 1 { _gnp4[1] } else { "" }
                     if gr == "EXACT" { exact_count = exact_count + 1 }
                     if gr == "NEAR" { near_count = near_count + 1 }
                     if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
                     if is_ax {
                         axiom_count = axiom_count + 1
-                        let cand_name = match_name(composed)
-                        let cand_label = if cand_name != "" { cand_name } else { nm }
+                        let cand_label = if _mn4 != "" { _mn4 } else { nm }
                         if !hset_has(ax_name_set, cand_label) && !hset_has(new_ax_set, cand_label) {
                             new_ax_name_arr = new_ax_name_arr.push(cand_label)
                             new_ax_set[cand_label] = 1
@@ -1568,15 +1632,15 @@ while depth < max_depth {
                         }
                     }
                     if gr == "EXACT" && !is_ax {
-                        let cand_name2 = match_name(composed)
-                        if cand_name2 != "" && !hset_has(ax_name_set, cand_name2) && !hset_has(new_ax_set, cand_name2) {
-                            new_ax_name_arr = new_ax_name_arr.push(cand_name2)
-                            new_ax_set[cand_name2] = 1
+                        if _mn4 != "" && !hset_has(ax_name_set, _mn4) && !hset_has(new_ax_set, _mn4) {
+                            new_ax_name_arr = new_ax_name_arr.push(_mn4)
+                            new_ax_set[_mn4] = 1
                             new_ax_val_arr = new_ax_val_arr.push(composed)
                             new_ax_n = new_ax_n + 1
                         }
                     }
                 }
+                } // end c1 pruning
                 k = k + 1
             }
             j = j + 1
@@ -2031,64 +2095,49 @@ if file_exists(absorb_hexa_path) {
 }
 
 // F. atlas.n6 자동흡수 — JSON 의존 제거, .n6 단일진실
-let atlas_n6_path = "shared/n6/atlas.n6"
+let _atlas_home = exec("printenv HOME").trim()
+let _atlas_dev = _atlas_home + "/Dev/nexus"
+let atlas_n6_path = _atlas_dev + "/shared/n6/atlas.n6"
 let mut absorb_atlas_count: i64 = 0
 if file_exists(atlas_n6_path) {
     let atlas_content = read_file(atlas_n6_path)
-    // 마지막 BT 번호 추출
+    // 마지막 BT 번호 추출 — grep + sort (hexa char 비교 회피)
     let mut atlas_last_bt: i64 = 0
-    let atlas_lines = atlas_content.split("\n")
-    let mut ali: i64 = 0
-    while ali < len(atlas_lines) {
-        let al = atlas_lines[ali]
-        if al.contains("n6-bt-") {
-            // @X n6-bt-NNN 또는 @F n6-bt-NNN 패턴에서 숫자 추출
-            let bt_parts = al.split("n6-bt-")
-            if len(bt_parts) > 1 {
-                let bt_rest = bt_parts[1]
-                let mut bt_num_str = ""
-                let mut bni: i64 = 0
-                while bni < len(bt_rest) {
-                    let bc = bt_rest[bni]
-                    if bc >= "0" && bc <= "9" {
-                        bt_num_str = bt_num_str + bc
-                    } else {
-                        bni = len(bt_rest)  // break
-                    }
-                    bni = bni + 1
-                }
-                if len(bt_num_str) > 0 {
-                    let bt_val = to_int(bt_num_str)
-                    if bt_val > atlas_last_bt { atlas_last_bt = bt_val }
-                }
-            }
+    try {
+        let _bt_max_str = exec("grep -oE 'n6-bt-[0-9]+' " + atlas_n6_path + " | grep -oE '[0-9]+$' | sort -n | tail -1").trim()
+        if len(_bt_max_str) > 0 {
+            atlas_last_bt = to_int(_bt_max_str)
         }
-        ali = ali + 1
-    }
+    } catch e {}
 
     let mut atlas_append = "\n\n# ── 돌파 자동흡수 (" + domain + ") ──────────────────────────\n"
     let mut abt: i64 = atlas_last_bt + 1
     let mut aci: i64 = 0
-    while aci < len(corollary_buf) {
-        let acor = corollary_buf[aci]
-        let ac_grade = acor["grade"]
-        let ac_conf = to_float(acor["confidence"])
-        let ac_summary = acor["name"]
-        let ac_value = to_string(acor["value"])
-        let ac_domain = acor["domain"]
+    while aci < len(recurse_all_corollaries) {
+        let a_cor_line = to_string(recurse_all_corollaries[aci])
+        let a_cor_parts = a_cor_line.split("\t")
+        if len(a_cor_parts) >= 7 {
+            let a_cor_id = to_string(a_cor_parts[0])
+            let a_cor_domain = to_string(a_cor_parts[2])
+            let mut a_cor_conf: f64 = 0.0
+            let mut a_cor_value: f64 = 0.0
+            try { a_cor_conf = to_float(a_cor_parts[3]) } catch e {}
+            try { a_cor_value = to_float(a_cor_parts[4]) } catch e {}
+            let ac_grade = match_grade(a_cor_value)
+            let ac_summary = a_cor_id + " = " + to_string(a_cor_value)
 
-        // EXACT + NEAR(conf>=0.9) 만 atlas에 흡수
-        if ac_grade == "EXACT" || (ac_grade == "NEAR" && ac_conf >= 0.9) {
-            let dup_key = "n6-bt-" + to_string(abt)
-            if !atlas_content.contains(ac_summary) {
-                let g_mark = if ac_grade == "EXACT" { "*" } else { "?" }
-                let ar = to_int(ac_conf * 10.0)
-                let ac_type = if ac_summary.contains("=") { "F" } else { "R" }
-                atlas_append = atlas_append + "@" + ac_type + " " + dup_key + " = " + ac_summary + " :: " + ac_domain + " [0." + to_string(ar) + g_mark + "]\n"
-                atlas_append = atlas_append + "  <- n\n"
-                atlas_append = atlas_append + "  !! \"자동흡수 conf=" + to_string(ac_conf) + "\"\n"
-                absorb_atlas_count = absorb_atlas_count + 1
-                abt = abt + 1
+            // EXACT + NEAR(conf>=0.9) 만 atlas에 흡수
+            if ac_grade == "EXACT" || (ac_grade == "NEAR" && a_cor_conf >= 0.9) {
+                if !atlas_content.contains(a_cor_id) {
+                    let g_mark = if ac_grade == "EXACT" { "*" } else { "?" }
+                    let ar = to_int(a_cor_conf * 10.0)
+                    let ac_n6_type = if ac_grade == "EXACT" { "F" } else { "R" }
+                    atlas_append = atlas_append + "@" + ac_n6_type + " n6-bt-" + to_string(abt) + " = " + ac_summary + " :: " + a_cor_domain + " [0." + to_string(ar) + g_mark + "]\n"
+                    atlas_append = atlas_append + "  <- n\n"
+                    atlas_append = atlas_append + "  !! \"자동흡수 conf=" + to_string(a_cor_conf) + "\"\n"
+                    absorb_atlas_count = absorb_atlas_count + 1
+                    abt = abt + 1
+                }
             }
         }
         aci = aci + 1

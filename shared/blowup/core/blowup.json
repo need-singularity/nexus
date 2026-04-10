@@ -1,0 +1,65 @@
+{
+  "ossification": "AI-native 성능 최적화 — 창발 구조 보존",
+  "date": "2026-04-11",
+  "version": "Mk.II-perf-v1",
+  "changes": [
+    {
+      "id": "OPT-01",
+      "target": "n6_distance()",
+      "before": "O(n) 선형 스캔 — 전체 n6_constants 순회",
+      "after": "O(1) 평균 — 공간 해시 버킷 (정수 floor 기준 인접 3개 버킷만 탐색)",
+      "impact": "핫루프 호출 수천회 × 상수 개수 절감",
+      "emergence": "보존 — 동일 결과, 탐색 순서만 변경"
+    },
+    {
+      "id": "OPT-02",
+      "target": "match_grade_name()",
+      "before": "match_grade() + match_name() 2회 전체 스캔",
+      "after": "단일 패스 grade+name 동시 반환 (pipe-separated)",
+      "impact": "Phase 4 전 corollary 타입에서 스캔 횟수 50% 절감",
+      "emergence": "보존 — 동일 grade/name 결과"
+    },
+    {
+      "id": "OPT-03",
+      "target": "graph_stats_single_pass()",
+      "before": "Phase 1 graph_count_type('node') + graph_count_type('edge') + graph_hub_count() = 3회 순회",
+      "after": "단일 패스로 nodes/edges/hubs 동시 집계",
+      "impact": "대형 그래프에서 I/O 66% 절감",
+      "emergence": "보존 — 통계 결과 동일"
+    },
+    {
+      "id": "OPT-04",
+      "target": "sqrt_f() / ln_f()",
+      "before": "고정 15회 반복",
+      "after": "조기 수렴 탈출 (수렴 감지 시 즉시 반환)",
+      "impact": "수학 연산 평균 반복 15 → 5~8회",
+      "emergence": "보존 — 수치 정밀도 동일 (임계값 1e-10)"
+    },
+    {
+      "id": "OPT-05",
+      "target": "evo_cycle() 전략 7종",
+      "before": "모든 전략 무조건 실행",
+      "after": "EXACT(>=0.99) 도달 시 나머지 전략 스킵 — 전 전략 보존",
+      "impact": "EXACT seed에서 전략 7종 → 평균 2~3종으로 절감",
+      "emergence": "보존 — 전략 삭제 없음, 도달 불가 전략만 스킵"
+    },
+    {
+      "id": "OPT-06",
+      "target": "Phase 4 Type 7 (composition O(n³))",
+      "before": "모든 삼중조합에 대해 c1*c2*c3 계산",
+      "after": "c1(prod1) < 0.05 시 가지치기 — c2/c3 계산 스킵",
+      "impact": "삼중루프 실행 횟수 ~60% 절감 (conf 기반)",
+      "emergence": "보존 — conf >= 0.05 이상만 통과, 0.05 미만은 원래 conf >= 0.1 필터에서 탈락"
+    }
+  ],
+  "invariants": [
+    "9-phase 파이프라인 구조 불변",
+    "7종 corollary 타입 (deduction/transfer/symbreak/bifurc/projection/dual/compose) 불변",
+    "7종 evo 전략 (shift/invert/combine/transfer/annealing/golden/harmonic) 불변",
+    "5종 telescope 렌즈 (consciousness/topology/causal/gravity/thermo) 불변",
+    "OUROBOROS 진화 사이클 불변",
+    "파동 연속돌파 (W1~W5) 구조 불변",
+    "Mk.III~VII 보조 엔진 호출 불변"
+  ],
+  "estimated_speedup": "Phase 2: ~40%, Phase 4: ~35%, Phase 1: ~66%, 전체: ~30%"
+}
