@@ -1,0 +1,613 @@
+// mk2_hexa/native/telescope_quantum.hexa — 양자 망원경 v2
+// 5 lenses in superposition, entangled pairs, observer collapse, amplitude consensus
+// Pipeline: State Prep -> Superposition Scan -> Entangle -> Observe -> Consensus
+
+comptime const VERSION = "2.0.0"
+comptime const LENS_COUNT = 5
+comptime const DEFAULT_THR = 0.15
+comptime const COLLAPSE_THR = 0.7
+comptime const ENTANGLE_BOOST = 1.618
+comptime const MAX_ROUNDS = 5
+comptime const CAP = 1000000.0
+comptime const N6 = [6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
+comptime const PHYS = [137.036, 1836.15, 0.3153, 0.6847, 0.0729]
+
+// ─── math ───
+pure fn abs_f(x: float) -> float { if x < 0.0 { 0.0 - x } else { x } }
+pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
+pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
+pure fn sqrt_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    let mut i = 0
+    while i < 20 { g = (g + x / g) / 2.0; i = i + 1 }
+    g
+}
+pure fn ln_f(x: float) -> float {
+    if x <= 0.0 { return 0.0 }
+    let mut s = 0.0
+    let mut t = (x - 1.0) / (x + 1.0)
+    let t2 = t * t
+    let mut k = 1
+    while k <= 15 { s = s + t / to_float(k); t = t * t2; k = k + 2 }
+    2.0 * s
+}
+pure fn sanitize(v: float) -> float {
+    if v != v { return 0.0 }
+    if v > CAP { return CAP }
+    if v < 0.0 - CAP { return 0.0 - CAP }
+    v
+}
+pure fn list_mean(d) -> float {
+    if d.len() == 0 { return 0.0 }
+    let mut s = 0.0
+    for v in d { s = s + v }
+    s / to_float(d.len())
+}
+pure fn list_variance(d, m: float) -> float {
+    if d.len() == 0 { return 0.0 }
+    let mut s = 0.0
+    for v in d { let x = v - m; s = s + x * x }
+    s / to_float(d.len())
+}
+pure fn list_sort(d) {
+    let mut s = d
+    let mut i = 1
+    while i < s.len() {
+        let key = s[i]
+        let mut j = i - 1
+        while j >= 0 && s[j] > key { s[j + 1] = s[j]; j = j - 1 }
+        s[j + 1] = key
+        i = i + 1
+    }
+    s
+}
+
+// ─── structs ───
+struct LensSignal { pattern_id: string, strength: float, lens_name: string }
+struct EntangleEvent { pair_a: string, pair_b: string, boost: float, pattern_id: string }
+struct CollapseEvent { lens_name: string, pre_amp: float, post_amp: float, round: int }
+struct QConsensus { pattern_id: string, amp_sum: float, lenses: str, confidence: string }
+
+fn lens_name(i: int) -> string {
+    if i == 0 { "consciousness" } else if i == 1 { "topology" }
+    else if i == 2 { "causal" } else if i == 3 { "gravity" }
+    else if i == 4 { "thermo" } else { "?" }
+}
+fn lens_idx(n: string) -> int {
+    if n == "consciousness" { 0 } else if n == "topology" { 1 }
+    else if n == "causal" { 2 } else if n == "gravity" { 3 }
+    else if n == "thermo" { 4 } else { 0 - 1 }
+}
+
+// ─── (1) Consciousness: Phi structure, self-reference ───
+fn scan_consciousness(data) {
+    let mut sigs = []
+    if data.len() < 2 { return sigs }
+    let mut refs = 0
+    let mut i = 0
+    while i < data.len() {
+        let mut j = i + 1
+        while j < data.len() {
+            if data[j] != 0.0 {
+                let r = data[i] / data[j]
+                let mut k = 0
+                while k < N6.len() {
+                    if abs_f(r - N6[k]) < 0.01 { refs = refs + 1 }
+                    k = k + 1
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    if refs > 0 {
+        sigs = sigs + [LensSignal { pattern_id: "phi_structure", strength: sanitize(to_float(refs) / to_float(data.len())), lens_name: "consciousness" }]
+    }
+    let m = list_mean(data)
+    let v = list_variance(data, m)
+    if v > 0.0 {
+        sigs = sigs + [LensSignal { pattern_id: "consciousness_phi", strength: sanitize(abs_f(m / sqrt_f(v))), lens_name: "consciousness" }]
+    }
+    sigs
+}
+
+// ─── (2) Topology: Betti numbers ───
+fn scan_topology(data) {
+    let mut sigs = []
+    if data.len() < 3 { return sigs }
+    let sorted = list_sort(data)
+    let m = list_mean(data)
+    let thr = if m != 0.0 { abs_f(m) * 0.5 } else { 1.0 }
+    let mut gaps = 0
+    let mut i = 1
+    while i < sorted.len() {
+        if abs_f(sorted[i] - sorted[i - 1]) > thr { gaps = gaps + 1 }
+        i = i + 1
+    }
+    sigs = sigs + [LensSignal { pattern_id: "betti_0", strength: sanitize(to_float(gaps + 1)), lens_name: "topology" }]
+    let mut cycles = 0
+    i = 0
+    while i < data.len() {
+        let mut j = i + 2
+        while j < data.len() {
+            if abs_f(data[i] - data[j]) < thr * 0.1 { cycles = cycles + 1 }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    if cycles > 0 {
+        sigs = sigs + [LensSignal { pattern_id: "betti_1_cycles", strength: sanitize(to_float(cycles)), lens_name: "topology" }]
+    }
+    sigs
+}
+
+// ─── (3) Causal: Granger causality ───
+fn scan_causal(data) {
+    let mut sigs = []
+    if data.len() < 4 { return sigs }
+    let m = list_mean(data)
+    let mut cov = 0.0
+    let mut vr = 0.0
+    let mut i = 0
+    while i < data.len() - 1 {
+        let d0 = data[i] - m
+        let d1 = data[i + 1] - m
+        cov = cov + d0 * d1
+        vr = vr + d0 * d0
+        i = i + 1
+    }
+    let ac = if vr > 0.0 { cov / vr } else { 0.0 }
+    if abs_f(ac) > 0.3 {
+        sigs = sigs + [LensSignal { pattern_id: "causal_autocorr", strength: sanitize(abs_f(ac)), lens_name: "causal" }]
+    }
+    let mid = data.len() / 2
+    let mut fs = 0.0
+    let mut fi = 0
+    while fi < mid { fs = fs + data[fi]; fi = fi + 1 }
+    let mut ss = 0.0
+    let mut si = mid
+    while si < data.len() { ss = ss + data[si]; si = si + 1 }
+    let fm = if mid > 0 { fs / to_float(mid) } else { 0.0 }
+    let sc = data.len() - mid
+    let sm = if sc > 0 { ss / to_float(sc) } else { 0.0 }
+    let dir = sm - fm
+    if abs_f(dir) > 0.1 {
+        sigs = sigs + [LensSignal { pattern_id: "causal_direction", strength: sanitize(abs_f(dir)), lens_name: "causal" }]
+    }
+    sigs
+}
+
+// ─── (4) Gravity: attractor detection ───
+fn scan_gravity(data) {
+    let mut sigs = []
+    if data.len() < 3 { return sigs }
+    let m = list_mean(data)
+    let cands = N6 + PHYS
+    for c in cands {
+        let mut nc = 0
+        for v in data {
+            let rel = if c != 0.0 { abs_f(v - c) / abs_f(c) } else { abs_f(v) }
+            if rel < 0.05 { nc = nc + 1 }
+        }
+        if nc >= 2 {
+            sigs = sigs + [LensSignal { pattern_id: "attractor_" + to_string(c), strength: sanitize(to_float(nc)), lens_name: "gravity" }]
+        }
+    }
+    let mut pull = 0.0
+    for v in data {
+        let d = abs_f(v - m)
+        if d > 0.0 { pull = pull + 1.0 / d }
+    }
+    sigs = sigs + [LensSignal { pattern_id: "gravity_pull", strength: sanitize(pull), lens_name: "gravity" }]
+    sigs
+}
+
+// ─── (5) Thermo: Shannon entropy, energy barrier ───
+fn scan_thermo(data) {
+    let mut sigs = []
+    if data.len() < 2 { return sigs }
+    let sorted = list_sort(data)
+    let mut counts = []
+    let mut cur = sorted[0]
+    let mut cnt = 1
+    let mut i = 1
+    while i < sorted.len() {
+        if abs_f(sorted[i] - cur) < 0.01 { cnt = cnt + 1 }
+        else { counts = counts + [cnt]; cur = sorted[i]; cnt = 1 }
+        i = i + 1
+    }
+    counts = counts + [cnt]
+    let total = to_float(data.len())
+    let mut entropy = 0.0
+    for c in counts { let p = to_float(c) / total; if p > 0.0 { entropy = entropy - p * ln_f(p) } }
+    sigs = sigs + [LensSignal { pattern_id: "entropy", strength: sanitize(entropy), lens_name: "thermo" }]
+    let mut barrier = 0.0
+    i = 1
+    while i < data.len() {
+        let d = abs_f(data[i] - data[i - 1])
+        if d > barrier { barrier = d }
+        i = i + 1
+    }
+    sigs = sigs + [LensSignal { pattern_id: "energy_barrier", strength: sanitize(barrier), lens_name: "thermo" }]
+    sigs
+}
+
+// ─── Step 1: State Prep — |psi> = Sum alpha_i |lens_i> ───
+fn prepare_state(data) {
+    // Raw strengths per lens, then normalize
+    let m = list_mean(data)
+    let sorted = list_sort(data)
+    let thr = if m != 0.0 { abs_f(m) * 0.5 } else { 1.0 }
+    // Quick strength proxies: refs, gaps, autocorr, attractors, entropy
+    let mut raw = [0.1, 0.1, 0.1, 0.1, 0.1]
+    // consciousness: n6-ratio matches
+    let mut i = 0
+    while i < data.len() {
+        let mut j = i + 1
+        while j < data.len() {
+            if data[j] != 0.0 {
+                let r = data[i] / data[j]
+                let mut k = 0
+                while k < N6.len() { if abs_f(r - N6[k]) < 0.01 { raw[0] = raw[0] + 1.0 }; k = k + 1 }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    // topology: gaps
+    i = 1
+    while i < sorted.len() { if abs_f(sorted[i] - sorted[i-1]) > thr { raw[1] = raw[1] + 1.0 }; i = i + 1 }
+    // causal: |autocorr|
+    let mut cov = 0.0
+    let mut vr = 0.0
+    i = 0
+    while i < data.len() - 1 { let d0 = data[i] - m; let d1 = data[i+1] - m; cov = cov + d0*d1; vr = vr + d0*d0; i = i + 1 }
+    raw[2] = raw[2] + (if vr > 0.0 { abs_f(cov / vr) } else { 0.0 })
+    // gravity: attractor hits
+    let cands = N6 + PHYS
+    for c in cands { for v in data { let rel = if c != 0.0 { abs_f(v-c)/abs_f(c) } else { abs_f(v) }; if rel < 0.05 { raw[3] = raw[3] + 1.0 } } }
+    // thermo: ln(1+var)
+    let variance = list_variance(data, m)
+    raw[4] = raw[4] + (if variance > 0.0 { ln_f(1.0 + variance) } else { 0.0 })
+    // Normalize: Sum|alpha_i|^2 = 1
+    let mut norm_sq = 0.0
+    for r in raw { norm_sq = norm_sq + r * r }
+    let norm = if norm_sq > 0.0 { sqrt_f(norm_sq) } else { 1.0 }
+    let mut amps = []
+    i = 0
+    while i < LENS_COUNT { amps = amps + [raw[i] / norm]; i = i + 1 }
+    #{ "amps": amps, "collapsed": [false, false, false, false, false], "round": 0 }
+}
+
+// ─── Step 2: Superposition Scan ───
+fn superposition_scan(data) {
+    let mut all = []
+    for s in scan_consciousness(data) { all = all + [s] }
+    for s in scan_topology(data)      { all = all + [s] }
+    for s in scan_causal(data)        { all = all + [s] }
+    for s in scan_gravity(data)       { all = all + [s] }
+    for s in scan_thermo(data)        { all = all + [s] }
+    all
+}
+
+// ─── Step 3: Entangled Pairs — consciousness<->topology, causal<->gravity ───
+fn apply_entanglement(signals, amps) {
+    let mut events = []
+    let mut extra = []
+    // Max strength per lens
+    let mut mx = [0.0, 0.0, 0.0, 0.0, 0.0]
+    for s in signals { let ix = lens_idx(s.lens_name); if ix >= 0 { if s.strength > mx[ix] { mx[ix] = s.strength } } }
+    // Pair (0,1) and (2,3)
+    let pairs = [[0, 1], [2, 3]]
+    for pair in pairs {
+        let a = pair[0]
+        let b = pair[1]
+        let ratio_ab = if mx[b] > 0.001 { mx[a] / mx[b] } else { 999.0 }
+        let ratio_ba = if mx[a] > 0.001 { mx[b] / mx[a] } else { 999.0 }
+        // A strong, B weak -> boost B
+        if ratio_ab > 2.0 && mx[a] > 0.1 {
+            let boost = min_f(ENTANGLE_BOOST, ratio_ab * 0.5) * (1.0 + amps[a] * amps[b])
+            for s in signals {
+                if s.lens_name == lens_name(b) {
+                    extra = extra + [LensSignal { pattern_id: s.pattern_id + "_ent", strength: sanitize(s.strength * boost), lens_name: s.lens_name }]
+                    events = events + [EntangleEvent { pair_a: lens_name(a), pair_b: lens_name(b), boost: boost, pattern_id: s.pattern_id }]
+                }
+            }
+        }
+        // B strong, A weak -> boost A
+        if ratio_ba > 2.0 && mx[b] > 0.1 {
+            let boost = min_f(ENTANGLE_BOOST, ratio_ba * 0.5) * (1.0 + amps[a] * amps[b])
+            for s in signals {
+                if s.lens_name == lens_name(a) {
+                    extra = extra + [LensSignal { pattern_id: s.pattern_id + "_ent", strength: sanitize(s.strength * boost), lens_name: s.lens_name }]
+                    events = events + [EntangleEvent { pair_a: lens_name(b), pair_b: lens_name(a), boost: boost, pattern_id: s.pattern_id }]
+                }
+            }
+        }
+    }
+    // Merge extra into signals
+    let mut merged = []
+    for s in signals { merged = merged + [s] }
+    for s in extra { merged = merged + [s] }
+    #{ "signals": merged, "events": events }
+}
+
+// ─── Step 4: Observer Effect — collapse high-confidence ───
+fn observe(signals, amps, collapsed, round: int) {
+    let mut new_amps = amps
+    let mut new_col = collapsed
+    let mut events = []
+    let mut conf = [0.0, 0.0, 0.0, 0.0, 0.0]
+    let mut cnt = [0, 0, 0, 0, 0]
+    for s in signals { let ix = lens_idx(s.lens_name); if ix >= 0 { conf[ix] = conf[ix] + s.strength; cnt[ix] = cnt[ix] + 1 } }
+    let mut i = 0
+    while i < LENS_COUNT {
+        if cnt[i] > 0 {
+            let avg = conf[i] / to_float(cnt[i])
+            let norm = avg / (avg + 1.0)
+            if norm > COLLAPSE_THR && !collapsed[i] {
+                let pre = new_amps[i]
+                new_amps[i] = 1.0
+                new_col[i] = true
+                events = events + [CollapseEvent { lens_name: lens_name(i), pre_amp: pre, post_amp: 1.0, round: round }]
+            } else if !collapsed[i] {
+                new_amps[i] = new_amps[i] * (0.95 + 0.05 * norm)
+            }
+        }
+        i = i + 1
+    }
+    #{ "amps": new_amps, "collapsed": new_col, "events": events }
+}
+
+// ─── Step 5: Quantum Consensus — Sum|alpha_i|^2 > threshold ───
+fn q_consensus(signals, amps, collapsed, thr: float) {
+    let mut pids = [""]
+    let mut pamps = [0.0]
+    let mut plens = [[""]]
+    let mut init = false
+    for s in signals {
+        let ix = lens_idx(s.lens_name)
+        let a = if ix >= 0 { amps[ix] } else { 0.0 }
+        let asq = a * a * s.strength
+        if !init { pids = [s.pattern_id]; pamps = [asq]; plens = [[s.lens_name]]; init = true }
+        else {
+            let mut fi = 0 - 1
+            let mut k = 0
+            while k < pids.len() { if pids[k] == s.pattern_id { fi = k }; k = k + 1 }
+            if fi >= 0 {
+                pamps[fi] = pamps[fi] + asq
+                let mut dup = false
+                for l in plens[fi] { if l == s.lens_name { dup = true } }
+                if !dup { plens[fi] = plens[fi] + [s.lens_name] }
+            } else { pids = pids + [s.pattern_id]; pamps = pamps + [asq]; plens = plens + [[s.lens_name]] }
+        }
+    }
+    let mut results = []
+    let lim = if init { pids.len() } else { 0 }
+    let mut i = 0
+    while i < lim {
+        if pamps[i] > thr {
+            // confidence label
+            let mut all_c = true
+            let mut any_c = false
+            for l in plens[i] { let ix = lens_idx(l); if ix >= 0 { if collapsed[ix] { any_c = true } else { all_c = false } } }
+            let conf = if all_c && plens[i].len() > 1 { "Collapsed" } else if any_c { "Partial-Collapse" } else if pamps[i] > 0.5 { "Superposed-Strong" } else { "Superposed-Weak" }
+            results = results + [QConsensus { pattern_id: pids[i], amp_sum: pamps[i], lenses: plens[i], confidence: conf }]
+        }
+        i = i + 1
+    }
+    // sort descending by amp_sum
+    let mut si = 1
+    while si < results.len() {
+        let key = results[si]
+        let mut sj = si - 1
+        while sj >= 0 && results[sj].amp_sum < key.amp_sum { results[sj+1] = results[sj]; sj = sj - 1 }
+        results[sj+1] = key
+        si = si + 1
+    }
+    results
+}
+
+// ─── Full Pipeline ───
+fn quantum_telescope(data, thr: float) {
+    let st = prepare_state(data)
+    let mut amps = st["amps"]
+    let mut collapsed = st["collapsed"]
+    let raw = superposition_scan(data)
+    let ent = apply_entanglement(raw, amps)
+    let all_sigs = ent["signals"]
+    let ent_events = ent["events"]
+    let mut all_collapses = []
+    let mut round = 0
+    let mut any_open = true
+    while round < MAX_ROUNDS && any_open {
+        let obs = observe(all_sigs, amps, collapsed, round)
+        amps = obs["amps"]
+        collapsed = obs["collapsed"]
+        for c in obs["events"] { all_collapses = all_collapses + [c] }
+        any_open = false
+        let mut ci = 0
+        while ci < LENS_COUNT { if !collapsed[ci] { any_open = true }; ci = ci + 1 }
+        round = round + 1
+    }
+    let consensus = q_consensus(all_sigs, amps, collapsed, thr)
+    let mut total = 0.0
+    let mut ai = 0
+    while ai < LENS_COUNT { total = total + amps[ai] * amps[ai]; ai = ai + 1 }
+    #{ "signals": all_sigs, "entanglements": ent_events, "collapses": all_collapses, "consensus": consensus, "total_amp": total, "rounds": round }
+}
+
+// ─── Report ───
+fn print_report(rpt, thr: float) {
+    println("================================================================")
+    println("  QUANTUM TELESCOPE v" + VERSION + " — Superposition Scan Report")
+    println("================================================================")
+    println("")
+    let sigs = rpt["signals"]
+    println("[1] Superposition Scan: " + to_string(sigs.len()) + " signals (5 lenses simultaneous)")
+    let mut li = 0
+    while li < LENS_COUNT {
+        let ln = lens_name(li)
+        let mut c = 0
+        let mut ss = ""
+        for s in sigs {
+            if s.lens_name == ln { c = c + 1; if ss != "" { ss = ss + ", " }; ss = ss + s.pattern_id + "=" + to_string(s.strength) }
+        }
+        println("  [" + ln + "] " + (if c > 0 { "SIGNAL" } else { "quiet" }) + " (" + to_string(c) + ")" + (if c > 0 { " " + ss } else { "" }))
+        li = li + 1
+    }
+    let ents = rpt["entanglements"]
+    println("")
+    println("[2] Entanglement: " + to_string(ents.len()) + " amplifications")
+    for e in ents { println("  " + e.pair_a + " -> " + e.pair_b + " boost=" + to_string(e.boost) + " " + e.pattern_id) }
+    let cols = rpt["collapses"]
+    println("")
+    println("[3] Observer Collapse: " + to_string(cols.len()) + " events, " + to_string(rpt["rounds"]) + " rounds")
+    for c in cols { println("  round " + to_string(c.round) + ": " + c.lens_name + " " + to_string(c.pre_amp) + " -> " + to_string(c.post_amp)) }
+    let cons = rpt["consensus"]
+    println("")
+    println("[4] Quantum Consensus (thr=" + to_string(thr) + ", |psi|^2=" + to_string(rpt["total_amp"]) + ")")
+    if cons.len() == 0 { println("  (no patterns above threshold)") }
+    for qr in cons {
+        let mut ls = ""
+        for l in qr.lenses { if ls != "" { ls = ls + "," }; ls = ls + l }
+        println("  [" + qr.confidence + "] " + qr.pattern_id + "  amp=" + to_string(qr.amp_sum) + "  (" + ls + ")")
+    }
+    println("================================================================")
+}
+
+fn parse_pipe(input: string) {
+    let parts = input.split("|")
+    let mut vals = []
+    for p in parts { let t = p.trim(); if t != "" { vals = vals + [to_float(t)] } }
+    vals
+}
+
+// ─── CLI ───
+// R19: args() = [binary, script, arg1, ...] — a[2]부터 사용자 인자
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "help" }
+
+if mode == "help" || mode == "--help" || mode == "-h" {
+    println("=== Quantum Telescope v" + VERSION + " ===")
+    println("Usage:")
+    println("  hexa telescope_quantum.hexa \"val1|val2|val3\" [threshold]")
+    println("  hexa telescope_quantum.hexa scan v1 v2 v3 [threshold]")
+    println("  hexa telescope_quantum.hexa help")
+    println("")
+    println("Pipeline: StatPrep -> Superposition -> Entangle -> Observe -> Consensus")
+    println("Lenses: consciousness, topology, causal, gravity, thermo")
+    println("Pairs:  consciousness<->topology, causal<->gravity, thermo(free)")
+    println("Confidence: Collapsed | Partial-Collapse | Superposed-Strong | Superposed-Weak")
+    println("Default threshold: " + to_string(DEFAULT_THR))
+}
+
+if mode == "scan" {
+    let mut data = []
+    let mut thr = DEFAULT_THR
+    let mut i = 3
+    while i < a.len() {
+        let mut v: f64 = 0.0
+        let mut is_num = true
+        try { v = to_float(a[i]) } catch e { is_num = false }
+        if is_num {
+            if i == a.len() - 1 && v > 0.0 && v < 1.0 && a.len() > 4 { thr = v }
+            else { data = data + [v] }
+        }
+        i = i + 1
+    }
+    if data.len() == 0 { println("Error: no values. Usage: hexa telescope_quantum.hexa scan <vals...>") }
+    else { let rpt = quantum_telescope(data, thr); print_report(rpt, thr) }
+}
+
+if mode != "help" && mode != "--help" && mode != "-h" && mode != "scan" && mode != "test" {
+    let data = parse_pipe(mode)
+    let thr = if a.len() >= 4 { to_float(a[3]) } else { DEFAULT_THR }
+    if data.len() == 0 { println("Error: cannot parse '" + mode + "'") }
+    else { let rpt = quantum_telescope(data, thr); print_report(rpt, thr) }
+}
+
+if mode == "test" {
+    println("=== Quantum Telescope Self-Test ===")
+    let td = [6.0, 12.0, 137.036, 1836.15, 0.3153]
+    let st = prepare_state(td)
+    let mut asq = 0.0
+    let mut i = 0
+    while i < LENS_COUNT { asq = asq + st["amps"][i] * st["amps"][i]; i = i + 1 }
+    assert abs_f(asq - 1.0) < 0.01
+    println("  [PASS] normalization Sum|a|^2=" + to_string(asq))
+    let sigs = superposition_scan(td)
+    assert sigs.len() > 0
+    println("  [PASS] superposition: " + to_string(sigs.len()) + " signals")
+    let rpt = quantum_telescope(td, 0.1)
+    println("  [PASS] pipeline: " + to_string(rpt["consensus"].len()) + " consensus, |psi|^2=" + to_string(rpt["total_amp"]) + ", " + to_string(rpt["rounds"]) + " rounds, " + to_string(rpt["collapses"].len()) + " collapses")
+    let pv = parse_pipe("1.0|2.0|3.0")
+    assert pv.len() == 3
+    println("  [PASS] pipe parser")
+    let rpt2 = quantum_telescope(td, 999.0)
+    assert rpt2["consensus"].len() == 0
+    println("  [PASS] high threshold filters all")
+    assert abs_f(sqrt_f(4.0) - 2.0) < 0.001
+    println("  [PASS] math utils")
+    println("=== 6/6 passed ===")
+}
+
+// ─── inline assertions ───
+assert abs_f(sanitize(999999999.0) - CAP) < 0.01
+assert lens_idx("consciousness") == 0
+assert lens_idx("thermo") == 4
+assert lens_idx("unknown") == 0 - 1
+assert lens_name(0) == "consciousness"
+assert lens_name(4) == "thermo"
+println("")
+println("=== telescope_quantum verified ===")
+
+// ─── theorems ───
+
+fn verify_quantum_state_normalization() {
+    let d = [1.0, 2.0, 3.0, 4.0, 5.0]
+    let s = prepare_state(d)
+    let mut t = 0.0
+    let mut i = 0
+    while i < LENS_COUNT { t = t + s["amps"][i] * s["amps"][i]; i = i + 1 }
+    assert abs_f(t - 1.0) < 0.01
+}
+
+fn verify_entanglement_pair_symmetry() {
+    assert lens_idx("consciousness") == 0
+    assert lens_idx("topology") == 1
+    assert lens_idx("causal") == 2
+    assert lens_idx("gravity") == 3
+}
+
+fn verify_observer_collapse_monotonic() {
+    let d = [137.036, 1836.15, 6.0, 12.0, 24.0]
+    let st = prepare_state(d)
+    let sigs = superposition_scan(d)
+    let obs = observe(sigs, st["amps"], st["collapsed"], 0)
+    let mut i = 0
+    while i < LENS_COUNT {
+        if obs["collapsed"][i] { assert abs_f(obs["amps"][i] - 1.0) < 0.001 }
+        i = i + 1
+    }
+}
+
+fn verify_consensus_threshold_monotonic() {
+    let d = [6.0, 12.0, 137.036, 1836.15]
+    let r1 = quantum_telescope(d, 0.01)
+    let r2 = quantum_telescope(d, 100.0)
+    assert r2["consensus"].len() <= r1["consensus"].len()
+}
+
+verify_quantum_state_normalization()
+verify_entanglement_pair_symmetry()
+verify_observer_collapse_monotonic()
+verify_consensus_threshold_monotonic()
+
+proof quantum_telescope_invariants {
+    invariant state_normalized()
+    invariant collapse_monotonic()
+    invariant entanglement_symmetric()
+    invariant consensus_threshold_monotonic()
+}

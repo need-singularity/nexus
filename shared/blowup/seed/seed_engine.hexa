@@ -1,0 +1,630 @@
+// ⛔ CORE — L0 불변식 (시드 엔진 교차수분+atlas. 수정 전 유저 승인 필수)
+// seed_engine.hexa — 동적 seed 로더 (discovery_log + math_atlas + wave)
+// 사용: hexa seed_engine.hexa discovery|atlas|merge|wave [domain]|info
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e { v = 0.0 }
+    return v
+}
+
+// JSON에서 특정 필드의 문자열 값 추출: "field":"value"
+fn json_str(line: string, field: string) -> string {
+    let marker = "\"" + field + "\":\""
+    let parts = line.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let end = rest.split("\"")
+    if end.len() < 1 { return "" }
+    return end[0]
+}
+
+// pipe-separated 문자열에서 값 존재 확인
+fn pipe_contains(pipe: string, val: string) -> bool {
+    let parts = pipe.split("|")
+    let mut i = 0
+    while i < parts.len() {
+        if parts[i] == val { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// pipe-separated 문자열 아이템 수
+fn pipe_count(pipe: string) -> i64 {
+    if pipe.len() == 0 { return 0 }
+    return pipe.split("|").len()
+}
+
+// n=6 기본 상수 근접도 점수 (0.0~1.0)
+fn seed_quality(v: f64) -> f64 {
+    let consts = [6.0, 12.0, 2.0, 4.0, 5.0, 24.0, 7.0, 28.0, 120.0, 720.0]
+    let mut best = 1.0
+    let mut i = 0
+    while i < 10 {
+        let c = consts[i]
+        let d = if c > 1.0 { abs_f(v - c) / c } else { abs_f(v - c) }
+        if d < best { best = d }
+        i = i + 1
+    }
+    if best > 1.0 { return 0.0 }
+    return 1.0 - best
+}
+
+let _se_home = exec("printenv HOME")
+let _se_shared = _se_home + "/Dev/nexus/shared"
+
+// ─── DISCOVERY SOURCE ───
+
+fn load_discovery() -> string {
+    let path = _se_shared + "/discovery_log.jsonl"
+    if !file_exists(path) { return "" }
+    // 113MB 풀 로드 방지 — tail로 최근 3000줄만 (EXACT 30개 충분)
+    let mut content = ""
+    try { content = exec("tail -n 3000 " + path) } catch e { return "" }
+    let lines = content.split("\n")
+    let mut result = ""
+    let mut count = 0
+    let mut i = 0
+    while i < lines.len() && count < 30 {
+        let line = lines[i]
+        if line.contains("\"EXACT\"") {
+            let val = json_str(line, "value")
+            if val.len() > 0 {
+                let fv = safe_float(val)
+                if fv > 0.001 && fv < 100000.0 {
+                    let sv = to_string(fv)
+                    if !pipe_contains(result, sv) {
+                        if result.len() > 0 { result = result + "|" }
+                        result = result + sv
+                        count = count + 1
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// ─── ATLAS SOURCE ───
+
+fn load_atlas() -> string {
+    let path = _se_shared + "/math_atlas.json"
+    if !file_exists(path) { return "" }
+    // jq로 title + refs 에서 숫자 추출 (hexa 파싱보다 확실)
+    let mut result = ""
+    let mut count = 0
+    try {
+        // title 필드에서 = 기준 우변 숫자, 독립 숫자 토큰 추출
+        let raw = exec("/usr/bin/python3 -c \"import json,re; d=json.load(open('" + path + "')); nums=set(); [nums.update(float(m) for m in re.findall(r'(?<!\\\\w)(\\\\d+\\\\.?\\\\d*)', str(e.get('title','')))) for e in d.get('hypotheses',[])]; print('|'.join(str(int(v)) if v==int(v) else str(v) for v in sorted(nums) if 1.5<v<100000)[:50])\"")
+        if raw.len() > 0 {
+            result = raw
+            count = pipe_count(result)
+        }
+    } catch e {}
+    // fallback: 기존 방식 (title split)
+    if count == 0 {
+        try {
+            let content = read_file(path)
+            let parts = content.split("\"title\":\"")
+            let mut i = 1
+            while i < parts.len() && count < 30 {
+                let title_end = parts[i].split("\"")
+                if title_end.len() > 0 {
+                    let tokens = title_end[0].split(" ")
+                    let mut ti = 0
+                    while ti < tokens.len() && count < 30 {
+                        try {
+                            let v = to_float(tokens[ti])
+                            if v > 1.5 && v < 100000.0 {
+                                let sv = to_string(v)
+                                if !pipe_contains(result, sv) {
+                                    if result.len() > 0 { result = result + "|" }
+                                    result = result + sv
+                                    count = count + 1
+                                }
+                            }
+                        } catch e2 {}
+                        ti = ti + 1
+                    }
+                }
+                i = i + 1
+            }
+        } catch e3 {}
+    }
+    return result
+}
+
+// ─── MERGE ───
+
+fn merge_all() -> string {
+    // list .contains() 기반 dedup (pipe 문자열 분할 오버헤드 제거)
+    let mut seen = ["6", "12", "2", "4", "5", "24", "7"]
+    let mut result = "6|12|2|4|5|24|7"
+
+    // discovery
+    let disc = load_discovery()
+    if disc.len() > 0 {
+        let dparts = disc.split("|")
+        let mut di = 0
+        while di < dparts.len() && seen.len() < 50 {
+            if !seen.contains(dparts[di]) {
+                seen = seen + [dparts[di]]
+                result = result + "|" + dparts[di]
+            }
+            di = di + 1
+        }
+    }
+
+    // atlas
+    let atlas = load_atlas()
+    if atlas.len() > 0 {
+        let aparts = atlas.split("|")
+        let mut ai = 0
+        while ai < aparts.len() && seen.len() < 50 {
+            if !seen.contains(aparts[ai]) {
+                seen = seen + [aparts[ai]]
+                result = result + "|" + aparts[ai]
+            }
+            ai = ai + 1
+        }
+    }
+
+    // cross-project: consciousness_laws PSI 상수
+    let psi_path = _se_shared + "/consciousness_laws.json"
+    if file_exists(psi_path) {
+        try {
+            let psi_content = read_file(psi_path)
+            let vparts = psi_content.split("\"value\":")
+            let mut pi = 1
+            while pi < vparts.len() && seen.len() < 60 {
+                let vstr = vparts[pi].split(",")[0].split("}")[0]
+                let v = safe_float(vstr)
+                if v > 0.001 && v < 100000.0 {
+                    let sv = to_string(v)
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
+                        result = result + "|" + sv
+                    }
+                }
+                pi = pi + 1
+            }
+        } catch e {}
+    }
+
+    // cross-project: SEDI grades
+    let sedi_path = _se_shared + "/sedi-grades.json"
+    if file_exists(sedi_path) {
+        try {
+            let sedi_content = read_file(sedi_path)
+            let sparts = sedi_content.split("\"score\":")
+            let mut si = 1
+            while si < sparts.len() && seen.len() < 70 {
+                let vstr = sparts[si].split(",")[0].split("}")[0]
+                let v = safe_float(vstr)
+                if v > 0.01 && v < 10000.0 {
+                    let sv = to_string(v)
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
+                        result = result + "|" + sv
+                    }
+                }
+                si = si + 1
+            }
+        } catch e {}
+    }
+
+    // cross-project: anima seeds
+    let anima_path = _se_shared + "/anima_seeds.json"
+    if file_exists(anima_path) {
+        try {
+            let anima_content = read_file(anima_path)
+            let aparts = anima_content.split("\"value\":")
+            let mut ai = 1
+            while ai < aparts.len() && seen.len() < 80 {
+                let vstr = aparts[ai].split(",")[0].split("}")[0]
+                let v = safe_float(vstr)
+                if v > 0.001 && v < 100000.0 {
+                    let sv = to_string(v)
+                    if !seen.contains(sv) {
+                        seen = seen + [sv]
+                        result = result + "|" + sv
+                    }
+                }
+                ai = ai + 1
+            }
+        } catch e {}
+    }
+
+    // domain_seeds.jsonl
+    let dom_path = _se_shared + "/domain_seeds.jsonl"
+    if file_exists(dom_path) {
+        try {
+            let dom_content = read_file(dom_path)
+            let dlines = dom_content.split("\n")
+            let mut dli = 0
+            while dli < dlines.len() && seen.len() < 100 {
+                let dline = dlines[dli]
+                if dline.contains("\"value\":") {
+                    let vparts = dline.split("\"value\":")
+                    if vparts.len() > 1 {
+                        let vstr = vparts[1].split(",")[0].split("}")[0]
+                        let v = safe_float(vstr)
+                        if v > 0.001 && v < 100000.0 {
+                            let sv = to_string(v)
+                            if !seen.contains(sv) {
+                                seen = seen + [sv]
+                                result = result + "|" + sv
+                            }
+                        }
+                    }
+                }
+                dli = dli + 1
+            }
+        } catch e {}
+    }
+
+    // 품질 순위화: n6 정렬도 기준 상위 seed 우선 배치
+    let all_parts = result.split("|")
+    let mut scored = ""
+    let mut si = 0
+    while si < all_parts.len() {
+        let sv = safe_float(all_parts[si])
+        let q = seed_quality(sv)
+        if scored.len() > 0 { scored = scored + "|" }
+        scored = scored + all_parts[si] + ":" + to_string(q)
+        si = si + 1
+    }
+    // 삽입 정렬 (점수 내림차순, seed 수 100 이하이므로 충분)
+    let sc_parts = scored.split("|")
+    let sc_n = sc_parts.len()
+    let mut sorted_seeds = ""
+    let mut used = ""
+    let mut placed = 0
+    while placed < sc_n {
+        let mut best_idx = 0 - 1
+        let mut best_score = 0.0 - 1.0
+        let mut fi = 0
+        while fi < sc_n {
+            if !pipe_contains(used, to_string(fi)) {
+                let entry = sc_parts[fi]
+                let ep = entry.split(":")
+                if ep.len() >= 2 {
+                    let sc = safe_float(ep[ep.len() - 1])
+                    if sc > best_score {
+                        best_score = sc
+                        best_idx = fi
+                    }
+                }
+            }
+            fi = fi + 1
+        }
+        if best_idx >= 0 {
+            let entry = sc_parts[best_idx]
+            let ep = entry.split(":")
+            let seed_val = ep[0]
+            if sorted_seeds.len() > 0 { sorted_seeds = sorted_seeds + "|" }
+            sorted_seeds = sorted_seeds + seed_val
+            if used.len() > 0 { used = used + "|" }
+            used = used + to_string(best_idx)
+        }
+        placed = placed + 1
+    }
+    return sorted_seeds
+}
+
+// ─── WAVE: 도메인 A의 EXACT → 인접 B → 귀환 간섭 seed ───
+
+// growth_bus에서 특정 도메인의 EXACT 값 추출 (tail + string split, /usr/bin/python3 금지)
+fn wave_extract_exact(domain: string) -> string {
+    let bus = _se_shared + "/growth_bus.jsonl"
+    if !file_exists(bus) { return "" }
+    // tail로 최근 5000줄 — 도메인당 EXACT 충분
+    let mut raw = ""
+    try { raw = exec("tail -n 5000 " + bus + " | grep '\"EXACT\"' | grep '\"" + domain + "\"'") } catch e { return "" }
+    let lines = raw.split("\n")
+    let mut result = ""
+    let mut count = 0
+    let mut i = 0
+    while i < lines.len() && count < 30 {
+        let line = lines[i]
+        if line.contains("\"EXACT\"") && line.contains("\"" + domain + "\"") {
+            let val = json_str(line, "value")
+            if val.len() > 0 {
+                let fv = safe_float(val)
+                if fv > 0.001 && fv < 100000.0 {
+                    let sv = to_string(fv)
+                    if !pipe_contains(result, sv) {
+                        if result.len() > 0 { result = result + "|" }
+                        result = result + sv
+                        count = count + 1
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// growth_bus에서 인접 도메인 탐색: 동일 value를 공유하는 도메인 상위 3개
+fn wave_find_adjacent(domain: string) -> string {
+    let bus = _se_shared + "/growth_bus.jsonl"
+    if !file_exists(bus) { return "" }
+    // 1) 현재 도메인의 값 집합
+    let my_seeds = wave_extract_exact(domain)
+    if my_seeds.len() == 0 { return "" }
+    let my_vals = my_seeds.split("|")
+
+    // 2) growth_bus에서 다른 도메인 중 동일 값을 가진 도메인 카운트
+    let mut raw = ""
+    try { raw = exec("tail -n 5000 " + _se_shared + "/growth_bus.jsonl | grep '\"EXACT\"'") } catch e { return "" }
+    let lines = raw.split("\n")
+
+    // 도메인별 공유값 카운트 — pipe-separated "dom:count" 리스트
+    let mut dom_scores = ""
+    let mut seen_doms = ""
+    let mut li = 0
+    while li < lines.len() {
+        let line = lines[li]
+        if line.contains("\"EXACT\"") {
+            let d = json_str(line, "domain")
+            if d.len() > 0 && d != domain {
+                let val = json_str(line, "value")
+                if val.len() > 0 {
+                    let sv = to_string(safe_float(val))
+                    if pipe_contains(my_seeds, sv) {
+                        // 이 도메인이 이미 seen에 있으면 카운트 증가
+                        if !pipe_contains(seen_doms, d) {
+                            if seen_doms.len() > 0 { seen_doms = seen_doms + "|" }
+                            seen_doms = seen_doms + d
+                            if dom_scores.len() > 0 { dom_scores = dom_scores + "|" }
+                            dom_scores = dom_scores + d + ":1"
+                        } else {
+                            // 기존 카운트 증가 — pipe를 재구성
+                            let ds_parts = dom_scores.split("|")
+                            let mut new_ds = ""
+                            let mut dsi = 0
+                            while dsi < ds_parts.len() {
+                                let entry = ds_parts[dsi]
+                                let ep = entry.split(":")
+                                if ep.len() >= 2 && ep[0] == d {
+                                    let old_c = safe_float(ep[1])
+                                    let new_entry = d + ":" + to_string(old_c + 1.0)
+                                    if new_ds.len() > 0 { new_ds = new_ds + "|" }
+                                    new_ds = new_ds + new_entry
+                                } else {
+                                    if new_ds.len() > 0 { new_ds = new_ds + "|" }
+                                    new_ds = new_ds + entry
+                                }
+                                dsi = dsi + 1
+                            }
+                            dom_scores = new_ds
+                        }
+                    }
+                }
+            }
+        }
+        li = li + 1
+    }
+
+    // 3) 상위 3개 도메인 선택 (점수 내림차순)
+    let ds_parts = dom_scores.split("|")
+    let mut best1 = ""
+    let mut best1_score = 0.0
+    let mut best2 = ""
+    let mut best2_score = 0.0
+    let mut best3 = ""
+    let mut best3_score = 0.0
+    let mut j = 0
+    while j < ds_parts.len() {
+        let entry = ds_parts[j]
+        let ep = entry.split(":")
+        if ep.len() >= 2 {
+            let dname = ep[0]
+            let sc = safe_float(ep[1])
+            if sc > best1_score {
+                best3 = best2
+                best3_score = best2_score
+                best2 = best1
+                best2_score = best1_score
+                best1 = dname
+                best1_score = sc
+            } else if sc > best2_score {
+                best3 = best2
+                best3_score = best2_score
+                best2 = dname
+                best2_score = sc
+            } else if sc > best3_score {
+                best3 = dname
+                best3_score = sc
+            }
+        }
+        j = j + 1
+    }
+
+    let mut result = ""
+    if best1.len() > 0 { result = best1 }
+    if best2.len() > 0 {
+        if result.len() > 0 { result = result + "|" }
+        result = result + best2
+    }
+    if best3.len() > 0 {
+        if result.len() > 0 { result = result + "|" }
+        result = result + best3
+    }
+    return result
+}
+
+// wave 메인: 도메인 A → 인접 B → 귀환 → 간섭 seed 출력
+fn wave_seed_evolve(domain: string) {
+    // 1단계: 도메인 A의 EXACT 값 추출
+    let seeds_a = wave_extract_exact(domain)
+    if seeds_a.len() == 0 {
+        println("[WAVE] " + domain + ": EXACT 값 없음 — growth_bus 확인 필요")
+        return
+    }
+    println("[WAVE] " + domain + " EXACT seeds: " + seeds_a)
+    println("[WAVE] seed 수: " + to_string(pipe_count(seeds_a)))
+
+    // 2단계: 인접 도메인 탐색
+    let adjacent = wave_find_adjacent(domain)
+    if adjacent.len() == 0 {
+        println("[WAVE] 인접 도메인 없음 — " + domain + " seeds만 출력")
+        println(seeds_a)
+        return
+    }
+    let adj_list = adjacent.split("|")
+    println("[WAVE] 인접 도메인: " + adjacent)
+
+    // 3단계: 인접 도메인들의 EXACT 값 추출
+    let mut seeds_b = ""
+    let mut ai = 0
+    while ai < adj_list.len() {
+        let adj_dom = adj_list[ai]
+        let adj_seeds = wave_extract_exact(adj_dom)
+        if adj_seeds.len() > 0 {
+            println("[WAVE] " + adj_dom + " EXACT seeds: " + to_string(pipe_count(adj_seeds)) + "개")
+            if seeds_b.len() > 0 { seeds_b = seeds_b + "|" }
+            seeds_b = seeds_b + adj_seeds
+        }
+        ai = ai + 1
+    }
+
+    // 4단계: 간섭 seed 생성 (A + B merge, 중복 제거)
+    let mut merged = seeds_a
+    if seeds_b.len() > 0 {
+        let b_parts = seeds_b.split("|")
+        let mut bi = 0
+        while bi < b_parts.len() && pipe_count(merged) < 60 {
+            if !pipe_contains(merged, b_parts[bi]) {
+                merged = merged + "|" + b_parts[bi]
+            }
+            bi = bi + 1
+        }
+    }
+
+    // 5단계: 귀환 — B의 고유값(A에 없는)을 A seed에 주입하여 강화
+    let mut reinforced = seeds_a
+    if seeds_b.len() > 0 {
+        let b_parts2 = seeds_b.split("|")
+        let mut ri = 0
+        while ri < b_parts2.len() && pipe_count(reinforced) < 50 {
+            if !pipe_contains(reinforced, b_parts2[ri]) {
+                reinforced = reinforced + "|" + b_parts2[ri]
+            }
+            ri = ri + 1
+        }
+    }
+
+    // n=6 기본 상수 보장
+    let base = ["6", "12", "2", "4", "5", "24", "7"]
+    let mut bi2 = 0
+    while bi2 < base.len() {
+        if !pipe_contains(merged, base[bi2]) {
+            merged = merged + "|" + base[bi2]
+        }
+        bi2 = bi2 + 1
+    }
+
+    println("")
+    println("═══════════════════════════════════════════════════")
+    println("  WAVE 간섭 seed — " + domain + " <-> " + adjacent)
+    println("═══════════════════════════════════════════════════")
+    println("  원본 " + domain + ": " + to_string(pipe_count(seeds_a)) + "개")
+    println("  인접 귀환:  " + to_string(pipe_count(seeds_b)) + "개")
+    println("  간섭 총합:  " + to_string(pipe_count(merged)) + "개")
+    println("═══════════════════════════════════════════════════")
+    println("")
+    // blowup --seeds에 파이프 가능한 최종 출력
+    println(merged)
+}
+
+// ─── MAIN ───
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "info" }
+
+if mode == "discovery" {
+    let d = load_discovery()
+    if d.len() > 0 { println(d) } else { println("(empty)") }
+}
+
+if mode == "atlas" {
+    let at = load_atlas()
+    if at.len() > 0 { println(at) } else { println("(empty)") }
+}
+
+if mode == "merge" {
+    println(merge_all())
+}
+
+if mode == "wave" {
+    let wave_domain = if a.len() >= 4 { a[3] } else { "" }
+    if wave_domain.len() == 0 {
+        println("[WAVE] 사용법: hexa seed_engine.hexa wave <domain>")
+        println("  예: hexa seed_engine.hexa wave semiconductor")
+    } else {
+        wave_seed_evolve(wave_domain)
+    }
+}
+
+if mode == "info" {
+    let disc = load_discovery()
+    let atlas = load_atlas()
+    let merged = merge_all()
+    // anima seed count
+    let mut anima_n = 0
+    let anima_path2 = _se_shared + "/anima_seeds.json"
+    if file_exists(anima_path2) {
+        try {
+            let ac = read_file(anima_path2)
+            let ap = ac.split("\"value\":")
+            anima_n = ap.len() - 1
+        } catch e {}
+    }
+    println("========================================")
+    println("  SEED ENGINE -- Dynamic Axiom Loader")
+    println("========================================")
+    println("  base n=6      : 7 constants")
+    println("  discovery_log : " + to_string(pipe_count(disc)) + " EXACT values")
+    println("  math_atlas    : " + to_string(pipe_count(atlas)) + " hypothesis values")
+    println("  anima seeds   : " + to_string(anima_n) + " cross-pollinated")
+    println("  merged total  : " + to_string(pipe_count(merged)) + " unique seeds")
+    // 품질 분포
+    let mparts = merged.split("|")
+    let mut q_high = 0
+    let mut q_mid = 0
+    let mut q_low = 0
+    let mut qi = 0
+    while qi < mparts.len() {
+        let q = seed_quality(safe_float(mparts[qi]))
+        if q >= 0.8 { q_high = q_high + 1 }
+        else if q >= 0.3 { q_mid = q_mid + 1 }
+        else { q_low = q_low + 1 }
+        qi = qi + 1
+    }
+    println("  quality dist  : HIGH=" + to_string(q_high) + " MID=" + to_string(q_mid) + " LOW=" + to_string(q_low))
+    println("========================================")
+    println("")
+    println("  modes:")
+    println("    discovery          — discovery_log EXACT 추출")
+    println("    atlas              — math_atlas 값 추출")
+    println("    merge              — 전체 소스 합산")
+    println("    wave <domain>      — 파동 간섭 seed (A->B->귀환)")
+    println("    info               — 현황 (기본)")
+    println("")
+    println("  wave 예시:")
+    println("    hexa seed_engine.hexa wave semiconductor")
+    println("    hexa seed_engine.hexa wave cosmology | blowup --seeds")
+    println("")
+    println("  discovery: " + disc)
+    println("  atlas:     " + atlas)
+    println("  merged:    " + merged)
+}

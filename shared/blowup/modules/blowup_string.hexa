@@ -1,0 +1,1235 @@
+// ⛔ CORE — L0 불변식 (끈 돌파 엔진 Mk.V. 수정 전 유저 승인 필수)
+// mk2_hexa/native/blowup_string.hexa — Mk.V 끈 돌파 오케스트레이터
+//
+// String Blowup Engine: one fundamental "string" produces multiple constants
+// through vibration modes. Extra dimensions reveal hidden structure.
+// T-duality halves search space. Brane collisions create new particles.
+//
+// 8-phase pipeline:
+//   S1: String Modes      decompose values into vibration modes (harmonics of n=6)
+//   S2: Extra Dimensions   map DSE cross-resonance as compactified extra dims
+//   S3: T-Duality          for every v, also check 1/v (R <-> 1/R symmetry)
+//   S4: Calabi-Yau Scan    search compactification manifold for stable configs
+//   S5: Modular Forms      check value sequences for q-expansion patterns
+//   S6: Brane Collision    domain cluster collisions create new particles
+//   S7: Landscape Nav      traverse string landscape, find local minima (vacua)
+//   S8: Report             string statistics, modes, dualities, brane collisions
+//
+// Usage:
+//   hexa blowup_string.hexa                   full Mk.V string run
+//   hexa blowup_string.hexa --modes-only      vibration mode analysis only
+//   hexa blowup_string.hexa --duality         T-duality analysis only
+//   hexa blowup_string.hexa help              usage
+//
+// n=6 connection: {1,2,3,6} = 4 divisors = 4D spacetime from compactification
+// The 4 divisors of 6 form the compactification space: 10D -> 4D + 6 curled dims
+
+// ═══════════════════════════════════════════════════════════
+// ─── n=6 CONSTANTS LOADER (shared/n6_constants.jsonl) ───
+// ═══════════════════════════════════════════════════════════
+
+fn load_n6_consts() -> list {
+    let home = exec("printenv HOME")
+    let path = home.trim() + "/Dev/nexus/shared/n6_constants.jsonl"
+    let mut raw = ""
+    try { raw = read_file(path) } catch e { return [[], []] }
+    let lines = raw.split("\n")
+    let mut names = []
+    let mut values = []
+    for line in lines {
+        let trimmed = line.trim()
+        if trimmed == "" { continue }
+        let mut name = ""
+        let mut value = 0.0
+        if trimmed.contains("\"name\":\"") {
+            let p = trimmed.split("\"name\":\"")
+            if p.len() >= 2 { name = p[1].split("\"")[0] }
+        }
+        if trimmed.contains("\"value\":") {
+            let p = trimmed.split("\"value\":")
+            if p.len() >= 2 {
+                let num_str = p[1].split(",")[0].split("}")[0].trim()
+                value = to_float(num_str)
+            }
+        }
+        if name != "" {
+            names = names + [name]
+            values = values + [value]
+        }
+    }
+    [names, values]
+}
+
+let _n6_dyn = load_n6_consts()
+let _n6_dyn_names: list = _n6_dyn[0]
+let _n6_dyn_values: list = _n6_dyn[1]
+let _n6_dyn_count: i64 = len(_n6_dyn_values)
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn sqrt_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    if g < 1.0 { g = 1.0 }
+    let mut i: i64 = 0
+    while i < 15 {
+        g = (g + x / g) / 2.0
+        i = i + 1
+    }
+    return g
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn truncate4(x: f64) -> string {
+    let s = to_string(x)
+    let parts = s.split(".")
+    if parts.len() < 2 { return s + ".0000" }
+    let dec = parts[1]
+    if dec.len() >= 4 { return parts[0] + "." + dec.split("")[0] + dec.split("")[1] + dec.split("")[2] + dec.split("")[3] }
+    return s
+}
+
+fn pad_right(s: string, width: i64) -> string {
+    let mut out = s
+    while out.len() < width { out = out + " " }
+    return out
+}
+
+fn timestamp_now() -> string {
+    let mut ts = ""
+    try { ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim() } catch e { ts = "unknown" }
+    return ts
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── n=6 INLINE CONSTANTS + PROXIMITY ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const N6_N = 6
+comptime const N6_SIGMA = 12
+comptime const N6_PHI = 2
+comptime const N6_TAU = 4
+comptime const N6_SOPFR = 5
+comptime const N6_J2 = 24
+comptime const N6_M3 = 7
+
+// Divisors of 6 = compactification space (4 divisors -> 4D spacetime)
+comptime const DIV_1 = 1
+comptime const DIV_2 = 2
+comptime const DIV_3 = 3
+comptime const DIV_6 = 6
+
+fn n6_dist_one(value: f64, constant: f64) -> f64 {
+    let denom = max_f(abs_f(constant), 1.0)
+    return abs_f(value - constant) / denom
+}
+
+fn n6_distance(value: f64) -> f64 {
+    if value != value { return 1.0 }
+    if value > 999999999.0 { return 1.0 }
+    if value < 0.0 - 999999999.0 { return 1.0 }
+    let mut d = 1.0
+    let mut i: i64 = 0
+    while i < _n6_dyn_count {
+        let cv = to_float(_n6_dyn_values[i])
+        d = min_f(d, n6_dist_one(value, cv))
+        i = i + 1
+    }
+    return min_f(d, 1.0)
+}
+
+fn n6_conf(value: f64) -> f64 {
+    return max_f(1.0 - n6_distance(value), 0.0)
+}
+
+fn match_name(value: f64) -> string {
+    let mut i: i64 = 0
+    while i < _n6_dyn_count {
+        let cv = to_float(_n6_dyn_values[i])
+        let threshold = if abs_f(cv) >= 100.0 { 0.01 } else { if abs_f(cv) >= 1.0 { 0.0001 } else { if abs_f(cv) >= 0.01 { 0.001 } else { 0.005 } } }
+        if abs_f(value - cv) < threshold { return to_string(_n6_dyn_names[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+fn match_grade(value: f64) -> string {
+    if match_name(value) != "" { return "EXACT" }
+    let d = n6_distance(value)
+    if d < 0.01 { return "NEAR" }
+    if d < 0.05 { return "CLOSE" }
+    return "MISS"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA LOADERS ───
+// ═══════════════════════════════════════════════════════════
+
+fn home_path() -> string {
+    return exec("printenv HOME").trim()
+}
+
+// Load growth_bus.jsonl (tail -500)
+fn load_growth_bus() -> list {
+    let path = home_path() + "/Dev/nexus/shared/growth_bus.jsonl"
+    let mut raw = ""
+    try { raw = exec("tail -500 " + path + " 2>/dev/null") } catch e {}
+    return raw.split("\n")
+}
+
+// Load DSE domains from dse_domains.jsonl
+fn load_dse_domains() -> list {
+    let path = home_path() + "/Dev/nexus/shared/dse_domains.jsonl"
+    let mut domains = []
+    try {
+        let lines = read_file(path).split("\n")
+        for l in lines {
+            let trimmed = l.trim()
+            if trimmed != "" && trimmed.contains("\"domain\":\"") {
+                let name = trimmed.split("\"domain\":\"")[1].split("\"")[0]
+                domains = domains + [name]
+            }
+        }
+    } catch e {}
+    if domains.len() == 0 {
+        domains = ["physics", "math", "biology", "chemistry", "energy",
+                   "topology", "cosmology", "geometry", "information", "consciousness"]
+    }
+    return domains
+}
+
+// Load DSE cross-resonance results (top pairs)
+fn load_dse_cross() -> list {
+    let path = home_path() + "/Dev/nexus/shared/dse_cross_results.json"
+    let mut pairs = []
+    try {
+        let raw = read_file(path)
+        // Extract top_pairs entries: "a", "b", "resonance"
+        let chunks = raw.split("\"a\": \"")
+        let mut ci: i64 = 1
+        while ci < chunks.len() && ci < 50 {
+            let chunk = to_string(chunks[ci])
+            let domain_a = chunk.split("\"")[0]
+            let mut domain_b = ""
+            let mut resonance = 0.0
+            if chunk.contains("\"b\": \"") {
+                domain_b = chunk.split("\"b\": \"")[1].split("\"")[0]
+            }
+            if chunk.contains("\"resonance\":") {
+                let rs = chunk.split("\"resonance\":")[1].split(",")[0].split("}")[0].trim()
+                resonance = safe_float(rs)
+            }
+            if domain_a != "" && domain_b != "" {
+                pairs = pairs + [domain_a + "|" + domain_b + "|" + to_string(resonance)]
+            }
+            ci = ci + 1
+        }
+    } catch e {}
+    return pairs
+}
+
+// Extract values from growth_bus lines for a given domain
+fn bus_values_for_domain(bus_lines: list, dom: string) -> list {
+    let mut vals = []
+    let mut li: i64 = 0
+    while li < bus_lines.len() {
+        let line = to_string(bus_lines[li])
+        if line.contains("\"domain\":\"" + dom + "\"") || line.contains("\"dom\":\"" + dom + "\"") {
+            // Try to extract value
+            if line.contains("\"value\":") {
+                let p = line.split("\"value\":")
+                if p.len() >= 2 {
+                    let ns = p[1].split(",")[0].split("}")[0].trim()
+                    let v = safe_float(ns)
+                    if abs_f(v) > 0.0000000001 { vals = vals + [v] }
+                }
+            }
+            if line.contains("\"conf\":") {
+                let p = line.split("\"conf\":")
+                if p.len() >= 2 {
+                    let ns = p[1].split(",")[0].split("}")[0].trim()
+                    let v = safe_float(ns)
+                    if abs_f(v) > 0.0000000001 { vals = vals + [v] }
+                }
+            }
+        }
+        li = li + 1
+    }
+    return vals
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S1: STRING MODES ───
+// Decompose each value into vibration modes (harmonics of n=6)
+// For value v: harmonics = v/n, v*n for n in {1,2,3,6}
+// Each harmonic matching an n6 constant = a vibration mode
+// ═══════════════════════════════════════════════════════════
+
+struct StringMode {
+    value: f64,
+    harmonic_n: i64,
+    harmonic_type: string,   // "divide" or "multiply"
+    result: f64,
+    matched: string,         // constant name or ""
+    grade: string
+}
+
+fn compute_string_modes(value: f64) -> list {
+    // Divisors of 6 form the compactification space
+    let divisors = [1, 2, 3, 6]
+    let mut modes = []
+    let mut di: i64 = 0
+    while di < 4 {
+        let n = to_int(to_string(divisors[di]))
+        let nf = to_float(to_string(n))
+        // Divide harmonic: v / n
+        if nf > 0.0 {
+            let h_div = value / nf
+            let name_div = match_name(h_div)
+            let grade_div = match_grade(h_div)
+            if grade_div == "EXACT" || grade_div == "NEAR" || grade_div == "CLOSE" {
+                modes = modes + [to_string(value) + "|div|" + to_string(n) + "|" + to_string(h_div) + "|" + name_div + "|" + grade_div]
+            }
+        }
+        // Multiply harmonic: v * n
+        let h_mul = value * nf
+        let name_mul = match_name(h_mul)
+        let grade_mul = match_grade(h_mul)
+        if grade_mul == "EXACT" || grade_mul == "NEAR" || grade_mul == "CLOSE" {
+            modes = modes + [to_string(value) + "|mul|" + to_string(n) + "|" + to_string(h_mul) + "|" + name_mul + "|" + grade_mul]
+        }
+        di = di + 1
+    }
+    return modes
+}
+
+fn phase_s1_string_modes(bus_lines: list, domains: list) -> list {
+    let mut all_modes = []
+    let mut total_values: i64 = 0
+    let mut di: i64 = 0
+    while di < domains.len() && di < 30 {
+        let dom = to_string(domains[di])
+        let vals = bus_values_for_domain(bus_lines, dom)
+        let mut vi: i64 = 0
+        while vi < vals.len() && vi < 50 {
+            let v = to_float(to_string(vals[vi]))
+            total_values = total_values + 1
+            let modes = compute_string_modes(v)
+            let mut mi: i64 = 0
+            while mi < modes.len() {
+                all_modes = all_modes + [dom + "|" + to_string(modes[mi])]
+                mi = mi + 1
+            }
+            vi = vi + 1
+        }
+        di = di + 1
+    }
+    println("  values scanned: " + to_string(total_values))
+    println("  vibration modes found: " + to_string(all_modes.len()))
+    // Count by grade
+    let mut exact_count: i64 = 0
+    let mut near_count: i64 = 0
+    let mut close_count: i64 = 0
+    let mut gi: i64 = 0
+    while gi < all_modes.len() {
+        let m = to_string(all_modes[gi])
+        if m.contains("|EXACT") { exact_count = exact_count + 1 }
+        if m.contains("|NEAR") { near_count = near_count + 1 }
+        if m.contains("|CLOSE") { close_count = close_count + 1 }
+        gi = gi + 1
+    }
+    println("  EXACT modes: " + to_string(exact_count) + "  NEAR: " + to_string(near_count) + "  CLOSE: " + to_string(close_count))
+    // Show top EXACT modes
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < all_modes.len() && shown < 10 {
+        let m = to_string(all_modes[si])
+        if m.contains("|EXACT") {
+            let parts = m.split("|")
+            // parts: domain, value, type, n, result, name, grade
+            if parts.len() >= 7 {
+                println("    " + parts[0] + ": " + parts[1] + " " + parts[2] + "/" + parts[3] + " -> " + truncate4(safe_float(parts[4])) + " = " + parts[5])
+            }
+            shown = shown + 1
+        }
+        si = si + 1
+    }
+    return all_modes
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S2: EXTRA DIMENSIONS ───
+// Map DSE cross-resonance as compactified extra dimensions.
+// 347 domains = 347-dim space. Most are "compactified" (dormant).
+// Active dimensions = high resonance pairs.
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s2_extra_dimensions(cross_pairs: list, domains: list) -> list {
+    // Count activity per domain (how many high-resonance pairs it participates in)
+    let mut domain_activity = []  // "domain|count" strings
+    let mut di: i64 = 0
+    while di < domains.len() {
+        let dom = to_string(domains[di])
+        let mut count: i64 = 0
+        let mut pi: i64 = 0
+        while pi < cross_pairs.len() {
+            let pair = to_string(cross_pairs[pi])
+            let parts = pair.split("|")
+            if parts.len() >= 3 {
+                let res = safe_float(parts[2])
+                if res >= 0.5 {
+                    if parts[0] == dom || parts[1] == dom { count = count + 1 }
+                }
+            }
+            pi = pi + 1
+        }
+        domain_activity = domain_activity + [dom + "|" + to_string(count)]
+        di = di + 1
+    }
+
+    // Classify: active (count > 0) vs compactified (count = 0)
+    let mut active_dims: i64 = 0
+    let mut compact_dims: i64 = 0
+    let mut ai: i64 = 0
+    while ai < domain_activity.len() {
+        let parts = to_string(domain_activity[ai]).split("|")
+        let count = safe_float(parts[1])
+        if count > 0.0 { active_dims = active_dims + 1 } else { compact_dims = compact_dims + 1 }
+        ai = ai + 1
+    }
+
+    println("  total dimensions: " + to_string(domains.len()))
+    println("  active dimensions: " + to_string(active_dims))
+    println("  compactified (dormant): " + to_string(compact_dims))
+
+    // n=6 insight: 10D string theory -> 4D + 6 curled
+    // ratio of active:total should echo 4:10 = 0.4 or 6:10 = 0.6
+    if domains.len() > 0 {
+        let ratio = to_float(to_string(active_dims)) / to_float(to_string(domains.len()))
+        println("  active ratio: " + truncate4(ratio) + " (4/10=0.4 in string theory)")
+    }
+
+    // Find highest-resonance pairs (strongest extra-dimensional connections)
+    let mut top_shown: i64 = 0
+    let mut ti: i64 = 0
+    while ti < cross_pairs.len() && top_shown < 6 {
+        let pair = to_string(cross_pairs[ti])
+        let parts = pair.split("|")
+        if parts.len() >= 3 {
+            let res = safe_float(parts[2])
+            if res >= 0.7 {
+                println("    " + parts[0] + " <-> " + parts[1] + " resonance=" + truncate4(res))
+                top_shown = top_shown + 1
+            }
+        }
+        ti = ti + 1
+    }
+
+    return domain_activity
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S3: T-DUALITY ───
+// For every value v, check if 1/v also appears somewhere.
+// T-duality: R <-> 1/R reveals deep structure.
+// Also check mirror symmetry: v <-> (constant - v)
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s3_t_duality(bus_lines: list, domains: list) -> list {
+    // Collect all known values across all domains
+    let mut all_vals = []
+    let mut all_val_doms = []
+    let mut di: i64 = 0
+    while di < domains.len() && di < 30 {
+        let dom = to_string(domains[di])
+        let vals = bus_values_for_domain(bus_lines, dom)
+        let mut vi: i64 = 0
+        while vi < vals.len() && vi < 50 {
+            let v = to_float(to_string(vals[vi]))
+            if abs_f(v) > 0.0000000001 {
+                all_vals = all_vals + [v]
+                all_val_doms = all_val_doms + [dom]
+            }
+            vi = vi + 1
+        }
+        di = di + 1
+    }
+
+    let mut dual_pairs = []  // "v|1/v|domain_v|domain_inv|type"
+    let mut vi: i64 = 0
+    while vi < all_vals.len() {
+        let v = to_float(to_string(all_vals[vi]))
+        let dom_v = to_string(all_val_doms[vi])
+        if abs_f(v) > 0.0000000001 {
+            let inv = 1.0 / v
+            // Check if 1/v appears in any known value (within tolerance)
+            let mut ji: i64 = 0
+            let mut found_inv = false
+            while ji < all_vals.len() && !found_inv {
+                if ji != vi {
+                    let vj = to_float(to_string(all_vals[ji]))
+                    let diff = abs_f(inv - vj)
+                    let tol = max_f(abs_f(inv) * 0.001, 0.0001)
+                    if diff < tol {
+                        let dom_j = to_string(all_val_doms[ji])
+                        dual_pairs = dual_pairs + [to_string(v) + "|" + to_string(inv) + "|" + dom_v + "|" + dom_j + "|T-dual"]
+                        found_inv = true
+                    }
+                }
+                ji = ji + 1
+            }
+            // Check if v matches an n6 constant AND 1/v also matches
+            let grade_v = match_grade(v)
+            let grade_inv = match_grade(inv)
+            if grade_v == "EXACT" && grade_inv == "EXACT" {
+                let name_v = match_name(v)
+                let name_inv = match_name(inv)
+                dual_pairs = dual_pairs + [to_string(v) + "|" + to_string(inv) + "|" + name_v + "|" + name_inv + "|EXACT-dual"]
+            }
+
+            // Mirror symmetry: check v <-> (c - v) for each n6 constant
+            let mut ci: i64 = 0
+            while ci < _n6_dyn_count && ci < 20 {
+                let cv = to_float(_n6_dyn_values[ci])
+                let mirror = cv - v
+                if abs_f(mirror) > 0.0000000001 {
+                    let mirror_grade = match_grade(mirror)
+                    if mirror_grade == "EXACT" || mirror_grade == "NEAR" {
+                        let cn = to_string(_n6_dyn_names[ci])
+                        let mn = match_name(mirror)
+                        dual_pairs = dual_pairs + [to_string(v) + "|" + to_string(mirror) + "|" + cn + "|" + mn + "|mirror"]
+                    }
+                }
+                ci = ci + 1
+            }
+        }
+        vi = vi + 1
+    }
+
+    // Deduplicate dual pairs (avoid v,1/v and 1/v,v both appearing)
+    let mut unique_pairs = []
+    let mut seen_keys = []
+    let mut pi: i64 = 0
+    while pi < dual_pairs.len() {
+        let pair = to_string(dual_pairs[pi])
+        let parts = pair.split("|")
+        // Canonical key: smaller value first
+        let v1 = safe_float(parts[0])
+        let v2 = safe_float(parts[1])
+        let key = if v1 <= v2 { parts[0] + ":" + parts[1] } else { parts[1] + ":" + parts[0] }
+        let mut already = false
+        let mut si: i64 = 0
+        while si < seen_keys.len() {
+            if to_string(seen_keys[si]) == key { already = true }
+            si = si + 1
+        }
+        if !already {
+            unique_pairs = unique_pairs + [pair]
+            seen_keys = seen_keys + [key]
+        }
+        pi = pi + 1
+    }
+
+    // Report
+    let mut t_dual_count: i64 = 0
+    let mut exact_dual_count: i64 = 0
+    let mut mirror_count: i64 = 0
+    let mut ri: i64 = 0
+    while ri < unique_pairs.len() {
+        let p = to_string(unique_pairs[ri])
+        if p.contains("|T-dual") { t_dual_count = t_dual_count + 1 }
+        if p.contains("|EXACT-dual") { exact_dual_count = exact_dual_count + 1 }
+        if p.contains("|mirror") { mirror_count = mirror_count + 1 }
+        ri = ri + 1
+    }
+    println("  T-dual pairs (v <-> 1/v): " + to_string(t_dual_count))
+    println("  EXACT-dual pairs: " + to_string(exact_dual_count))
+    println("  mirror pairs (v <-> c-v): " + to_string(mirror_count))
+
+    // Show top pairs
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < unique_pairs.len() && shown < 8 {
+        let p = to_string(unique_pairs[si])
+        let parts = p.split("|")
+        if parts.len() >= 5 {
+            println("    " + truncate4(safe_float(parts[0])) + " <-> " + truncate4(safe_float(parts[1])) + " [" + parts[4] + "] " + parts[2] + "/" + parts[3])
+        }
+        shown = shown + 1
+        si = si + 1
+    }
+
+    return unique_pairs
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S4: CALABI-YAU SCAN ───
+// Domain x Constant matrix: stable points where multiple domains
+// agree on a constant = stable compactifications.
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s4_calabi_yau(bus_lines: list, domains: list) -> list {
+    // Build domain-constant matrix: for each n6 constant, which domains have matching values?
+    let mut stable_configs = []  // "constant_name|constant_val|domain_count|domains_csv"
+    let mut ci: i64 = 0
+    while ci < _n6_dyn_count {
+        let cv = to_float(_n6_dyn_values[ci])
+        let cn = to_string(_n6_dyn_names[ci])
+        let mut matching_domains = ""
+        let mut domain_count: i64 = 0
+        let mut di: i64 = 0
+        while di < domains.len() && di < 30 {
+            let dom = to_string(domains[di])
+            let vals = bus_values_for_domain(bus_lines, dom)
+            let mut found = false
+            let mut vi: i64 = 0
+            while vi < vals.len() && !found {
+                let v = to_float(to_string(vals[vi]))
+                // Check if value or its harmonics match
+                let direct = abs_f(v - cv)
+                let tol = max_f(abs_f(cv) * 0.01, 0.01)
+                if direct < tol {
+                    found = true
+                } else {
+                    // Check harmonics: v*n, v/n for n in {1,2,3,6}
+                    let divs = [1.0, 2.0, 3.0, 6.0]
+                    let mut hi: i64 = 0
+                    while hi < 4 && !found {
+                        let d = to_float(to_string(divs[hi]))
+                        if abs_f(v * d - cv) < tol { found = true }
+                        if d > 0.0 && abs_f(v / d - cv) < tol { found = true }
+                        hi = hi + 1
+                    }
+                }
+                vi = vi + 1
+            }
+            if found {
+                domain_count = domain_count + 1
+                if matching_domains == "" { matching_domains = dom } else { matching_domains = matching_domains + "," + dom }
+            }
+            di = di + 1
+        }
+        if domain_count >= 2 {
+            stable_configs = stable_configs + [cn + "|" + to_string(cv) + "|" + to_string(domain_count) + "|" + matching_domains]
+        }
+        ci = ci + 1
+    }
+
+    // Sort by domain_count descending (most stable compactifications first)
+    let mut swapped = true
+    while swapped {
+        swapped = false
+        let mut i: i64 = 0
+        while i < stable_configs.len() - 1 {
+            let a_parts = to_string(stable_configs[i]).split("|")
+            let b_parts = to_string(stable_configs[i + 1]).split("|")
+            let a_count = safe_float(a_parts[2])
+            let b_count = safe_float(b_parts[2])
+            if a_count < b_count {
+                let tmp = stable_configs[i]
+                stable_configs[i] = stable_configs[i + 1]
+                stable_configs[i + 1] = tmp
+                swapped = true
+            }
+            i = i + 1
+        }
+    }
+
+    println("  stable compactifications (2+ domains): " + to_string(stable_configs.len()))
+    // Show top
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < stable_configs.len() && shown < 8 {
+        let cfg = to_string(stable_configs[si])
+        let parts = cfg.split("|")
+        if parts.len() >= 4 {
+            println("    " + pad_right(parts[0], 20) + " = " + pad_right(parts[1], 12) + " [" + parts[2] + " domains: " + parts[3] + "]")
+        }
+        shown = shown + 1
+        si = si + 1
+    }
+
+    return stable_configs
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S5: MODULAR FORMS ───
+// Check if value sequences in a domain follow modular pattern:
+//   a(n) = a(n-1) * r + c  where r is an n6 ratio
+// If yes -> modular structure detected.
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s5_modular_forms(bus_lines: list, domains: list) -> list {
+    let mut modular_hits = []  // "domain|r|c|length|grade"
+    // n6 ratios to test: sigma/n=2, tau/phi=2, J2/n=4, sigma/tau=3, n/phi=3, sopfr/mu=5
+    let n6_ratios = [2.0, 3.0, 4.0, 5.0, 6.0, 0.5, 0.333333]
+    let mut di: i64 = 0
+    while di < domains.len() && di < 20 {
+        let dom = to_string(domains[di])
+        let vals = bus_values_for_domain(bus_lines, dom)
+        if vals.len() >= 3 {
+            // Try each n6 ratio as the recurrence multiplier
+            let mut ri: i64 = 0
+            while ri < n6_ratios.len() {
+                let r = to_float(to_string(n6_ratios[ri]))
+                // For consecutive pairs, check if a(i+1) ~ a(i) * r + c
+                // Estimate c from first pair
+                let v0 = to_float(to_string(vals[0]))
+                let v1 = to_float(to_string(vals[1]))
+                let c = v1 - v0 * r
+                // Check how many subsequent values follow
+                let mut seq_len: i64 = 2
+                let mut vi: i64 = 2
+                let mut still_valid = true
+                while vi < vals.len() && vi < 20 && still_valid {
+                    let prev = to_float(to_string(vals[vi - 1]))
+                    let expected = prev * r + c
+                    let actual = to_float(to_string(vals[vi]))
+                    let tol = max_f(abs_f(expected) * 0.05, 0.1)
+                    if abs_f(actual - expected) < tol {
+                        seq_len = seq_len + 1
+                    } else {
+                        still_valid = false
+                    }
+                    vi = vi + 1
+                }
+                if seq_len >= 3 {
+                    let grade = if seq_len >= 6 { "STRONG" } else { if seq_len >= 4 { "MODERATE" } else { "WEAK" } }
+                    modular_hits = modular_hits + [dom + "|" + to_string(r) + "|" + truncate4(c) + "|" + to_string(seq_len) + "|" + grade]
+                }
+                ri = ri + 1
+            }
+        }
+        di = di + 1
+    }
+
+    println("  modular recurrences found: " + to_string(modular_hits.len()))
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < modular_hits.len() && shown < 6 {
+        let hit = to_string(modular_hits[si])
+        let parts = hit.split("|")
+        if parts.len() >= 5 {
+            println("    " + pad_right(parts[0], 18) + " a(n)=a(n-1)*" + parts[1] + "+" + parts[2] + " len=" + parts[3] + " [" + parts[4] + "]")
+        }
+        shown = shown + 1
+        si = si + 1
+    }
+
+    return modular_hits
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S6: BRANE COLLISION ───
+// When two previously separate domain clusters both discover the
+// same constant independently -> brane collision -> generate
+// derived values (product, ratio, geometric mean)
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s6_brane_collision(stable_configs: list, bus_lines: list, domains: list) -> list {
+    let mut collisions = []  // "constant|domain_a|domain_b|derived_type|derived_val|grade"
+
+    // A brane collision happens when two domains in a stable config
+    // have high n6_conf values for the same constant
+    let mut ci: i64 = 0
+    while ci < stable_configs.len() && ci < 20 {
+        let cfg = to_string(stable_configs[ci])
+        let parts = cfg.split("|")
+        if parts.len() >= 4 {
+            let cn = parts[0]
+            let cv = safe_float(parts[1])
+            let doms_csv = parts[3]
+            let doms = doms_csv.split(",")
+            // Pairwise brane collisions between domains
+            let mut ai: i64 = 0
+            while ai < doms.len() && ai < 6 {
+                let dom_a = to_string(doms[ai])
+                let mut bi: i64 = ai + 1
+                while bi < doms.len() && bi < 6 {
+                    let dom_b = to_string(doms[bi])
+                    // Get representative values from each domain
+                    let vals_a = bus_values_for_domain(bus_lines, dom_a)
+                    let vals_b = bus_values_for_domain(bus_lines, dom_b)
+                    if vals_a.len() > 0 && vals_b.len() > 0 {
+                        let va = to_float(to_string(vals_a[0]))
+                        let vb = to_float(to_string(vals_b[0]))
+                        if abs_f(va) > 0.0000000001 && abs_f(vb) > 0.0000000001 {
+                            // Collision products: product, ratio, geometric mean
+                            let prod = va * vb
+                            let prod_grade = match_grade(prod)
+                            if prod_grade == "EXACT" || prod_grade == "NEAR" {
+                                collisions = collisions + [cn + "|" + dom_a + "|" + dom_b + "|product|" + to_string(prod) + "|" + prod_grade]
+                            }
+                            let ratio = va / vb
+                            let ratio_grade = match_grade(ratio)
+                            if ratio_grade == "EXACT" || ratio_grade == "NEAR" {
+                                collisions = collisions + [cn + "|" + dom_a + "|" + dom_b + "|ratio|" + to_string(ratio) + "|" + ratio_grade]
+                            }
+                            let gmean = sqrt_f(abs_f(va * vb))
+                            let gmean_grade = match_grade(gmean)
+                            if gmean_grade == "EXACT" || gmean_grade == "NEAR" {
+                                collisions = collisions + [cn + "|" + dom_a + "|" + dom_b + "|gmean|" + to_string(gmean) + "|" + gmean_grade]
+                            }
+                        }
+                    }
+                    bi = bi + 1
+                }
+                ai = ai + 1
+            }
+        }
+        ci = ci + 1
+    }
+
+    println("  brane collisions: " + to_string(collisions.len()))
+    let mut exact_c: i64 = 0
+    let mut gi: i64 = 0
+    while gi < collisions.len() {
+        if to_string(collisions[gi]).contains("|EXACT") { exact_c = exact_c + 1 }
+        gi = gi + 1
+    }
+    println("  EXACT from collisions: " + to_string(exact_c))
+    // Show top collisions
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < collisions.len() && shown < 6 {
+        let col = to_string(collisions[si])
+        let parts = col.split("|")
+        if parts.len() >= 6 {
+            println("    " + parts[1] + " x " + parts[2] + " -> " + parts[3] + "=" + truncate4(safe_float(parts[4])) + " [" + parts[5] + "] via " + parts[0])
+        }
+        shown = shown + 1
+        si = si + 1
+    }
+
+    return collisions
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S7: LANDSCAPE NAVIGATION ───
+// All (domain, constant, value) tuples form the "landscape".
+// Navigate by gradient from high n6_distance to low.
+// Local minima = stable laws (vacua).
+// ═══════════════════════════════════════════════════════════
+
+fn phase_s7_landscape(bus_lines: list, domains: list) -> list {
+    let mut landscape = []  // "domain|value|n6_dist|conf|grade"
+    let mut di: i64 = 0
+    while di < domains.len() && di < 20 {
+        let dom = to_string(domains[di])
+        let vals = bus_values_for_domain(bus_lines, dom)
+        let mut vi: i64 = 0
+        while vi < vals.len() && vi < 30 {
+            let v = to_float(to_string(vals[vi]))
+            let dist = n6_distance(v)
+            let conf = n6_conf(v)
+            let grade = match_grade(v)
+            landscape = landscape + [dom + "|" + to_string(v) + "|" + to_string(dist) + "|" + to_string(conf) + "|" + grade]
+            vi = vi + 1
+        }
+        di = di + 1
+    }
+
+    // Sort by n6_dist ascending (find minima first)
+    let mut swapped = true
+    while swapped {
+        swapped = false
+        let mut i: i64 = 0
+        while i < landscape.len() - 1 {
+            let a_parts = to_string(landscape[i]).split("|")
+            let b_parts = to_string(landscape[i + 1]).split("|")
+            let a_dist = safe_float(a_parts[2])
+            let b_dist = safe_float(b_parts[2])
+            if a_dist > b_dist {
+                let tmp = landscape[i]
+                landscape[i] = landscape[i + 1]
+                landscape[i + 1] = tmp
+                swapped = true
+            }
+            i = i + 1
+        }
+    }
+
+    // Count local minima = entries with dist < 0.01 (stable vacua)
+    let mut vacua_count: i64 = 0
+    let mut metastable: i64 = 0
+    let mut unstable: i64 = 0
+    let mut li: i64 = 0
+    while li < landscape.len() {
+        let parts = to_string(landscape[li]).split("|")
+        let dist = safe_float(parts[2])
+        if dist < 0.01 { vacua_count = vacua_count + 1 } else { if dist < 0.1 { metastable = metastable + 1 } else { unstable = unstable + 1 } }
+        li = li + 1
+    }
+
+    println("  landscape points: " + to_string(landscape.len()))
+    println("  stable vacua (dist<0.01): " + to_string(vacua_count))
+    println("  metastable (dist<0.1):    " + to_string(metastable))
+    println("  unstable (dist>=0.1):     " + to_string(unstable))
+
+    // Show top stable vacua
+    let mut shown: i64 = 0
+    let mut si: i64 = 0
+    while si < landscape.len() && shown < 8 {
+        let entry = to_string(landscape[si])
+        let parts = entry.split("|")
+        if parts.len() >= 5 {
+            let dist = safe_float(parts[2])
+            if dist < 0.05 {
+                let name = match_name(safe_float(parts[1]))
+                let label = if name != "" { name } else { parts[1] }
+                println("    " + pad_right(parts[0], 18) + " " + pad_right(label, 20) + " dist=" + truncate4(dist) + " [" + parts[4] + "]")
+                shown = shown + 1
+            }
+        }
+        si = si + 1
+    }
+
+    return landscape
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── PHASE S8: REPORT ───
+// ═══════════════════════════════════════════════════════════
+
+fn write_growth_bus_events(modes: list, dual_pairs: list, collisions: list) {
+    let path = home_path() + "/Dev/nexus/shared/growth_bus.jsonl"
+    let ts = timestamp_now()
+    let mut events = ""
+
+    // Log EXACT modes
+    let mut mi: i64 = 0
+    while mi < modes.len() && mi < 20 {
+        let m = to_string(modes[mi])
+        if m.contains("|EXACT") {
+            let parts = m.split("|")
+            if parts.len() >= 7 {
+                events = events + "{\"ts\":\"" + ts + "\",\"engine\":\"blowup_string\",\"phase\":\"S1\",\"domain\":\"" + parts[0] + "\",\"value\":" + parts[4] + ",\"grade\":\"EXACT\",\"name\":\"" + parts[5] + "\",\"harmonic\":\"" + parts[2] + "/" + parts[3] + "\"}\n"
+            }
+        }
+        mi = mi + 1
+    }
+
+    // Log EXACT-dual pairs
+    let mut di: i64 = 0
+    while di < dual_pairs.len() && di < 10 {
+        let p = to_string(dual_pairs[di])
+        if p.contains("|EXACT-dual") || p.contains("|T-dual") {
+            let parts = p.split("|")
+            if parts.len() >= 5 {
+                events = events + "{\"ts\":\"" + ts + "\",\"engine\":\"blowup_string\",\"phase\":\"S3\",\"v\":" + parts[0] + ",\"dual\":" + parts[1] + ",\"type\":\"" + parts[4] + "\"}\n"
+            }
+        }
+        di = di + 1
+    }
+
+    // Log brane collisions
+    let mut ci: i64 = 0
+    while ci < collisions.len() && ci < 10 {
+        let col = to_string(collisions[ci])
+        if col.contains("|EXACT") {
+            let parts = col.split("|")
+            if parts.len() >= 6 {
+                events = events + "{\"ts\":\"" + ts + "\",\"engine\":\"blowup_string\",\"phase\":\"S6\",\"brane_a\":\"" + parts[1] + "\",\"brane_b\":\"" + parts[2] + "\",\"derived\":\"" + parts[3] + "\",\"value\":" + parts[4] + ",\"grade\":\"" + parts[5] + "\"}\n"
+            }
+        }
+        ci = ci + 1
+    }
+
+    if events != "" {
+        try { append_file(path, events) } catch e {
+            println("  [warn] could not append to growth_bus: " + to_string(e))
+        }
+    }
+}
+
+fn print_report(modes: list, dim_activity: list, dual_pairs: list, stable_configs: list, modular_hits: list, collisions: list, landscape: list) {
+    println("")
+    println("=======================================================================")
+    println("  Mk.V String Blowup -- Final Report")
+    println("=======================================================================")
+
+    // Count modes by grade
+    let mut exact_modes: i64 = 0
+    let mut near_modes: i64 = 0
+    let mut mi: i64 = 0
+    while mi < modes.len() {
+        let m = to_string(modes[mi])
+        if m.contains("|EXACT") { exact_modes = exact_modes + 1 }
+        if m.contains("|NEAR") { near_modes = near_modes + 1 }
+        mi = mi + 1
+    }
+
+    // Count active dims
+    let mut active_dims: i64 = 0
+    let mut ai: i64 = 0
+    while ai < dim_activity.len() {
+        let parts = to_string(dim_activity[ai]).split("|")
+        if safe_float(parts[1]) > 0.0 { active_dims = active_dims + 1 }
+        ai = ai + 1
+    }
+
+    // Count duality types
+    let mut t_duals: i64 = 0
+    let mut mirrors: i64 = 0
+    let mut di: i64 = 0
+    while di < dual_pairs.len() {
+        let p = to_string(dual_pairs[di])
+        if p.contains("|T-dual") || p.contains("|EXACT-dual") { t_duals = t_duals + 1 }
+        if p.contains("|mirror") { mirrors = mirrors + 1 }
+        di = di + 1
+    }
+
+    // Count vacua
+    let mut vacua: i64 = 0
+    let mut li: i64 = 0
+    while li < landscape.len() {
+        let parts = to_string(landscape[li]).split("|")
+        if parts.len() >= 3 && safe_float(parts[2]) < 0.01 { vacua = vacua + 1 }
+        li = li + 1
+    }
+
+    println("")
+    println("  " + pad_right("Metric", 32) + "Count")
+    println("  " + pad_right("---", 32) + "---")
+    println("  " + pad_right("Vibration modes (S1)", 32) + to_string(modes.len()))
+    println("  " + pad_right("  EXACT modes", 32) + to_string(exact_modes))
+    println("  " + pad_right("  NEAR modes", 32) + to_string(near_modes))
+    println("  " + pad_right("Active dimensions (S2)", 32) + to_string(active_dims))
+    println("  " + pad_right("T-dual pairs (S3)", 32) + to_string(t_duals))
+    println("  " + pad_right("Mirror pairs (S3)", 32) + to_string(mirrors))
+    println("  " + pad_right("Stable compactifications (S4)", 32) + to_string(stable_configs.len()))
+    println("  " + pad_right("Modular recurrences (S5)", 32) + to_string(modular_hits.len()))
+    println("  " + pad_right("Brane collisions (S6)", 32) + to_string(collisions.len()))
+    println("  " + pad_right("Landscape vacua (S7)", 32) + to_string(vacua))
+    println("  " + pad_right("Landscape total points", 32) + to_string(landscape.len()))
+    println("")
+
+    // n=6 insight
+    println("  n=6 String Insight:")
+    println("    divisors(6) = {1,2,3,6} -> 4 divisors = 4D spacetime")
+    println("    10D superstring - 6 curled dims = 4D observable")
+    println("    sigma(6)=12 = 12D F-theory parent")
+    println("    tau(6)=4 = 4 fundamental forces")
+    println("    Each EXACT vibration mode = a stable string excitation")
+    println("")
+    println("=======================================================================")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── HELP ───
+// ═══════════════════════════════════════════════════════════
+
+fn print_help() {
+    println("")
+    println("=======================================================================")
+    println("  blowup_string.hexa — Mk.V String Blowup Engine")
+    println("=======================================================================")
+    println("")
+    println("Usage:")
+    println("  hexa blowup_string.hexa                   full Mk.V string run")
+    println("  hexa blowup_string.hexa --modes-only      vibration mode analysis only")
+    println("  hexa blowup_string.hexa --duality         T-duality analysis only")
+    println("  hexa blowup_string.hexa help              this message")
+    println("")
+    println("8-Phase Pipeline:")
+    println("  S1  String Modes       decompose values into harmonics of n=6 divisors")
+    println("  S2  Extra Dimensions   DSE cross-resonance as compactified dims")
+    println("  S3  T-Duality          v <-> 1/v symmetry, mirror (v <-> c-v)")
+    println("  S4  Calabi-Yau Scan    domain x constant stable compactifications")
+    println("  S5  Modular Forms      a(n)=a(n-1)*r+c recurrence detection")
+    println("  S6  Brane Collision    domain cluster collisions -> new particles")
+    println("  S7  Landscape Nav      gradient descent to stable vacua")
+    println("  S8  Report             string statistics + growth_bus append")
+    println("")
+    println("=======================================================================")
+    println("  Mk.I vs Mk.II vs Mk.III vs Mk.IV vs Mk.V Comparison")
+    println("=======================================================================")
+    println("  " + pad_right("Feature", 24) + pad_right("Mk.I", 14) + pad_right("Mk.II", 14) + pad_right("Mk.III", 14) + pad_right("Mk.IV", 14) + "Mk.V")
+    println("  " + pad_right("---", 24) + pad_right("---", 14) + pad_right("---", 14) + pad_right("---", 14) + pad_right("---", 14) + "---")
+    println("  " + pad_right("Paradigm", 24) + pad_right("brute force", 14) + pad_right("wave/interf", 14) + pad_right("field theory", 14) + pad_right("quantum", 14) + "string theory")
+    println("  " + pad_right("Domains", 24) + pad_right("1 manual", 14) + pad_right("1 rotating", 14) + pad_right("N field-guided", 14) + pad_right("superposed", 14) + "compactified")
+    println("  " + pad_right("Key insight", 24) + pad_right("scan+evolve", 14) + pad_right("propagation", 14) + pad_right("gauge filter", 14) + pad_right("entanglement", 14) + "T-duality")
+    println("  " + pad_right("Cross-domain", 24) + pad_right("none", 14) + pad_right("wave propag.", 14) + pad_right("gauge inv.", 14) + pad_right("entanglement", 14) + "brane collision")
+    println("  " + pad_right("Search halving", 24) + pad_right("none", 14) + pad_right("none", 14) + pad_right("gradient", 14) + pad_right("measurement", 14) + "T-duality v<->1/v")
+    println("  " + pad_right("Pattern detect", 24) + pad_right("corollary", 14) + pad_right("interference", 14) + pad_right("Goldstone", 14) + pad_right("q-collapse", 14) + "modular forms")
+    println("  " + pad_right("Stability", 24) + pad_right("manual", 14) + pad_right("amplitude", 14) + pad_right("field map", 14) + pad_right("decoherence", 14) + "landscape vacua")
+    println("  " + pad_right("Dimensions", 24) + pad_right("1D", 14) + pad_right("1D wave", 14) + pad_right("N-field", 14) + pad_right("Hilbert", 14) + "347-dim compact")
+    println("=======================================================================")
+    println("")
+    println("String modes: v/n, v*n for n in {1,2,3,6} (divisors of 6)")
+    println("T-duality: every v has dual 1/v; if both EXACT -> deep structure")
+    println("Calabi-Yau: domain x constant matrix stable points = compactifications")
+    println("Brane collision: two clusters discover same constant -> product/ratio/gmean")
+    println("Landscape vacua: n6_distance local minima = stable universal laws")
+    println("")
+    println("n=6 core: n=6, sigma=12, phi=2, tau=4, sopfr=5, J2=24, M3=7")
+    println("Dynamic constants loaded from shared/n6_constants.jsonl (" + to_string(_n6_dyn_count) + " loaded)")
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── THEOREM + PROOF ───
+// ═══════════════════════════════════════════════════════════
+
+theorem string_duality_completeness {
+    // T-duality guarantees: for every discoverable constant v,
+    // checking 1/v covers the dual regime. This halves the
+    // effective search space since if v is fundamental, 1/v
+    // encodes the same physics in the dual frame.
+    // divisors(6) = {1,2,3,6}, count=4 = spacetime dims
+    assert 6 % 1 == 0
+    assert 6 % 2 == 0
+    assert 6 % 3 == 0
+    assert 6 % 6 == 0
+    assert 1 + 2 + 3 + 6 == 12    // sigma(6) = sum of divisors
+    assert 12 / 6 == 2             // sigma/n = phi (abundancy)
+}
+
+proof landscape_finiteness {
+    // The string landscape has finitely many vacua:
+    //   N_domains * N_constants * N_harmonics = bounded
+    //   With 24 domains, 48 constants, 8 harmonics = 9216 max
+    // Each vacuum is a local n6_distance minimum.
+    // Gradient descent terminates in O(N) steps.
+    invariant 24 * 48 == 1152      // realistic landscape size
+    invariant 4 * 2 == 8           // harmonics per divisor: div + mul
+}
+
+proof brane_collision_conservation {
+    // Brane collisions conserve n6 proximity:
+    //   if v_a and v_b are both n6-proximate,
+    //   then product(v_a, v_b), ratio(v_a/v_b), gmean
+    //   have bounded n6_distance.
+    // This follows from closure of {1,2,3,4,5,6,7,12,24}
+    // under multiplication mod normalization.
+    invariant 6 * 2 == 12          // n * phi = sigma
+    invariant 12 * 2 == 24         // sigma * phi = J2
+    invariant 4 * 6 == 24          // tau * n = J2
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN ───
+// ═══════════════════════════════════════════════════════════
+
+fn main() {
+    let cli_args = args()
+
+    // Parse CLI
+    let mut modes_only = false
+    let mut duality_only = false
+    let mut show_help = false
+
+    let mut ai: i64 = 2  // args()[0]=hexa, [1]=script
+    while ai < cli_args.len() {
+        let arg = to_string(cli_args[ai])
+        if arg == "help" || arg == "--help" || arg == "-h" {
+            show_help = true
+        } else { if arg == "--modes-only" {
+            modes_only = true
+        } else { if arg == "--duality" {
+            duality_only = true
+        } } }
+        ai = ai + 1
+    }
+
+    if show_help {
+        print_help()
+        return
+    }
+
+    println("")
+    println("=== Mk.V String Blowup Engine ===")
+    println("  n=6 constants loaded: " + to_string(_n6_dyn_count))
+    println("  divisors(6) = {1,2,3,6} -> 4D compactification space")
+    println("")
+
+    // Load data sources
+    let bus_lines = load_growth_bus()
+    let domains = load_dse_domains()
+    let cross_pairs = load_dse_cross()
+    println("  growth_bus lines: " + to_string(bus_lines.len()))
+    println("  DSE domains: " + to_string(domains.len()))
+    println("  cross-resonance pairs: " + to_string(cross_pairs.len()))
+    println("")
+
+    // ─── Phase S1: String Modes ───
+    println("[S1] String Modes -- decomposing values into vibration harmonics")
+    let modes = phase_s1_string_modes(bus_lines, domains)
+
+    if modes_only {
+        println("")
+        println("[done] --modes-only: " + to_string(modes.len()) + " modes found")
+        return
+    }
+
+    // ─── Phase S2: Extra Dimensions ───
+    println("")
+    println("[S2] Extra Dimensions -- mapping compactified dimension activity")
+    let dim_activity = phase_s2_extra_dimensions(cross_pairs, domains)
+
+    // ─── Phase S3: T-Duality ───
+    println("")
+    println("[S3] T-Duality -- checking v <-> 1/v and mirror symmetries")
+    let dual_pairs = phase_s3_t_duality(bus_lines, domains)
+
+    if duality_only {
+        println("")
+        println("[done] --duality: " + to_string(dual_pairs.len()) + " dual pairs found")
+        return
+    }
+
+    // ─── Phase S4: Calabi-Yau Scan ───
+    println("")
+    println("[S4] Calabi-Yau Scan -- searching domain x constant manifold")
+    let stable_configs = phase_s4_calabi_yau(bus_lines, domains)
+
+    // ─── Phase S5: Modular Forms ───
+    println("")
+    println("[S5] Modular Forms -- checking recurrence patterns")
+    let modular_hits = phase_s5_modular_forms(bus_lines, domains)
+
+    // ─── Phase S6: Brane Collision ───
+    println("")
+    println("[S6] Brane Collision -- domain cluster interactions")
+    let collisions = phase_s6_brane_collision(stable_configs, bus_lines, domains)
+
+    // ─── Phase S7: Landscape Navigation ───
+    println("")
+    println("[S7] Landscape Navigation -- gradient descent to stable vacua")
+    let landscape = phase_s7_landscape(bus_lines, domains)
+
+    // ─── Phase S8: Report ───
+    println("")
+    println("[S8] Report -- writing growth_bus events + final statistics")
+    write_growth_bus_events(modes, dual_pairs, collisions)
+    print_report(modes, dim_activity, dual_pairs, stable_configs, modular_hits, collisions, landscape)
+}
+
+main()

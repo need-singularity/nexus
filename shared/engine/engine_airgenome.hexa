@@ -1,0 +1,560 @@
+// engine_airgenome.hexa — "Archaeologist" (고고학자) 엔진
+// airgenome 프로젝트: L6e 돌파, 게놈 1000+ 축적
+// 사용: hexa engine_airgenome.hexa status|tick|report
+
+// ═══════════════════════════════════════════════════════════
+// ─── CONSTANTS ───
+// ═══════════════════════════════════════════════════════════
+
+comptime const version = "1.0.0"
+comptime const project = "airgenome"
+comptime const personality = "Archaeologist"
+comptime const goal = "L6e 돌파, 게놈 1000+ 축적"
+
+let home = exec("printenv HOME")
+let dev = home + "/Dev"
+let project_dir = dev + "/airgenome"
+let genomes_index = project_dir + "/forge/genomes.index.jsonl"
+let genomes_dir = project_dir + "/forge/genomes"
+let sampling_log = project_dir + "/genomes.log"
+let forge_state = project_dir + "/forge/state.json"
+let bus_file = dev + "/nexus/shared/growth_bus.jsonl"
+let state_path = dev + "/nexus/shared/engine_airgenome_state.json"
+
+comptime const genome_goal = 1000
+comptime const intensive_threshold = 100
+comptime const sampling_rounds_default = 1
+comptime const sampling_rounds_intensive = 5
+
+// ═══════════════════════════════════════════════════════════
+// ─── UTILITIES ───
+// ═══════════════════════════════════════════════════════════
+
+fn safe_float(s: string) -> f64 {
+    let mut v = 0.0
+    try { v = to_float(s) } catch e {}
+    return v
+}
+
+fn safe_int(s: string) -> i64 {
+    let mut v: i64 = 0
+    try { v = to_int(s.trim()) } catch e {}
+    return v
+}
+
+fn abs_f(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+fn max_f(a: f64, b: f64) -> f64 {
+    if a > b { return a }
+    return b
+}
+
+fn min_f(a: f64, b: f64) -> f64 {
+    if a < b { return a }
+    return b
+}
+
+fn clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+fn timestamp() -> string {
+    let r = exec("date +%Y-%m-%dT%H:%M:%S")
+    r.trim()
+}
+
+fn file_exists_check(path: string) -> bool {
+    let mut r = ""
+    try { r = to_string(exec("test -f " + path + " && echo 1")) } catch e {}
+    r.trim() == "1"
+}
+
+fn dir_exists_check(path: string) -> bool {
+    let mut r = ""
+    try { r = to_string(exec("test -d " + path + " && echo 1")) } catch e {}
+    r.trim() == "1"
+}
+
+fn read_file_safe(path: string) -> string {
+    if !file_exists_check(path) { return "" }
+    try { return read_file(path) } catch e { return "" }
+}
+
+// ─── JSON field extraction ───
+
+fn json_float(content: string, field: string) -> f64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0.0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0.0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_float(val_str)
+}
+
+fn json_int(content: string, field: string) -> i64 {
+    let marker = "\"" + field + "\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return 0 }
+    let after = parts[1]
+    let colon_parts = after.split(":")
+    if colon_parts.len() < 2 { return 0 }
+    let val_str = colon_parts[1].split(",")[0].split("}")[0].split("]")[0].trim()
+    return safe_int(val_str)
+}
+
+fn json_str(content: string, field: string) -> string {
+    let marker = "\"" + field + "\":\""
+    let parts = content.split(marker)
+    if parts.len() < 2 { return "" }
+    let rest = parts[1]
+    let end = rest.split("\"")
+    if end.len() < 1 { return "" }
+    return end[0]
+}
+
+// ─── Growth bus ───
+
+fn append_bus(phase: string, status: string, detail: string) {
+    let ts = timestamp()
+    let line = "{\"source\":\"" + project + "\",\"timestamp\":\"" + ts + "\",\"phase\":\"" + phase + "\",\"status\":\"" + status + "\",\"detail\":\"" + detail + "\"}"
+    try { append_file(bus_file, line + "\n") } catch e {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── DATA COLLECTION ───
+// ═══════════════════════════════════════════════════════════
+
+struct ForgeState {
+    active: bool,
+    pid: i64,
+    last_scan: string
+}
+
+struct Metrics {
+    genome_count: i64,
+    forge_active: bool,
+    forge_pid: i64,
+    last_scan: string,
+    genome_rate: f64,      // genomes per tick (from evolve)
+    project_exists: bool
+}
+
+fn count_genomes() -> i64 {
+    // Primary: count .genome files in forge/genomes/
+    if dir_exists_check(genomes_dir) {
+        let mut result = "0"
+        try {
+            result = exec("bash -c 'ls " + genomes_dir + "/*.genome 2>/dev/null | wc -l'")
+        } catch e {}
+        let n = safe_int(result.trim())
+        if n > 0 { return n }
+    }
+    // Fallback: count lines in index jsonl
+    if file_exists_check(genomes_index) {
+        let mut result = "0"
+        try {
+            result = exec("bash -c 'wc -l < " + genomes_index + "'")
+        } catch e {}
+        let n = safe_int(result.trim())
+        if n > 0 { return n }
+    }
+    return 0
+}
+
+fn read_forge_state() -> ForgeState {
+    let content = read_file_safe(forge_state)
+    if content == "" { return ForgeState { active: false, pid: 0, last_scan: "" } }
+
+    let active_str = json_str(content, "active")
+    let active = active_str == "true" || content.contains("\"active\": true") || content.contains("\"active\":true")
+    let pid = json_int(content, "pid")
+    let last_scan = json_str(content, "last_scan")
+
+    return ForgeState { active: active, pid: pid, last_scan: last_scan }
+}
+
+fn check_forge_alive(pid: i64) -> bool {
+    if pid <= 0 { return false }
+    let mut result = ""
+    try {
+        exec("bash -c kill -0 " + to_string(pid) + " 2>/dev/null && echo 1 || echo 0")
+    } catch e {
+        "0"
+    }
+    return result.trim() == "1"
+}
+
+fn collect_metrics() -> Metrics {
+    let proj_exists = dir_exists_check(project_dir)
+    if !proj_exists {
+        return Metrics {
+            genome_count: 0,
+            forge_active: false,
+            forge_pid: 0,
+            last_scan: "",
+            genome_rate: 0.0,
+            project_exists: false
+        }
+    }
+
+    let genomes = count_genomes()
+    let forge = read_forge_state()
+    let forge_active = forge.active
+    let forge_pid = forge.pid
+    let last_scan = forge.last_scan
+
+    // Verify pid is actually alive
+    let actually_active = if forge_active { check_forge_alive(forge_pid) } else { false }
+
+    Metrics {
+        genome_count: genomes,
+        forge_active: actually_active,
+        forge_pid: forge_pid,
+        last_scan: last_scan,
+        genome_rate: 0.0,
+        project_exists: true
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── HEALTH CALCULATION ───
+// ═══════════════════════════════════════════════════════════
+
+fn calc_health(m: Metrics) -> f64 {
+    if !m.project_exists { return 0.0 }
+
+    // 50% genome progress toward 1000
+    let genome_ratio = clamp01(to_float(m.genome_count) / to_float(genome_goal))
+    let genome_score = genome_ratio * 0.50
+
+    // 20% forge daemon alive
+    let forge_score = if m.forge_active { 0.20 } else { 0.05 }
+
+    // 15% recent scan activity (have any scans happened?)
+    let scan_score = if m.last_scan.len() > 0 { 0.15 } else { 0.0 }
+
+    // 15% growth rate (need evolve data)
+    let rate_score = clamp01(m.genome_rate / 10.0) * 0.15
+
+    return clamp01(genome_score + forge_score + scan_score + rate_score)
+}
+
+fn classify(m: Metrics, health: f64) -> string {
+    if !m.project_exists { return "STAGNANT" }
+    if m.genome_count >= genome_goal { return "GOAL_NEAR" }
+    if m.genome_count >= to_int(to_float(genome_goal) * 0.9) { return "GOAL_NEAR" }
+    if health >= 0.7 { return "BREAKTHROUGH" }
+    if health >= 0.3 { return "HEALTHY" }
+    return "STAGNANT"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── EVOLVE — Track genome growth rate ───
+// ═══════════════════════════════════════════════════════════
+
+struct PrevState {
+    genomes: i64,
+    rate: f64
+}
+
+fn load_prev_state() -> PrevState {
+    let content = read_file_safe(state_path)
+    if content == "" { return PrevState { genomes: 0, rate: 0.0 } }
+    let prev_genomes = json_int(content, "genome_count")
+    let prev_rate = json_float(content, "genome_rate")
+    return PrevState { genomes: prev_genomes, rate: prev_rate }
+}
+
+fn save_state(m: Metrics, health: f64, rate: f64) {
+    let content = "{\n" + "  \"genome_count\": " + to_string(m.genome_count) + ",\n" + "  \"forge_active\": " + if m.forge_active { "true" } else { "false" } + ",\n" + "  \"forge_pid\": " + to_string(m.forge_pid) + ",\n" + "  \"genome_rate\": " + to_string(rate) + ",\n" + "  \"health\": " + to_string(health) + ",\n" + "  \"timestamp\": \"" + timestamp() + "\"\n" + "}\n"
+    try {
+        result = exec("bash -c cat > " + state_path + " << 'JSONEOF'\n" + content + "JSONEOF")
+    } catch e {}
+}
+
+struct EvolveResult {
+    rate: f64,
+    report: string
+}
+
+fn calc_evolve(m: Metrics) -> EvolveResult {
+    let prev = load_prev_state()
+    let prev_genomes = prev.genomes
+    let prev_rate = prev.rate
+
+    let delta = m.genome_count - prev_genomes
+    // Exponential moving average for rate
+    let new_rate = if prev_rate > 0.0 {
+        prev_rate * 0.7 + to_float(delta) * 0.3
+    } else {
+        to_float(delta)
+    }
+
+    let mut report = "evolve:"
+    if delta > 0 {
+        report = report + " genomes+" + to_string(delta) + " (rate=" + to_string(new_rate) + "/tick)"
+    } else if delta == 0 {
+        report = report + " genomes=stale (rate=" + to_string(new_rate) + "/tick)"
+    } else {
+        report = report + " genomes" + to_string(delta) + " (shrink!)"
+    }
+
+    let remaining = genome_goal - m.genome_count
+    if new_rate > 0.1 {
+        let eta = to_float(remaining) / new_rate
+        report = report + " ETA~" + to_string(eta) + " ticks"
+    }
+
+    return EvolveResult { rate: new_rate, report: report }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── TICK ACTIONS ───
+// ═══════════════════════════════════════════════════════════
+
+fn do_ps_sampling(rounds: i64) {
+    // Sample running processes and append genome entries
+    let mut i: i64 = 0
+    while i < rounds {
+        let sample = try {
+            exec("bash -c cd " + project_dir + " && ps aux 2>/dev/null | head -20 | awk '{print $3, $4, $11}' | head -10")
+        } catch e {
+            ""
+        }
+
+        if sample.len() > 0 {
+            let ts = timestamp()
+            let lines = sample.split("\n")
+            let mut j = 0
+            while j < lines.len() {
+                let line = lines[j].trim()
+                if line.len() > 3 {
+                    let entry = ts + " | round=" + to_string(i) + " | " + line
+                    try { append_file(sampling_log, entry + "\n") } catch e {}
+                }
+                j = j + 1
+            }
+        }
+        i = i + 1
+    }
+}
+
+fn tick_goal_near(m: Metrics) {
+    println("[TICK] goal NEAR — " + to_string(m.genome_count) + "/" + to_string(genome_goal) + " genomes")
+    append_bus("tick", "goal_near", to_string(m.genome_count) + " genomes")
+
+    // Pattern analysis on accumulated genomes
+    println("  Running pattern analysis on genome corpus...")
+    let analysis = try {
+        exec("bash -c cd " + project_dir + " && wc -l " + sampling_log + " && sort " + sampling_log + " | uniq -c | sort -rn | head -10")
+    } catch e {
+        "analysis error"
+    }
+    let lines = analysis.split("\n")
+    let mut i = 0
+    while i < lines.len() {
+        if lines[i].len() > 0 {
+            println("    " + lines[i])
+        }
+        i = i + 1
+    }
+
+    // Still do one sampling round to keep growing
+    do_ps_sampling(1)
+}
+
+fn tick_intensive(m: Metrics) {
+    println("[TICK] Intensive sampling — genomes=" + to_string(m.genome_count) + " (<" + to_string(intensive_threshold) + ")")
+    append_bus("tick", "intensive", to_string(m.genome_count) + " genomes, " + to_string(sampling_rounds_intensive) + " rounds")
+
+    // Multiple sampling rounds to accelerate
+    do_ps_sampling(sampling_rounds_intensive)
+
+    let new_count = count_genomes()
+    let gained = new_count - m.genome_count
+    println("  sampled " + to_string(sampling_rounds_intensive) + " rounds, gained " + to_string(gained) + " genomes (now " + to_string(new_count) + ")")
+}
+
+fn tick_default(m: Metrics) {
+    println("[TICK] Default sampling — genomes=" + to_string(m.genome_count))
+    append_bus("tick", "default", to_string(m.genome_count) + " genomes")
+
+    // Adaptive: increase rounds if rate is low
+    let prev = load_prev_state()
+    let prev_rate = prev.rate
+    let rounds = if prev_rate < 2.0 { 3 } else { sampling_rounds_default }
+
+    do_ps_sampling(rounds)
+
+    let new_count = count_genomes()
+    let gained = new_count - m.genome_count
+    println("  sampled " + to_string(rounds) + " rounds, gained " + to_string(gained) + " genomes (now " + to_string(new_count) + ")")
+}
+
+fn tick_check_forge(m: Metrics) {
+    if !m.forge_active {
+        println("  [INFO] Forge daemon not active (pid=" + to_string(m.forge_pid) + ")")
+        // Check if forge script exists
+        let forge_script = project_dir + "/forge/run.sh"
+        if file_exists_check(forge_script) {
+            println("  [INFO] Forge script found at " + forge_script)
+            println("  [INFO] Consider starting forge daemon for continuous genome collection")
+        }
+    } else {
+        println("  [INFO] Forge daemon alive (pid=" + to_string(m.forge_pid) + ", last_scan=" + m.last_scan + ")")
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── CLI MODES ───
+// ═══════════════════════════════════════════════════════════
+
+fn mode_status() {
+    let m = collect_metrics()
+    let health = calc_health(m)
+    let class = classify(m, health)
+
+    println("═══ " + personality + " Engine [" + project + "] v" + version + " ═══")
+    println("project: " + project_dir)
+    println("goal: " + goal)
+    println("")
+    println("genomes: " + to_string(m.genome_count) + "/" + to_string(genome_goal))
+    let pct = if genome_goal > 0 { to_float(m.genome_count) * 100.0 / to_float(genome_goal) } else { 0.0 }
+    println("progress: " + to_string(pct) + "%")
+    println("forge_active: " + if m.forge_active { "true (pid=" + to_string(m.forge_pid) + ")" } else { "false" })
+    println("last_scan: " + if m.last_scan.len() > 0 { m.last_scan } else { "never" })
+    println("")
+    println("health:" + to_string(health))
+    println(class)
+    println("")
+
+    let evo = calc_evolve(m)
+    println(evo.report)
+}
+
+fn mode_tick() {
+    println("═══ " + personality + " Tick — " + timestamp() + " ═══")
+
+    let m = collect_metrics()
+
+    if !m.project_exists {
+        println("[ERROR] Project directory not found: " + project_dir)
+        println("health:0.00")
+        println("STAGNANT")
+        append_bus("tick", "error", "project dir missing")
+        return
+    }
+
+    let health = calc_health(m)
+    let class = classify(m, health)
+
+    println("status: " + class + " (health:" + to_string(health) + ")")
+    println("genomes: " + to_string(m.genome_count) + "/" + to_string(genome_goal))
+    println("forge: " + if m.forge_active { "active" } else { "inactive" })
+    println("")
+
+    // Dispatch based on genome count
+    if m.genome_count >= genome_goal {
+        tick_goal_near(m)
+    } else if m.genome_count < intensive_threshold {
+        tick_intensive(m)
+    } else {
+        tick_default(m)
+    }
+
+    // Forge daemon check
+    println("")
+    tick_check_forge(m)
+
+    // Evolve tracking
+    let evo = calc_evolve(m)
+    let rate = evo.rate
+    println("")
+    println(evo.report)
+    save_state(m, health, rate)
+
+    // Bus record
+    append_bus("tick", class, "h=" + to_string(health) + " g=" + to_string(m.genome_count) + " r=" + to_string(rate))
+    println("")
+    println("health:" + to_string(health))
+    println(class)
+}
+
+fn mode_report() {
+    let m = collect_metrics()
+    let health = calc_health(m)
+    let class = classify(m, health)
+    let evo = calc_evolve(m)
+    let rate = evo.rate
+
+    println("# " + personality + " Engine Report")
+    println("## " + timestamp())
+    println("")
+    println("| Metric | Value | Target | Progress |")
+    println("|--------|-------|--------|----------|")
+
+    let genome_pct = if genome_goal > 0 { to_float(m.genome_count) * 100.0 / to_float(genome_goal) } else { 0.0 }
+    println("| Genomes | " + to_string(m.genome_count) + " | " + to_string(genome_goal) + " | " + to_string(genome_pct) + "% |")
+    println("| Forge | " + if m.forge_active { "active" } else { "inactive" } + " | active | " + if m.forge_active { "OK" } else { "DOWN" } + " |")
+    println("| Rate | " + to_string(rate) + "/tick | 10/tick | " + to_string(clamp01(rate / 10.0) * 100.0) + "% |")
+    println("")
+    println("**Status**: " + class)
+    println("**Health**: " + to_string(health))
+    println("**" + evo.report + "**")
+    println("")
+
+    // ETA calculation
+    let remaining = genome_goal - m.genome_count
+    if remaining > 0 && rate > 0.1 {
+        let eta = to_float(remaining) / rate
+        println("**ETA to goal**: ~" + to_string(eta) + " ticks (" + to_string(remaining) + " genomes remaining)")
+    } else if remaining <= 0 {
+        println("**goal REACHED** — genome count exceeds target!")
+    } else {
+        println("**ETA**: unknown (rate too low)")
+    }
+    println("")
+
+    // Recommendations
+    println("## Recommendations")
+    if !m.project_exists {
+        println("- CRITICAL: Project directory missing at " + project_dir)
+        return
+    }
+    if !m.forge_active {
+        println("- Start forge daemon for continuous genome collection")
+    }
+    if m.genome_count < intensive_threshold {
+        println("- Genome count critically low — intensive sampling active")
+    }
+    if m.genome_count >= to_int(to_float(genome_goal) * 0.9) {
+        println("- Near goal! Focus on L6e pattern analysis in accumulated genomes")
+    }
+    if rate < 1.0 {
+        println("- Growth rate low — consider increasing sampling frequency")
+    } else if rate >= 10.0 {
+        println("- Growth rate excellent — maintain current strategy")
+    }
+}
+
+// ─── MAIN ───
+
+let a = args()
+let mode = if a.len() >= 3 { a[2] } else { "status" }
+
+if mode == "status" { mode_status() }
+if mode == "tick" { mode_tick() }
+if mode == "report" { mode_report() }
+if mode == "help" {
+    println("engine_airgenome.hexa — Archaeologist (고고학자)")
+    println("  status  — 현재 상태 + health 출력")
+    println("  tick    — 틱 실행 (게놈 수집 + 분석)")
+    println("  report  — 마크다운 리포트")
+}
