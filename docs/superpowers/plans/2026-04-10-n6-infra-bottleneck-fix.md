@@ -66,7 +66,7 @@ SYNC_FILES=(
   "growth_bus.jsonl"
   "infra_state.json"
   "dse_cross_results.json"
-  "n6_mirror/"
+  "n6/docs/"
   "convergence/"
 )
 
@@ -121,7 +121,7 @@ WATCH_PATHS=(
   "$SHARED/reality_map_live.json"
   "$SHARED/growth_bus.jsonl"
   "$SHARED/dse_cross_results.json"
-  "$SHARED/n6_mirror"
+  "$SHARED/n6/docs"
 )
 
 echo "[watch-remote] monitoring ${#WATCH_PATHS[@]} paths → sync-remote $TARGET"

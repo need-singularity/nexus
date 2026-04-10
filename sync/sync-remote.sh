@@ -30,7 +30,7 @@ SYNC_FILES=(
   "growth_bus.jsonl"
   "infra_state.json"
   "dse_cross_results.json"
-  "n6_mirror/"
+  "n6/docs/"
   "convergence/"
 )
 
