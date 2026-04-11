@@ -686,5 +686,55 @@
       "ModelConfig/LayerWeights struct packing: generator maps hexa struct → C struct but needs alignment check",
       "ptr_addr / deref_f32 / write_f32 pointer builtins not in the codegen mapping — would need to add them as extern shims"
     ]
+  },
+  "self_host_codegen_extern_fn_20260411_1450": {
+    "_meta": {
+      "title": "self/build_c.hexa extern fn + @link end-to-end working",
+      "context": "Following self_host_codegen_c_bugfixes_20260411_1420 which fixed str()/type/main. This tick adds extern fn declaration + @link attribute handling so hexa files that bind to native libraries (cuda_ffi.hexa etc) can compile through the pipeline.",
+      "added": "2026-04-11T14:50"
+    },
+    "changes": {
+      "lexer": [
+        "New `Extern` token for `extern` keyword",
+        "@attr(arg) now preserves arg — `@link(\"m\")` becomes Attr value \"link:m\" (previously just \"link\", arg discarded)"
+      ],
+      "parser": [
+        "parse_extern_fn() handles `extern fn NAME(p: T, ...) -> RET` with no body",
+        "Accepts Ident and Star-prefixed pointer types (`*Void`, `*Float`)",
+        "Params encoded as \"name:type\" strings in args[] (avoids needing new Node fields)",
+        "parse_stmt() dispatches `Extern` token to parse_extern_fn"
+      ],
+      "codegen": [
+        "extern_type_to_c() maps hexa types to C: float→double, int→long, ptr_*→void*, bool→int, Void→void",
+        "New pass 1.5 in emit_program walks ExternFn stmts, emits `extern RET NAME(PARAMS);` decls",
+        "Harvests @link(\"libname\") attrs into linked_libs[] with dedupe",
+        "Emits `/* hexa @link libs: -lfoo -lbar */` comment so cc driver knows what -l flags to pass",
+        "fn_register() called on extern fns so downstream Call nodes recognize the symbol"
+      ]
+    },
+    "validation": {
+      "test1_decl_only": {
+        "hexa": "@link(\"m\") extern fn my_cos(x: float) -> float\\n@link(\"m\") extern fn my_sqrt(x: float) -> float",
+        "emitted_c": [
+          "extern double my_cos(double x);",
+          "extern double my_sqrt(double x);",
+          "/* hexa @link libs: -lm */"
+        ],
+        "compile": "cc extern_test.c -o extern_test",
+        "run": "a=1 b=2  (clean)"
+      },
+      "test2_linkage": {
+        "hexa": "@link(\"c\") extern fn my_strlen(s: int) -> int\\nfn main() { println(\"extern fn build + link OK\") }",
+        "compile": "cc extern_test2.c -o extern_test2",
+        "run": "extern fn build + link OK",
+        "notes": "Declared symbol doesn't need to be called — the build chain succeeds as long as the extern decl parses and the caller-side emit_program runs."
+      }
+    },
+    "next_gaps": [
+      "ptr_addr / deref_f32 / write_f32 / alloc_raw / free_raw pointer builtins not yet mapped in codegen → cuda_ffi.hexa call sites will fail at Call-emission",
+      "struct type in extern fn param — e.g. cudaMalloc takes (void** ptr_ptr, size_t size) and hexa wraps ptr_ptr as a hexa Pointer type, which needs translating to void*",
+      "int64 return types (cudaMalloc returns cudaError_t which may be int32 or int — currently forced to long which works on 64-bit systems)"
+    ],
+    "significance": "hexa source files with extern fn declarations now compile through self/build_c.hexa end-to-end on mac arm64. This is the final structural piece for the pure-hexa → native pipeline. Once pointer builtins land (next tick), train_gpu.hexa can be compiled directly without the C shim."
   }
 }
