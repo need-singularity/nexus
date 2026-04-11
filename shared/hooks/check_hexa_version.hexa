@@ -9,14 +9,14 @@ let lock_file = home + "/Dev/hexa-lang/.hexa_building"
 // 바이너리 존재 확인
 let bin_check = to_string(exec("test -f " + hexa_bin + " && echo yes || echo no")).trim()
 if bin_check == "no" {
-  print("[❌ hexa 바이너리 없음] 자동 빌드 시작...")
-  exec("cd " + hexa_src + " && cargo build --release &")
+  print("[❌ hexa 바이너리 없음] 자동 self-host 빌드 시작...")
+  exec("cd " + hexa_src + " && hexa build_hexa.hexa &")
 } else {
   // 이미 빌드 중이면 스킵
   let building = to_string(exec("test -f " + lock_file + " && echo yes || echo no")).trim()
   if building == "yes" {
     // 빌드 프로세스가 실제로 살아있는지 확인
-    let alive = to_string(exec("pgrep -f 'cargo build.*hexa-lang' > /dev/null 2>&1 && echo yes || echo no")).trim()
+    let alive = to_string(exec("pgrep -f 'build_hexa.hexa' > /dev/null 2>&1 && echo yes || echo no")).trim()
     if alive == "no" {
       // 프로세스 죽었으면 lock 제거
       exec("rm -f " + lock_file)
@@ -37,9 +37,9 @@ if bin_check == "no" {
         let src_date = to_string(exec("date -r " + src_time + " '+%m/%d %H:%M'")).trim()
         let src_msg = to_string(exec("git -C " + hexa_src + " log -1 --format=%s")).trim()
         print("[⚠️ hexa 구버전] " + bin_date + " → " + src_date + " (" + src_msg + ")")
-        print("[🔨 자동 빌드 시작] cargo build --release (백그라운드)")
+        print("[🔨 자동 self-host 빌드 시작] hexa build_hexa.hexa (백그라운드)")
         // lock 생성 + 백그라운드 빌드 + 완료 시 lock 제거
-        exec("touch " + lock_file + " && (cd " + hexa_src + " && cargo build --release && touch " + hexa_bin + " && rm -f " + lock_file + " && echo '[✅ hexa 빌드 완료]' >> /tmp/hexa_build.log) &")
+        exec("touch " + lock_file + " && (cd " + hexa_src + " && hexa build_hexa.hexa && touch " + hexa_bin + " && rm -f " + lock_file + " && echo '[✅ hexa 빌드 완료]' >> /tmp/hexa_build.log) &")
       }
     }
   }

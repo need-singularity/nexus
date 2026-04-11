@@ -1,6 +1,6 @@
 // hexa-only-guard.hexa — PreToolUse:Write|Edit hook
 // .py/.rs/.sh/.js/.ts 파일 생성/편집 감지 → hexa-only + AI-native 유도
-// 예외: 기존 파일 수정(포팅 중), Cargo.toml, build.rs 등 빌드 필수 파일
+// R1 hexa-only 원칙: 예외 없음 (hexa.toml 만 유일 빌드 매니페스트)
 
 let HEXA_BIN = env("HOME") + "/Dev/nexus/shared/scripts/bin/hexa"
 
@@ -10,7 +10,7 @@ fn ai_native_hint(ext: str) -> str {
         return "@memoize(캐싱), @optimize(알고리즘 교체), @parallel(GIL 없는 병렬), @symbolic(sympy→내장), @approximate(numpy→내장 tensor)"
     }
     if ext == "rs" {
-        return "@inline/@hot(LLVM 힌트 불필요), @memoize(HashMap 보일러플레이트 제거), @simd(intrinsics→자동), @bounded(언롤링)"
+        return "@inline/@hot, @memoize, @simd, @bounded — hexa native @attr 전용 (Rust 전면 금지)"
     }
     if ext == "sh" {
         return "@parallel(xargs/GNU parallel→내장), exec()(외부 명령), file_exists/read_file/write_file(내장 I/O)"
@@ -37,12 +37,6 @@ fn blocked_ext(path: str) -> str {
 }
 
 fn is_exception(path: str) -> bool {
-    // 빌드 필수 파일
-    if path.ends_with("build.rs") { return true }
-    if path.ends_with("Cargo.toml") { return true }
-    if path.ends_with("Cargo.lock") { return true }
-    // hexa-lang 자체 src/ (Rust 구현체)
-    if path.contains("/hexa-lang/src/") { return true }
     // 기존 .growth/ 스캐너 (레거시 허용)
     if path.contains("/.growth/") { return true }
     // hook 자체

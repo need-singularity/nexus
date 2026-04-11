@@ -97,13 +97,13 @@ Physical constants grouped by smallest prime set:
 
 singularity-*: tick, daemon, backfill, convergence, query, frontier,
 bridges, rebuild-edges, resonance, seed, viz
-Plus: closed-find (Rust closer.rs port)
+Plus: closed-find (hexa-native closer.hexa)
 
-### Rust Modules (13 total)
+### hexa Modules (13 total) — hexa-native only
 
-`src/singularity_recursion/`:
+`mk2_hexa/native/singularity_recursion/`:
 - airgenome_runner, analysis, backfill, boundary, closer, budget,
-  embedding, preflight, tick, topology, wal, watcher, mod
+  embedding, preflight, tick, topology, wal, watcher, main
 
 All tests pass (46+ unit tests, 3 integration tests).
 

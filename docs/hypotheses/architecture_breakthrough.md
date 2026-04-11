@@ -136,12 +136,12 @@ telescope/ →
 1. [ ] 유령층 감사 확정 (본 문서로 완료)
 2. [ ] `git tag pre-ghost-purge` + 5 모듈 삭제 (4.3K LOC)
 3. [ ] telescope 분열 설계 세부 작성 (별도 문서)
-4. [ ] verifier semver lock (Cargo.toml + CHANGELOG)
+4. [ ] verifier semver lock (hexa.toml + CHANGELOG)
 5. [ ] integration → event 마이그레이션 (점진적)
 
 ## 검증 가능 예측
 
-- **P1**: telescope 분열 후 `cargo build` 시간 -40% 이상
-- **P2**: 유령층 삭제 후 `cargo test --all` 통과 (참조 0건이므로)
+- **P1**: telescope 분열 후 `hexa build_hexa.hexa` 시간 -40% 이상
+- **P2**: 유령층 삭제 후 `hexa tests/run.hexa` 통과 (참조 0건이므로)
 - **P3**: verifier fanin은 분열 후에도 증가 추세 유지 (안정 핵 가설)
 - **P4**: 전체 LOC의 핵:엔진:실험 비율이 1:φ⁻¹:remainder에 근접

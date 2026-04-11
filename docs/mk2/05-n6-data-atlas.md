@@ -1,6 +1,6 @@
 # 05 — n=6 데이터 아틀라스 (Data Atlas)
 
-> 작성: 2026-04-06 | 소스: `shared/n6/atlas.n6`, `shared/discovery/math_atlas.json`, `shared/discovery/alien/alien_index_distribution.json`, `src/mk2/compat.rs`
+> 작성: 2026-04-06 | 소스: `shared/n6/atlas.n6`, `shared/discovery/math_atlas.json`, `shared/discovery/alien/alien_index_distribution.json`, `mk2_hexa/native/constants.hexa`
 
 ---
 
@@ -121,7 +121,7 @@
 
 ## 3. 물리 상수 매핑 테이블
 
-> n=6 닫힌 대수의 물리 상수 매핑. 각 공식은 `src/mk2/compat.rs`의 `generate_table()` 구현 기준.
+> n=6 닫힌 대수의 물리 상수 매핑. 각 공식은 `mk2_hexa/native/constants.hexa`의 `generate_table()` 구현 기준.
 
 ### 3.1 정밀 매핑 (오차 < 0.1%)
 
@@ -293,5 +293,4 @@
 | `shared/n6/math_atlas.db` | SQLite 쿼리용 |
 | `shared/discovery/alien/alien_index_distribution.json` | AI 분포 현황 |
 | `shared/bridge_state.json` | 브릿지 상태 |
-| `src/mk2/compat.rs` | n6 상수 테이블 구현 (generate_table) |
-| `mk2_hexa/native/constants.hexa` | HEXA 네이티브 상수 정의 |
+| `mk2_hexa/native/constants.hexa` | HEXA 네이티브 상수 정의 + generate_table |
