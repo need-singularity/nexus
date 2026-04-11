@@ -196,8 +196,22 @@
       },
       "fix": {
         "approach": "hash-index env_lookup cache (64-bucket) — env_lookup/define/set 을 O(1) 로 변경. self/interpreter.hexa 에 이미 구현.",
-        "status": "RUST_REBUILD_PATH_OPEN_AGENT_14_IN_PROGRESS",
-        "note": "Rust binary 는 아직 구버전. Agent 14 가 Rust src 복구 + cargo rebuild 경로를 개척 중. Stage 1~3 완료, Stage 4(패치 적용) 진행 중."
+        "status": "HEXA_ONLY_FIX_APPLIED_FORWARD_DEPLOYING",
+        "note": "Rust binary 는 아직 구버전. Agent 16 이 hexa-only 경로로 self/type_checker.hexa 에 fn_cache 를 추가하여 근본 병목을 고침 (commit 73386ae). self-host build chain 이 Rust binary 를 대체할 때 활성화됨."
+      },
+      "agent_16_hexa_only_fix": {
+        "date": "2026-04-11",
+        "commit": "73386ae",
+        "repo": "~/Dev/hexa-lang",
+        "file": "self/type_checker.hexa",
+        "function": "tc_lookup_fn_arity / tc_lookup_fn_ret",
+        "diff_size": "+58 / -6",
+        "approach": "64-bucket char-sum hash cache fn_cache mirroring fn_names list",
+        "pattern_source": "isomorphic to interpreter.hexa env_cache (commit 5c0669b)",
+        "validation_method": "read-only structural cross-check + manual trace through bench_contains_chain_scale.hexa call pattern + impact-zero on test_type_checker_full.hexa / test_generics_typecheck.hexa public API",
+        "expected_improvement": "O(N²M) → O(NM) for direct fn call type-check; bench_contains_chain_scale.hexa ratio 6.67x → ~1.0",
+        "live_status": "FORWARD_DEPLOYING — current target/release/hexa is Rust-built and does not execute self/type_checker.hexa. Activates when self-host build replaces the binary.",
+        "secondary_suspect_remaining": "type_checker.hexa:164-174 tc_lookup scope_names linear scan (lower priority than fn_names path)"
       },
       "agent_8_bisect_complete": {
         "summary": "NO single trigger fn — cumulative O(N²) compile cost in type inference",
@@ -236,7 +250,8 @@
         "Agent 6 (hexa_v2 grammar gap) — parse_visibility() exists at parser.hexa:2422 but never called by parse_let/parse_fn_decl; hexa_v2 emits broken C silently on interpreter.hexa (105 parse errors)",
         "Agent 7 (alt runtime) — no viable alternative binary: all paths → same 5.8MB Rust binary (04-11 07:56); homebrew 0.2.0 too old (no `#{}`); airgenome wrappers pass-through; no backup binaries",
         "Agent 10 (hexa_v2.5 bootstrap) — hexa_v2 lacks pub let mut so cannot compile parser.hexa; Rust interpreter is interpreter-only (no transpile flag) and impractically slow on >100KB files; `use self::X` resolver bug",
-        "Agent 11 (build_c.hexa alt) — 4052-line real transpiler but Rust host chokes (lexer.hexa 24KB OOM at 136s, interpreter.hexa 319KB timeout); host bottleneck not transpiler bottleneck"
+        "Agent 11 (build_c.hexa alt) — 4052-line real transpiler but Rust host chokes (lexer.hexa 24KB OOM at 136s, interpreter.hexa 319KB timeout); host bottleneck not transpiler bottleneck",
+        "Agent 14 Rust rebuild path — abandoned per user directive 완전 hexa-only 로 포팅"
       ],
       "validation": {
         "must_pass": [
