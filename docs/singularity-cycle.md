@@ -18,7 +18,7 @@
 
 | | hexa-lang (원본) | nexus (하이브리드) |
 |---|---|---|
-| 파일 | `src/singularity.rs` | `src/blowup/cycle_engine.rs` |
+| 파일 | `self/singularity.hexa` | `shared/blowup/core/cycle_engine.hexa` |
 | 입력 | 메트릭 (key-value) | 메트릭 + 공리 |
 | Blowup | n6_check (17상수) | n6_check + BlowupEngine (공리 교란) |
 | Contraction | EXACT≥0.95 / CLOSE≥0.8 | 동일 |

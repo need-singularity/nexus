@@ -159,13 +159,11 @@ Grows as classifier encounters new n.
 ## Dependencies
 
 ```toml
-# Cargo.toml (mk2 additions)
-serde = "1"
-serde_json = "1"
-# Internal only; no new external deps.
+# hexa.toml (mk2 — hexa-native)
+# hexa.toml 에 dependencies 섹션 없음 — stdlib only, Rust-free
 ```
 
-**Intentional**: mk2 depends only on `serde` and stdlib. No BigInt, no external math libraries. This keeps binary size small and compile time fast.
+**Intentional**: mk2 depends only on hexa stdlib. No BigInt, no external math libraries. This keeps binary size small and compile time fast.
 
 ## Performance budget
 
