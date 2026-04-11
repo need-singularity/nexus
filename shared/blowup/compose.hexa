@@ -162,7 +162,13 @@ if !skip_core {
     println("")
     println("--- STAGE 1: core blowup.hexa ---")
     let mut core_cmd = _env_prefix + "'" + _HEXA_BIN + "' '" + _BLOWUP_CORE + "' '" + domain + "' '" + depth + "'"
-    if fast_flag { core_cmd = core_cmd + " --fast" }
+    // --fast + --dfs 상호 배타: fast_mode는 Phase 8 스킵 → wave_targets 미생성 → DFS silent fail
+    if fast_flag && dfs_depth > 0 {
+        println("  [WARN] --fast + --dfs 상호 배타 — --fast 해제하여 DFS 실행 보장")
+        // fast 해제, dfs 우선
+    } else if fast_flag {
+        core_cmd = core_cmd + " --fast"
+    }
     if dfs_depth > 0 { core_cmd = core_cmd + " --dfs " + to_string(dfs_depth) }
     println("  cmd: " + core_cmd)
     try {
