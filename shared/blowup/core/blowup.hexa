@@ -1848,6 +1848,91 @@ println("")
 try { arena_reset() } catch e {}  // AI-native: Phase 3 임시 메모리 해제
 
 // ═══════════════════════════════════════════════════════════
+// STREAM FILTER — inline (hexa import 미지원, 별도 파일 불가)
+// AG5: raw TSV corollary → compact byte 재인코딩 (lossless)
+// ═══════════════════════════════════════════════════════════
+
+fn _sf_type_enum(t: str) -> str {
+    if t == "deduction" { return "d" }
+    if t == "transfer" { return "t" }
+    if t == "symbreak" { return "s" }
+    if t == "bifurc" { return "b" }
+    if t == "projection" { return "p" }
+    if t == "dual" { return "u" }
+    if t == "compose" { return "c" }
+    if t == "recursive" { return "r" }
+    return "x"
+}
+
+fn _sf_enum_type(e: str) -> str {
+    if e == "d" { return "deduction" }
+    if e == "t" { return "transfer" }
+    if e == "s" { return "symbreak" }
+    if e == "b" { return "bifurc" }
+    if e == "p" { return "projection" }
+    if e == "u" { return "dual" }
+    if e == "c" { return "compose" }
+    if e == "r" { return "recursive" }
+    return e
+}
+
+fn _sf_encode(tsv: str) -> str {
+    let p = tsv.split("\t")
+    if len(p) < 7 { return tsv }
+    let mut ci: i64 = 0
+    try { ci = to_int(to_float(p[3]) * 1000.0) } catch e {}
+    return p[0] + ":" + _sf_type_enum(p[1]) + ":" + p[2] + ":" + to_string(ci) + ":" + p[4] + ":" + p[5] + ":" + p[6]
+}
+
+fn _sf_decode(compact: str) -> str {
+    let p = compact.split(":")
+    if len(p) < 7 { return compact }
+    let mut cf: f64 = 0.0
+    try { cf = to_float(p[3]) / 1000.0 } catch e {}
+    return p[0] + "\t" + _sf_enum_type(p[1]) + "\t" + p[2] + "\t" + to_string(cf) + "\t" + p[4] + "\t" + p[5] + "\t" + p[6]
+}
+
+fn filter_flush(lines: list, path: str) -> i64 {
+    let mut buf = ""
+    let mut i: i64 = 0
+    let mut count: i64 = 0
+    while i < len(lines) {
+        buf = buf + _sf_encode(to_string(lines[i])) + "\n"
+        count = count + 1
+        i = i + 1
+    }
+    // hexa 내장 write/append — shell 특수문자 문제 없음
+    if len(buf) > 0 {
+        if file_exists(path) {
+            try { append_file(path, buf) } catch e {
+                println("  [FILTER] append fail: " + to_string(e))
+            }
+        } else {
+            try { write_file(path, buf) } catch e {
+                println("  [FILTER] write fail: " + to_string(e))
+            }
+        }
+    }
+    return count
+}
+
+fn filter_load(path: str) -> list {
+    let mut result = []
+    if file_exists(path) == false { return result }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut i: i64 = 0
+    while i < len(lines) {
+        let l = lines[i].trim()
+        if len(l) > 3 {
+            result = result + [_sf_decode(l)]
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// ═══════════════════════════════════════════════════════════
 // PHASE 4: Recursive Blowup Corollary Generation (7 types)
 // ═══════════════════════════════════════════════════════════
 
@@ -2354,7 +2439,7 @@ while depth < max_depth {
 
     // STREAM FILTER: depth별 compact 인코딩 → 디스크 flush → 메모리 해제
     // AG5 filter: raw TSV bytes → compact byte 재인코딩 (16x 압축)
-    let _cf_path = "/tmp/blowup_d" + to_string(depth) + "_" + to_string(exec("echo $$").trim()) + ".cf"
+    let _cf_path = "/tmp/blowup_d" + to_string(depth) + "_" + domain + ".cf"
     let _cf_count = filter_flush(buf_lines, _cf_path)
     println("  [FILTER] depth " + to_string(depth) + ": " + to_string(_cf_count) + " lines → " + _cf_path)
     // 메모리 해제 — buf_lines 를 비워 GC 대상으로
@@ -2383,10 +2468,9 @@ try { arena_reset() } catch e {}  // AI-native: Phase 4 임시 메모리 해제 
 
 // STREAM FILTER: 전 depth compact 파일에서 buf_lines 복원 (Phase 5/6 에서 필요)
 // 각 depth 파일 순차 로드 → 메모리 부담 = 1 depth 분량만
-let _pid_s = exec("echo $$").trim()
 let mut _d_reload: i64 = 0
 while _d_reload <= max_depth {
-    let _cf_reload_path = "/tmp/blowup_d" + to_string(_d_reload) + "_" + _pid_s + ".cf"
+    let _cf_reload_path = "/tmp/blowup_d" + to_string(_d_reload) + "_" + domain + ".cf"
     let _reloaded = filter_load(_cf_reload_path)
     let mut _ri: i64 = 0
     while _ri < len(_reloaded) {
