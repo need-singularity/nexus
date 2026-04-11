@@ -111,21 +111,21 @@ topology 대량 유입으로 ρ가 0.55 → 0.21로 하강. 1/3 밴드(0.30-0.36
 
 ## 🔜 Phase 5: mk2_hexa 네이티브 통합
 
-`mk2_hexa/native/` 11개 .hexa 파일 → Rust 코드와 동기화:
+`mk2_hexa/native/` 11개 .hexa 파일 — 전면 hexa-native 구현:
 
-| hexa 파일 | Rust 대응 | 상태 |
-|-----------|----------|------|
-| absorb.hexa | alien_index promote | 매핑 필요 |
-| classify.hexa | classify_v2.rs | 매핑 필요 |
-| cycle.hexa | CycleEngine | 매핑 필요 |
-| gate.hexa | breakthrough gate | 매핑 필요 |
-| grading.hexa | alien_index r판정 | 매핑 필요 |
-| pure_math.hexa | mk2/primes.rs | 매핑 필요 |
-| theorems.hexa | 정리 검증 | 매핑 필요 |
-| record.hexa | record.rs | 매핑 필요 |
-| constants.hexa | n6_check | 매핑 필요 |
-| effects.hexa | side effects | 매핑 필요 |
-| architecture.hexa | mod.rs | 매핑 필요 |
+| hexa 파일 | 기능 | 상태 |
+|-----------|------|------|
+| absorb.hexa | alien_index promote | ✅ |
+| classify.hexa | 3-signal classifier | ✅ |
+| cycle.hexa | CycleEngine | ✅ |
+| gate.hexa | 12-gate 매트릭스 | ✅ |
+| grading.hexa | alien_index r 판정 | ✅ |
+| pure_math.hexa | 수론 함수 | ✅ |
+| theorems.hexa | 정리 검증 | ✅ |
+| record.hexa | 레코드 구조 | ✅ |
+| constants.hexa | n=6 상수 | ✅ |
+| effects.hexa | algebraic effect | ✅ |
+| architecture.hexa | 통합 엔진 구조 | ✅ |
 
 ---
 
@@ -151,7 +151,7 @@ topology 대량 유입으로 ρ가 0.55 → 0.21로 하강. 1/3 밴드(0.30-0.36
 
 ## 구현 도구
 
-### hexa-native (Rust/Python 의존 0) — PRIMARY
+### hexa-native (R1 HEXA-ONLY) — PRIMARY, 유일 경로
 
 | 파일 | 용도 | 상태 |
 |------|------|------|
@@ -168,15 +168,6 @@ topology 대량 유입으로 ρ가 0.55 → 0.21로 하강. 1/3 밴드(0.30-0.36
 | `mk2_hexa/native/theorems.hexa` | BT-344/345/346 정리 | ✅ |
 | `mk2_hexa/native/effects.hexa` | algebraic effect | ✅ |
 | `mk2_hexa/native/architecture.hexa` | 통합 엔진 구조 | ✅ |
-
-### legacy (Rust/Python — fallback only)
-
-| 파일 | 용도 | 상태 |
-|------|------|------|
-| `src/mk2/*.rs` | Rust CLI (레거시) | ⚠️ fallback |
-| `src/alien_index/*.rs` | Rust alien index | ⚠️ fallback |
-| `tools/mk2_full_absorb.py` | Python 일괄 흡수 | ⚠️ fallback |
-| `hooks/nexus-mk2-engine.py` | Python 훅 | ⚠️ fallback |
 
 ---
 

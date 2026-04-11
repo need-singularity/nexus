@@ -15,7 +15,7 @@ ssh hetzner   # Mac에서 (root@157.180.8.154)
 - **Network**: 1Gbit 무제한
 
 ## 설치 완료
-- Python 3.12.3, PyTorch 2.11.0+cpu
+- hexa self-host binary (/usr/local/bin/hexa), clang
 - git, htop, tmux, build-essential
 
 ## 프로젝트별 활용
@@ -32,7 +32,7 @@ ssh hetzner   # Mac에서 (root@157.180.8.154)
 - 경로: git clone 후 /home/nexus/
 
 ### hexa-lang
-- Rust 빌드 (16코어 병렬 `cargo build -j 32`)
+- hexa self-host 빌드 (`hexa build_hexa.hexa`, 16코어 병렬)
 - 테스트 (128GB로 대규모 테스트 가능)
 - 경로: git clone 후 /home/hexa-lang/
 
