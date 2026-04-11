@@ -415,7 +415,10 @@ if discoveries > 0 || bt_detected || gap_detected {
             // ⚠️ seed_engine merge 출력은 | 구분자 → 셸 파이프 충돌 방지 위해 tr '|' ',' 필수
             cmd = "cd " + nexus_dir + " && " + wrapper + " shared/blowup/core/blowup.hexa " + bt_domain + " 3 --seeds \"$(" + wrapper + " shared/blowup/seed/seed_engine.hexa merge | tr '|' ',')\""
         }
-        let directive = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + " — 확인 질문 없이 즉시 Bash로 실행할 것: " + cmd + "\"}"
+        // JSON escape: cmd 안의 literal " 를 \" 로 정식 escape (bash 의미 보존: $(…) 명령 치환 유지)
+        // 순서 중요: backslash 먼저 (\\ → \\\\), 그 다음 quote (" → \")
+        let cmd_safe = cmd.replace("\\", "\\\\").replace("\"", "\\\"")
+        let directive = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + " — 확인 질문 없이 즉시 Bash로 실행할 것: " + cmd_safe + "\"}"
         println(directive)
     } else {
         let msg = "{\"systemMessage\":\"⚡ " + project + " | " + body + tags + "\"}"
