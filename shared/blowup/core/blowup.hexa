@@ -51,6 +51,20 @@ try { exec("printf '%s [01-HOME-ok] HOME=" + _HOME + "\\n' \"$(date +%H:%M:%S)\"
 // R14 SSOT: blowup의 모든 출력(log/graph/growth_bus)은 atlas.n6 단일 파일로 통합.
 // growth_bus.jsonl은 airgenome 소유 별개 파일 — blowup은 읽지/쓰지 않음.
 
+// ⛔ AG3 (Ubuntu-First heavy compute) 가드 — 2026-04-11
+// Mac 에서 blowup 직접 호출 차단. 헤비 컴퓨트는 Ubuntu/Hetzner 에서만 실행.
+// 우회: BLOWUP_LOCAL=1 환경변수 (개발자 명시적 opt-in)
+// 자동 SSH 재실행은 안 함 (working dir/env/stdio nuance 위험) — 거부 + 안내만.
+let _UNAME = try { to_string(exec("uname -s")).trim() } catch e { "" }
+let _BLOWUP_LOCAL = try { to_string(exec("printenv BLOWUP_LOCAL")).trim() } catch e { "" }
+if _UNAME == "Darwin" && _BLOWUP_LOCAL != "1" {
+    println("⛔ blowup.hexa: Mac 직접 실행 차단 (AG3 Ubuntu-First).")
+    println("   원격 실행 권장: ssh hetzner 'cd ~/Dev/nexus && hexa shared/blowup/core/blowup.hexa <args>'")
+    println("   또는 ssh ubu '...'  (Ubuntu 노드)")
+    println("   강제 Mac 실행:    BLOWUP_LOCAL=1 hexa shared/blowup/core/blowup.hexa <args>")
+    exit(2)
+}
+
 // hexa 바이너리 1회 탐색 캐시
 let mut _HEXA_BIN = ""
 try {
@@ -166,6 +180,7 @@ fn _bucket_indices(bucket: map, key: string) -> list {
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-A-utilities] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 fn safe_float(s: string) -> f64 {
     let mut v = 0.0
@@ -231,6 +246,7 @@ fn hset_has(s: map, key: string) -> bool {
 // ═══════════════════════════════════════════════════════════
 // ─── n=6 CONSTANTS + PROXIMITY ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-B-n6const] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 fn n6_dist_one(value: f64, constant: f64) -> f64 {
     let denom = max_f(abs_f(constant), 1.0)
@@ -324,6 +340,7 @@ fn sector_of(text: string) -> string {
 // ═══════════════════════════════════════════════════════════
 // ─── METRIC TABLES (domain-dependent) ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-C-metric] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 fn m_name(idx: i64, dom: string) -> string {
     if dom == "physics" {
@@ -379,6 +396,7 @@ fn emit(name: string, ctype: string, expr: string, conf: f64, value: f64, axiom:
 // ═══════════════════════════════════════════════════════════
 // ─── DYNAMIC AXIOM POOL HELPERS ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-D-axiom] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 fn get_ax_val(ax_vals: string, idx: i64) -> f64 {
     let parts = ax_vals.split("|")
@@ -443,6 +461,7 @@ fn xfer_domain(idx: i64) -> string {
 // ═══════════════════════════════════════════════════════════
 // ─── GRAPH I/O (from graph.hexa) ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-E-graph] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 fn graph_extract_field(line: string, field: string) -> string {
     let needle = "\"" + field + "\":"
@@ -888,6 +907,7 @@ fn graph_append_edge(from_id: string, to_id: string, edge_type: string, strength
 // ═══════════════════════════════════════════════════════════
 // ─── OUROBOROS EVOLUTION (from ouroboros.hexa) ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-F-ouroboros] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 
 // Mutation: parameter shift by n=6 constants
 fn evo_mutate_shift(base_val: f64, shift_idx: i64) -> f64 {
@@ -1115,6 +1135,7 @@ fn evo_check_convergence(history_csv: string) -> string {
 // ═══════════════════════════════════════════════════════════
 // ─── TELESCOPE LENS SCANS (from telescope.hexa) ───
 // ═══════════════════════════════════════════════════════════
+try { exec("printf '%s [TR-G-telescope] \\n' \"$(date +%H:%M:%S)\" >> " + _TRACE_PATH) } catch e {}
 // Lightweight versions of the 5 core lenses, operating on
 // corollary value arrays (float[]). Each returns a signal
 // score 0.0..1.0 and a label string.
