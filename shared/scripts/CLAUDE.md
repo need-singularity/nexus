@@ -1,12 +1,14 @@
-# scripts/ — 공용 bash 스크립트 + bin
+# scripts/ — 공용 .hexa 스크립트 + bin (R1 HEXA-FIRST)
 
-sync:
-  sync-calculators.sh sync-claude-rules.sh sync-dse.sh
-  sync-math-atlas.sh sync-nexus-lenses.sh sync-readmes.sh
-  sync-all-verify.md
+sync (R1 migrated .sh → .hexa):
+  sync_claude_md.hexa   sync_settings.hexa
+  sync-calculators.hexa sync-claude-rules.hexa sync-dse.hexa
+  sync-math-atlas.hexa  sync-nexus-lenses.hexa sync-readmes.hexa
+  sync-all-verify.md    (doc)
 
-run: nexus_ensure_running.sh
+run: nexus_ensure_running.hexa
 
 bin/: 실행 심볼릭 링크 디렉토리
+  hexa: hexa 바이너리 resolver (R1 예외 — bootstrap bash, hexa 를 찾기 전에 실행)
 
 parent: ../CLAUDE.md → "scripts"
