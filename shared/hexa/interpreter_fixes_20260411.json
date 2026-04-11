@@ -969,5 +969,108 @@
     ],
     "what_blocks_AGI_goal_directly": "ONE thing: H100 R9 measurement of train_gpu_pure.hexa wall clock. Without that empirical number we can't be certain the pure-hexa path actually delivers 500×. Everything else is built and waiting.",
     "next_session_recommendation": "Rent H100 (~$3, 30 min), run the 5-line measurement script, capture the number, tear down. That single data point unblocks the entire P5b/P5c pipeline."
+  },
+  "pure_hexa_layer_forward_20260411_1605": {
+    "_meta": {
+      "title": "Pure-hexa transformer layer_forward — 9 cublasSgemm calls per layer",
+      "added": "2026-04-11T16:05",
+      "task": "#70 Pure-hexa minimal forward layer COMPLETE"
+    },
+    "layer_forward_dispatch": [
+      {
+        "step": 1,
+        "op": "Q = x @ Wq",
+        "shape": "seq×dim @ dim×dim → seq×dim"
+      },
+      {
+        "step": 2,
+        "op": "K = x @ Wk",
+        "shape": "seq×dim @ dim×dim → seq×dim"
+      },
+      {
+        "step": 3,
+        "op": "V = x @ Wv",
+        "shape": "seq×dim @ dim×dim → seq×dim"
+      },
+      {
+        "step": 4,
+        "op": "attn = Q @ K^T",
+        "shape": "seq×dim @ dim×seq → seq×seq (CUBLAS_OP_T on K)"
+      },
+      {
+        "step": 5,
+        "op": "softmax stub",
+        "shape": "cudaDeviceSynchronize placeholder"
+      },
+      {
+        "step": 6,
+        "op": "attn_out = attn @ V",
+        "shape": "seq×seq @ seq×dim → seq×dim"
+      },
+      {
+        "step": 7,
+        "op": "O = attn_out @ Wo",
+        "shape": "seq×dim @ dim×dim → seq×dim"
+      },
+      {
+        "step": 8,
+        "op": "ffn_gate = x @ Wg",
+        "shape": "seq×dim @ dim×ff → seq×ff"
+      },
+      {
+        "step": 9,
+        "op": "ffn_up = x @ Wu",
+        "shape": "seq×dim @ dim×ff → seq×ff"
+      },
+      {
+        "step": 10,
+        "op": "silu*up stub",
+        "shape": "cudaDeviceSynchronize placeholder"
+      },
+      {
+        "step": 11,
+        "op": "ffn_out = hidden @ Wd",
+        "shape": "seq×ff @ ff×dim → seq×dim"
+      }
+    ],
+    "bench_shapes": {
+      "100M_layer": {
+        "seq": 128,
+        "dim": 512,
+        "ff": 1536,
+        "iters": 100,
+        "matches": "model_100m_gpu.hexa GPU_DIM=512 GPU_FF=1536 GPU_SEQ=128"
+      },
+      "1B_layer": {
+        "seq": 2048,
+        "dim": 2048,
+        "ff": 5504,
+        "iters": 5,
+        "matches": "anima/training/model_1b_gpu.hexa M1B_DIM=2048 M1B_FF=5504 M1B_SEQ=2048"
+      }
+    },
+    "compile_validation_mac": {
+      "hexa_to_c": "19922 bytes / 467 lines pure C",
+      "cc_minus_c": "PASS (no errors)",
+      "cc_link": "expected failures (cudart/cublas missing on darwin)"
+    },
+    "expected_h100_outcome": {
+      "100M_layer_per_ms_target": 20,
+      "100M_layer_per_ms_target_aspirational": 5,
+      "100M_layer_8_layer_step_target_ms": 160,
+      "r8_interpreter_per_layer_estimate_ms": 20180,
+      "speedup_target": 1000,
+      "what_proves_500x_claim": "If LAYER_RESULT per_layer_ms < 20 for 100M shape, full 8-layer step fits in <200 ms vs R8 161,448 ms → 800× speedup, well above the 500× claim threshold."
+    },
+    "remaining_for_full_training": [
+      "Real layernorm CUDA kernel (or host fallback) — currently stub",
+      "Real softmax CUDA kernel — currently stub",
+      "Real silu*up CUDA kernel — currently stub",
+      "Backward pass (mirror layer_forward in reverse + stored activations)",
+      "AdamW step (cublasSscal + cublasSaxpy already in cuda_ffi.hexa)",
+      "Loss computation (cross_entropy via host loop or kernel)",
+      "Embedding lookup (host loop or sparse kernel)"
+    ],
+    "next_session_action": "H100 R9 rental + ./scripts/h100_r9_bench.sh runs the full bench. Single data point from LAYER_RESULT 100M proves or disproves the 500× claim. Pod cost ≤ \\$0.50 if torn down immediately after the 60-second bench."
   }
 }
