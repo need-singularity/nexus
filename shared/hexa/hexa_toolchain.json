@@ -1,21 +1,37 @@
 {
   "_meta": {
-    "name": "hexa-lang self/interpreter.hexa 골화 레지스트리",
-    "path": "hexa-lang/self/interpreter.hexa",
+    "name": "hexa-lang self-host 툴체인 골화 레지스트리",
+    "scope": [
+      "hexa-lang/self/main.hexa — CLI dispatcher (SSOT, 2026-04-13~)",
+      "hexa-lang/self/interpreter.hexa — stage0 인터프리터 (build/hexa_stage0)",
+      "hexa-lang/self/native/hexa_cc.c — 트랜스파일러 (self/native/hexa_v2)"
+    ],
     "created": "2026-04-13",
     "updated": "2026-04-13",
-    "description": "self-host 인터프리터의 골화/안정/실패 항목을 누적. 수정 시 해당 섹션 이동. 222 examples 전수 테스트 기반.",
+    "description": "hexa 자체호스트 3단(CLI/stage0/cc)의 골화/안정/실패 항목을 누적. 수정 시 해당 섹션 이동. 222 examples 전수 테스트 기반.",
     "rule": "골화=검증 PASS + 재현 가능, 안정=회귀 없음 장기 동작, 실패=현재 버그(수정 대상)",
-    "linked_from": "hexa-lang/self/interpreter.hexa (top comment)"
+    "linked_from": [
+      "hexa-lang/self/main.hexa (top comment)",
+      "hexa-lang/self/interpreter.hexa (top comment)"
+    ]
   },
 
   "ossified": [
+    {
+      "id": "OSS-CLI-SUBCOMMAND",
+      "name": "go-style CLI subcommand dispatcher",
+      "since": "2026-04-13",
+      "commit": "0689460",
+      "evidence": "./hexa 77KB dispatcher (run/build/cc/status/version/help), self/main.hexa SSOT, self-rebuild fixpoint",
+      "location": "self/main.hexa → hexa (77KB), build/hexa_stage0 (351KB interp), self/native/hexa_v2 (801KB cc)",
+      "breaking_change": "./hexa <file.hexa> 직접 실행 ❌ → ./hexa run <file.hexa> ✅"
+    },
     {
       "id": "OSS-NATIVE-C",
       "name": "C native 바이너리 부트스트랩",
       "since": "2026-04-12",
       "evidence": "hexa 343KB arm64 Mach-O, zero Rust, build ≈ 4s (hexa_cc + hexa-build)",
-      "location": "build/interpreter.c (460510B), ./hexa"
+      "location": "build/interpreter.c (460510B), build/hexa_stage0"
     },
     {
       "id": "OSS-FIX-8C",
@@ -88,7 +104,8 @@
       "verify_after_rebuild": [
         "let mut arr=[0,0,0]; arr[0]=10; assert arr[0]==10",
         "examples/idxassign_min.hexa exit 0 + 출력 확인"
-      ]
+      ],
+      "rebuild_cli": "./hexa build self/interpreter.hexa -o build/hexa_stage0 (new CLI since 2026-04-13)"
     },
     {
       "id": "BUG-COMPOUND-INDEX-SEGV",

@@ -1,7 +1,8 @@
 # blowup/ — 단일 진입점 + 변종/렌즈/시드/우로보로스
 
 entry: core/blowup.hexa (357e50e router/batch/wave 흡수)
-cli:   hexa blowup.hexa <domain> <depth> [--seeds <s>]
+cli:   hexa run blowup.hexa <domain> <depth> [--seeds <s>]   (권장, go/cargo 스타일)
+       hexa blowup.hexa <domain> <depth>                     (호환 모드, 자동 run 위임)
 
 core/        blowup.hexa
 guard/       blowup_guard.hexa
@@ -16,7 +17,7 @@ root         commands.hexa  todo.hexa(bd323be 자연창발 통합)
 
 quantum 축: modules,lens,ouroboros,seed 횡단
 
-ex: hexa blowup.hexa math 3
-    hexa blowup.hexa <d> <n> --seeds "$(hexa seed_engine.hexa merge)"
+ex: hexa run blowup.hexa math 3
+    hexa run blowup.hexa <d> <n> --seeds "$(hexa run seed_engine.hexa merge)"
 
 parent: ../CLAUDE.md → "blowup"
