@@ -21,14 +21,26 @@
     },
     "go": {
       "keywords": ["go", "가자"],
-      "description": "모든 미완료 TODO 병렬 백그라운드 Agent 발사",
-      "action": "프로젝트 TODO SSOT에서 status=todo|partial 전부 수집 → 관련 항목 클러스터링 → 병렬 bg Agent 발사",
+      "description": "TODO 병렬 발사 → loop 정합 → commit → push 풀사이클",
+      "action": "프로젝트 TODO SSOT에서 status=todo|partial 전부 수집 → 병렬 bg Agent 발사 → 전원 완료 대기 → loop-guard --fix → git add -A → git commit → git push",
+      "flow": [
+        "1. TODO 수집 + 클러스터링",
+        "2. 병렬 Agent 발사 (run_in_background: true)",
+        "3. 발사 테이블 ASCII 출력",
+        "4. 전 Agent 완료 대기",
+        "5. hexa .shared/hooks/loop-guard.hexa --fix (정합 수정)",
+        "6. git add -A",
+        "7. git commit -m 'go(...): 에이전트 N건 + loop 정합'",
+        "8. git push"
+      ],
       "rules": [
         "확인 질문 금지 — 즉시 실행",
-        "run_in_background: true",
+        "run_in_background: true (에이전트만, commit/push는 포그라운드)",
         "발사 테이블 ASCII 출력",
         "각 에이전트에 구현 규칙 + 문법 주의사항 전달",
-        "완료 시 JSON status/summary 갱신"
+        "step 5 loop-guard 필수 — 생략 금지",
+        "step 7 커밋 메시지에 에이전트 수 + loop 정합 결과 포함",
+        "step 8 push 실패 시 pull --rebase 후 재시도 1회"
       ]
     },
     "smash": {
