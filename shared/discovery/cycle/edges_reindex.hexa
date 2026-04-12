@@ -1,0 +1,250 @@
+// ═══════════════════════════════════════════════════════════
+// edges_reindex.hexa -- Convert edges.adjacency.json to MessagePack binary index
+// ROI #18: 178MB JSON -> ~54MB compact binary MessagePack. 파싱 오버헤드 -70%.
+// R1 HEXA-FIRST 준수 (staleness 판정 hexa, 대용량 변환 python3 위임)
+// 사용: hexa edges_reindex.hexa [--force] [--verbose]
+// 출력: edges.adjacency.msgpack + edges.adjacency.meta.json (동일 디렉토리)
+// 원칙: edges.adjacency.json 읽기 전용 보존 (fallback). 바이너리 인덱스만 생성/갱신.
+//
+// Binary layout (msgpack-binidx/1.0):
+//   node_table:   uint32[] — sorted node numeric IDs (p_NNNNNN → NNNNNN)
+//   offset_table: uint64[] — byte offset into edges_blob for each node
+//   edges_blob:   per node: uint32 count + count x (uint32 neighbor_idx, uint16 dist_x10000)
+//   Distances quantized: real_distance = dist_q / 10000
+//   Consumers: use read_edges_binary() helper in inline python
+// ═══════════════════════════════════════════════════════════
+
+let a = args()
+let mut force = false
+let mut verbose = false
+
+// ─── CLI 파싱 ───
+let mut ai: i64 = 2
+while ai < len(a) {
+    let tok = a[ai]
+    if tok == "--force" || tok == "-f" { force = true }
+    else if tok == "--verbose" || tok == "-v" { verbose = true }
+    else if tok == "--help" || tok == "-h" {
+        println("usage: hexa edges_reindex.hexa [--force] [--verbose]")
+        println("  --force    mtime 무시, 강제 재빌드")
+        println("  --verbose  상세 출력")
+        println("")
+        println("output: edges.adjacency.msgpack + edges.adjacency.meta.json")
+        println("format: msgpack-binidx/1.0 (compact binary: uint32 node IDs + uint16 distances)")
+        println("reads:  edges.adjacency.json (preserved as fallback)")
+        exit(0)
+    }
+    ai = ai + 1
+}
+
+// ─── shell helper ───
+fn _exec_str(cmd: string) -> string {
+    let mut r = ""
+    try { r = to_string(exec(cmd)).trim() } catch e {}
+    return r
+}
+
+// ─── 경로 계산 ───
+let _home = _exec_str("printenv HOME")
+let _cycle = _home + "/Dev/nexus/shared/discovery/cycle"
+let JSON_PATH    = _cycle + "/edges.adjacency.json"
+let MSGPACK_PATH = _cycle + "/edges.adjacency.msgpack"
+let META_PATH    = _cycle + "/edges.adjacency.meta.json"
+
+println("╔══════════════════════════════════════════════════════════╗")
+println("║  edges_reindex — JSON → MessagePack binary index         ║")
+println("╚══════════════════════════════════════════════════════════╝")
+println("")
+
+// ─── 소스 존재 검증 ───
+if !file_exists(JSON_PATH) {
+    println("  ERROR: source not found: " + JSON_PATH)
+    println("  Run build_edges_index.hexa first to generate JSON.")
+    exit(1)
+}
+
+// ─── source mtime/size ───
+let source_mtime = _exec_str("stat -f '%m' '" + JSON_PATH + "' 2>/dev/null || stat -c '%Y' '" + JSON_PATH + "' 2>/dev/null")
+let source_size  = _exec_str("stat -f '%z' '" + JSON_PATH + "' 2>/dev/null || stat -c '%s' '" + JSON_PATH + "' 2>/dev/null")
+if verbose {
+    println("  source: " + JSON_PATH)
+    println("  mtime:  " + source_mtime)
+    println("  size:   " + source_size + " bytes")
+}
+
+// ─── staleness check (hexa-native) ───
+if !force && file_exists(MSGPACK_PATH) && file_exists(META_PATH) {
+    let meta_raw = _exec_str("/usr/bin/python3 -c \"import json; m=json.load(open('" + META_PATH + "')); print(str(m.get('source_mtime','')) + '|' + str(m.get('source_size','')))\" 2>/dev/null")
+    if meta_raw != "" {
+        let meta_parts = meta_raw.split("|")
+        if len(meta_parts) == 2 {
+            let cached_mtime = meta_parts[0].trim()
+            let cached_size  = meta_parts[1].trim()
+            if cached_mtime == source_mtime && cached_size == source_size {
+                let mp_size = _exec_str("stat -f '%z' '" + MSGPACK_PATH + "' 2>/dev/null || stat -c '%s' '" + MSGPACK_PATH + "' 2>/dev/null")
+                println("  status: FRESH (mtime=" + source_mtime + ")")
+                println("  msgpack: " + mp_size + " bytes")
+                println("  Use --force to rebuild.")
+                exit(0)
+            }
+        }
+    }
+}
+
+// ─── Python3 위임: 178MB JSON → compact binary MessagePack 변환 ───
+println("  converting JSON → compact binary MessagePack ...")
+println("")
+
+let py_script = "
+import json, os, sys, time, struct, msgpack
+
+json_path    = '" + JSON_PATH + "'
+msgpack_path = '" + MSGPACK_PATH + "'
+meta_path    = '" + META_PATH + "'
+source_mtime = '" + source_mtime + "'
+source_size  = " + source_size + "
+verbose      = " + if verbose { "True" } else { "False" } + "
+
+t0 = time.time()
+
+# Phase 1: Read JSON
+print('  [1/4] Reading JSON adjacency list ...')
+with open(json_path, 'r') as f:
+    data = json.load(f)
+
+meta_block = data.get('_meta', {})
+adj = data.get('adj', {})
+t_read = time.time() - t0
+print(f'         {len(adj):,} nodes loaded in {t_read:.1f}s')
+
+# Phase 2: Build compact binary layout
+t1 = time.time()
+print('  [2/4] Building compact binary layout ...')
+# Node IDs: strip p_ prefix -> sorted uint32 array
+# Edges: uint32 neighbor_index + uint16 quantized distance (6 bytes per edge vs ~16 chars JSON)
+sorted_keys = sorted(adj.keys())
+node_nums = [int(k[2:]) for k in sorted_keys]
+str_to_idx = {k: i for i, k in enumerate(sorted_keys)}
+
+node_table_bin = struct.pack('<' + 'I' * len(node_nums), *node_nums)
+
+edges_parts = []
+offsets = []
+current_offset = 0
+total_edges = 0
+
+for k in sorted_keys:
+    offsets.append(current_offset)
+    edges = adj[k]
+    count = len(edges)
+    total_edges += count
+    part = struct.pack('<I', count)
+    for nb_str, dist in edges:
+        nb_idx = str_to_idx.get(nb_str, 0xFFFFFFFF)
+        dist_q = min(65535, int(round(float(dist) * 10000)))
+        part += struct.pack('<IH', nb_idx, dist_q)
+    edges_parts.append(part)
+    current_offset += len(part)
+
+edges_blob = b''.join(edges_parts)
+offset_table_bin = struct.pack('<' + 'Q' * len(offsets), *offsets)
+
+t_build = time.time() - t1
+print(f'         {len(sorted_keys):,} nodes, {total_edges:,} edge-pairs')
+if verbose:
+    print(f'         node_table: {len(node_table_bin):,} bytes')
+    print(f'         offset_table: {len(offset_table_bin):,} bytes')
+    print(f'         edges_blob: {len(edges_blob):,} bytes')
+
+# Phase 3: Pack msgpack envelope
+t2 = time.time()
+print('  [3/4] Packing msgpack envelope ...')
+
+pack_data = {
+    '_meta': {
+        'source': meta_block.get('source', 'edges.jsonl'),
+        'mtime': meta_block.get('mtime', source_mtime),
+        'edge_count': meta_block.get('edge_count', total_edges),
+        'node_count': len(sorted_keys),
+        'errors': meta_block.get('errors', 0),
+        'format': 'msgpack-binidx/1.0',
+        'format_desc': 'Binary-indexed adjacency. node_table: uint32[] sorted node nums. offset_table: uint64[] offsets into edges_blob. edges_blob: per node uint32 count + count x (uint32 nbr_idx, uint16 dist_x10000).',
+        'json_fallback': os.path.basename(json_path),
+        'distance_scale': 10000,
+    },
+    'node_table': node_table_bin,
+    'offset_table': offset_table_bin,
+    'edges_blob': edges_blob,
+}
+
+packed_bytes = msgpack.packb(pack_data, use_bin_type=True)
+t_pack = time.time() - t2
+
+# Phase 4: Write
+t3 = time.time()
+print('  [4/4] Writing files ...')
+
+with open(msgpack_path, 'wb') as f:
+    f.write(packed_bytes)
+
+msgpack_size = os.path.getsize(msgpack_path)
+ratio = msgpack_size / source_size * 100
+
+sidecar = {
+    'format': 'msgpack-binidx/1.0',
+    'format_version': 1,
+    'source_json': os.path.basename(json_path),
+    'source_mtime': source_mtime,
+    'source_size': source_size,
+    'msgpack_size': msgpack_size,
+    'node_count': len(sorted_keys),
+    'edge_count': meta_block.get('edge_count', total_edges),
+    'edge_pairs': total_edges,
+    'errors': meta_block.get('errors', 0),
+    'compression_ratio': round(ratio, 1),
+    'distance_scale': 10000,
+    'node_id_format': 'p_NNNNNN (6-digit zero-padded)',
+}
+
+with open(meta_path, 'w') as f:
+    json.dump(sidecar, f, indent=2, sort_keys=True)
+
+t_write = time.time() - t3
+total_time = time.time() - t0
+
+print()
+print('=' * 60)
+print('  RESULT')
+print(f'  json:     {source_size:>14,} bytes  ({source_size/(1024*1024):.1f} MB)')
+print(f'  msgpack:  {msgpack_size:>14,} bytes  ({msgpack_size/(1024*1024):.1f} MB)')
+print(f'  ratio:    {ratio:.1f}%  (saved {(source_size - msgpack_size)/(1024*1024):.1f} MB)')
+print(f'  nodes:    {len(sorted_keys):,}')
+print(f'  edges:    {meta_block.get(\"edge_count\", total_edges):,} (pairs: {total_edges:,})')
+print(f'  time:     {total_time:.1f}s')
+print(f'  output:   {msgpack_path}')
+print(f'  meta:     {meta_path}')
+print('=' * 60)
+"
+
+let build_result = _exec_str("/usr/bin/python3 -c \"" + py_script + "\" 2>&1")
+println(build_result)
+
+// ─── 결과 검증 ───
+if !file_exists(MSGPACK_PATH) {
+    println("")
+    println("  ERROR: msgpack file was not created!")
+    println("  check: python3 -c 'import msgpack' — msgpack 설치 필요")
+    exit(1)
+}
+
+let final_mp_size   = _exec_str("stat -f '%z' '" + MSGPACK_PATH + "' 2>/dev/null || stat -c '%s' '" + MSGPACK_PATH + "' 2>/dev/null")
+let final_json_size = source_size
+
+println("")
+println("═══════════════════════════════════════════════════════════")
+println("  DONE — edges.adjacency.msgpack created (compact binary)")
+println("  json:    " + final_json_size + " bytes")
+println("  msgpack: " + final_mp_size + " bytes")
+println("  JSON preserved as fallback for consumers without msgpack.")
+println("═══════════════════════════════════════════════════════════")
+exit(0)

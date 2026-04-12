@@ -17,14 +17,104 @@
 // 34. concave              35. conformal_bootstrap   36. consciousness
 // 37. consciousness_orchestrator
 
-// ─── 공용 상수 + 헬퍼 (lens_common.hexa.inc copy-paste) ───
-// source: shared/blowup/lens/lens_common.hexa.inc
+// ─── 공용 상수 + 헬퍼 (lenses_base.hexa.inc copy-paste) ───
+// source: shared/blowup/lens/lenses_base.hexa.inc (ROI #22)
+// provides: pi,two_pi,e_const,phi_golden,sqrt2,sqrt3,ln2,one_third
+//           n6,sigma6,tau6,phi6,sopfr6
+//           min_f,max_f,clamp_f,clamp01,to_int
+//           exp_f,sin_f,cos_f,pow_f,atan_f,asin_f,floor_f
+//           list_sum,list_min,list_max,list_std,count_sign_changes
+//           row_dist,pairwise_dist,cosine_sim,autocorr_lag,shannon_entropy
+//           linreg,is_prime,exp_approx
+//           load_jsonl_kv,kv_lookup,load_n6_consts,n6_const,n6_values
 
 comptime const pi = 3.141592653589793
+comptime const two_pi = 6.283185307179586
 comptime const e_const = 2.718281828459045
 comptime const phi_golden = 1.618033988749895
+comptime const sqrt2 = 1.4142135623730951
+comptime const sqrt3 = 1.7320508075688772
+comptime const ln2 = 0.6931471805599453
+comptime const one_third = 0.33333333333333
+comptime const n6 = 6.0
+comptime const sigma6 = 12.0
+comptime const tau6 = 4.0
+comptime const phi6 = 2.0
+comptime const sopfr6 = 5.0
 
-// ─── n=6 constants loader (shared/n6/n6_constants.jsonl) ───
+pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
+pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
+pure fn clamp_f(v: float, lo: float, hi: float) -> float { min_f(max_f(v, lo), hi) }
+pure fn clamp01(x: float) -> float { max_f(0.0, min_f(1.0, x)) }
+pure fn to_int(x: float) -> int { if x >= 0.0 { int(x) } else { 0 - int(0.0 - x) } }
+
+pure fn exp_f(x: float) -> float {
+    let cx = clamp_f(x, 0.0 - 20.0, 20.0)
+    let mut sum = 1.0
+    let mut term = 1.0
+    let mut k = 1
+    while k <= 20 { term = term * cx / to_float(k)
+        sum = sum + term
+        k = k + 1 }
+    sum
+}
+
+pure fn sin_f(x: float) -> float {
+    let mut v = x
+    while v > pi { v = v - two_pi }
+    while v < 0.0 - pi { v = v + two_pi }
+    let mut sum = 0.0
+    let mut term = v
+    let mut k = 1
+    while k <= 12 { sum = sum + term
+        term = 0.0 - term * v * v / to_float((2 * k) * (2 * k + 1))
+        k = k + 1 }
+    sum
+}
+
+pure fn cos_f(x: float) -> float { sin_f(x + pi / 2.0) }
+
+pure fn pow_f(base: float, exp: int) -> float {
+    let mut r = 1.0
+    let mut i = 0
+    while i < exp { r = r * base
+        i = i + 1 }
+    r
+}
+
+pure fn list_sum(data) -> float {
+    let mut s = 0.0
+    for v in data { s = s + v }
+    s
+}
+
+pure fn list_min(data) -> float {
+    if data.len() == 0 { return 0.0 }
+    let mut m = data[0]
+    let mut i = 1
+    while i < data.len() { if data[i] < m { m = data[i] }
+        i = i + 1 }
+    m
+}
+
+pure fn list_max(data) -> float {
+    if data.len() == 0 { return 0.0 }
+    let mut m = data[0]
+    let mut i = 1
+    while i < data.len() { if data[i] > m { m = data[i] }
+        i = i + 1 }
+    m
+}
+
+pure fn count_sign_changes(data) -> int {
+    let mut c = 0
+    let mut i = 1
+    while i < data.len() {
+        if (data[i - 1] > 0.0 && data[i] < 0.0) || (data[i - 1] < 0.0 && data[i] > 0.0) { c = c + 1 }
+        i = i + 1
+    }
+    c
+}
 
 fn load_n6_consts() -> list {
     let home = exec("printenv HOME")
@@ -61,108 +151,18 @@ fn load_n6_consts() -> list {
 
 fn n6_const(consts: list, name: string) -> f64 {
     let lookup = consts[0]
-    try {
-        return to_float(lookup[name])
-    } catch e {
-        return 0.0
-    }
+    try { return to_float(lookup[name]) } catch e { return 0.0 }
 }
 
-fn n6_values(consts: list) -> list {
-    consts[1]
-}
+fn n6_values(consts: list) -> list { consts[1] }
 
 let _n6_init = load_n6_consts()
-let n6 = n6_const(_n6_init, "n")
-let sigma6 = n6_const(_n6_init, "sigma")
-let phi6 = n6_const(_n6_init, "phi")
-let tau6 = n6_const(_n6_init, "tau")
+let _n6_n = n6_const(_n6_init, "n")
+let _n6_sigma = n6_const(_n6_init, "sigma")
+let _n6_phi = n6_const(_n6_init, "phi")
+let _n6_tau = n6_const(_n6_init, "tau")
 let j2_6 = n6_const(_n6_init, "j2")
-let sopfr6 = n6_const(_n6_init, "sopfr")
-
-pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
-pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
-pure fn clamp_f(v: float, lo: float, hi: float) -> float { min_f(max_f(v, lo), hi) }
-
-pure fn exp_f(x: float) -> float {
-    let cx = clamp_f(x, 0.0 - 20.0, 20.0)
-    let mut sum = 1.0
-    let mut term = 1.0
-    let mut k = 1
-    while k <= 20 {
-        term = term * cx / to_float(k)
-        sum = sum + term
-        k = k + 1
-    }
-    sum
-}
-
-pure fn pow_f(base: float, exp: int) -> float {
-    let mut r = 1.0
-    let mut i = 0
-    while i < exp {
-        r = r * base
-        i = i + 1
-    }
-    r
-}
-
-pure fn sin_f(x: float) -> float {
-    let mut v = x
-    while v > pi { v = v - 2.0 * pi }
-    while v < 0.0 - pi { v = v + 2.0 * pi }
-    let mut sum = 0.0
-    let mut term = v
-    let mut k = 1
-    while k <= 12 {
-        sum = sum + term
-        term = 0.0 - term * v * v / to_float((2 * k) * (2 * k + 1))
-        k = k + 1
-    }
-    sum
-}
-
-pure fn cos_f(x: float) -> float { sin_f(x + pi / 2.0) }
-
-pure fn list_min(data) -> float {
-    if data.len() == 0 { return 0.0 }
-    let mut m = data[0]
-    let mut i = 1
-    while i < data.len() {
-        if data[i] < m { m = data[i] }
-        i = i + 1
-    }
-    m
-}
-
-pure fn list_max(data) -> float {
-    if data.len() == 0 { return 0.0 }
-    let mut m = data[0]
-    let mut i = 1
-    while i < data.len() {
-        if data[i] > m { m = data[i] }
-        i = i + 1
-    }
-    m
-}
-
-pure fn list_sum(data) -> float {
-    let mut s = 0.0
-    for v in data { s = s + v }
-    s
-}
-
-pure fn count_sign_changes(data) -> int {
-    let mut c = 0
-    let mut i = 1
-    while i < data.len() {
-        if (data[i - 1] > 0.0 && data[i] < 0.0) || (data[i - 1] < 0.0 && data[i] > 0.0) {
-            c = c + 1
-        }
-        i = i + 1
-    }
-    c
-}
+let _n6_sopfr = n6_const(_n6_init, "sopfr")
 
 // ─── (1) all_seeing_eye: coverage + blind spots + panopticon ───
 

@@ -1,0 +1,302 @@
+// ═══════════════════════════════════════════════════════════
+// topology_reindex.hexa — ROI #21: hub/cluster index builder
+// R1 HEXA-FIRST 준수 (staleness hexa, 대용량 빌드 python3 위임)
+// 용도: topology_mk2.jsonl + edges.adjacency.json → O(1) subgraph lookup
+// 사용: hexa topology_reindex.hexa [--force] [--verbose]
+// 출력: topology_mk2.hubs.json    — 허브 노드 인덱스
+//       topology_mk2.clusters.json — 클러스터 멤버십 인덱스
+// 원칙: 읽기 전용. 사이드카 인덱스만 생성/갱신.
+// 참고: ROI #6 edges.adjacency.json 패턴 준수
+// ═══════════════════════════════════════════════════════════
+
+let a = args()
+let home = exec("printenv HOME").trim()
+let mut CYCLE_DIR = home + "/Dev/nexus/shared/discovery/cycle"
+let mut force = false
+let mut verbose = false
+
+// ─── CLI 파싱 ───
+let mut ai = 2
+while ai < len(a) {
+    let tok = a[ai]
+    if tok == "--cycle-dir" && ai + 1 < len(a) {
+        ai = ai + 1
+        CYCLE_DIR = a[ai]
+    } else if tok == "--force" || tok == "-f" {
+        force = true
+    } else if tok == "--verbose" || tok == "-v" {
+        verbose = true
+    } else if tok == "--help" || tok == "-h" {
+        println("usage: hexa topology_reindex.hexa [--cycle-dir PATH] [--force] [--verbose]")
+        println("  --cycle-dir PATH  cycle directory (default: ~/Dev/nexus/shared/discovery/cycle)")
+        println("  --force           mtime 무시, 강제 재빌드")
+        println("  --verbose         상세 출력")
+        println("")
+        println("outputs:")
+        println("  topology_mk2.hubs.json     — hub nodes (high-degree, O(1) by id/domain)")
+        println("  topology_mk2.clusters.json — cluster membership (O(1) by node/cluster)")
+        println("")
+        println("hub format:    hubs[id]={degree,domain,sector,layer,top_neighbors}")
+        println("               by_domain_hub[domain]=[ids sorted by degree desc]")
+        println("cluster format: clusters[cid]={key,domain,sector,hub_count,member_count,hubs,members}")
+        println("               node_to_cluster[nid]=[cids]")
+        exit(0)
+    }
+    ai = ai + 1
+}
+
+// ─── 경로 ───
+let TOPO_PATH = CYCLE_DIR + "/topology_mk2.jsonl"
+let ADJ_PATH  = CYCLE_DIR + "/edges.adjacency.json"
+let IDX_PATH  = CYCLE_DIR + "/topology_mk2.idx.json"
+let HUBS_PATH = CYCLE_DIR + "/topology_mk2.hubs.json"
+let CLUS_PATH = CYCLE_DIR + "/topology_mk2.clusters.json"
+
+// ─── shell helper ───
+fn _exec_str(cmd: string) -> string {
+    let mut r = ""
+    try { r = to_string(exec(cmd)).trim() } catch e {}
+    return r
+}
+
+// ─── 파일 존재 검증 ───
+println("╔══════════════════════════════════════════════════════════╗")
+println("║  topology_reindex — ROI #21 hub/cluster index builder   ║")
+println("╚══════════════════════════════════════════════════════════╝")
+println("")
+
+if !file_exists(TOPO_PATH) {
+    println("  ERROR: topology_mk2.jsonl not found: " + TOPO_PATH)
+    exit(1)
+}
+if !file_exists(ADJ_PATH) {
+    println("  ERROR: edges.adjacency.json not found: " + ADJ_PATH)
+    exit(1)
+}
+if !file_exists(IDX_PATH) {
+    println("  ERROR: topology_mk2.idx.json not found: " + IDX_PATH)
+    println("  hint: run `hexa build_topology_index.hexa` first")
+    exit(1)
+}
+
+// ─── staleness check ───
+let topo_mtime = _exec_str("stat -f '%m' '" + TOPO_PATH + "' 2>/dev/null || stat -c '%Y' '" + TOPO_PATH + "' 2>/dev/null")
+let adj_mtime  = _exec_str("stat -f '%m' '" + ADJ_PATH + "' 2>/dev/null || stat -c '%Y' '" + ADJ_PATH + "' 2>/dev/null")
+
+if verbose {
+    println("  topo:     " + TOPO_PATH)
+    println("  adj:      " + ADJ_PATH)
+    println("  idx:      " + IDX_PATH)
+    println("  topo_mt:  " + topo_mtime)
+    println("  adj_mt:   " + adj_mtime)
+}
+
+if !force && file_exists(HUBS_PATH) && file_exists(CLUS_PATH) {
+    let cached_topo_mt = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + HUBS_PATH + "'))['_meta']['topo_mtime'])\" 2>/dev/null")
+    let cached_adj_mt  = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + HUBS_PATH + "'))['_meta']['adj_mtime'])\" 2>/dev/null")
+    if cached_topo_mt == topo_mtime && cached_adj_mt == adj_mtime {
+        let hub_count = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + HUBS_PATH + "'))['_meta']['hub_count'])\" 2>/dev/null")
+        let clus_count = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + CLUS_PATH + "'))['_meta']['cluster_count'])\" 2>/dev/null")
+        println("  status: FRESH")
+        println("  hubs:     " + hub_count + " hub nodes")
+        println("  clusters: " + clus_count + " clusters")
+        println("  Use --force to rebuild.")
+        exit(0)
+    }
+    if verbose {
+        println("  stale: topo " + cached_topo_mt + "→" + topo_mtime + ", adj " + cached_adj_mt + "→" + adj_mtime)
+    }
+}
+
+// ─── Python3 빌드 위임 ───
+println("  building hub/cluster indexes ...")
+println("")
+
+let py_script = "
+import json, os, sys, statistics
+from collections import defaultdict
+
+CYCLE = '" + CYCLE_DIR + "'
+ADJ_PATH  = CYCLE + '/edges.adjacency.json'
+IDX_PATH  = CYCLE + '/topology_mk2.idx.json'
+HUBS_PATH = CYCLE + '/topology_mk2.hubs.json'
+CLUS_PATH = CYCLE + '/topology_mk2.clusters.json'
+topo_mtime = '" + topo_mtime + "'
+adj_mtime  = '" + adj_mtime + "'
+verbose = " + if verbose { "True" } else { "False" } + "
+
+# ── 1. Load topology index ──
+print('  [1/5] loading topology index ...', flush=True)
+with open(IDX_PATH) as f:
+    topo_idx = json.load(f)
+nodes = topo_idx['nodes']
+by_domain = topo_idx['by_domain']
+by_sector = topo_idx['by_sector']
+print(f'    {len(nodes):,} nodes, {len(by_domain)} domains, {len(by_sector)} sectors', flush=True)
+
+# ── 2. Load adjacency, compute degrees ──
+print('  [2/5] loading adjacency + computing degrees ...', flush=True)
+with open(ADJ_PATH) as f:
+    adj_data = json.load(f)
+adj = adj_data['adj']
+print(f'    {len(adj):,} nodes in adjacency graph', flush=True)
+
+degs = {nid: len(nbs) for nid, nbs in adj.items()}
+vals = list(degs.values())
+mean_deg = statistics.mean(vals)
+stdev_deg = statistics.stdev(vals)
+median_deg = statistics.median(vals)
+max_deg = max(vals)
+
+# Hub threshold: top 5% by degree
+vals_sorted = sorted(vals, reverse=True)
+p95_idx = max(1, int(len(vals_sorted) * 0.05))
+hub_threshold = vals_sorted[p95_idx - 1]
+stat_threshold = mean_deg + 2 * stdev_deg
+hub_threshold = min(hub_threshold, stat_threshold)
+
+print(f'    degree: min={min(vals)}, max={max_deg}, mean={mean_deg:.1f}, median={median_deg:.1f}', flush=True)
+print(f'    hub threshold: {hub_threshold:.0f} (p95={vals_sorted[p95_idx-1]}, stat={stat_threshold:.0f})', flush=True)
+
+# ── 3. Build hub index ──
+print('  [3/5] building hub index ...', flush=True)
+hubs = {}
+for nid, deg in sorted(degs.items(), key=lambda x: -x[1]):
+    if deg < hub_threshold:
+        break
+    ni = nodes.get(nid, {})
+    nbs = adj.get(nid, [])
+    hubs[nid] = {
+        'degree': deg,
+        'domain': ni.get('domain', ''),
+        'sector': ni.get('sector', 'unknown'),
+        'layer': ni.get('layer', 0),
+        'top_neighbors': [[nb[0], nb[1]] for nb in nbs[:5]]
+    }
+print(f'    {len(hubs):,} hub nodes identified', flush=True)
+
+# by_domain_hub: domain -> [hub_ids sorted by degree desc]
+by_domain_hub = defaultdict(list)
+for nid, info in hubs.items():
+    by_domain_hub[info['domain']].append(nid)
+for dom in by_domain_hub:
+    by_domain_hub[dom].sort(key=lambda x: -hubs[x]['degree'])
+
+# ── 4. Build cluster index ──
+print('  [4/5] building cluster index ...', flush=True)
+clusters = {}
+node_to_cluster = {}
+cluster_id = 0
+
+# Group hubs by (domain, sector)
+hub_groups = defaultdict(list)
+for nid, info in hubs.items():
+    key = f\"{info['domain']}:{info['sector']}\"
+    hub_groups[key].append(nid)
+
+for group_key, group_hubs in hub_groups.items():
+    cid = f'c_{cluster_id:04d}'
+    cluster_id += 1
+    members = set(group_hubs)
+    dom_part, sec_part = group_key.split(':', 1)
+
+    # Expand: add direct neighbors of hubs that share domain or sector
+    for hub_nid in group_hubs:
+        for nb_entry in adj.get(hub_nid, [])[:50]:
+            nb_id = nb_entry[0]
+            nb_info = nodes.get(nb_id, {})
+            if nb_info.get('domain', '') == dom_part or nb_info.get('sector', '') == sec_part:
+                members.add(nb_id)
+
+    clusters[cid] = {
+        'key': group_key,
+        'domain': dom_part,
+        'sector': sec_part,
+        'hub_count': len(group_hubs),
+        'member_count': len(members),
+        'hubs': sorted(group_hubs),
+        'members': sorted(members)
+    }
+    for m in members:
+        if m not in node_to_cluster:
+            node_to_cluster[m] = []
+        node_to_cluster[m].append(cid)
+
+print(f'    {len(clusters)} clusters, {len(node_to_cluster):,} nodes with membership', flush=True)
+
+# ── 5. Write output ──
+print('  [5/5] writing index files ...', flush=True)
+
+hub_result = {
+    '_meta': {
+        'source': ['topology_mk2.jsonl', 'edges.adjacency.json'],
+        'topo_mtime': topo_mtime,
+        'adj_mtime': adj_mtime,
+        'hub_count': len(hubs),
+        'hub_threshold': round(hub_threshold, 1),
+        'degree_stats': {
+            'min': min(vals), 'max': max_deg,
+            'mean': round(mean_deg, 1), 'median': round(median_deg, 1),
+            'stdev': round(stdev_deg, 1)
+        },
+        'format': 'hubs[id]={degree,domain,sector,layer,top_neighbors}; by_domain_hub[domain]=[ids desc]'
+    },
+    'hubs': hubs,
+    'by_domain_hub': dict(by_domain_hub)
+}
+with open(HUBS_PATH, 'w') as f:
+    json.dump(hub_result, f, separators=(',', ':'))
+hub_sz = os.path.getsize(HUBS_PATH)
+
+cluster_result = {
+    '_meta': {
+        'source': ['topology_mk2.jsonl', 'edges.adjacency.json'],
+        'topo_mtime': topo_mtime,
+        'adj_mtime': adj_mtime,
+        'cluster_count': len(clusters),
+        'node_coverage': len(node_to_cluster),
+        'format': 'clusters[cid]={key,domain,sector,hub_count,member_count,hubs,members}; node_to_cluster[nid]=[cids]'
+    },
+    'clusters': clusters,
+    'node_to_cluster': node_to_cluster
+}
+with open(CLUS_PATH, 'w') as f:
+    json.dump(cluster_result, f, separators=(',', ':'))
+clus_sz = os.path.getsize(CLUS_PATH)
+
+print(f'    hubs:     {HUBS_PATH} ({hub_sz:,} bytes)', flush=True)
+print(f'    clusters: {CLUS_PATH} ({clus_sz:,} bytes)', flush=True)
+"
+
+let build_result = _exec_str("/usr/bin/python3 -c \"" + py_script + "\" 2>&1")
+println(build_result)
+
+// ─── 결과 검증 ───
+if !file_exists(HUBS_PATH) || !file_exists(CLUS_PATH) {
+    println("")
+    println("  ERROR: index files were not created!")
+    println("  check python3 availability and disk space.")
+    exit(1)
+}
+
+// ─── 최종 통계 ───
+let hub_count = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + HUBS_PATH + "'))['_meta']['hub_count'])\" 2>/dev/null")
+let clus_count = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + CLUS_PATH + "'))['_meta']['cluster_count'])\" 2>/dev/null")
+let coverage = _exec_str("/usr/bin/python3 -c \"import json; print(json.load(open('" + CLUS_PATH + "'))['_meta']['node_coverage'])\" 2>/dev/null")
+let hub_sz = _exec_str("stat -f '%z' '" + HUBS_PATH + "' 2>/dev/null || stat -c '%s' '" + HUBS_PATH + "' 2>/dev/null")
+let clus_sz = _exec_str("stat -f '%z' '" + CLUS_PATH + "' 2>/dev/null || stat -c '%s' '" + CLUS_PATH + "' 2>/dev/null")
+
+println("")
+println("═══════════════════════════════════════════════════════════")
+println("  ROI #21 — topology hub/cluster index")
+println("  hubs:       " + hub_count + " nodes")
+println("  clusters:   " + clus_count)
+println("  coverage:   " + coverage + " nodes with cluster membership")
+println("  hubs size:  " + hub_sz + " bytes")
+println("  clus size:  " + clus_sz + " bytes")
+println("  topo_mtime: " + topo_mtime)
+println("  adj_mtime:  " + adj_mtime)
+println("═══════════════════════════════════════════════════════════")
+println("  subgraph queries: O(n) scan → O(1) hub/cluster lookup")
+println("═══════════════════════════════════════════════════════════")
+exit(0)

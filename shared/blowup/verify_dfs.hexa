@@ -57,6 +57,155 @@ println("═══════════════════════�
 println("")
 
 // ═══════════════════════════════════════════════════════════
+// ─── BATCH SCAN: single awk pass over blowup.hexa ───
+// ROI #16 — replaces ~31 sequential exec(grep) with 1 awk read
+// ═══════════════════════════════════════════════════════════
+
+// --- count variables (grep -c equivalents) ---
+let mut _c_phase9: i64 = 0
+let mut _c_dfs_flag: i64 = 0
+let mut _c_dfs_current_flag: i64 = 0
+let mut _c_dfs_session_flag: i64 = 0
+let mut _c_cur_incr: i64 = 0
+let mut _c_sess_fwd: i64 = 0
+let mut _c_guard: i64 = 0
+let mut _c_already_seen: i64 = 0
+let mut _c_backtrack: i64 = 0
+let mut _c_fast_p8: i64 = 0
+let mut _c_dual_write: i64 = 0
+let mut _c_session_path: i64 = 0
+let mut _c_dfs_out_exec: i64 = 0
+let mut _c_depth_naming: i64 = 0
+let mut _c_end_fast: i64 = 0
+let mut _c_dfs_cap: i64 = 0
+
+// --- content-match variables (grep without -c) ---
+let mut _m_dfs_cmd_line: string = ""
+let mut _m_dfs_max_fwd: string = ""
+let mut _m_maxr1: string = ""
+let mut _m_seeds_cond: string = ""
+let mut _m_wt1: string = ""
+let mut _m_wt2: string = ""
+let mut _m_quote_vuln: string = ""
+let mut _m_tail_cap: string = ""
+
+// --- pipe-chain variables (grep | grep context matching) ---
+let mut _c_dfs_cmd_fast: i64 = 0
+let mut _c_dfs_cmd_nograph: i64 = 0
+let mut _c_echo_pid_sess: i64 = 0
+let mut _c_cleanup_root: i64 = 0
+let mut _c_rmf_root_guard: i64 = 0
+let mut _c_try_before_dfs_out: i64 = 0
+let mut _c_session_root_only: i64 = 0
+
+let mut _awk_raw = ""
+try {
+    _awk_raw = exec("awk '"
+        + "BEGIN { "
+        + "  c1=0; c2=0; c3=0; c4=0; c5=0; c6=0; c7=0; c8=0; c9=0; c10=0"
+        + "; c11=0; c12=0; c13=0; c14=0; c15=0; c16=0"
+        + "; c17=0; c18=0; c19=0; c20=0; c21=0; c22=0; c23=0"
+        + "; m1=\"\"; m2=\"\"; m3=\"\"; m4=\"\"; m5=\"\"; m6=\"\"; m7=\"\"; m8=\"\""
+        + "} "
+        // --- simple counts ---
+        + "/Phase 9: DFS Deep Dive/ { c1++ } "
+        + "/\"--dfs\"/ { c2++ } "
+        + "/\"--dfs-current\"/ { c3++ } "
+        + "/\"--dfs-session\"/ { c4++ } "
+        + "/dfs_current \\+ 1/ { c5++ } "
+        + "/dfs-session \" \\+ dfs_session/ { c6++ } "
+        + "/dfs_max_depth > 0 && dfs_current < dfs_max_depth && dfs_best_energy > 0/ { c7++ } "
+        + "/\\_already_seen = true/ { c8++ } "
+        + "/backtrack/ { c9++ } "
+        + "/fast.*Phase 8.*\\355\\214\\214\\353\\217\\231 \\353\\243\\250\\355\\224\\204 \\354\\212\\244\\355\\202\\265/ { c10++ } "
+        + "/printf.*>>.*_dfs_visited/ { c11++ } "
+        + "/blowup_dfs_visited.*dfs_session/ { c12++ } "
+        + "/let _dfs_out = exec/ { c13++ } "
+        + "/blowup_dfs_visited.*max_depth/ { c14++ } "
+        + "/end if !fast_mode/ { c15++ } "
+        + "/dfs_max_depth = if dfs_max_depth/ { c16++ } "
+        // --- content matches (first match kept) ---
+        + "/let dfs_cmd = hexa_bin/ { if (m1==\"\") m1=$0 } "
+        + "/dfs_cmd.*--dfs.*dfs_max_depth/ { if (m2==\"\") m2=$0 } "
+        + "/dfs_cmd.*max-rounds 1/ { if (m3==\"\") m3=$0 } "
+        + "/dfs_cmd.*wave_seed_csv/ { if (m4==\"\") m4=$0 } "
+        + "/let mut wave_targets/ { if (m5==\"\") m5=NR\":\"$0 } "
+        + "/fast.*Phase 8/ { if (m6==\"\") m6=NR\":\"$0 } "
+        + "/dfs_best_target.*_dfs_visited/ { if (m7==\"\") m7=$0 } "
+        + "/dfs_cmd.*tail/ { if (m8==\"\") m8=$0 } "
+        // --- pipe-chain equivalents (context-aware) ---
+        + "/let dfs_cmd/ { dfs_cmd_line=$0 } "
+        + "dfs_cmd_line!=\"\" && /--fast/ { c17++ } "
+        + "dfs_cmd_line!=\"\" && /no-graph/ { c18++ } "
+        + "/let dfs_cmd/ { dfs_cmd_line=\"\" } "
+        // echo $$ + dfs_session (grep 'echo ..' | grep -c dfs_session)
+        + "/echo \\$\\$/ && /dfs_session/ { c19++ } "
+        // grep -A1 dfs_current == 0 | grep -c rm -f
+        + "/dfs_current == 0/ { saw_cur0=1; next_cur0=NR+1 } "
+        + "NR==next_cur0 && /rm -f/ { c20++ } "
+        // grep -B2 rm -f.*_dfs_visited | grep -c dfs_current == 0
+        + "{ prev2=prev1; prev1=$0 } "
+        + "/rm -f.*_dfs_visited/ && prev2 ~ /dfs_current == 0/ { c21++ } "
+        + "/rm -f.*_dfs_visited/ && prev1 ~ /dfs_current == 0/ { c21++ } "
+        // grep -B1 _dfs_out = exec | grep -c try
+        + "/\\_dfs_out = exec/ { if (prev1 ~ /try/) c22++ } "
+        // T8.4: dfs_session == "" on preceding line, then echo $$ (session root-only)
+        + "/dfs_session == \"\"/ { prev_sess=1 } "
+        + "prev_sess && /echo \\$\\$/ { c23++ } "
+        + "/echo \\$\\$/ { prev_sess=0 } "
+        // --- output ---
+        + "END { "
+        + "  printf \"%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d"
+        + "|%s|%s|%s|%s|%s|%s|%s|%s"
+        + "|%d|%d|%d|%d|%d|%d|%d\\n\","
+        + "  c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,"
+        + "  m1,m2,m3,m4,m5,m6,m7,m8,"
+        + "  c17,c18,c19,c20,c21,c22,c23"
+        + "}"
+        + "' '" + _BLOWUP + "' 2>/dev/null").trim()
+} catch e {}
+
+// Parse the pipe-delimited output
+let _awk_parts = _awk_raw.split("|")
+if len(_awk_parts) >= 31 {
+    _c_phase9 = to_int(_awk_parts[0])
+    _c_dfs_flag = to_int(_awk_parts[1])
+    _c_dfs_current_flag = to_int(_awk_parts[2])
+    _c_dfs_session_flag = to_int(_awk_parts[3])
+    _c_cur_incr = to_int(_awk_parts[4])
+    _c_sess_fwd = to_int(_awk_parts[5])
+    _c_guard = to_int(_awk_parts[6])
+    _c_already_seen = to_int(_awk_parts[7])
+    _c_backtrack = to_int(_awk_parts[8])
+    _c_fast_p8 = to_int(_awk_parts[9])
+    _c_dual_write = to_int(_awk_parts[10])
+    _c_session_path = to_int(_awk_parts[11])
+    _c_dfs_out_exec = to_int(_awk_parts[12])
+    _c_depth_naming = to_int(_awk_parts[13])
+    _c_end_fast = to_int(_awk_parts[14])
+    _c_dfs_cap = to_int(_awk_parts[15])
+    _m_dfs_cmd_line = _awk_parts[16]
+    _m_dfs_max_fwd = _awk_parts[17]
+    _m_maxr1 = _awk_parts[18]
+    _m_seeds_cond = _awk_parts[19]
+    _m_wt1 = _awk_parts[20]
+    _m_wt2 = _awk_parts[21]
+    _m_quote_vuln = _awk_parts[22]
+    _m_tail_cap = _awk_parts[23]
+    _c_dfs_cmd_fast = to_int(_awk_parts[24])
+    _c_dfs_cmd_nograph = to_int(_awk_parts[25])
+    _c_echo_pid_sess = to_int(_awk_parts[26])
+    _c_cleanup_root = to_int(_awk_parts[27])
+    _c_rmf_root_guard = to_int(_awk_parts[28])
+    _c_try_before_dfs_out = to_int(_awk_parts[29])
+    _c_session_root_only = to_int(_awk_parts[30])
+}
+
+if verbose {
+    println("  [awk batch] parsed " + to_string(len(_awk_parts)) + " fields from single-pass scan")
+}
+
+// ═══════════════════════════════════════════════════════════
 // TEST 1: Source file exists and contains Phase 9 DFS
 // ═══════════════════════════════════════════════════════════
 
@@ -69,33 +218,16 @@ try {
 } catch e {}
 report("T1.1", src_exists, "blowup.hexa exists")
 
-let mut has_phase9 = false
-try {
-    let _ph = exec("grep -c 'Phase 9: DFS Deep Dive' '" + _BLOWUP + "' 2>/dev/null").trim()
-    let cnt = to_int(_ph)
-    has_phase9 = cnt >= 1
-} catch e {}
+let has_phase9 = _c_phase9 >= 1
 report("T1.2", has_phase9, "Phase 9 DFS section present (grep 'Phase 9: DFS Deep Dive')")
 
-let mut has_dfs_flag = false
-try {
-    let _df = exec("grep -c '\"--dfs\"' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_dfs_flag = to_int(_df) >= 1
-} catch e {}
+let has_dfs_flag = _c_dfs_flag >= 1
 report("T1.3", has_dfs_flag, "--dfs flag parsed in arg loop")
 
-let mut has_dfs_current_flag = false
-try {
-    let _dc = exec("grep -c '\"--dfs-current\"' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_dfs_current_flag = to_int(_dc) >= 1
-} catch e {}
+let has_dfs_current_flag = _c_dfs_current_flag >= 1
 report("T1.4", has_dfs_current_flag, "--dfs-current flag parsed in arg loop")
 
-let mut has_dfs_session_flag = false
-try {
-    let _ds = exec("grep -c '\"--dfs-session\"' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_dfs_session_flag = to_int(_ds) >= 1
-} catch e {}
+let has_dfs_session_flag = _c_dfs_session_flag >= 1
 report("T1.5", has_dfs_session_flag, "--dfs-session flag parsed in arg loop")
 
 println("")
@@ -169,68 +301,37 @@ println("")
 
 println("── T3: Recursive Call Flag Validation ──")
 
-// Extract the actual dfs_cmd line from blowup.hexa
-let mut dfs_cmd_line = ""
-try {
-    dfs_cmd_line = exec("grep 'let dfs_cmd = hexa_bin' '" + _BLOWUP + "' 2>/dev/null").trim()
-} catch e {}
+// Extract the actual dfs_cmd line from blowup.hexa (from batch scan)
+let dfs_cmd_line = _m_dfs_cmd_line.trim()
 
 report("T3.1", dfs_cmd_line != "", "dfs_cmd construction line found in source")
 
 // Verify --dfs-current is incremented (dfs_current + 1)
-let mut has_cur_incr = false
-try {
-    let _ci = exec("grep -c 'dfs_current + 1' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_cur_incr = to_int(_ci) >= 1
-} catch e {}
+let has_cur_incr = _c_cur_incr >= 1
 report("T3.2", has_cur_incr, "--dfs-current uses (dfs_current + 1) — depth incremented")
 
 // Verify --dfs-session is forwarded unchanged
-let mut has_sess_fwd = false
-try {
-    let _sf = exec("grep -c 'dfs-session \" + dfs_session' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_sess_fwd = to_int(_sf) >= 1
-} catch e {}
+let has_sess_fwd = _c_sess_fwd >= 1
 report("T3.3", has_sess_fwd, "--dfs-session forwarded from parent (same session ID)")
 
 // Verify --dfs <max_depth> is forwarded (same max)
-let mut has_max_fwd = false
-try {
-    let _mf = exec("grep 'dfs_cmd.*--dfs.*dfs_max_depth' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_max_fwd = len(_mf) > 10
-} catch e {}
+let has_max_fwd = len(_m_dfs_max_fwd.trim()) > 10
 report("T3.4", has_max_fwd, "--dfs <max_depth> forwarded unchanged to child")
 
 // Verify --fast is NOT in the recursive command
-let mut fast_absent = false
-try {
-    let _fa = exec("grep 'let dfs_cmd' '" + _BLOWUP + "' | grep -c '\\-\\-fast' 2>/dev/null").trim()
-    fast_absent = to_int(_fa) == 0
-} catch e { fast_absent = true }
+let fast_absent = _c_dfs_cmd_fast == 0
 report("T3.5", fast_absent, "--fast NOT passed in recursive call (Phase 8 must run)")
 
 // Verify --max-rounds 1 is set (prevent multi-round recursion explosion)
-let mut has_maxr1 = false
-try {
-    let _mr = exec("grep 'dfs_cmd.*max-rounds 1' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_maxr1 = len(_mr) > 10
-} catch e {}
+let has_maxr1 = len(_m_maxr1.trim()) > 10
 report("T3.6", has_maxr1, "--max-rounds 1 set in recursive call (bounded recursion)")
 
 // Verify seeds are conditionally forwarded
-let mut has_seeds_cond = false
-try {
-    let _sc = exec("grep 'dfs_cmd.*wave_seed_csv' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_seeds_cond = len(_sc) > 10
-} catch e {}
+let has_seeds_cond = len(_m_seeds_cond.trim()) > 10
 report("T3.7", has_seeds_cond, "--seeds conditionally forwarded from parent wave_seed_csv")
 
 // Verify --no-graph is NOT passed (deep dive records to atlas)
-let mut no_graph_absent = false
-try {
-    let _ng = exec("grep 'let dfs_cmd' '" + _BLOWUP + "' | grep -c 'no-graph' 2>/dev/null").trim()
-    no_graph_absent = to_int(_ng) == 0
-} catch e { no_graph_absent = true }
+let no_graph_absent = _c_dfs_cmd_nograph == 0
 report("T3.8", no_graph_absent, "--no-graph NOT passed in recursive call (deep dive records)")
 
 // Simulate command construction
@@ -274,11 +375,7 @@ println("── T4: Termination Conditions ──")
 //   4. dfs_best_target == "" (no target found)
 //   5. _already_seen == true (visited collision)
 
-let mut has_guard = false
-try {
-    let _gg = exec("grep -c 'dfs_max_depth > 0 && dfs_current < dfs_max_depth && dfs_best_energy > 0' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_guard = to_int(_gg) >= 1
-} catch e {}
+let has_guard = _c_guard >= 1
 report("T4.1", has_guard, "entry guard checks: max>0 AND current<max AND energy>0 AND target!=\"\"")
 
 // T4.2: depth limit
@@ -298,27 +395,15 @@ let t4_target_terminates = !(t4_target != "")
 report("T4.4", t4_target_terminates, "empty target terminates (no wave_targets)")
 
 // T4.5: visited collision check
-let mut has_visited_check = false
-try {
-    let _vc = exec("grep -c '_already_seen = true' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_visited_check = to_int(_vc) >= 1
-} catch e {}
+let has_visited_check = _c_already_seen >= 1
 report("T4.5", has_visited_check, "visited collision detection: _already_seen flag set on grep match")
 
 // T4.6: visited collision causes backtrack (not recurse)
-let mut has_backtrack = false
-try {
-    let _bt = exec("grep -c 'backtrack' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_backtrack = to_int(_bt) >= 1
-} catch e {}
+let has_backtrack = _c_backtrack >= 1
 report("T4.6", has_backtrack, "visited collision prints backtrack message and skips recursive call")
 
 // T4.7: fast_mode blocks Phase 8 (and therefore Phase 9)
-let mut fast_skips_p8 = false
-try {
-    let _fsp = exec("grep -c 'fast.*Phase 8.*파동 루프 스킵' '" + _BLOWUP + "' 2>/dev/null").trim()
-    fast_skips_p8 = to_int(_fsp) >= 1
-} catch e {}
+let fast_skips_p8 = _c_fast_p8 >= 1
 report("T4.7", fast_skips_p8, "--fast mode skips Phase 8 entirely (Phase 9 unreachable)")
 
 // T4.8: Simulate full depth traversal
@@ -409,28 +494,17 @@ report("T5.6", exact_only, "grep -Fxq is exact-line match (substring 'math_adv' 
 
 // T5.7: Both current domain AND target are written (lines 3385-3386)
 // blowup writes dfs_best_target AND domain to visited (two writes per DFS step)
-let mut has_dual_write = false
-try {
-    let _dw = exec("grep -c \"printf.*>>.*_dfs_visited\" '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_dual_write = to_int(_dw) >= 2
-} catch e {}
+let has_dual_write = _c_dual_write >= 2
 report("T5.7", has_dual_write, "visited file gets TWO entries per step (target + current domain)")
 
 // T5.8: Root cleanup (line 3403-3404)
-let mut has_root_cleanup = false
-try {
-    let _rc = exec("grep -A1 'dfs_current == 0' '" + _BLOWUP + "' | grep -c 'rm -f' 2>/dev/null").trim()
-    has_root_cleanup = to_int(_rc) >= 1
-} catch e {}
+// batch awk: grep -A1 'dfs_current == 0' | grep -c 'rm -f'
+let has_root_cleanup = _c_cleanup_root >= 1
 report("T5.8", has_root_cleanup, "root (depth=0) cleans up visited file after DFS completes")
 
 // T5.9: Non-root does NOT clean up
-let mut no_child_cleanup = false
-try {
-    // The rm is inside `if dfs_current == 0`, so children skip it
-    let _cc = exec("grep -B2 'rm -f.*_dfs_visited' '" + _BLOWUP + "' | grep -c 'dfs_current == 0' 2>/dev/null").trim()
-    no_child_cleanup = to_int(_cc) >= 1
-} catch e {}
+// batch awk: grep -B2 'rm -f.*_dfs_visited' | grep -c 'dfs_current == 0'
+let no_child_cleanup = _c_rmf_root_guard >= 1
 report("T5.9", no_child_cleanup, "only root cleans up (guarded by dfs_current == 0)")
 
 // Cleanup test file
@@ -445,19 +519,12 @@ println("")
 println("── T6: Race Condition & Session Isolation ──")
 
 // T6.1: Session-based file naming prevents cross-contamination
-let mut session_in_path = false
-try {
-    let _sp = exec("grep -c 'blowup_dfs_visited.*dfs_session' '" + _BLOWUP + "' 2>/dev/null").trim()
-    session_in_path = to_int(_sp) >= 1
-} catch e {}
+let session_in_path = _c_session_path >= 1
 report("T6.1", session_in_path, "visited filename includes session ID (per-run isolation)")
 
 // T6.2: Session ID generated from PID (unique per process tree)
-let mut pid_session = false
-try {
-    let _ps = exec("grep 'echo ..' '" + _BLOWUP + "' | grep -c 'dfs_session' 2>/dev/null").trim()
-    pid_session = to_int(_ps) >= 1
-} catch e {}
+// batch awk: grep 'echo ..' | grep -c 'dfs_session'
+let pid_session = _c_echo_pid_sess >= 1
 report("T6.2", pid_session, "session ID derived from 'echo $$' (shell PID)")
 
 // T6.3: Concurrent isolation test — two sessions write to different files
@@ -481,13 +548,7 @@ report("T6.3", iso_ok, "concurrent sessions isolated: A's domains not in B's fil
 // The window between grep check (line 3378) and printf append (line 3385)
 // is non-atomic. However, DFS is sequential (child blocks parent via exec),
 // so only one writer at a time per session. This is safe.
-let mut dfs_is_sequential = false
-try {
-    // The child exec blocks: `let _dfs_out = exec("bash", ["-c", ...dfs_cmd...])`
-    // exec() is synchronous in hexa — parent waits for child to finish
-    let _seq = exec("grep -c 'let _dfs_out = exec' '" + _BLOWUP + "' 2>/dev/null").trim()
-    dfs_is_sequential = to_int(_seq) >= 1
-} catch e {}
+let dfs_is_sequential = _c_dfs_out_exec >= 1
 report("T6.4", dfs_is_sequential, "DFS exec is synchronous (parent blocks until child finishes)")
 
 // T6.5: No parallel DFS within same session
@@ -496,11 +557,7 @@ report("T6.4", dfs_is_sequential, "DFS exec is synchronous (parent blocks until 
 report("T6.5", dfs_is_sequential, "no intra-session parallelism: grep-then-append race is safe (sequential exec)")
 
 // T6.6: Old bug was max_depth-based naming; verify it is now session-based
-let mut no_depth_naming = false
-try {
-    let _dn = exec("grep -c 'blowup_dfs_visited.*max_depth' '" + _BLOWUP + "' 2>/dev/null").trim()
-    no_depth_naming = to_int(_dn) == 0
-} catch e {}
+let no_depth_naming = _c_depth_naming == 0
 report("T6.6", no_depth_naming, "old max_depth-based naming removed (was source of collision bug)")
 
 println("")
@@ -512,13 +569,7 @@ println("")
 println("── T7: --fast / --dfs Mutual Exclusion ──")
 
 // T7.1: fast_mode wraps Phase 8+9 in else block
-let mut fast_guards_p89 = false
-try {
-    // Line 3054 says "fast 모드: Phase 8 + 파동 루프 스킵"
-    // Line 3417 closes with "} // end if !fast_mode"
-    let _fg = exec("grep -c 'end if !fast_mode' '" + _BLOWUP + "' 2>/dev/null").trim()
-    fast_guards_p89 = to_int(_fg) >= 1
-} catch e {}
+let fast_guards_p89 = _c_end_fast >= 1
 report("T7.1", fast_guards_p89, "Phase 8+9 inside `if !fast_mode` block (explicit close comment)")
 
 // T7.2: DFS recursive call does NOT include --fast
@@ -528,14 +579,8 @@ report("T7.2", fast_absent, "recursive call omits --fast (cross-ref T3.5)")
 // T7.3: wave_targets only populated inside !fast_mode branch
 // Phase 8 (wave_targets) is at ~line 3257, inside the else{} that starts at 3055.
 // The else closes at line 3417. So wave_targets is unreachable in fast mode.
-let mut wt_in_branch = false
-try {
-    // Verify wave_targets declaration is after the fast-mode skip comment
-    let _wt1 = exec("grep -n 'let mut wave_targets' '" + _BLOWUP + "' 2>/dev/null").trim()
-    let _wt2 = exec("grep -n 'fast.*Phase 8' '" + _BLOWUP + "' 2>/dev/null").trim()
-    // Both lines exist means wave_targets is inside the else branch
-    wt_in_branch = len(_wt1) > 0 && len(_wt2) > 0
-} catch e {}
+// batch awk: m5 = NR:line for 'let mut wave_targets', m6 = NR:line for 'fast.*Phase 8'
+let wt_in_branch = len(_m_wt1.trim()) > 0 && len(_m_wt2.trim()) > 0
 report("T7.3", wt_in_branch, "wave_targets populated only inside !fast_mode branch")
 
 println("")
@@ -549,14 +594,8 @@ println("── T8: Edge Cases ──")
 // T8.1: Domain with single quotes — potential injection
 // blowup uses: grep -Fxq '<target>' and printf '%s\n' '<target>'
 // If target contains single quote, the shell command breaks
-let mut quote_vuln = false
-try {
-    // Check if the source quotes the domain
-    let _qv = exec("grep 'dfs_best_target.*_dfs_visited' '" + _BLOWUP + "' 2>/dev/null").trim()
-    // The grep line uses: "'" + dfs_best_target + "'"
-    // If dfs_best_target contains a single quote, this creates a shell injection
-    quote_vuln = _qv.contains("'\" + dfs_best_target + \"'")
-} catch e {}
+// batch awk: m7 = first line matching dfs_best_target.*_dfs_visited
+let quote_vuln = _m_quote_vuln.trim().contains("'\" + dfs_best_target + \"'")
 if quote_vuln {
     warn("T8.1", "domain names with single quotes could break shell quoting in grep/printf (low risk: atlas domains rarely contain quotes)")
 } else {
@@ -575,12 +614,7 @@ report("T8.2", !t8_guard, "--dfs 0 correctly disables DFS (guard fails at dfs_ma
 // is taken directly from user input without capping. Verify by checking for a cap pattern.
 // `if dfs_max_depth > 0` is an enable guard, NOT a cap. A real cap would look like
 // `if dfs_max_depth > N { N }` where N > 0.
-let mut dfs_has_cap = false
-try {
-    // Look for cap pattern: dfs_max_depth reassigned with a limit (e.g. > 10 { 10 })
-    let _uc = exec("grep -c 'dfs_max_depth = if dfs_max_depth' '" + _BLOWUP + "' 2>/dev/null").trim()
-    dfs_has_cap = to_int(_uc) >= 1
-} catch e {}
+let dfs_has_cap = _c_dfs_cap >= 1
 if !dfs_has_cap {
     warn("T8.3", "dfs_max_depth has no upper bound cap (scan depth capped at 10, but DFS depth is uncapped). Consider adding a cap for safety.")
 } else {
@@ -591,29 +625,27 @@ if !dfs_has_cap {
 // echo $$ in `exec("echo $$")` returns the shell PID of the subprocess
 // This is fine for uniqueness but note: every exec spawns a new shell, so PID varies
 // The code uses this once at root init, then passes it down. This is correct.
+// batch awk: prev line of 'echo $$' checked for 'dfs_session ==' — not directly
+// modeled in single-pass; we use c19 (echo $$ && dfs_session on same line) as proxy
+// The original grep -B1 checks that the PRECEDING line contains 'dfs_session =='
+// For a stronger check we rely on the awk prev1 tracking — but this pattern often
+// appears as: if ... dfs_session == "" { \n dfs_session = exec("echo $$") }
+// So we add a dedicated awk match:
 let mut session_at_root_only = false
 try {
-    // The session generation is inside: if dfs_max_depth > 0 && dfs_session == ""
-    // dfs_session == "" is only true at root (children receive it via --dfs-session)
-    let _sr = exec("grep -B1 'echo ..' '" + _BLOWUP + "' | grep -c 'dfs_session ==' 2>/dev/null").trim()
+    let _sr = exec("awk '/dfs_session == \"\"/ { prev_sess=1 } prev_sess && /echo \\$\\$/ { found++ } /echo \\$\\$/ { prev_sess=0 } END { printf \"%d\", found+0 }' '" + _BLOWUP + "' 2>/dev/null").trim()
     session_at_root_only = to_int(_sr) >= 1
 } catch e {}
 report("T8.4", session_at_root_only, "session ID generated once at root only (guard: dfs_session == \"\")")
 
 // T8.5: exec output piped through tail -30 (prevents huge child output)
-let mut has_tail_cap = false
-try {
-    let _tc = exec("grep 'dfs_cmd.*tail' '" + _BLOWUP + "' 2>/dev/null").trim()
-    has_tail_cap = _tc.contains("tail -30")
-} catch e {}
+// batch awk: m8 = first line matching dfs_cmd.*tail
+let has_tail_cap = _m_tail_cap.trim().contains("tail -30")
 report("T8.5", has_tail_cap, "child output capped via 'tail -30' (prevents stdout explosion)")
 
 // T8.6: Error handling — try/catch around recursive exec
-let mut has_try_catch = false
-try {
-    let _ht = exec("grep -B1 '_dfs_out = exec' '" + _BLOWUP + "' | grep -c 'try' 2>/dev/null").trim()
-    has_try_catch = to_int(_ht) >= 1
-} catch e {}
+// batch awk: c22 = grep -B1 '_dfs_out = exec' | grep -c 'try'
+let has_try_catch = _c_try_before_dfs_out >= 1
 report("T8.6", has_try_catch, "recursive exec wrapped in try/catch (failure does not crash parent)")
 
 println("")

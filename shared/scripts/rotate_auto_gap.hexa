@@ -1,6 +1,7 @@
-// rotate_auto_gap.hexa — auto_gap.log 로테이션 + gzip (ROI #19)
+// rotate_auto_gap.hexa — auto_gap.log 일간 로테이션 + gzip (ROI #19)
 // 사용: hexa shared/scripts/rotate_auto_gap.hexa
-// 멱등: 5MB 미만이면 스킵. 반복 호출 안전.
+// 멱등: 당일 이미 로테이션했으면 스킵. 빈 파일이면 스킵. 반복 호출 안전.
+// 트리거: 일간 (mtime 기준 24h 경과) 또는 크기 초과 (5MB)
 
 let HOME = env("HOME")
 let BASE = HOME + "/Dev/nexus/shared/logs"
@@ -8,7 +9,7 @@ let LOG_FILE = BASE + "/auto_gap.log"
 
 // --- 설정 ---
 let MAX_SIZE_MB = 5
-let KEEP_ROTATED = 2
+let KEEP_DAYS = 7
 
 println("=== auto_gap.log 로테이션 ===")
 println("")
@@ -28,26 +29,55 @@ let line_count = to_int(to_string(exec("wc -l < '" + LOG_FILE + "' 2>/dev/null |
 println("  크기: " + to_string(size_mb) + "MB (" + to_string(size_bytes) + " bytes)")
 println("  라인: " + to_string(line_count))
 
-// --- 3. 임계값 확인 ---
-if size_mb < MAX_SIZE_MB {
-    println("  [OK] " + to_string(size_mb) + "MB < " + to_string(MAX_SIZE_MB) + "MB — 로테이션 불필요")
+// --- 3. 임계값 확인: 크기 초과 또는 일간(24h 경과) ---
+let need_rotate = false
+let reason = ""
+
+if size_bytes == 0 {
+    println("  [OK] 빈 파일 — 로테이션 불필요")
     exit(0)
 }
 
-println("  [!] 크기 임계값 초과 (" + to_string(MAX_SIZE_MB) + "MB)")
+if size_mb >= MAX_SIZE_MB {
+    need_rotate = true
+    reason = "크기 임계값 초과 (" + to_string(size_mb) + "MB >= " + to_string(MAX_SIZE_MB) + "MB)"
+}
+
+// mtime 기반 일간 로테이션: 마지막 수정이 24h 이전이면 로테이트
+let mtime_epoch = to_int(to_string(exec("stat -f %m '" + LOG_FILE + "' 2>/dev/null || echo 0")).trim())
+let now_epoch = to_int(to_string(exec("date +%s")).trim())
+let age_hours = (now_epoch - mtime_epoch) / 3600
+
+if !need_rotate && age_hours >= 24 {
+    need_rotate = true
+    reason = "일간 로테이션 (경과 " + to_string(age_hours) + "시간 >= 24h)"
+}
+
+// 같은 날 이미 로테이션 완료인지 확인 (오늘 날짜 gz 존재 + 현재 파일 빈 상태)
+let today = to_string(exec("date +%Y-%m-%d")).trim()
+let today_gz = to_string(exec("test -f '" + BASE + "/auto_gap." + today + ".log.gz' && echo y || echo n")).trim()
+if !need_rotate && today_gz == "y" {
+    println("  [OK] 당일 로테이션 이미 완료")
+    exit(0)
+}
+
+if !need_rotate {
+    println("  [OK] " + to_string(size_mb) + "MB < " + to_string(MAX_SIZE_MB) + "MB, 경과 " + to_string(age_hours) + "h < 24h — 로테이션 불필요")
+    exit(0)
+}
+
+println("  [!] " + reason)
 
 // --- 4. 로테이션 실행 ---
-let date = to_string(exec("date +%Y-%m-%d")).trim()
-
 // 같은 날 이미 로테이션된 파일이 있으면 시간 접미사 추가
-let rotated_base = BASE + "/auto_gap." + date + ".log"
+let rotated_base = BASE + "/auto_gap." + today + ".log"
 let rotated_gz = rotated_base + ".gz"
-let gz_exists = to_string(exec("test -f '" + rotated_gz + "' && echo y || echo n")).trim()
+let gz_already = to_string(exec("test -f '" + rotated_gz + "' && echo y || echo n")).trim()
 
 let final_name = rotated_base
-if gz_exists == "y" {
+if gz_already == "y" {
     let ts = to_string(exec("date +%H%M%S")).trim()
-    final_name = BASE + "/auto_gap." + date + "_" + ts + ".log"
+    final_name = BASE + "/auto_gap." + today + "_" + ts + ".log"
 }
 
 println("")
@@ -64,28 +94,34 @@ println("  압축 완료: " + to_string(gz_kb) + "KB")
 println("[3/3] 빈 로그 파일 생성 + 오래된 파일 정리")
 exec("touch '" + LOG_FILE + "'")
 
-// --- 5. 오래된 로테이션 파일 정리 (최근 KEEP_ROTATED 개만 유지) ---
-let rotated_files = to_string(exec("ls -1t " + BASE + "/auto_gap.????-??-??*.log.gz 2>/dev/null")).trim()
+// --- 5. 오래된 로테이션 파일 정리 (KEEP_DAYS일 이상 된 아카이브 삭제) ---
+let cutoff = to_string(exec("date -v-" + to_string(KEEP_DAYS) + "d +%Y-%m-%d 2>/dev/null || date -d '-" + to_string(KEEP_DAYS) + " days' +%Y-%m-%d 2>/dev/null")).trim()
+println("  정리 기준일: " + cutoff + " (이전 삭제)")
+
+let rotated_files = to_string(exec("ls -1 " + BASE + "/auto_gap.????-??-??*.log.gz 2>/dev/null")).trim()
 
 if len(rotated_files) > 0 {
     let files = rotated_files.split("\n")
-    let total = files.len()
-    if total > KEEP_ROTATED {
-        let mut deleted = 0
-        let mut i = KEEP_ROTATED
-        while i < total {
-            let old_file = files[i]
-            if len(old_file) > 0 {
-                exec("rm -f '" + old_file + "'")
-                println("  삭제: " + old_file)
-                deleted = deleted + 1
-            }
-            i = i + 1
+    let mut deleted = 0
+    for f in files {
+        if len(f) == 0 { continue }
+        // 파일명에서 날짜 추출 (auto_gap.YYYY-MM-DD[...].log.gz)
+        let basename = to_string(exec("basename '" + f + "'")).trim()
+        // "auto_gap." = 9 chars, 날짜 = 10 chars (YYYY-MM-DD)
+        let file_date = basename.substring(9, 19)
+        if file_date < cutoff {
+            exec("rm -f '" + f + "'")
+            println("  삭제: " + basename + " (" + file_date + " < " + cutoff + ")")
+            deleted = deleted + 1
         }
-        println("  " + to_string(deleted) + "개 삭제됨")
-    } else {
-        println("  정리 불필요 (" + to_string(total) + "개)")
     }
+    if deleted == 0 {
+        println("  정리 불필요 (모두 " + to_string(KEEP_DAYS) + "일 이내)")
+    } else {
+        println("  " + to_string(deleted) + "개 삭제됨")
+    }
+} else {
+    println("  아카이브 없음")
 }
 
 println("")

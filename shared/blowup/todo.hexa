@@ -110,27 +110,106 @@ fn _is_missing(p: string) -> bool { return p.starts_with("MISSING") }
 let _engine_dir = _dev + "/nexus/shared/blowup"
 let _module_dir = _engine_dir + "/modules"
 
-// ─── 렌즈 레지스트리 카운터 (python3 제거 — hexa native) ───
+// ═══════════════════════════════════════════════════════════
+// ─── ROI #17: 캐시 레이어 (read_file 1회 → N회 재사용) ───
+// 서브프로세스 33→1 제거: 동일 JSON을 반복 read_file/exec 대신
+// 시작 시 1회 로드 → 캐시 맵에서 참조.
+// ═══════════════════════════════════════════════════════════
+
+// ── atlas.n6 라인 수 캐시 (6회 exec("wc -l") → 1회) ──
+let mut _atlas_line_count: i64 = 0
+try {
+    let _atlas_raw = read_file(_shared + "/n6/atlas.n6")
+    let _atlas_lines = _atlas_raw.split("\n")
+    _atlas_line_count = _atlas_lines.len()
+    // 끝 빈줄 보정
+    if _atlas_raw.ends_with("\n") { _atlas_line_count = _atlas_line_count - 1 }
+} catch e {}
+
+// ── lens_registry.json 캐시 (7회 read_file → 1회) ──
+let mut _lens_raw_cache = ""
+let mut _lens_implemented: i64 = 0
+let mut _lens_registered: i64 = 0
+try {
+    _lens_raw_cache = read_file(_shared + "/lens_registry.json")
+    let _le = _lens_raw_cache.split("\"status\"")
+    for _lentry in _le {
+        if !_lentry.contains(":") { continue }
+        let _lsv = _lentry.split(":")[1].trim().split("\"")[1]
+        if _lsv == "implemented" { _lens_implemented = _lens_implemented + 1 }
+        if _lsv == "registered" { _lens_registered = _lens_registered + 1 }
+    }
+} catch e {}
+
+// ── papers/manifest.json 캐시 (5회 read_file → 1회) ──
+let mut _papers_raw_cache = ""
+let mut _papers_total_c: i64 = 0
+let mut _papers_published_c: i64 = 0
+let mut _papers_draft_c: i64 = 0
+let mut _papers_doi_c: i64 = 0
+try {
+    _papers_raw_cache = read_file(_dev + "/papers/manifest.json")
+    let _pp = _papers_raw_cache.split("\"title\":")
+    _papers_total_c = _pp.len() - 1
+    let _ps = _papers_raw_cache.split("\"status\"")
+    for _pe in _ps {
+        if !_pe.contains(":") { continue }
+        let _pv = _pe.split(":")[1].trim().split("\"")[1]
+        if _pv == "Published" { _papers_published_c = _papers_published_c + 1 }
+        if _pv == "Draft" { _papers_draft_c = _papers_draft_c + 1 }
+    }
+    let _pd = _papers_raw_cache.split("\"doi\"")
+    for _pde in _pd {
+        if !_pde.contains(":") { continue }
+        let _pdv = _pde.split(":")[1].trim().split("\"")[1]
+        if _pdv != "" { _papers_doi_c = _papers_doi_c + 1 }
+    }
+} catch e {}
+
+// ── products.json 캐시 (3회 read_file → 1회) ──
+let mut _products_raw_cache = ""
+try {
+    _products_raw_cache = read_file(_dev + "/n6-architecture/config/products.json")
+} catch e {}
+
+// ── 모듈 카운트 캐시 (3회 exec("find ... wc -l") → 1회) ──
+let mut _module_count: i64 = 0
+try {
+    _module_count = safe_int(exec("find " + _module_dir + " -name '*.hexa' -type f 2>/dev/null | wc -l").trim())
+} catch e {}
+
+// ── goal.md 통합 캐시 (3회 shell → 1회 배치) ──
+// goal_missing_count + goal_weak_count + goal_missing_list(head 20) + goal_weak_list(head 5)
+// 단일 shell에서 모두 계산하여 TSV 반환
+let mut _goal_missing_c: i64 = 0
+let mut _goal_weak_c: i64 = 0
+let mut _goal_missing_list = ""
+let mut _goal_weak_list = ""
+try {
+    let _goal_batch = exec("miss=0; weak=0; miss_list=''; weak_list=''; for d in $(ls -1 " + _dev + "/n6-architecture/docs 2>/dev/null | sort); do test -d " + _dev + "/n6-architecture/docs/\"$d\" || continue; if ! test -f " + _dev + "/n6-architecture/docs/\"$d\"/goal.md; then miss=$((miss+1)); [ $miss -le 20 ] && miss_list=\"${miss_list}${d}\n\"; else n=$(wc -l < " + _dev + "/n6-architecture/docs/\"$d\"/goal.md); [ \"$n\" -lt " + to_string(_goal_min) + " ] && { weak=$((weak+1)); [ $weak -le 5 ] && weak_list=\"${weak_list}${d}\t${n}\n\"; }; fi; done; printf '%d\\t%d\\t%s\\t%s' \"$miss\" \"$weak\" \"$miss_list\" \"$weak_list\"")
+    let _gb_parts = _goal_batch.split("\t")
+    if _gb_parts.len() >= 2 {
+        _goal_missing_c = safe_int(_gb_parts[0])
+        _goal_weak_c = safe_int(_gb_parts[1])
+    }
+    if _gb_parts.len() >= 3 { _goal_missing_list = _gb_parts[2] }
+    if _gb_parts.len() >= 4 { _goal_weak_list = _gb_parts[3] }
+} catch e {}
+
+// ═══════════════════════════════════════════════════════════
+// ─── 캐시 기반 접근자 (후방호환 API 유지) ───
+// ═══════════════════════════════════════════════════════════
+
 fn _count_lens_status(status: string) -> i64 {
-    let mut cnt: i64 = 0
-    try {
-        let raw = read_file(_shared + "/lens_registry.json")
-        let entries = raw.split("\"status\"")
-        for e in entries {
-            if !e.contains(":") { continue }
-            let sv = e.split(":")[1].trim().split("\"")[1]
-            if sv == status { cnt = cnt + 1 }
-        }
-    } catch e {}
-    return cnt
+    if status == "implemented" { return _lens_implemented }
+    if status == "registered" { return _lens_registered }
+    return 0
 }
 
-// ─── products.json alien_index 리스트 (hexa native) ───
 fn _alien_items_below(target: i64) -> string {
     let mut out = ""
     try {
-        let raw = read_file(_dev + "/n6-architecture/config/products.json")
-        let sec_parts = raw.split("\"title\":")
+        let sec_parts = _products_raw_cache.split("\"title\":")
         let mut si: i64 = 0
         for sp in sec_parts {
             if si == 0 { si = si + 1; continue }
@@ -148,55 +227,23 @@ fn _alien_items_below(target: i64) -> string {
     return out
 }
 
-// ─── DSE 미탐색 도메인 (hexa native — shell diff) ───
+// ─── DSE 미탐색 도메인 (shell diff — 캐시 불가, 디렉토리 스캔) ───
 fn _dse_missing_domains(limit: i64) -> string {
     return exec("comm -23 <(ls -1 " + _dev + "/n6-architecture/docs 2>/dev/null | while read d; do test -d " + _dev + "/n6-architecture/docs/\"$d\" && echo \"$d\"; done | sort) <(ls -1 " + _shared + "/dse/domains/*.toml 2>/dev/null | xargs -I{} basename {} .toml | sort) | head -" + to_string(limit))
 }
 
-// ─── goal.md 미작성/부실 카운트 (hexa native — shell) ───
-fn _goal_missing_count() -> i64 {
-    return safe_int(exec("ls -1 " + _dev + "/n6-architecture/docs 2>/dev/null | while read d; do test -d " + _dev + "/n6-architecture/docs/\"$d\" && ! test -f " + _dev + "/n6-architecture/docs/\"$d\"/goal.md && echo \"$d\"; done | wc -l").trim())
-}
-fn _goal_weak_count(thr: i64) -> i64 {
-    return safe_int(exec("for d in $(ls -1 " + _dev + "/n6-architecture/docs 2>/dev/null); do f=" + _dev + "/n6-architecture/docs/$d/goal.md; test -f \"$f\" && n=$(wc -l < \"$f\") && [ \"$n\" -lt " + to_string(thr) + " ] && echo \"$d\"; done | wc -l").trim())
-}
+// ─── goal.md 미작성/부실 카운트 (캐시 참조) ───
+fn _goal_missing_count() -> i64 { return _goal_missing_c }
+fn _goal_weak_count(thr: i64) -> i64 { return _goal_weak_c }
 
-// ─── papers manifest 파서 (hexa native) ───
+// ─── papers manifest 접근자 (캐시 참조) ───
 fn _papers_count_status(status: string) -> i64 {
-    let mut cnt: i64 = 0
-    try {
-        let raw = read_file(_dev + "/papers/manifest.json")
-        let parts = raw.split("\"status\"")
-        for p in parts {
-            if !p.contains(":") { continue }
-            let sv = p.split(":")[1].trim().split("\"")[1]
-            if sv == status { cnt = cnt + 1 }
-        }
-    } catch e {}
-    return cnt
+    if status == "Published" { return _papers_published_c }
+    if status == "Draft" { return _papers_draft_c }
+    return 0
 }
-fn _papers_total() -> i64 {
-    let mut cnt: i64 = 0
-    try {
-        let raw = read_file(_dev + "/papers/manifest.json")
-        let parts = raw.split("\"title\":")
-        cnt = parts.len() - 1
-    } catch e {}
-    return cnt
-}
-fn _papers_doi_count() -> i64 {
-    let mut cnt: i64 = 0
-    try {
-        let raw = read_file(_dev + "/papers/manifest.json")
-        let parts = raw.split("\"doi\"")
-        for p in parts {
-            if !p.contains(":") { continue }
-            let dv = p.split(":")[1].trim().split("\"")[1]
-            if dv != "" { cnt = cnt + 1 }
-        }
-    } catch e {}
-    return cnt
-}
+fn _papers_total() -> i64 { return _papers_total_c }
+fn _papers_doi_count() -> i64 { return _papers_doi_c }
 
 // ═══════════════════════════════════════════════════════════
 // ─── 돌파 엔진 — 특이점 수준 할일 자동 생성 ───
@@ -253,22 +300,22 @@ fn load_breakthrough_todos() -> string {
         }
     } catch e {}
 
-    // 3) discovery_graph 통계 — 메타 상태 (hexa native)
+    // 3) discovery_graph 통계 — 메타 상태 (캐시 참조)
     let mut meta_out = ""
     try {
-        let disc_count = exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim()
-        let dc = safe_int(disc_count)
+        let dc = _atlas_line_count
+        let disc_count = to_string(dc)
         let next_target = ((dc / _disc_step) + 1) * _disc_step
         if dc < next_target {
             meta_out = meta_out + "200\tIMPORTANT\t성장\t발견 " + disc_count + " → " + to_string(next_target) + " 목표\t⏳진행중\t특이점 심화\n"
         }
     } catch e {}
 
-    // 4) 모듈 진화 — OUROBOROS (blowup variants)
+    // 4) 모듈 진화 — OUROBOROS (blowup variants) — 캐시 참조
     let mut lens_out = ""
     try {
-        let lens_count = exec("find " + _module_dir + " -name '*.hexa' -type f 2>/dev/null | wc -l").trim()
-        let lc = safe_int(lens_count)
+        let lc = _module_count
+        let lens_count = to_string(lc)
         let next_mod = ((lc / _mod_step) + 1) * _mod_step
         if lc < next_mod {
             lens_out = "202\tIMPORTANT\t진화\t모듈 " + lens_count + "개 → " + to_string(next_mod) + "+ 확장 (OUROBOROS evolve)\t미시작\t탐색 커버리지 확대\n"
@@ -286,11 +333,9 @@ fn load_project_breakthroughs(name: string) -> string {
     let mut out = ""
 
     if name == "n6-architecture" {
-        // products.json에서 alien < 10 스캔 (hexa native)
+        // products.json에서 alien < 10 스캔 (캐시 참조)
         try {
-            let prod_raw = read_file(_dev + "/n6-architecture/config/products.json")
-            // sections 배열 내 각 항목에서 title + alien_index 추출
-            let sec_parts = prod_raw.split("\"title\":")
+            let sec_parts = _products_raw_cache.split("\"title\":")
             let mut si: i64 = 0
             for sp in sec_parts {
                 if si == 0 { si = si + 1; continue }  // 첫 split은 앞부분
@@ -305,9 +350,9 @@ fn load_project_breakthroughs(name: string) -> string {
                 si = si + 1
             }
         } catch e {}
-        // goal.md 미작성 도메인 (hexa native — 단일 shell 호출)
+        // goal.md 미작성 도메인 (캐시 참조)
         try {
-            let _gm_raw = exec("for d in $(ls -1 " + _dev + "/n6-architecture/docs 2>/dev/null); do test -d " + _dev + "/n6-architecture/docs/\"$d\" && ! test -f " + _dev + "/n6-architecture/docs/\"$d\"/goal.md && echo \"$d\"; done | head -20")
+            let _gm_raw = _goal_missing_list
             let _gm_lines = _gm_raw.split("\n")
             let mut gi: i64 = 0
             for _gml in _gm_lines {
@@ -542,10 +587,10 @@ fn print_project(name: string, bt_lines: string) {
             } catch e {}
         }
 
-        // 공통: 발견 로그 다음 목표
+        // 공통: 발견 로그 다음 목표 (캐시 참조)
         if gen < need {
             try {
-                let dc = safe_int(exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim())
+                let dc = _atlas_line_count
                 let nt = ((dc / _disc_step) + 1) * _disc_step
                 gen = gen + 1; row_id = row_id + 1; proposed = proposed + 1
                 tsv = tsv + to_string(row_id) + "\t발견\tatlas " + to_string(dc) + " → " + to_string(nt) + " 목표\t특이점 심화\t진행중\n"
@@ -596,10 +641,10 @@ fn print_project(name: string, bt_lines: string) {
 
         // nexus 전용
         if name == "nexus" {
-            // 모듈 확장
+            // 모듈 확장 (캐시 참조)
             if gen < need {
                 try {
-                    let mc = safe_int(exec("find " + _module_dir + " -name '*.hexa' -type f 2>/dev/null | wc -l").trim())
+                    let mc = _module_count
                     let nm = ((mc / _mod_step) + 1) * _mod_step
                     gen = gen + 1; row_id = row_id + 1; proposed = proposed + 1
                     tsv = tsv + to_string(row_id) + "\t모듈\t" + to_string(mc) + "개 → " + to_string(nm) + "+ 확장 (OUROBOROS)\t커버리지 ↑\t제안\n"
@@ -740,10 +785,10 @@ fn print_project(name: string, bt_lines: string) {
                 } catch e {}
             }
 
-            // growth_bus 분석
+            // growth_bus 분석 (캐시 참조)
             if gen < need {
                 try {
-                    let gb = safe_int(exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim())
+                    let gb = _atlas_line_count
                     gen = gen + 1; row_id = row_id + 1; proposed = proposed + 1
                     tsv = tsv + to_string(row_id) + "\t분석\tgrowth_bus " + to_string(gb) + "건 패턴 분석\t돌파 패턴\t제안\n"
                 } catch e {}
@@ -1118,7 +1163,7 @@ fn _bulk_scan_deprecated(project: string) {
         println("")
         println("## 3. NEXUS 모듈 현황")
         try {
-            let mod_count = exec("find " + _engine_dir + " -name '*.hexa' -type f 2>/dev/null | wc -l").trim()
+            let mod_count = to_string(_module_count)
             println("  shared/blowup/core 모듈: " + mod_count + "개")
             let mod_list = exec("find " + _engine_dir + " -name '*.hexa' -type f 2>/dev/null | xargs -I{} basename {} .hexa | sort")
             let mlines = mod_list.split("\n")
@@ -1204,7 +1249,7 @@ fn _bulk_scan_deprecated(project: string) {
         try {
             let rho = exec("tail -5 " + _shared + "/n6/atlas.n6 2>/dev/null")
             println(rho)
-            let bus_count = exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim()
+            let bus_count = to_string(_atlas_line_count)
             println("  atlas.n6 항목: " + bus_count + "건")
         } catch e {
             println("> 돌파 엔진 스캔 불가")
@@ -1483,7 +1528,7 @@ fn _bulk_scan_deprecated(project: string) {
     println("")
     println("## 11. 발견 로그 통계")
     try {
-        let disc = exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim()
+        let disc = to_string(_atlas_line_count)
         println("  발견: " + disc + "건")
         let graph = exec("grep -c '::' " + _shared + "/n6/atlas.n6 2>/dev/null")
         println("  그래프(atlas.n6): " + graph.trim() + "건")
@@ -1576,10 +1621,10 @@ fn _bulk_scan_deprecated(project: string) {
         }
     } catch e {}
 
-    // 공통: 발견 로그 목표
+    // 공통: 발견 로그 목표 (캐시 참조)
     try {
-        let disc_count = exec("wc -l < " + _shared + "/n6/atlas.n6 2>/dev/null").trim()
-        let dc = safe_int(disc_count)
+        let dc = _atlas_line_count
+        let disc_count = to_string(dc)
         let next_disc = ((dc / _disc_step) + 1) * _disc_step
         if dc < next_disc {
             let remain = next_disc - dc

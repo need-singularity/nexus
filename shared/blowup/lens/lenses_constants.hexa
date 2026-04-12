@@ -16,15 +16,86 @@
 // 34. exotic_matter           35. expanding_scan           36. extrapolation
 // 37. faraday_induction
 
-// ─── 공용 상수 + 헬퍼 (lens_common.hexa.inc copy-paste) ───
-// source: shared/blowup/lens/lens_common.hexa.inc
+// ─── 공용 상수 + 헬퍼 (lenses_base.hexa.inc copy-paste) ───
+// source: shared/blowup/lens/lenses_base.hexa.inc (ROI #22)
+// provides: pi,two_pi,e_const,phi_golden,sqrt2,sqrt3,ln2,one_third
+//           n6,sigma6,tau6,phi6,sopfr6
+//           min_f,max_f,clamp_f,clamp01,to_int
+//           exp_f,sin_f,cos_f,pow_f
+//           list_sum,list_min,list_max
+//           load_jsonl_kv,kv_lookup
 
 comptime const pi = 3.141592653589793
+comptime const two_pi = 6.283185307179586
 comptime const e_const = 2.718281828459045
 comptime const phi_golden = 1.618033988749895
 comptime const sqrt2 = 1.4142135623730951
 comptime const sqrt3 = 1.7320508075688772
 comptime const ln2 = 0.6931471805599453
+comptime const one_third = 0.33333333333333
+
+pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
+pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
+pure fn clamp_f(v: float, lo: float, hi: float) -> float { min_f(max_f(v, lo), hi) }
+pure fn clamp01(x: float) -> float { max_f(0.0, min_f(1.0, x)) }
+
+pure fn exp_f(x: float) -> float {
+    let cx = clamp_f(x, 0.0 - 20.0, 20.0)
+    let mut sum = 1.0
+    let mut term = 1.0
+    let mut k = 1
+    while k <= 20 { term = term * cx / to_float(k)
+        sum = sum + term
+        k = k + 1 }
+    sum
+}
+
+pure fn sin_f(x: float) -> float {
+    let mut v = x
+    while v > pi { v = v - two_pi }
+    while v < 0.0 - pi { v = v + two_pi }
+    let mut sum = 0.0
+    let mut term = v
+    let mut k = 1
+    while k <= 12 { sum = sum + term
+        term = 0.0 - term * v * v / to_float((2 * k) * (2 * k + 1))
+        k = k + 1 }
+    sum
+}
+
+pure fn cos_f(x: float) -> float { sin_f(x + pi / 2.0) }
+
+pure fn pow_f(base: float, exp: int) -> float {
+    let mut r = 1.0
+    let mut i = 0
+    while i < exp { r = r * base
+        i = i + 1 }
+    r
+}
+
+pure fn list_sum(data) -> float {
+    let mut s = 0.0
+    for v in data { s = s + v }
+    s
+}
+
+pure fn list_min(data) -> float {
+    if data.len() == 0 { return 0.0 }
+    let mut m = data[0]
+    let mut i = 1
+    while i < data.len() { if data[i] < m { m = data[i] }
+        i = i + 1 }
+    m
+}
+
+pure fn list_max(data) -> float {
+    if data.len() == 0 { return 0.0 }
+    let mut m = data[0]
+    let mut i = 1
+    while i < data.len() { if data[i] > m { m = data[i] }
+        i = i + 1 }
+    m
+}
 
 fn load_jsonl_kv(path: string) -> list {
     let raw = try { read_file(path) } catch e { return [[], []] }
@@ -66,12 +137,12 @@ fn kv_lookup(data: list, key: string) -> float {
     0.0
 }
 
+// ─── constants-specific: n6 + physics 상수 (jsonl 로드) ───
 let _home = exec("printenv HOME")
 let _shared = _home + "/Dev/nexus/shared"
 let _n6_data = load_jsonl_kv(_shared + "/n6_constants.jsonl")
 let _ph_data = load_jsonl_kv(_shared + "/n6_physics.jsonl")
 
-// n6 상수 (jsonl에서 로드)
 let n6 = kv_lookup(_n6_data, "n")
 let sigma = kv_lookup(_n6_data, "sigma")
 let tau = kv_lookup(_n6_data, "tau")
@@ -84,91 +155,16 @@ let sigma_sq = kv_lookup(_n6_data, "sigma_sq")
 let sigma_times_j2 = kv_lookup(_n6_data, "sigma_j2")
 let ln_4_3 = kv_lookup(_n6_data, "ln_4_3")
 
-// 물리 상수 (jsonl에서 로드)
 let fine_structure_inv = kv_lookup(_ph_data, "alpha_inv")
 let fine_structure = kv_lookup(_n6_data, "fine_structure")
 let proton_electron = kv_lookup(_ph_data, "mp_me")
 let omega_m = kv_lookup(_ph_data, "omega_m")
 let omega_l = kv_lookup(_ph_data, "omega_lambda")
 
-// known_names / known_values — 수학 상수 + jsonl 상수 합쳐서 동적 구성
 let _math_names = ["pi", "e", "phi_golden", "sqrt2", "sqrt3", "ln2"]
 let _math_values = [pi, e_const, phi_golden, sqrt2, sqrt3, ln2]
 let known_names = _math_names + _n6_data[0] + _ph_data[0]
 let known_values = _math_values + _n6_data[1] + _ph_data[1]
-
-pure fn min_f(a: float, b: float) -> float { if a < b { a } else { b } }
-pure fn max_f(a: float, b: float) -> float { if a > b { a } else { b } }
-pure fn clamp_f(v: float, lo: float, hi: float) -> float { min_f(max_f(v, lo), hi) }
-pure fn clamp01(x: float) -> float { max_f(0.0, min_f(1.0, x)) }
-
-pure fn list_sum(data) -> float {
-    let mut s = 0.0
-    for v in data { s = s + v }
-    s
-}
-
-pure fn list_max(data) -> float {
-    if data.len() == 0 { return 0.0 }
-    let mut m = data[0]
-    let mut i = 1
-    while i < data.len() {
-        if data[i] > m { m = data[i] }
-        i = i + 1
-    }
-    m
-}
-
-pure fn list_min(data) -> float {
-    if data.len() == 0 { return 0.0 }
-    let mut m = data[0]
-    let mut i = 1
-    while i < data.len() {
-        if data[i] < m { m = data[i] }
-        i = i + 1
-    }
-    m
-}
-
-pure fn pow_f(base: float, exp: int) -> float {
-    let mut r = 1.0
-    let mut i = 0
-    while i < exp {
-        r = r * base
-        i = i + 1
-    }
-    r
-}
-
-pure fn exp_f(x: float) -> float {
-    let cx = clamp_f(x, 0.0 - 20.0, 20.0)
-    let mut sum = 1.0
-    let mut term = 1.0
-    let mut k = 1
-    while k <= 20 {
-        term = term * cx / to_float(k)
-        sum = sum + term
-        k = k + 1
-    }
-    sum
-}
-
-pure fn sin_f(x: float) -> float {
-    let mut v = x
-    while v > pi { v = v - 2.0 * pi }
-    while v < 0.0 - pi { v = v + 2.0 * pi }
-    let mut sum = 0.0
-    let mut term = v
-    let mut k = 1
-    while k <= 12 {
-        sum = sum + term
-        term = 0.0 - term * v * v / to_float((2 * k) * (2 * k + 1))
-        k = k + 1
-    }
-    sum
-}
-
-pure fn cos_f(x: float) -> float { sin_f(x + pi / 2.0) }
 
 // ─── (1) constant_collector: 알려진 상수 탐지 ───
 
