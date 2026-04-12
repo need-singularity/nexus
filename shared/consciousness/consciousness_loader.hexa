@@ -5,9 +5,38 @@
 
 comptime const DIR = file_dir()
 
-// ─── consciousness_laws.json 로드 ───
+// ─── consciousness_laws.json 로드 (mtime 캐시) ───
+// ROI #5: 매 호출마다 139→354KB JSON 파싱 회피.
+// /tmp 에 mtime 기록, 변경 없으면 캐시된 데이터 재사용.
 comptime const LAWS_PATH = DIR + "/consciousness_laws.json"
-let _DATA = load_json(LAWS_PATH)
+comptime const CACHE_MTIME_PATH = "/tmp/anima_laws_mtime.txt"
+
+fn _get_file_mtime(path: string) -> string {
+    let result = exec("stat -f '%m' " + path + " 2>/dev/null || stat -c '%Y' " + path + " 2>/dev/null")
+    return result.trim()
+}
+
+fn _load_laws_cached() -> map {
+    let current_mtime = _get_file_mtime(LAWS_PATH)
+    if current_mtime != "" {
+        let cached_mtime = read_file(CACHE_MTIME_PATH)
+        let parts = cached_mtime.split("\n")
+        let cached_str = if parts.len() >= 1 { parts[0].trim() } else { "" }
+        if cached_str == current_mtime && has_key(_LAWS_CACHE, "_loaded") {
+            return _LAWS_CACHE
+        }
+    }
+    let data = load_json(LAWS_PATH)
+    if current_mtime != "" {
+        write_file(CACHE_MTIME_PATH, current_mtime)
+    }
+    return data
+}
+
+let mut _LAWS_CACHE = {}
+_LAWS_CACHE["_loaded"] = true
+let _DATA = _load_laws_cached()
+for k, v in _DATA { _LAWS_CACHE[k] = v }
 
 // Ψ-상수 (직접 값)
 let PSI = {}

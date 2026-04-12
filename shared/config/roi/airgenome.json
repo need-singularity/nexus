@@ -13,7 +13,7 @@
     "forge/genomes.index.jsonl",
     "modules/load_balancer.hexa"
   ],
-  "summary": { "done": 0, "running": 0, "todo": 9, "total": 9 },
+  "summary": { "done": 3, "running": 0, "todo": 6, "total": 9 },
   "items": [
     {
       "id": 1,
@@ -26,8 +26,8 @@
       "priority": "P0",
       "difficulty": "easy",
       "target_files": ["modules/genome_harvest.hexa"],
-      "status": "todo",
-      "note": "현재 PID당 awk fork 1회 (~4ms). 300 PID 배치 = ~1.2초 순수 fork 오버헤드. 이미 bulk ps snapshot 있으므로 hexa 내 문자열 파싱만 추가하면 0ms"
+      "status": "done",
+      "note": "완료 2026-04-12. sample_proc_from_row()에서 exec(echo|awk) 제거 → 순수 hexa split+to_int 파싱. parse_time_to_sec() 추가로 H:MM:SS도 내부 처리. 300 PID 배치 기준 300 fork → 0 fork"
     },
     {
       "id": 2,
@@ -40,8 +40,8 @@
       "priority": "P0",
       "difficulty": "medium",
       "target_files": ["modules/genome_harvest.hexa", "scripts/genome_pack.hexa", "modules/ring_io.hexa"],
-      "status": "todo",
-      "note": "120B x 6978 = 837KB 순데이터, 27MB 디스크 점유 (32x 오버헤드). inode 압박 + find/ls 지연. ring_io.hexa 이미 AG3R 포맷 보유 — 로컬 확장만 필요"
+      "status": "done",
+      "note": "완료 2026-04-12. harvest_batch()가 개별 .genome write_file() 대신 ring_append_batch()로 단일 AG3R 링버퍼에 일괄 기록. ring_io.hexa에 init_local_ring/append_local_batch/dump_local_ring 추가. genome_pack.hexa에 ring→pack 변환 경로 추가. count_ring() O(1) 헤더 읽기로 readdir 제거"
     },
     {
       "id": 3,
@@ -53,9 +53,9 @@
       "roi": 2.67,
       "priority": "P0",
       "difficulty": "easy",
-      "target_files": ["modules/genome_harvest.hexa", "scripts/genome_pack.hexa", "modules/log_rotate.hexa"],
-      "status": "todo",
-      "note": "source_group_from_index()가 6878줄 전체 read_file+split+loop. 현재 1.3MB지만 월 2K줄 증가 속도. 6개월 뒤 8MB+ 예상. tail -N 또는 ring 방식으로 최근분만 처리"
+      "target_files": ["modules/genome_harvest.hexa", "scripts/genome_pack.hexa"],
+      "status": "done",
+      "note": "완료 2026-04-12. rolling_trim_index() 추가 — 10K줄 초과 시 excess를 .archive.YYYYMMDD_HHMMSS.jsonl.gz로 gzip 아카이브 + 최근 5개만 보관. harvest 루프 종료 후 + genome_pack 시작 시 양쪽에서 실행. cfg index_rolling_cap으로 조정 가능"
     },
     {
       "id": 4,
