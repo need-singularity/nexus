@@ -158,16 +158,38 @@
         "L6": "수렴 JSON ossified/stable/failed"
       },
       "format_rules": [
-        "결과를 ASCII 표로 출력 (행 구분선 포함)",
-        "DRIFT 항목: 이전값 → 실제값",
+        "⛔ markdown 표 금지 — box-drawing (┌├│┤└) 필수",
+        "⛔ 매 행 사이에 ├────┼── 가로줄 필수",
+        "표1: 공통 점검 항목 (L1~L6 계층별 상태)",
+        "표2: 프로젝트별 drift-rules.json 규칙 목록 + 상태",
+        "DRIFT 항목: 문서값 → 실제값",
         "OK 항목: 정합 표시",
-        "하단에 드리프트/수정 카운트",
-        "--all 시 프로젝트별 섹션 분리"
+        "하단에 드리프트/수정 카운트"
       ],
+      "format_example": "표1: 공통 점검\n┌────┬──────────────────┬──────┬──────┬──────┐\n│ L# │ 계층             │ 대상 │ 결과 │ 상태 │\n├────┼──────────────────┼──────┼──────┼──────┤\n│ L1 │ CLAUDE.md 헤더   │  3   │  3   │ OK   │\n├────┼──────────────────┼──────┼──────┼──────┤\n│ L2 │ _registry.json   │  2   │  1   │DRIFT │\n└────┴──────────────────┴──────┴──────┴──────┘\n\n표2: 프로젝트별 규칙 (drift-rules.json)\n┌────┬──────────────────┬──────┬──────┬──────┐\n│ #  │ 규칙             │ 문서 │ 실제 │ 상태 │\n├────┼──────────────────┼──────┼──────┼──────┤\n│  1 │ 칩 래더 단수     │  9   │  9   │ OK   │\n├────┼──────────────────┼──────┼──────┼──────┤\n│  2 │ Techniques 목록  │ 109  │ 110  │DRIFT │\n└────┴──────────────────┴──────┴──────┴──────┘",
+      "subcommands": {
+        "list": {
+          "keywords": ["list", "목록"],
+          "description": "drift-rules.json 규칙 목록 + 현재 상태를 표1(공통)+표2(프로젝트별)로 출력",
+          "action": "drift-guard.hexa 실행 결과를 2개 표로 포맷"
+        },
+        "fix": {
+          "keywords": ["fix", "수정"],
+          "description": "드리프트 자동 수정",
+          "action": "hexa .shared/hooks/drift-guard.hexa --fix"
+        },
+        "all": {
+          "keywords": ["all", "전체"],
+          "description": "전 프로젝트 순회 점검",
+          "action": "hexa .shared/hooks/drift-guard.hexa --all"
+        }
+      },
       "rules": [
         "seed 없으면 현재 프로젝트만 점검",
-        "'전체 drift' 또는 'drift all' → --all 모드",
+        "'drift list' → 표1+표2 출력",
         "'drift fix' → --fix 모드",
+        "'drift all' → --all 모드",
+        "'전체 정합' → --all --fix",
         "go 루프 커밋 직전에 자동 실행 (PostToolUse:Bash 훅)"
       ]
     },
