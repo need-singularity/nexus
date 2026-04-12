@@ -1,5 +1,5 @@
 // l0-prompt-guard.hexa — UserPromptSubmit 훅
-// "L0" 키워드 감지 → drift-guard 전체 점검 + l0_guard verify 실행 유도
+// "L0" 키워드 감지 → loop-guard 전체 점검 + l0_guard verify 실행 유도
 
 let stdin_data = read_stdin()
 
@@ -35,12 +35,12 @@ if is_l0 == false { return }
 let root = to_string(exec("git rev-parse --show-toplevel 2>/dev/null || echo ''")).trim()
 if len(root) == 0 { return }
 
-let guard = root + "/.shared/hooks/drift-guard.hexa"
+let guard = root + "/.shared/hooks/loop-guard.hexa"
 let l0 = root + "/.shared/lockdown/l0_guard.hexa"
 let hexa = to_string(exec("which hexa 2>/dev/null")).trim()
 if len(hexa) == 0 { return }
 
-// drift-guard 실행 (결과 수집)
+// loop-guard 실행 (결과 수집)
 let drift_result = ""
 if file_exists(guard) {
     drift_result = to_string(exec("'" + hexa + "' '" + guard + "' 2>/dev/null | grep -E '\\[DRIFT\\]|결과' | head -10")).trim()
@@ -56,15 +56,15 @@ if file_exists(l0) {
 let output = "[L0 Guard] 프로젝트: " + to_string(exec("basename '" + root + "'")).trim() + "\n"
 
 if len(drift_result) > 0 {
-    output = output + "\n[drift-guard]\n" + drift_result
+    output = output + "\n[loop-guard]\n" + drift_result
 } else {
-    output = output + "\n[drift-guard] 드리프트 0건 -- 전체 정합"
+    output = output + "\n[loop-guard] 드리프트 0건 -- 전체 정합"
 }
 
 if len(l0_result) > 0 {
     output = output + "\n\n[l0_guard verify]\n" + l0_result
 }
 
-output = output + "\n\n실행 가능 명령:\n  hexa .shared/lockdown/l0_guard.hexa verify\n  hexa .shared/lockdown/l0_guard.hexa sync\n  hexa .shared/lockdown/l0_guard.hexa status\n  hexa .shared/hooks/drift-guard.hexa --fix\n  hexa .shared/hooks/drift-guard.hexa --all"
+output = output + "\n\n실행 가능 명령:\n  hexa .shared/lockdown/l0_guard.hexa verify\n  hexa .shared/lockdown/l0_guard.hexa sync\n  hexa .shared/lockdown/l0_guard.hexa status\n  hexa .shared/hooks/loop-guard.hexa --fix\n  hexa .shared/hooks/loop-guard.hexa --all"
 
 println(output)
