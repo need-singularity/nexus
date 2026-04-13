@@ -18,6 +18,11 @@
 //   hexa run shared/harness/entry.hexa session_registry <register|heartbeat|list|peers> ... — H-SESSION-REGISTRY
 //   hexa run shared/harness/entry.hexa session_worktree <init|list|status|merge|prune|gc_branches> ... — H-SESSION-WORKTREE
 //   hexa run shared/harness/entry.hexa session_prompt_gen [args]  — 세션 이어받기 프롬프트 생성
+//   hexa run shared/harness/entry.hexa session <lock|registry|worktree|prompt_gen> [args] — session 통합 라우터
+//   hexa run shared/harness/entry.hexa verify <v-const|sync-diff|atlas|all|list> — verify 통합 검증 라우터
+//   hexa run shared/harness/entry.hexa gauge <tick|status|reset>  — 컨텍스트 게이지 (tool-call 카운터)
+//   hexa run shared/harness/entry.hexa instinct <scan|score|promote|prune|status> — 인스팅트 파이프라인
+//   hexa run shared/harness/entry.hexa audit [full|json|summary]   — 하네스 스코어카드 7 카테고리
 //   hexa run shared/harness/entry.hexa self_check              — 하네스 자가 진단
 //
 // 성공 조용, 실패 시끄럽게 (하네스 H1 원칙).
@@ -25,6 +30,27 @@
 let HOME = env("HOME")
 let HARNESS = HOME + "/Dev/nexus/shared/harness"
 let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+
+// L1 좀비 차단 — sub-module dispatch 기본 timeout (초). 우회: NEXUS_NO_TIMEOUT=1
+let WRAPPER = HARNESS + "/perl_timeout.sh"
+let DISPATCH_TIMEOUT_SEC = 45
+
+// long-running 모듈 화이트리스트 — timeout 면제
+let LONG_RUN_MODULES = ["agent_ledger", "session_worktree", "blowup", "session_prompt_gen", "handoff_write"]
+
+fn needs_timeout(script: str) -> bool {
+    for m in LONG_RUN_MODULES {
+        if script.contains("/" + m + ".hexa") { return false }
+    }
+    return true
+}
+
+fn wrap_prefix(script: str) -> str {
+    // perl_timeout.sh 가 없으면 fallback to plain (좀비 방지보다 가용성 우선)
+    if file_exists(WRAPPER) == false { return "" }
+    if needs_timeout(script) == false { return "" }
+    return "bash " + WRAPPER + " " + to_string(DISPATCH_TIMEOUT_SEC) + " "
+}
 
 fn route(mode: str, rest: [str]) {
     if mode == "prompt" {
@@ -64,10 +90,28 @@ fn route(mode: str, rest: [str]) {
         dispatch_file(HARNESS + "/session_worktree.hexa", rest)
     } else if mode == "session_prompt_gen" {
         dispatch_file(HARNESS + "/session_prompt_gen.hexa", rest)
+    } else if mode == "session" {
+        dispatch_file(HARNESS + "/session.hexa", rest)
+    } else if mode == "verify" {
+        dispatch_file(HARNESS + "/verify.hexa", rest)
+    } else if mode == "gauge" {
+        dispatch_file(HARNESS + "/context_gauge.hexa", rest)
+    } else if mode == "instinct" {
+        dispatch_file(HARNESS + "/instinct.hexa", rest)
+    } else if mode == "audit" {
+        dispatch_file(HARNESS + "/harness_audit.hexa", rest)
+    } else if mode == "sensor" {
+        dispatch_file(HARNESS + "/sensor.hexa", rest)
+    } else if mode == "growth_tick" {
+        dispatch_file(HARNESS + "/growth_tick.hexa", rest)
+    } else if mode == "cross_feed" {
+        dispatch_file(HARNESS + "/cross_feed.hexa", rest)
+    } else if mode == "thinking" {
+        dispatch_file(HARNESS + "/thinking_engine.hexa", rest)
     } else if mode == "self_check" {
         self_check()
     } else {
-        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|self_check")
+        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|gauge|instinct|audit|self_check")
     }
 }
 
@@ -90,7 +134,8 @@ fn dispatch_agent_guard(rest: [str]) {
             hash = rest[1]
         }
     }
-    let mut cmd = HEXA + " run " + script + " " + sub + " \"" + area.replace("\"", "\\\"") + "\""
+    let prefix = wrap_prefix(script)
+    let mut cmd = prefix + HEXA + " run " + script + " " + sub + " \"" + area.replace("\"", "\\\"") + "\""
     if hash.len() > 0 { cmd = cmd + " \"" + hash.replace("\"", "\\\"") + "\"" }
     let out = to_string(exec(cmd + " 2>&1"))
     if out.trim().len() > 0 { print(out) }
@@ -101,7 +146,8 @@ fn dispatch_file(script: str, rest: [str]) {
         // silent pass — sub-module 아직 미구현 단계
         return
     }
-    let mut cmd = HEXA + " run " + script
+    let prefix = wrap_prefix(script)
+    let mut cmd = prefix + HEXA + " run " + script
     for a in rest {
         let safe = a.replace("\"", "\\\"")
         cmd = cmd + " \"" + safe + "\""
@@ -127,7 +173,12 @@ fn self_check() {
         ["session_lock", HARNESS + "/session_lock.hexa"],
         ["session_registry", HARNESS + "/session_registry.hexa"],
         ["session_worktree", HARNESS + "/session_worktree.hexa"],
-        ["session_prompt_gen", HARNESS + "/session_prompt_gen.hexa"]
+        ["session_prompt_gen", HARNESS + "/session_prompt_gen.hexa"],
+        ["session", HARNESS + "/session.hexa"],
+        ["verify", HARNESS + "/verify.hexa"],
+        ["context_gauge", HARNESS + "/context_gauge.hexa"],
+        ["instinct", HARNESS + "/instinct.hexa"],
+        ["harness_audit", HARNESS + "/harness_audit.hexa"]
     ]
     let mut present = 0
     let mut missing = []
@@ -154,12 +205,15 @@ fn self_check() {
     } else {
         println("gate reject test: FAIL — expected REJECT, got: " + gate_out)
     }
+    // harness_audit 스코어 요약 (옵셔널 — 매 self_check 마다 점수 표시)
+    let audit_out = to_string(exec(HEXA + " run " + HARNESS + "/harness_audit.hexa summary 2>/dev/null")).trim()
+    if audit_out.len() > 0 { println(audit_out) }
 }
 
 fn main() {
     let argv = args()
     if argv.len() < 3 {
-        eprintln("usage: entry.hexa <mode> [args...]  — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|self_check")
+        eprintln("usage: entry.hexa <mode> [args...]  — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|gauge|instinct|audit|self_check")
         return
     }
     let mode = argv[2]
