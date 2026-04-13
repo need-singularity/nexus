@@ -1,0 +1,49 @@
+#!/bin/bash
+# loop-guard + harness-lint pre-commit
+# loop-guard 자체 커밋이면 스킵
+MSG=$(cat .git/MERGE_MSG 2>/dev/null || git log -1 --format=%s 2>/dev/null)
+echo "$MSG" | grep -q "loop-guard\|loop 정합" && exit 0
+
+R=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+GUARD="$R/.shared/hooks/loop-guard.hexa"
+
+HEXA=$(which hexa 2>/dev/null)
+# fallback
+[ -z "$HEXA" ] && HEXA="$HOME/Dev/hexa-lang/hexa"
+[ -x "$HEXA" ] || exit 0
+
+# ─── harness-lint 체인 (실패는 시끄럽게, 성공은 조용히) ───
+# exit 1 = lint 위반 (차단), 기타 = 환경 이슈 (통과). 30s 타임아웃.
+LINT="$R/shared/harness/lint.hexa"
+if [ -f "$LINT" ]; then
+    "$HEXA" "$LINT" --staged 2>/tmp/.harness-lint.err &
+    LPID=$!
+    ( sleep 30 && kill -9 $LPID 2>/dev/null ) >/dev/null 2>&1 &
+    WPID=$!
+    disown $WPID 2>/dev/null
+    wait $LPID 2>/dev/null
+    LINT_RC=$?
+    { kill $WPID && wait $WPID; } 2>/dev/null
+    if [ $LINT_RC -eq 1 ]; then
+        echo "❌ harness-lint 위반 — shared/harness/lint_log.jsonl 참조" >&2
+        cat /tmp/.harness-lint.err >&2 2>/dev/null
+        exit 1
+    fi
+fi
+
+[ -f "$GUARD" ] || exit 0
+
+# --fix 실행, 원래 스테이징된 파일만 재스테이징 (git add -A 금지)
+# 30s timeout — stage1 stage0 위임 hang 으로부터 commit 보호 (memory: hook-zombies-timeout)
+STAGED=$(git diff --cached --name-only)
+"$HEXA" "$GUARD" --fix >/tmp/.loop-pre-commit.log 2>&1 &
+HPID=$!
+( sleep 30 && kill -9 $HPID 2>/dev/null ) >/dev/null 2>&1 &
+WPID=$!
+disown $WPID 2>/dev/null
+wait $HPID 2>/dev/null
+{ kill $WPID && wait $WPID; } 2>/dev/null
+if [ -n "$STAGED" ]; then
+    echo "$STAGED" | xargs git add 2>/dev/null
+fi
+exit 0

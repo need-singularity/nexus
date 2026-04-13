@@ -1,5 +1,27 @@
 # 하네스 — 사용자 가이드
 
+## 설치 (새 clone 후 1회)
+
+```bash
+hexa shared/harness/install-hook.hexa
+```
+
+`.githooks/pre-commit` 을 git 훅 경로로 등록. 이후 매 커밋 자동 lint.
+
+## CLI 인자 대신 env var
+
+`hexa.real` 이 `args()` 를 빈 배열로 반환해서 `--flag` CLI 인자가 작동하지 않음. env var 로 모드 지정:
+
+```bash
+HARNESS_LINT_MODE=all hexa shared/harness/lint.hexa              # 전체 shared/ 스캔 (무거움 — 로컬에서만)
+HARNESS_LINT_MODE=file HARNESS_LINT_FILE=shared/xxx.hexa hexa ...  # 단일 파일
+HARNESS_GC_WEEKLY_MODE=status hexa shared/harness/gc-weekly.hexa   # 쿨다운 확인
+HARNESS_GC_WEEKLY_MODE=force  hexa shared/harness/gc-weekly.hexa   # 쿨다운 무시
+```
+
+단일 파일/단일 모드 엔트리는 그대로 작동 (기본값이 올바른 선택).
+
+
 AI 코딩 하네스(Mitchell Hashimoto, Ghostty 2026-02)를 nexus에 이식한 시스템. 규칙 강제 + 실수 누적 + 주기적 청소 + 규칙 자기감사.
 
 ## 언제 쓰나
