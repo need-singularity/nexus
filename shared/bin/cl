@@ -184,7 +184,7 @@ cl_load_data() {
 }
 
 # fmt_until <out_var> <target_epoch> — 현재부터 target 까지 남은 시간 (최대 7자).
-# "-" (데이터 없음) / "now" (과거) / "45m" / "4h12m" / "3d18h" 형식.
+# "-" (데이터 없음) / "now" (과거) / "45m" / "4h 12m" / "3d 18h" 형식.
 fmt_until() {
     local __out=$1 target="${2:-}" now diff
     if [ -z "$target" ] || [ "$target" = "null" ]; then
@@ -195,8 +195,8 @@ fmt_until() {
     if   [ "$diff" -le 0 ];     then printf -v "$__out" '%s' "now"
     elif [ "$diff" -lt 60 ];    then printf -v "$__out" '%ds'    "$diff"
     elif [ "$diff" -lt 3600 ];  then printf -v "$__out" '%dm'    $(( diff / 60 ))
-    elif [ "$diff" -lt 86400 ]; then printf -v "$__out" '%dh%02dm' $(( diff / 3600 ))      $(( (diff % 3600) / 60 ))
-    else                             printf -v "$__out" '%dd%02dh' $(( diff / 86400 ))     $(( (diff % 86400) / 3600 ))
+    elif [ "$diff" -lt 86400 ]; then printf -v "$__out" '%dh %02dm' $(( diff / 3600 ))      $(( (diff % 3600) / 60 ))
+    else                             printf -v "$__out" '%dd %02dh' $(( diff / 86400 ))     $(( (diff % 86400) / 3600 ))
     fi
 }
 
@@ -238,7 +238,7 @@ build_frame_to() {
         bar_to b2 "$si"
         fmt_until s_in "${CL_SRT[$i]:-}"
         fmt_until w_in "${CL_WRT[$i]:-}"
-        # * = 최선의 선택 (auto-pick: 여유 있고 wk% 최저). active 는 헤더에 표시.
+        # * = auto-pick (여유 있고 wk% 최저) = cursor 초기 위치. active 는 헤더에 표시.
         act_mark=" "
         [ "$name" = "$CL_AUTO" ] && act_mark="*"
         if [ "$i" -lt 9 ]; then num_label=$((i+1));
@@ -284,23 +284,10 @@ cmd_interactive() {
     [ "$count" -gt 0 ] || { echo "ERROR(cl): 계정 없음" >&2; exit 1; }
 
     local auto="$CL_AUTO"
-    local cursor=0 i _placed=0 _wi _err
-    # 커서 우선순위: active 가 아직 쓸만(<95%, error 없음) > auto_pick(=*) > 0
-    # 캐시가 놓치는 외부 limit(예: 5시간 세션 한도)이 있을 수 있으므로,
-    # 현재 계정이 여유 있을 때는 무지성 계정 전환 금지 — 유저가 직접 바꿀 때만 이동.
-    if [ -n "$CL_ACTIVE" ]; then
-        for ((i=0; i<count; i++)); do
-            if [ "${CL_NAMES[$i]}" = "$CL_ACTIVE" ]; then
-                printf -v _wi '%.0f' "${CL_WK[$i]:-100}"
-                _err="${CL_ERR[$i]:-}"
-                if [ -z "$_err" ] && [ "$_wi" -lt 95 ]; then
-                    cursor=$i; _placed=1
-                fi
-                break
-            fi
-        done
-    fi
-    if [ "$_placed" -eq 0 ] && [ -n "$auto" ]; then
+    local cursor=0 i _placed=0
+    # 커서 초기 위치: auto-pick(=*) 계정 (여유 있고 wk% 최저). 없으면 0.
+    # 정렬 위치는 그대로(자연정렬) — cursor 만 * 위치로 이동.
+    if [ -n "$auto" ]; then
         for ((i=0; i<count; i++)); do [ "${CL_NAMES[$i]}" = "$auto" ] && cursor=$i && break; done
     fi
 
@@ -516,7 +503,7 @@ Passthrough (타 프로젝트 자동화 용 — claude 대체재):
 
 표기:
   active=... (헤더)   현재 활성 계정
-  *                   최선의 선택(auto-pick: 여유 있고 wk% 최저)
+  *                   auto-pick (여유 있고 wk% 최저) = cursor 초기 위치
   >                   커서 위치
 
 Store: $CL_HOME
