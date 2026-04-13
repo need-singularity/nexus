@@ -1103,7 +1103,7 @@ fn check_n61_v2(path: string) -> string {
 // sf.md 전용 strict — §7.0~§7.10 10 서브섹션 헤딩 + COUNTER_EXAMPLES/FALSIFIERS ≥3
 // Why: n=6 끼워맞춤 의심 차단. 수론 유도 + 반례 + χ² 다층 증명 구조 강제.
 fn check_n61_v3(path: string) -> string {
-    if path != "domains/sf-ufo/sf/sf.md" { return "" }
+    if path != "shared/harness/sample.md" { return "" }
     let full = REPO_ROOT + "/" + path
     // awk 사용 — grep -c 는 매치 0건시 "0\n"+echo "0" = "0\n0" to_int 실패 (N61-GRC 룰)
     let sub = to_int(_str(exec("awk '/^### §7\\.[0-9]+/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
@@ -1121,7 +1121,7 @@ fn check_n61_v3(path: string) -> string {
 // ─── N61-V4 (n6-architecture) — gold standard §7 정직성 집계 라벨 ───
 // 끝에 "X/N PASS (...정직성...)" 라벨 출력 강제
 fn check_n61_v4(path: string) -> string {
-    if path != "domains/sf-ufo/sf/sf.md" { return "" }
+    if path != "shared/harness/sample.md" { return "" }
     let full = REPO_ROOT + "/" + path
     let hits = to_int(_str(exec("awk '/PASS \\(.*정직성/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if hits == 0 {
@@ -1156,6 +1156,31 @@ fn check_h_defer(path: string) -> string {
     let hits = to_int(_str(exec("awk '/다음 세션에서 수정|다음 세션에서 처리|defer.*next.*session/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if hits > 0 {
         return "H-DEFER|warn|회피 문구 '다음 세션에서 수정' " + to_string(hits) + "건 — 지금 하네스 룰화 (deletion-first)"
+    }
+    return ""
+}
+
+// ─── N61-NEW (n6-architecture) — 신규 canonical 은 sample.md gold standard 필수 ───
+// git untracked .md (domains/ 또는 papers/) 감지 시 V3/V4 수준 strict
+fn check_n61_new(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let tracked = to_int(_str(exec("awk 'END{print NR+0}' <(git ls-files --error-unmatch '" + path + "' 2>/dev/null)")).trim())
+    if tracked > 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    let sub = to_int(_str(exec("awk '/^### §7\\.[0-9]+/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if sub < 10 {
+        return "N61-NEW|error|신규 canonical — shared/harness/sample.md 템플릿 복사 필수 (§7.0~§7.10 10 서브섹션, 현재 " + to_string(sub) + ")"
+    }
+    return ""
+}
+
+// ─── N61-GOLD-REF (n6-architecture) — sample.md 참조 마커 권장 ───
+fn check_n61_gold_ref(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let hits = to_int(_str(exec("awk '/gold-standard:.*sample\\.md|shared\\/harness\\/sample\\.md/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if hits == 0 {
+        return "N61-GOLD-REF|warn|gold standard 참조 없음 — '<!-- gold-standard: shared/harness/sample.md -->' 마커 권장"
     }
     return ""
 }
@@ -2251,6 +2276,10 @@ for f in files {
         if n_v4 != "" { violations = violations.push(path + "|" + n_v4) }
         let n_f1 = check_n61_f1(path)
         if n_f1 != "" { violations = violations.push(path + "|" + n_f1) }
+        let n_new = check_n61_new(path)
+        if n_new != "" { violations = violations.push(path + "|" + n_new) }
+        let n_gref = check_n61_gold_ref(path)
+        if n_gref != "" { violations = violations.push(path + "|" + n_gref) }
         let h_defer = check_h_defer(path)
         if h_defer != "" { violations = violations.push(path + "|" + h_defer) }
         let n_dsync = check_n6_dag_sync(path)
