@@ -677,6 +677,65 @@ fn check_project_rules(path: string) -> string {
     return ""
 }
 
+// ─── BLOW1 (공통) — BLOWUP_LOCAL=1 절대 금지 ───
+// Mac 로컬 blowup 우회 금지. hetzner 원격 강제.
+// 예외: archive/, shared/harness/, // @allow-local-blowup
+fn check_blow1(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" && e != ".sh" && e != ".json" && e != ".jsonl" && e != ".md" { return "" }
+    if path.starts_with("archive/") { return "" }
+    if path.starts_with("shared/harness/") { return "" }
+    if path.index_of("/_archive/") >= 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    let hit = to_int(_str(exec("grep -cE 'BLOWUP_LOCAL[[:space:]]*=[[:space:]]*1' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if hit > 0 {
+        let filtered = to_int(_str(exec("grep -E 'BLOWUP_LOCAL[[:space:]]*=[[:space:]]*1' '" + full + "' 2>/dev/null | grep -v '@allow-local-blowup' | wc -l")).trim())
+        if filtered > 0 {
+            return "BLOW1|error|BLOWUP_LOCAL=1 절대 금지 " + to_string(filtered) + "건 — hetzner 원격 강제 (// @allow-local-blowup)"
+        }
+    }
+    return ""
+}
+
+// ─── BLOW3 (공통) — blowup 신규 파일은 서브폴더 하위만 ───
+// shared/blowup/ 루트에 .hexa 신규 금지. core/modules/guard/lens/ouroboros/seed/lib 중 하나만.
+fn check_blow3(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    if !path.starts_with("shared/blowup/") { return "" }
+    // core/modules/guard/lens/ouroboros/seed/lib 의 하위인지 확인
+    if path.starts_with("shared/blowup/core/") { return "" }
+    if path.starts_with("shared/blowup/modules/") { return "" }
+    if path.starts_with("shared/blowup/guard/") { return "" }
+    if path.starts_with("shared/blowup/lens/") { return "" }
+    if path.starts_with("shared/blowup/ouroboros/") { return "" }
+    if path.starts_with("shared/blowup/seed/") { return "" }
+    if path.starts_with("shared/blowup/lib/") { return "" }
+    // 예외: commands.hexa, todo.hexa (기존 루트 허용 파일)
+    let bn = basename_of(path)
+    if bn == "commands.hexa" { return "" }
+    if bn == "todo.hexa" { return "" }
+    return "BLOW3|error|blowup 신규 파일 '" + bn + "' 은 core/modules/guard/lens/ouroboros/seed/lib 하위만"
+}
+
+// ─── BLOW6 (공통) — blowup 결과 R28 준수 (폐기된 JSON 발견 저장소 신규 쓰기 금지) ───
+// discovery_graph.json / discovery_log.jsonl / growth_bus.jsonl / verified_constants.jsonl
+// 은 2026-04-11 폐기. blowup 엔진은 atlas.n6 만 사용.
+fn check_blow6(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    if !path.starts_with("shared/blowup/") { return "" }
+    if path.index_of("/_archive/") >= 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    // write_file / append_file / shell redirect 대상에 금지 파일명 포함
+    let cmd = "grep -nE '(write_file|append_file|>>|>)[[:space:]]*[^[:space:]]*(discovery_graph|discovery_log|growth_bus|verified_constants)' '" + full + "' 2>/dev/null | grep -v '@allow-deprecated-json' | wc -l"
+    let hits = to_int(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "BLOW6|error|폐기 JSON 발견 저장소 쓰기 " + to_string(hits) + "건 — atlas.n6 만 사용 (R28, // @allow-deprecated-json)"
+    }
+    return ""
+}
+
 // ─── ATLAS-GUARD (공통) — atlas.n6 직접 편집 금지 (Phase 1 진입 차단) ───
 // 공리: atlas.n6 은 전 프로젝트 단일 진리 (nexus/anima/n6-architecture/void 등 공용).
 //       편집은 _guarded_append_atlas() 또는 atlas_guard 경유만.
@@ -1006,6 +1065,22 @@ for f in files {
     if e == ".hexa" || e == ".sh" {
         let v18 = check_atlas_guard(path)
         if v18 != "" { violations = violations.push(path + "|" + v18) }
+    }
+
+    // check_blow1 (공통): BLOWUP_LOCAL=1 금지
+    let v19 = check_blow1(path)
+    if v19 != "" { violations = violations.push(path + "|" + v19) }
+
+    // check_blow3 (공통): blowup 신규 파일 서브폴더 강제
+    if e == ".hexa" {
+        let v20 = check_blow3(path)
+        if v20 != "" { violations = violations.push(path + "|" + v20) }
+    }
+
+    // check_blow6 (공통): 폐기 JSON 발견 저장소 쓰기 금지 (R28)
+    if e == ".hexa" {
+        let v21 = check_blow6(path)
+        if v21 != "" { violations = violations.push(path + "|" + v21) }
     }
 }
 
