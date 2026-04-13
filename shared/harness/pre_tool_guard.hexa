@@ -199,6 +199,49 @@ fn check_roadmap_min(tool: str, file_path: str) -> str {
     return "REJECT: 로드맵 최소 경로 문법 필수 (R34) — 순차 배열 + 병렬 중첩 + '>' 서브순차 + par_bg 만 허용. phases/tracks/depends_on/priority/est/roi 등 확장 금지. 우회: `\"_legacy\": true` (기존 재배치)"
 }
 
+// H-NOBLOCK: 세션 채팅 블로킹 금지 — 사용자 입력 채널을 막는 동기 대기 명령 차단.
+// 대상: read -p / read -r / wait (PID/%N) / fg / sleep N (N>=10) / while sleep ... do done
+// 우회: NEXUS_BLOCK_OK=1 prefix (정당한 사유 — 예: long-poll 의도 명시).
+// 구현: arg 를 임시파일로 쓰고 awk 매칭 — hexa-real char 비교/$expansion 함정 우회.
+fn check_blocking_cmd(tool: str, arg: str) -> str {
+    if tool != "Bash" { return "" }
+    if arg.len() == 0 { return "" }
+    if arg.contains("NEXUS_BLOCK_OK=1") { return "" }
+    if arg.contains("@allow-block") { return "" }
+
+    // read -p/-rp/-sp — char 단위 contains 안전
+    if arg.contains("read -p ") || arg.contains("read -rp ") || arg.contains("read -sp ") {
+        return "REJECT: read -p/-rp/-sp 입력 대기 금지 (H-NOBLOCK) — 세션 블로킹. 우회: NEXUS_BLOCK_OK=1 prefix"
+    }
+    // fg — foreground 복귀
+    if arg.contains(" fg ") || arg.starts_with("fg ") || arg == "fg" || arg.contains(";fg") || arg.contains("&& fg") {
+        return "REJECT: fg 포그라운드 복귀 금지 (H-NOBLOCK) — 세션 블로킹. 우회: NEXUS_BLOCK_OK=1"
+    }
+    // while/until + sleep + done — 폴링 루프
+    if (arg.contains("while ") || arg.contains("until ")) && arg.contains("sleep ") && arg.contains("done") {
+        return "REJECT: while/until + sleep 폴링 루프 금지 (H-NOBLOCK) — Monitor 또는 run_in_background 사용. 우회: NEXUS_BLOCK_OK=1"
+    }
+
+    // wait + sleep N>=10 → awk 로 검사 (arg 임시파일 경유, $expansion 회피)
+    let tmp = "/tmp/h_noblock_arg." + to_string(exec("date +%s%N")).trim()
+    let _ = exec("cat > " + tmp + " <<'NOBLOCK_EOF'\n" + arg + "\nNOBLOCK_EOF")
+
+    let wait_hits = to_string(exec("awk '/wait[[:space:]]+(\\$|%|[0-9])/{c++} END{print c+0}' " + tmp + " 2>/dev/null")).trim()
+    if wait_hits != "0" && wait_hits != "" {
+        let _ = exec("rm -f " + tmp)
+        return "REJECT: wait PID/%/숫자 합류 대기 금지 (H-NOBLOCK) — run_in_background + Monitor 사용. 우회: NEXUS_BLOCK_OK=1"
+    }
+
+    let sl_hits = to_string(exec("awk '/sleep[[:space:]]+([1-9][0-9]+|[1-9][0-9][0-9]+)/{c++} END{print c+0}' " + tmp + " 2>/dev/null")).trim()
+    if sl_hits != "0" && sl_hits != "" {
+        let _ = exec("rm -f " + tmp)
+        return "REJECT: sleep N>=10s 장시간 대기 금지 (H-NOBLOCK) — ScheduleWakeup/Monitor 사용. 우회: NEXUS_BLOCK_OK=1"
+    }
+
+    let _ = exec("rm -f " + tmp)
+    return ""
+}
+
 // H-SEND-GUARD: 외부 발송/등록 (이메일, github issue/PR, webhook) — 사용자 명시 요청 전 차단.
 // 우회: NEXUS_SEND_OK=1 prefix (사용자가 직접 요청한 경우 Claude 가 명시 부여).
 fn check_external_send_cmd(tool: str, arg: str) -> str {
@@ -250,6 +293,7 @@ fn main() {
         check_shared_protected(tool, file_path),
         check_md_to_pdf_cmd(tool, file_path),
         check_external_send_cmd(tool, file_path),
+        check_blocking_cmd(tool, file_path),
         check_pkill_f_cmd(tool, file_path),
         check_bare_interpreter_cmd(tool, file_path),
         check_discovery_json_path(tool, file_path),

@@ -1304,6 +1304,41 @@ fn check_h_root(path: string) -> string {
     return ""
 }
 
+// ─── H-NOBLOCK (공통) — 세션 채팅 블로킹 금지 (read -p / wait $ / fg / sleep>=10 / while+sleep) ───
+// Why: cron/auto/loop 트리거에서 동기 대기 명령은 사용자 입력 채널을 막아 hang. ScheduleWakeup/Monitor/run_in_background 강제.
+// 우회: 파일에 '@allow-block' 토큰 또는 'NEXUS_BLOCK_OK=1' envvar prefix.
+fn check_h_noblock(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" && e != ".sh" { return "" }
+    let full = REPO_ROOT + "/" + path
+    if !file_exists(full) { return "" }
+    let mut content = ""
+    try { content = read_file(full) } catch e {}
+    if content == "" { return "" }
+    if content.index_of("@allow-block") >= 0 { return "" }
+    if content.index_of("NEXUS_BLOCK_OK=1") >= 0 { return "" }
+    if content.index_of("check_h_noblock") >= 0 { return "" }
+    if content.index_of("check_blocking_cmd") >= 0 { return "" }
+    if content.index_of("H-NOBLOCK") >= 0 { return "" }
+
+    let mut hits = 0
+    let mut kinds = ""
+    if content.index_of("read -p ") >= 0 || content.index_of("read -rp ") >= 0 || content.index_of("read -sp ") >= 0 {
+        hits = hits + 1; kinds = kinds + "read-p "
+    }
+    if content.index_of("wait $") >= 0 || content.index_of("wait %") >= 0 {
+        hits = hits + 1; kinds = kinds + "wait-pid "
+    }
+    let sl_hits = _to_int0(_str(exec("awk '/sleep[[:space:]]+([1-9][0-9]+|[1-9][0-9][0-9]+)/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if sl_hits > 0 { hits = hits + 1; kinds = kinds + "sleep>=10(" + to_string(sl_hits) + ") " }
+    let wl_hits = _to_int0(_str(exec("awk '/while.*sleep|until.*sleep/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if wl_hits > 0 { hits = hits + 1; kinds = kinds + "while+sleep " }
+    if hits > 0 {
+        return "H-NOBLOCK|warn|세션 블로킹 패턴 감지: " + kinds.trim() + "— ScheduleWakeup/Monitor/run_in_background 사용. 우회: '// @allow-block' 또는 NEXUS_BLOCK_OK=1 prefix"
+    }
+    return ""
+}
+
 // ─── H-MD2PDF (공통) — MD→PDF 는 md-to-pdf 전용. pandoc/xelatex 호출 차단 ───
 // Why: 사용자 정책 — MD→PDF 변환은 md-to-pdf 만 사용. pandoc/xelatex/pdflatex/lualatex 결과물 스타일 깨짐.
 // 우회: 파일에 '@allow-pandoc' 토큰 또는 'NEXUS_PDF_OK=1' envvar prefix 있으면 스킵.
@@ -2253,6 +2288,92 @@ fn check_h9_hook_stdin_gate(all_files: string) -> string {
     return "H9|error|hook_stdin_gate FAIL (rc=" + rc + ") — hexa read_stdin() 회귀. 상단 HOOK-STDIN-GATE 메시지 + shared/harness/mistakes.jsonl 참조"
 }
 
+// ─── V-PARSE (공통, verify) — L0 .hexa 파일 Parse error 0건 검증 ───
+// SSOT: shared/lockdown/lockdown.json → projects.{cwd_basename}.L0[].path
+// 대상: L0 경로 중 `.hexa` 로 끝나는 파일만 (디렉토리/JSON/MD 제외)
+// 동작: 각 파일에 대해 `~/Dev/hexa-lang/hexa <abs> 2>&1 < /dev/null | grep -c 'Parse error'`
+//       결과 0 → PASS, ≥1 → FAIL
+// 이유: 파일 존재만으로 L0 자격 유지되면 dead code 진입. 파싱 가능성 = L0 최소 조건.
+// 비용: 모든 L0 .hexa 파일에 hexa 런타임 1회 spawn. 현재 nexus 27건 → ~수초.
+//       per-file 검사가 아닌 session-level one-shot (H9 패턴)으로 비용 제한.
+// 트리거: mode=all 항상 / staged에 L0 .hexa 포함 시 / file 모드에서 target 이 L0 .hexa 일 때.
+// 이식원본: shared/lockdown/l0_guard.hexa §4 (line 194~227) — 해당 섹션은 lockdown_gate 신설 시 제거.
+// 예외: L0G_LOCKDIR 등 mkdir 잠금 없음 (lint 자체가 빈번 실행이므로 유저에게 즉시 시각 피드백 필요).
+
+fn _vparse_l0_hexa_paths(project: string) -> string {
+    let LOCKDOWN = REPO_ROOT + "/shared/lockdown/lockdown.json"
+    if !file_exists(LOCKDOWN) { return "" }
+    // awk 로 projects.<project>.L0 블록 내 "path":"*.hexa" 만 추출. L1 진입 시 종료.
+    // R22 회피: bare interpreter 없음. R33/H-GRC 회피: `|| echo 0` 없음.
+    let cmd = "awk '/\"projects\"[[:space:]]*:/,0' '" + LOCKDOWN + "' | awk '/\"" + project + "\"[[:space:]]*:/{p=1} p && /\"L0\"[[:space:]]*:/{l=1} l && /\"path\"[[:space:]]*:/{gsub(/^[^\"]*\"path\"[[:space:]]*:[[:space:]]*\"/,\"\"); gsub(/\".*$/,\"\"); print} l && /\"L1\"[[:space:]]*:/{exit}' | awk '/\\.hexa$/'"
+    return _str(exec(cmd)).trim()
+}
+
+// 단일 L0 .hexa 파일 parse 검사. 반환: (rel_path, pe_count) — pe>0 이면 실패.
+fn _vparse_one(rel: string) -> string {
+    let abs = REPO_ROOT + "/" + rel
+    if !file_exists(abs) { return rel + "|MISSING" }
+    let HEXA = HOME + "/Dev/hexa-lang/hexa"
+    // `grep -c 'Parse error'` — _to_int0 로 첫 줄만 파싱 (안전)
+    let pe_raw = _str(exec(HEXA + " '" + abs + "' 2>&1 < /dev/null | awk '/Parse error/{c++} END{print c+0}'")).trim()
+    let pe = _to_int0(pe_raw)
+    return rel + "|" + to_string(pe)
+}
+
+// staged/file 리스트에 L0 .hexa 경로가 하나라도 포함되면 true
+fn _vparse_should_trigger(files_raw: string, mode: string, l0_list: string) -> bool {
+    if mode == "all" { return true }
+    if l0_list == "" { return false }
+    let l0_lines = l0_list.split("\n")
+    let files = files_raw.split("\n")
+    for f in files {
+        let fp = _str(f).trim()
+        if fp == "" { continue }
+        for lp in l0_lines {
+            let lps = _str(lp).trim()
+            if lps == "" { continue }
+            if fp == lps { return true }
+        }
+    }
+    return false
+}
+
+// V-PARSE gate — 성공 시 "", 실패 시 aggregate 메시지 + 각 실패건 violations 에 push
+fn check_v_parse(files_raw: string, mode: string) -> string {
+    let project = _project_name()
+    if project == "" { return "" }
+    let LOCKDOWN = REPO_ROOT + "/shared/lockdown/lockdown.json"
+    if !file_exists(LOCKDOWN) { return "" }
+    let l0_list = _vparse_l0_hexa_paths(project)
+    if l0_list == "" { return "" }
+    if !_vparse_should_trigger(files_raw, mode, l0_list) { return "" }
+
+    let lines = l0_list.split("\n")
+    let mut fail = 0
+    let mut pass = 0
+    let mut detail = ""
+    for ln in lines {
+        let rel = _str(ln).trim()
+        if rel == "" { continue }
+        let r = _vparse_one(rel)
+        let parts = r.split("|")
+        if len(parts) < 2 { continue }
+        let rp = _str(parts[0])
+        let cnt_s = _str(parts[1])
+        if cnt_s == "MISSING" { continue }
+        let cnt = _to_int0(cnt_s)
+        if cnt == 0 {
+            pass = pass + 1
+        } else {
+            fail = fail + 1
+            if detail != "" { detail = detail + " / " }
+            detail = detail + rp + "(" + to_string(cnt) + ")"
+        }
+    }
+    if fail == 0 { return "" }
+    return "V-PARSE|error|L0 .hexa 파싱 실패 " + to_string(fail) + "건 / " + to_string(pass) + " PASS — " + detail + " — `hexa <path>` 로 로컬 재현 후 수정 (// @allow-parse-fail)"
+}
+
 // ─── Gather files to lint ───
 
 fn get_staged_files() -> string {
@@ -2320,6 +2441,14 @@ if h9 != "" {
     try { exec("echo '" + log_line.replace("'", "'\\''") + "' >> '" + LINT_LOG + "'") } catch e {}
     try { exec("echo '{\"ts\":\"" + now_iso() + "\",\"kind\":\"lint_fail\",\"rule\":\"H9\",\"fix\":\"" + json_escape(h9) + "\"}' >> '" + MISTAKES_LOG + "'") } catch e {}
     exit(1)
+}
+
+// ─── V-PARSE one-shot gate: L0 .hexa Parse error 0건 검증 ───
+// H9 와 달리 즉시 exit 하지 않고 violations 에 push — 다른 체크도 함께 보고되도록.
+// error 가 누적되면 loop 끝에서 has_error=true → exit(1) 로 차단.
+let vp = check_v_parse(files_raw, mode)
+if vp != "" {
+    violations = violations.push("shared/lockdown/L0-hexa-paths|" + vp)
 }
 
 for f in files {
@@ -2568,6 +2697,10 @@ for f in files {
     // check_send_guard (공통, H-SEND-GUARD): 외부 발송/등록 코드 감지 (.hexa/.sh)
     let v23 = check_send_guard(path)
     if v23 != "" { violations = violations.push(path + "|" + v23) }
+
+    // check_h_noblock (공통, H-NOBLOCK): 세션 채팅 블로킹 패턴 감지 (.hexa/.sh)
+    let v24 = check_h_noblock(path)
+    if v24 != "" { violations = violations.push(path + "|" + v24) }
 
     // check_blow3 (공통): blowup 신규 파일 서브폴더 강제
     if e == ".hexa" {
