@@ -6,6 +6,40 @@
 let HOME = env("HOME")
 let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
 let HARNESS = HOME + "/Dev/nexus/shared/harness"
+let CMDS_JSON = HOME + "/Dev/nexus/shared/config/commands.json"
+
+// commands.json SSOT 동적 로드 — 공용 + project_specific[git basename] 머지.
+// 하드코딩 미러 금지 (R36 후보, drift 0).
+fn load_cmds_from_ssot() {
+    let mut cmds = []
+
+    // 공용 commands
+    let q1 = "/usr/bin/jq -r '.commands | to_entries[] | \"\\(.key)\\t\\(.value.keywords | join(\"|\"))\"' '" + CMDS_JSON + "' 2>/dev/null"
+    let out1 = to_string(exec(q1)).trim()
+    for line in out1.split("\n") {
+        if line.len() == 0 { continue }
+        let parts = line.split("\t")
+        if parts.len() >= 2 {
+            cmds = cmds.push([parts[0], parts[1]])
+        }
+    }
+
+    // 프로젝트별 (git basename 기반)
+    let proj = to_string(exec("basename \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null")).trim()
+    if proj.len() > 0 {
+        let q2 = "/usr/bin/jq -r --arg p '" + proj + "' '.project_specific[$p] // {} | to_entries[] | \"\\(.key)\\t\\(.value.keywords | join(\"|\"))\"' '" + CMDS_JSON + "' 2>/dev/null"
+        let out2 = to_string(exec(q2)).trim()
+        for line in out2.split("\n") {
+            if line.len() == 0 { continue }
+            let parts = line.split("\t")
+            if parts.len() >= 2 {
+                cmds = cmds.push([parts[0], parts[1]])
+            }
+        }
+    }
+
+    return cmds
+}
 
 fn main() {
     let argv = args()
@@ -14,18 +48,8 @@ fn main() {
     let lower = user_text.trim().to_lower()
     if lower.len() == 0 { return }
 
-    // 명령 키워드 레지스트리 (commands.json SSOT 미러)
-    let cmds = [
-        ["smash",    "smash|부셔|돌파|breakthrough|블로업|blowup"],
-        ["go",       "go|가자"],
-        ["keep",     "keep|계속|이어|continue|keepgoing"],
-        ["todo",     "todo|할일"],
-        ["free_dfs", "free|dfs|자유|탐색"],
-        ["loop",     "loop|루프|정합"],
-        ["roi",      "roi|투자수익|개선목록"],
-        ["list",     "list|목록"],
-        ["lm",       "lm|듀얼|dual"]
-    ]
+    let cmds = load_cmds_from_ssot()
+    if cmds.len() == 0 { return }  // SSOT 로드 실패 시 silent (jq 누락 등)
 
     let mut matched = ""
     let mut matched_kw = ""

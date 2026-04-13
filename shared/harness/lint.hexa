@@ -290,6 +290,35 @@ fn check_calculator_ssot_path(path: string) -> string {
     return "R29|error|계산기/검증 .hexa 는 shared/n6/scripts/ 단일 SSOT — '" + hit_seg + "' 하위 금지 (// @allow-project-hexa 예외)"
 }
 
+// ─── Check CMDS-DRIFT: commands.json 키워드 하드코딩 매칭 ───
+// 대상: .hexa 중 prompt_scan/cmd_gate/lint 외
+// 패턴: (cmd|matched|keyword|kw|name) == "(smash|go|todo|keep|loop|list|roi|lm|free_dfs|free)" 3+ 회
+// 우회: // @allow-cmds-hardcode 토큰
+fn check_cmds_hardcoded(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+
+    let base = _str(exec("basename '" + path + "' 2>/dev/null")).trim()
+    // 화이트리스트: SSOT 동적 로드 또는 정책 분기
+    if base == "prompt_scan.hexa" { return "" }
+    if base == "cmd_gate.hexa" { return "" }
+    if base == "lint.hexa" { return "" }
+    if base == "entry.hexa" { return "" }
+
+    let full = REPO_ROOT + "/" + path
+
+    // 우회 마커
+    let bypass = _to_int0(_str(exec("grep -c '@allow-cmds-hardcode' '" + full + "' 2>/dev/null")).trim())
+    if bypass > 0 { return "" }
+
+    let pattern = "(cmd|matched|keyword|kw|name)[[:space:]]*==[[:space:]]*\"(smash|go|todo|keep|loop|list|roi|lm|free_dfs|free)\""
+    let hits = _to_int0(_str(exec("grep -cE '" + pattern + "' '" + full + "' 2>/dev/null")).trim())
+    if hits >= 3 {
+        return "CMDS-DRIFT|warn|commands.json 키워드 매칭 " + to_string(hits) + "건 — SSOT 동적 로드 필요. shared/harness/prompt_scan.hexa load_cmds_from_ssot() 패턴 참조 (jq + commands.json)"
+    }
+    return ""
+}
+
 // ─── Check R34: 로드맵 최소 경로 문법 ───
 // 대상: roadmap*.json | */roadmaps/*.json | *.roadmap.json
 // 금지 키: depends_on/deps/priority/weight/roi/est/val/phases/tracks/gate_exit/
@@ -2384,6 +2413,12 @@ for f in files {
     if e == ".json" {
         let v12d = check_r34(path)
         if v12d != "" { violations = violations.push(path + "|" + v12d) }
+    }
+
+    // check_cmds_hardcoded: commands.json 키워드 SSOT 강제
+    if e == ".hexa" {
+        let v12e = check_cmds_hardcoded(path)
+        if v12e != "" { violations = violations.push(path + "|" + v12e) }
     }
 
     // check_an2 (anima 프로젝트 전용): localStorage/sessionStorage 금지
