@@ -93,8 +93,13 @@ bar_to() {
     printf -v "$__var" '%s%s' "${hashes:0:filled}" "${dots:0:$((20-filled))}"
 }
 
-# usage-cache 에서 week_all_pct 최저(error=null, <95) 계정 선택.
-# 정직성 게이트: week_resets 가 현재보다 과거면 stale → 0% 로 간주 (이미 리셋됐을 것).
+# usage-cache 에서 가용량(=100 - max(wk, ss)) 최대 계정 선택.
+# 병목 모델: wk / ss 중 큰 값이 병목 → 100-병목이 실가용량.
+#   예) wk 22% / ss 98% → 병목 98%, 가용 2% → 추천 제외.
+#       wk 39% / ss 8%  → 병목 39%, 가용 61% → 1순위.
+# 동률: -avail desc → wk asc → ss asc (둘 다 작은 쪽 우선).
+# 컷오프: 가용 > 5% (= 병목 < 95%). 미달이면 empty.
+# 정직성 게이트: wk_resets / session_resets 과거면 해당 pct 0 으로 override (stale cache 방어).
 auto_pick() {
     [ -f "$USAGE" ] || { echo "" ; return; }
     local now; now=$(date -u +%s)
@@ -110,11 +115,15 @@ auto_pick() {
             | select(.value.error == null)
             | . as $e
             | (($e.value.week_resets // $e.value.week_all_resets) | parse_ts) as $wrt
+            | ($e.value.session_resets | parse_ts) as $srt
             | (if $wrt != null and $wrt < $now then 0
                else ($e.value.week_all_pct // 100) end) as $wk
-            | {name:.key, wk:$wk}
-            | select(.wk < 95)]
-        | sort_by(.wk)
+            | (if $srt != null and $srt < $now then 0
+               else ($e.value.session_pct // 100) end) as $ss
+            | (100 - ([$wk, $ss] | max)) as $avail
+            | {name:.key, avail:$avail, wk:$wk, ss:$ss}
+            | select(.avail > 5)]
+        | sort_by(-.avail, .wk, .ss)
         | .[0].name // empty
     ' "$USAGE" 2>/dev/null
 }
@@ -380,7 +389,7 @@ cmd_pick() {
     local target="${1:-}"
     if [ -z "$target" ]; then
         target="$(auto_pick)"
-        [ -n "$target" ] || { echo "ERROR(cl): 가용 계정 없음 (모두 ≥95% 또는 error)" >&2; exit 1; }
+        [ -n "$target" ] || { echo "ERROR(cl): 가용 계정 없음 (모두 가용량 ≤5% 또는 error)" >&2; exit 1; }
         echo "auto-pick: $target"
     fi
     local exists; exists=$(jq -r --arg n "$target" '.accounts[] | select(.name == $n) | .name' "$ACCOUNTS")
@@ -421,7 +430,7 @@ cmd_passthrough() {
     local name="$1"; shift
     if [ -z "$name" ]; then
         name="$(auto_pick)"
-        [ -n "$name" ] || { echo "ERROR(cl): 가용 계정 없음 (모두 ≥95% 또는 error)" >&2; exit 1; }
+        [ -n "$name" ] || { echo "ERROR(cl): 가용 계정 없음 (모두 가용량 ≤5% 또는 error)" >&2; exit 1; }
     fi
     account_exists "$name" || { echo "ERROR(cl): 계정 '$name' 없음" >&2; exit 1; }
     command -v claude >/dev/null 2>&1 || { echo "ERROR(cl): claude 바이너리 없음" >&2; exit 127; }
