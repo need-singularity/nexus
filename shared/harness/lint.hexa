@@ -495,6 +495,188 @@ fn check_ag4(path: string) -> string {
     return ""
 }
 
+// ─── 프로젝트별 규칙 JSONL 자동 로드 엔진 ───
+// 파일: shared/rules/<project>.lint.jsonl (한 줄 = 한 규칙)
+// 지원 kind: grep, grep_combo, grep_any, ext_blacklist, ext_blacklist_in_path,
+//           ext_whitelist, filename, require_entry
+// 규칙 추가/변경은 JSONL 파일만 편집 (엔진 코드 불변)
+
+fn _pr_field(line: string, key: string) -> string {
+    let marker = "\"" + key + "\":\""
+    let idx = line.index_of(marker)
+    if idx < 0 { return "" }
+    let after = line.substring(idx + len(marker), len(line))
+    let end = after.index_of("\"")
+    if end < 0 { return "" }
+    return after.substring(0, end)
+}
+
+// "key":[...] 배열 값 추출 — 각 원소를 " 로 감싼 문자열로 반환
+fn _pr_array(line: string, key: string) -> [string] {
+    let mut arr: [string] = []
+    let marker = "\"" + key + "\":["
+    let idx = line.index_of(marker)
+    if idx < 0 { return arr }
+    let after = line.substring(idx + len(marker), len(line))
+    let end = after.index_of("]")
+    if end < 0 { return arr }
+    let body = after.substring(0, end)
+    // body 안의 "..." 추출
+    let mut i: i64 = 0
+    while i < len(body) {
+        let q1 = body.index_of("\"")
+        if q1 < 0 { break }
+        let rest = body.substring(q1 + 1, len(body))
+        let q2 = rest.index_of("\"")
+        if q2 < 0 { break }
+        let val = rest.substring(0, q2)
+        arr = arr.push(val)
+        let consumed = q1 + 1 + q2 + 1
+        if consumed >= len(body) { break }
+        // 진행: body 를 자르는 대신 local slicing
+        let new_body = body.substring(consumed, len(body))
+        return _pr_array_continue(new_body, arr)
+    }
+    return arr
+}
+
+fn _pr_array_continue(body: string, acc: [string]) -> [string] {
+    let mut arr = acc
+    let q1 = body.index_of("\"")
+    if q1 < 0 { return arr }
+    let rest = body.substring(q1 + 1, len(body))
+    let q2 = rest.index_of("\"")
+    if q2 < 0 { return arr }
+    let val = rest.substring(0, q2)
+    arr = arr.push(val)
+    let consumed = q1 + 1 + q2 + 1
+    if consumed >= len(body) { return arr }
+    let next_body = body.substring(consumed, len(body))
+    return _pr_array_continue(next_body, arr)
+}
+
+fn _ext_in(ext: string, list: [string]) -> bool {
+    for e in list {
+        if _str(e) == ext { return true }
+    }
+    return false
+}
+
+fn _any_in_path(path: string, parts: [string]) -> bool {
+    for p in parts {
+        let s = _str(p)
+        if s != "" && path.index_of(s) >= 0 { return true }
+    }
+    return false
+}
+
+fn _any_excluded(path: string, exclude: [string]) -> bool {
+    for e in exclude {
+        let s = _str(e)
+        if s != "" && path.index_of(s) >= 0 { return true }
+    }
+    return false
+}
+
+// kind=grep_combo: all[] 패턴이 전부 파일에 나타나면 위반
+fn _match_grep_combo(full: string, patterns: [string], allow: string) -> bool {
+    for p in patterns {
+        let pat = _str(p)
+        if pat == "" { continue }
+        let cmd = "grep -E '" + pat + "' '" + full + "' 2>/dev/null | grep -v '" + allow + "' | head -1"
+        let r = _str(exec(cmd)).trim()
+        if r == "" { return false }
+    }
+    return true
+}
+
+// kind=grep_any: any[] 패턴이 하나라도 나타나면 위반
+fn _match_grep_any(full: string, patterns: [string], allow: string) -> bool {
+    for p in patterns {
+        let pat = _str(p)
+        if pat == "" { continue }
+        let cmd = "grep -E '" + pat + "' '" + full + "' 2>/dev/null | grep -v '" + allow + "' | head -1"
+        let r = _str(exec(cmd)).trim()
+        if r != "" { return true }
+    }
+    return false
+}
+
+// kind=require_entry: entry_patterns 중 하나는 있어야 함 (없으면 위반)
+fn _match_require_entry(full: string, patterns: [string]) -> bool {
+    for p in patterns {
+        let pat = _str(p)
+        if pat == "" { continue }
+        let cmd = "grep -cE '" + pat + "' '" + full + "' 2>/dev/null || echo 0"
+        let c = to_int(_str(exec(cmd)).trim())
+        if c > 0 { return false }
+    }
+    return true
+}
+
+fn check_project_rules(path: string) -> string {
+    let project = _project_name()
+    if project == "" { return "" }
+    let rulefile = REPO_ROOT + "/shared/rules/" + project + ".lint.jsonl"
+    if !file_exists(rulefile) { return "" }
+    let raw = _str(exec("cat '" + rulefile + "' 2>/dev/null")).trim()
+    if raw == "" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let e = ext_of(path)
+    for ln in raw.split("\n") {
+        let line = _str(ln).trim()
+        if line == "" { continue }
+        if line.starts_with("//") { continue }
+        let id = _pr_field(line, "id")
+        let kind = _pr_field(line, "kind")
+        let severity = _pr_field(line, "severity")
+        let fix = _pr_field(line, "fix")
+        let allow = _pr_field(line, "allow")
+        if id == "" || kind == "" { continue }
+        let exts = _pr_array(line, "ext")
+        if len(exts) > 0 && !_ext_in(e, exts) { continue }
+        let exclude = _pr_array(line, "exclude")
+        if _any_excluded(path, exclude) { continue }
+        let prefix = _pr_field(line, "path_prefix")
+        if prefix != "" && !path.starts_with(prefix) { continue }
+        let path_any = _pr_array(line, "path_any")
+        if len(path_any) > 0 && !_any_in_path(path, path_any) { continue }
+        let mut violated = false
+        if kind == "grep_combo" {
+            let pats = _pr_array(line, "all")
+            if _match_grep_combo(full, pats, allow) { violated = true }
+        }
+        else if kind == "grep_any" {
+            let pats = _pr_array(line, "any")
+            if _match_grep_any(full, pats, allow) { violated = true }
+        }
+        else if kind == "ext_blacklist_in_path" {
+            // 확장자 목록 + 경로 any 둘 다 매칭 시 위반 (path_any 이미 매칭됨 + 확장자 blacklist)
+            let bl = _pr_array(line, "ext")
+            if _ext_in(e, bl) { violated = true }
+        }
+        else if kind == "ext_blacklist" {
+            let bl = _pr_array(line, "ext")
+            if _ext_in(e, bl) { violated = true }
+        }
+        else if kind == "filename" {
+            let deny = _pr_array(line, "deny")
+            let bn = basename_of(path)
+            for d in deny {
+                if _str(d) == bn { violated = true; break }
+            }
+        }
+        else if kind == "require_entry" {
+            let pats = _pr_array(line, "entry_patterns")
+            if _match_require_entry(full, pats) { violated = true }
+        }
+        if violated {
+            return id + "|" + severity + "|" + fix
+        }
+    }
+    return ""
+}
+
 // ─── AN2 (anima 전용) localStorage/sessionStorage 금지 — MemoryStore SQLite 전용 ───
 fn check_an2(path: string) -> string {
     if _project_name() != "anima" { return "" }
@@ -774,6 +956,10 @@ for f in files {
     // check_ag4 (airgenome 프로젝트 전용): launcher cap ≤8
     let v16 = check_ag4(path)
     if v16 != "" { violations = violations.push(path + "|" + v16) }
+
+    // check_project_rules: shared/rules/<project>.lint.jsonl 자동 로드 + 디스패치
+    let v17 = check_project_rules(path)
+    if v17 != "" { violations = violations.push(path + "|" + v17) }
 }
 
 let pass = len(violations) == 0
