@@ -210,16 +210,87 @@
       "hexa_impl": "73386ae perf(self): hexa-only fix for FIX-NESTED-IF",
       "priority": "P1",
       "difficulty": "medium"
+    },
+    {
+      "id": 33,
+      "category": "runtime",
+      "name": "cmd_run cold-start — module_loader fast-exit + watchdog floor",
+      "description": "hook UX 집중 측정. `hexa run <hook>` 1706ms 중 700ms 가 module_loader 전처리 (shared/hooks/* 49개 전부 use/import 0건인데도 매번 실행). 나머지 ~1000ms 는 stage0 watchdog 의 `sleep 1` 바닥값. fast-exit (grep -qE '^(use|import) \"') 로 전처리 스킵 — 훅 워크로드 -39% (1708 → 1038ms). 워치독 sleep 은 rt#34 후보.",
+      "impact": "hook invocation −670ms (−39%), probe −0.5%. 훅이 편집당 N회 발사 → 누적 체감 큼.",
+      "status": "partial",
+      "hexa_impl": "self/main.hexa cmd_run grep fast-exit (rt-33-cold-start branch)",
+      "report": "shared/hexa/rt-33-cold-start-report.md",
+      "priority": "P1",
+      "difficulty": "easy",
+      "followups": [
+        "rt#34 watchdog sleep 1 → sleep 0.05 또는 SIGCHLD-driven (1000ms 바닥 제거)",
+        "AOT cache 재점화 (bt#36) — 빌드+codesign 비용이 stage0 overhead 보다 크므로 훅에는 부적합. 장시간 실행 스크립트에만.",
+        "binary 재빌드 후 배포 — 이번 세션은 소스만 수정, /tmp/hexa_rt33 로 A/B 검증 완료"
+      ],
+      "measurements": {
+        "probe_plain_script_ms": {"baseline_p50": 1033.5, "rt33_p50": 1029.5, "delta_pct": -0.4},
+        "real_hook_ms": {"baseline_p50": 1708.0, "rt33_p50": 1037.7, "delta_pct": -39.2},
+        "stage0_direct_probe_ms": 1.87,
+        "stage0_direct_hook_ms": 38.55,
+        "module_loader_on_hook_ms": 702.38,
+        "watchdog_floor_ms": 1000
+      }
+    },
+    {
+      "id": 32,
+      "category": "runtime",
+      "name": "Val map→flat C struct (rt 32-G)",
+      "description": "Interpreter의 Val(tagged value carrier)이 map-backed. d64 200-step 에서 ~3.37M Val 구성 × 13 hash-table 삽입 = 8.6GB RSS 하한. 해결: flat 12-field C struct (HexaValStruct) + TAG_VALSTRUCT + 단일 malloc.",
+      "impact": "microbench 1M Val: wall 0.80→0.28s (-65%), RSS 3.1GB→98MB (-97%), map_new 1M→0 (-100%)",
+      "status": "phase_0_done",
+      "hexa_impl": "rt-32-g-phase0 branch: self/runtime.c (+260 LOC foundation), self/codegen_c2.hexa gen2_struct_decl Val 특수화, self/native/hexa_cc.c 동일 분기 직접 패치",
+      "priority": "P0",
+      "difficulty": "hard",
+      "phase_0_scope": [
+        "runtime.c: TAG_VALSTRUCT enum + HexaValStruct {12 fields} + HexaVal union .vs 추가",
+        "runtime.c: hexa_valstruct_new / _new_v (boxed args) / 13 typed accessors / get_by_key / set_by_key",
+        "runtime.c: hexa_map_get / hexa_map_set / hexa_is_type / hexa_type_of / hexa_truthy / hexa_to_string / hexa_eq 에 TAG_VALSTRUCT 라우팅",
+        "runtime.c: HEXA_EMPTY_STR 싱글톤으로 12×strdup('') void-Val 방지",
+        "codegen_c2.hexa: gen2_struct_decl 에 name=='Val' && 12 fields 분기 추가 (SSOT)",
+        "native/hexa_cc.c: 동일 분기 C로 직접 패치 (stage0 재부팅 회피)",
+        "smoke: 직접 C test 20 어서션 PASS, test_closures 16/16 PASS, Point/Color 구조체 회귀 없음"
+      ],
+      "phase_1_plan": [
+        "853 field-access call-sites 스위프 — 대부분 hexa_map_get 경유라 자동 라우팅 중이지만, strdup 오염 시 누락 경로 식별",
+        "stage0 재부팅 + hexa_full.hexa 재전사 → 실제 interpreter가 valstruct 경로를 씀",
+        "d64 200-step 실측 (3.37M Val) — 목표 map_new <500K, RSS <3GB",
+        "build_c.hexa / interpreter.hexa parity (현재 SSOT divergence per bt 74-D — interpreter.hexa 불변 유지)"
+      ],
+      "phase_2_plan": [
+        "HexaValStruct 필드 접근을 codegen 이 hexa_valstruct_int() 같은 typed accessor 로 인라인 (hexa_map_get dispatch 제거)",
+        "string field 소유권 정리 (현재는 caller 포인터 공유 — interpreter 레벨에선 안전)",
+        "serialization / JSON / hash_of 경로에 TAG_VALSTRUCT case 추가",
+        "HexaValStruct 풀 할당자 (~3.37M malloc → bump arena) — 재진입형 reset 지원"
+      ],
+      "measurements": {
+        "microbench_1M_val": {
+          "old_wall_s": 0.80, "new_wall_s": 0.28, "delta_pct": -65,
+          "old_rss_bytes": 3108519936, "new_rss_bytes": 98189312, "delta_pct_rss": -96.8,
+          "old_map_new": 1000000, "new_map_new": 0
+        },
+        "microbench_10K_val_map_new": {"old": 10000, "new": 0}
+      },
+      "commit": "rt-32-g-phase0 branch (not yet pushed)",
+      "blocker_remaining": "Phase 1 stage0 재부팅 — hexa_full.hexa 재전사 필요"
     }
   ],
   "summary": {
-    "total": 16,
+    "total": 18,
     "done": 5,
     "done_hexa_only": 6,
     "todo": 4,
     "blocked": 1,
+    "partial": 1,
+    "phase_0_done": 1,
     "critical_path": "#6 (self-host bootstrap) → #10 (Array in-place) → #20 (fused kernel)",
     "fastest_win": "#6 — bootstrap 풀리면 done_hexa 6개 전부 pod 반영",
+    "hook_ux_win": "#33 — fast-exit -39% on hook path; next rt#34 removes sleep 1 watchdog floor for another ~1000ms",
+    "rt_32_g_win": "#32 Phase 0 — 1M Val microbench wall -65%, RSS -97% (3.1GB→98MB). Phase 1 stage0 rebootstrap 으로 interpreter 실적용",
     "forbidden": "Rust/cargo 절대 금지 (zero-Rust)"
   }
 }
