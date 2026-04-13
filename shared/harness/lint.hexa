@@ -598,6 +598,32 @@ fn check_ag5(path: string) -> string {
     return ""
 }
 
+// ─── N62-A (n6-architecture 전용) — 논문 md 에 ```python 검증코드 블록 필수 ───
+// 원칙: 논문 = 검증 .py 코드를 ```python 코드블록으로 직접 embed. hexa 블록은 무관.
+// Scope: papers/*.md, domains/*/paper/*.md
+// 예외: CLAUDE/README, _index 계열, archive/, // @allow-no-verify
+fn check_n62a(path: string) -> string {
+    if _project_name() != "n6-architecture" { return "" }
+    let e = ext_of(path)
+    if e != ".md" { return "" }
+    let bn = basename_of(path)
+    if bn == "CLAUDE.md" || bn == "README.md" || bn == "LICENSE.md" || bn == "CHANGELOG.md" { return "" }
+    if bn.starts_with("_") { return "" }
+    let is_paper = path.starts_with("papers/") || (path.starts_with("domains/") && path.index_of("/paper/") >= 0)
+    if !is_paper { return "" }
+    if path.starts_with("archive/") { return "" }
+    if path.index_of("/_archive/") >= 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    let marker = to_int(_str(exec("grep -c '@allow-no-verify' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if marker > 0 { return "" }
+    // ```python 블록 (python만, hexa 제외)
+    let has = to_int(_str(exec("grep -cE '^\\`\\`\\`python(\\b|$)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has == 0 {
+        return "N62-A|error|논문 '" + bn + "' 에 \\`\\`\\`python 검증코드 블록 없음 — .py 코드 직접 embed 필수 (// @allow-no-verify)"
+    }
+    return ""
+}
+
 // ─── AG6-S1 (airgenome 전용) — Mac 로컬 heavy compute 실행 전 원격 가드 필수 ───
 // 원칙: 원격(ubu/htz/hetzner) 자원 가용 시 Mac heavy compute 0. Mac은 오케스트레이션 전용.
 // 정적 탐지: heavy compute 호출(blowup/seed_engine/ouroboros) 이 파일에 존재하면
@@ -1217,6 +1243,10 @@ for f in files {
     // check_ag6 (airgenome 프로젝트 전용): Mac 로컬 heavy compute 원격 가드 필수
     let v16c = check_ag6(path)
     if v16c != "" { violations = violations.push(path + "|" + v16c) }
+
+    // check_n62a (n6-architecture 전용): 논문 md 에 ```python 블록 필수
+    let v16d = check_n62a(path)
+    if v16d != "" { violations = violations.push(path + "|" + v16d) }
 
     // check_project_rules: shared/rules/<project>.lint.jsonl 자동 로드 + 디스패치
     let v17 = check_project_rules(path)
