@@ -1271,7 +1271,8 @@ fn check_h_defer(path: string) -> string {
 // ─── H-ROOT (공통, R33) — 근본원인 우선, workaround/symptom patch 금지 ───
 // Why: cl cache stale incident — ccmon launchd 미등록 + nexus cache orphan.
 // symptom patch (수동갱신 안내) 대신 파이프라인 자체 복원 강제.
-// 9 키워드: workaround/땜빵/일단 이렇게/수동으로 갱신/수동으로 fix/우회해서/symptom patch/stopgap/band-aid
+// 14 키워드: workaround/땜빵/일단 이렇게/수동으로 갱신/수동으로 fix/우회해서/symptom patch/stopgap/band-aid
+//           + 우회 가능/완화책/운영 관찰/regen 복구/α 완화 (2026-04-14 passive-defer 표현 추가)
 // allow 토큰 파일 내 존재 시 스킵: @allow-workaround (명시 예외), check_h_root / H-ROOT (self-reference)
 fn check_h_root(path: string) -> string {
     let e = ext_of(path)
@@ -1298,8 +1299,13 @@ fn check_h_root(path: string) -> string {
     if content.index_of("symptom patch") >= 0 { hits = hits + 1 }
     if content.index_of("stopgap") >= 0 { hits = hits + 1 }
     if content.index_of("band-aid") >= 0 { hits = hits + 1 }
+    if content.index_of("우회 가능") >= 0 { hits = hits + 1 }
+    if content.index_of("완화책") >= 0 { hits = hits + 1 }
+    if content.index_of("운영 관찰") >= 0 { hits = hits + 1 }
+    if content.index_of("regen 복구") >= 0 { hits = hits + 1 }
+    if content.index_of("α 완화") >= 0 { hits = hits + 1 }
     if hits > 0 {
-        return "H-ROOT|warn|근본원인 회피 키워드 " + to_string(hits) + "종 감지 — R33: 파이프라인/launchd/orphan 경로 복원 필수, workaround 금지. 명시 예외 시 '// @allow-workaround'"
+        return "H-ROOT|warn|근본원인 회피 키워드 " + to_string(hits) + "종 감지 — R33: 파이프라인/launchd/orphan 경로 복원 필수, workaround/완화책/passive-defer 금지. 명시 예외 시 '// @allow-workaround'"
     }
     return ""
 }
@@ -2363,9 +2369,12 @@ fn _vparse_l0_hexa_paths(project: string) -> string {
 }
 
 // 단일 L0 .hexa 파일 parse 검사. 반환: (rel_path, pe_count) — pe>0 이면 실패.
+// `// @allow-parse-fail` 마커가 파일 앞쪽(head 5줄)에 있으면 PASS 로 처리 (archive/폐기 경로).
 fn _vparse_one(rel: string) -> string {
     let abs = REPO_ROOT + "/" + rel
     if !file_exists(abs) { return rel + "|MISSING" }
+    let head = _str(exec("head -5 '" + abs + "' 2>/dev/null"))
+    if head.contains("@allow-parse-fail") { return rel + "|0" }
     let HEXA = HOME + "/Dev/hexa-lang/hexa"
     // `grep -c 'Parse error'` — _to_int0 로 첫 줄만 파싱 (안전)
     let pe_raw = _str(exec(HEXA + " '" + abs + "' 2>&1 < /dev/null | awk '/Parse error/{c++} END{print c+0}'")).trim()
