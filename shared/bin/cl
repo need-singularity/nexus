@@ -14,10 +14,18 @@
 # Subcommands:
 #   cl              대화형 픽커 (tty) → 선택 → exec claude. 비-tty면 cl u 와 동일
 #   cl u            usage bars (비대화형 조회용)
+#   cl list         계정 목록 (cl u alias — 타 프로젝트 자동화 용)
 #   cl status       간단 요약
 #   cl pick [NAME]  활성 계정 전환만(런칭 X). NAME 없으면 week_all_pct 최저 자동
 #   cl env          현재 활성 계정의 CLAUDE_CONFIG_DIR export 라인 출력
+#   cl -- ARGS      auto-pick → claude "$@" (비대화형 passthrough, 자동화 용)
+#   cl NAME -- ARGS NAME 계정으로 claude "$@" (명시 passthrough)
 #   cl help
+#
+# Passthrough 특징:
+#   - 비-tty 에서도 동작 → 타 프로젝트 스크립트/파이프에 연결 가능 (claude 대체재)
+#   - stderr rate-limit 감지 시 usage-cache 에 error 마킹 + 다음 후보로 1회 재시도
+#   - 각 계정별 CLAUDE_CONFIG_DIR 독립 → projects/memory 분리 (one-shot 에 안전)
 #
 # AirGenome 기존 cl 은 hexa 기반으로 void-method 이슈로 깨짐.
 # 본 스크립트는 기존 코드 무시, 자동 선택 로직만 참고하여 재작성.
@@ -325,22 +333,94 @@ cmd_env() {
     printf 'export CLAUDE_CONFIG_DIR=%q\n' "$dir"
 }
 
+# 런타임 rate-limit 감지 시 usage-cache 에 error 필드 주입 → auto_pick 에서 즉시 배제
+mark_rate_limit() {
+    local name="$1"
+    [ -f "$USAGE" ] || return 0
+    local tmp="$USAGE.tmp.$$"
+    jq --arg n "$name" '.[$n].error = "rate-limit-runtime"' "$USAGE" > "$tmp" 2>/dev/null \
+        && mv "$tmp" "$USAGE" || rm -f "$tmp"
+}
+
+account_exists() {
+    local name="$1"
+    [ -n "$name" ] || return 1
+    jq -e --arg n "$name" '.accounts[] | select(.name == $n)' "$ACCOUNTS" >/dev/null 2>&1
+}
+
+# cmd_passthrough <NAME_or_empty> <claude_args...>
+# - NAME 비어있으면 auto_pick
+# - claude 실행 실패 + stderr 에 rate-limit 단서 → 해당 계정 마킹 + 다음 후보로 1회 재시도
+cmd_passthrough() {
+    local name="$1"; shift
+    if [ -z "$name" ]; then
+        name="$(auto_pick)"
+        [ -n "$name" ] || { echo "ERROR(cl): 가용 계정 없음 (모두 ≥95% 또는 error)" >&2; exit 1; }
+    fi
+    account_exists "$name" || { echo "ERROR(cl): 계정 '$name' 없음" >&2; exit 1; }
+    command -v claude >/dev/null 2>&1 || { echo "ERROR(cl): claude 바이너리 없음" >&2; exit 127; }
+
+    local dir; dir=$(config_dir_for "$name")
+    set_active "$name"
+    export CLAUDE_CONFIG_DIR="$dir"
+    echo "cl: → $name ($dir)" >&2
+
+    # one-shot passthrough — stderr 를 임시 파일로 캡처 후 사용자에게 그대로 전달
+    local tmp_err rc
+    tmp_err=$(mktemp -t cl-err.XXXXXX)
+    if claude --effort max "$@" 2>"$tmp_err"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    cat "$tmp_err" >&2
+
+    # rate-limit 패턴 감지 → 해당 계정 마킹 + auto_pick 재선정 (self 제외) 1회 재시도
+    if [ "$rc" -ne 0 ] && grep -qiE 'rate[- ]?limit|usage limit|quota|429|too many request' "$tmp_err" 2>/dev/null; then
+        mark_rate_limit "$name"
+        local next; next="$(auto_pick)"
+        if [ -n "$next" ] && [ "$next" != "$name" ]; then
+            echo "cl: rate-limit detected on $name → retry with $next" >&2
+            rm -f "$tmp_err"
+            local next_dir; next_dir=$(config_dir_for "$next")
+            set_active "$next"
+            export CLAUDE_CONFIG_DIR="$next_dir"
+            exec claude --effort max "$@"
+        fi
+    fi
+    rm -f "$tmp_err"
+    return "$rc"
+}
+
 case "${1:-interactive}" in
     ""|interactive)  cmd_interactive ;;
-    u|dashboard)     show_dashboard ;;
+    u|dashboard|list) show_dashboard ;;
     status)          show_status ;;
     pick)            shift || true; cmd_pick "${1:-}" ;;
     env)             cmd_env ;;
+    --)              shift; cmd_passthrough "" "$@" ;;
     help|-h|--help)
         cat <<USAGE
 cl — Claude Code multi-account launcher (nexus-managed)
 
-  cl              대화형 픽커 → 선택 → claude 런칭 (비-tty면 cl u)
-  cl u            대시보드만 (조회/스크립트용)
-  cl status       요약
-  cl pick [NAME]  active 전환만 (런칭 X). NAME 없으면 자동
-  cl env          eval "\$(cl env)" → CLAUDE_CONFIG_DIR export
+Subcommands:
+  cl                   대화형 픽커 → 선택 → claude 런칭 (비-tty면 cl u)
+  cl u | list          대시보드만 (조회/스크립트용)
+  cl status            요약
+  cl pick [NAME]       active 전환만 (런칭 X). NAME 없으면 자동
+  cl env               eval "\$(cl env)" → CLAUDE_CONFIG_DIR export
   cl help
+
+Passthrough (타 프로젝트 자동화 용 — claude 대체재):
+  cl -- <args>         auto-pick (limit 없는 최저 wk%) → claude "\$@"
+  cl NAME -- <args>    NAME 계정으로 claude "\$@"
+
+  예) cl -- -p "분석해줘"
+      cl claude7 -- -p "..." --output-format json
+  - 비-tty OK (파이프/스크립트 가능)
+  - rate-limit 감지 시 해당 계정 error 마킹 + 다음 후보로 1회 재시도
+  - 각 계정 CLAUDE_CONFIG_DIR 독립 → projects/memory 분리
+    (장기 memory 공유 필요 시 별도 심링크, 현재 미제공)
 
 대화형 키:
   ↑↓←→     커서 이동 (이동 후엔 "그 외 키" 추천 진입 비활성)
@@ -352,5 +432,15 @@ cl — Claude Code multi-account launcher (nexus-managed)
 Store: $CL_HOME
 USAGE
         ;;
-    *) echo "ERROR(cl): unknown subcommand '$1' — 'cl help'" >&2; exit 64 ;;
+    *)
+        # 첫 인자가 accounts.json 에 있는 계정명이면 passthrough 로 처리
+        # 사용법: cl NAME -- <claude args>   (또는 -- 생략도 허용)
+        if account_exists "$1"; then
+            name="$1"; shift
+            [ "${1:-}" = "--" ] && shift || true
+            cmd_passthrough "$name" "$@"
+        else
+            echo "ERROR(cl): unknown subcommand '$1' — 'cl help'" >&2; exit 64
+        fi
+        ;;
 esac
