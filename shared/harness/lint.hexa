@@ -1533,45 +1533,6 @@ fn check_h_noblock(path: string) -> string {
 // Why: 사용자 정책 — *.bak / *.backup / *.old / archive/ / backup/ 별도 사본 금지.
 //      git history/branch/tag 가 단일 진실. 별도 사본은 drift 원인.
 // 우회: '@allow-archive' 토큰 또는 'NEXUS_ARCHIVE_OK=1' envvar prefix.
-// 격리 예외 (이미 합의된 archaeological 공간): /shared/backups/, /shared/archive/, /shared/discovery/archive/, /archive/deprecated_json/
-fn check_h_noarchive(path: string) -> string {
-    let e = ext_of(path)
-    if e != ".hexa" && e != ".sh" { return "" }
-    if path.index_of("/shared/backups/") >= 0 { return "" }
-    if path.index_of("/shared/archive/") >= 0 { return "" }
-    if path.index_of("/shared/discovery/archive/") >= 0 { return "" }
-    if path.index_of("/archive/deprecated_json/") >= 0 { return "" }
-    let full = REPO_ROOT + "/" + path
-    if !file_exists(full) { return "" }
-    let mut content = ""
-    try { content = read_file(full) } catch e {}
-    if content == "" { return "" }
-    if content.index_of("@allow-archive") >= 0 { return "" }
-    if content.index_of("NEXUS_ARCHIVE_OK=1") >= 0 { return "" }
-    if content.index_of("check_h_noarchive") >= 0 { return "" }
-    if content.index_of("check_no_archive_") >= 0 { return "" }
-    if content.index_of("H-NOARCHIVE") >= 0 { return "" }
-
-    let mut hits = 0
-    let mut kinds = ""
-    let mk_hits = _to_int0(_str(exec("awk '/mkdir[[:space:]]+(-p[[:space:]]+)?(backup|backups|archive|archives)([[:space:]]|$|\\/)/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
-    if mk_hits > 0 { hits = hits + 1; kinds = kinds + "mkdir-archive(" + to_string(mk_hits) + ") " }
-    let cp_hits = _to_int0(_str(exec("awk '/(cp|mv|rsync)[[:space:]]+[^|;&]+[.](bak|backup|old|orig)([[:space:]]|$)/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
-    if cp_hits > 0 { hits = hits + 1; kinds = kinds + "cp-bak(" + to_string(cp_hits) + ") " }
-    let wf_hits = _to_int0(_str(exec("awk '/(write_file|append_file)\\([^,]*[.](bak|backup|old|orig)/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
-    if wf_hits > 0 { hits = hits + 1; kinds = kinds + "write-bak(" + to_string(wf_hits) + ") " }
-    let tar_hits = _to_int0(_str(exec("awk '/(backup|archive)[._-](tar|tgz|zip)/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
-    if tar_hits > 0 { hits = hits + 1; kinds = kinds + "tar-archive(" + to_string(tar_hits) + ") " }
-    if hits > 0 {
-        return "H-NOARCHIVE|warn|archive/backup 파일·폴더 생성 패턴 감지: " + kinds.trim() + "— git commit/branch/tag 사용. 격리 예외: shared/backups/, shared/archive/. 우회: '// @allow-archive' 또는 NEXUS_ARCHIVE_OK=1 prefix"
-    }
-    return ""
-}
-
-// ─── H-NOARCHIVE (공통) — 신규 archive/backup 파일·폴더 생성 금지 ───
-// Why: 사용자 정책 — *.bak / *.backup / *.old / archive/ / backup/ 별도 사본 금지.
-//      git history/branch/tag 가 단일 진실. 별도 사본은 drift 원인.
-// 우회: '@allow-archive' 토큰 또는 'NEXUS_ARCHIVE_OK=1' envvar prefix.
 // 격리 예외: shared/backups/, shared/archive/, shared/discovery/archive/, archive/deprecated_json/
 fn check_h_noarchive(path: string) -> string {
     let e = ext_of(path)
