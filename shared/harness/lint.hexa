@@ -624,6 +624,253 @@ fn check_n62a(path: string) -> string {
     return ""
 }
 
+// ─── N6 논문 canonical 양식 공통 scope 헬퍼 ───
+// True 이면 n6 canonical 검사 대상 (papers/* 또는 domains/* 의 .md, _archive 제외)
+fn _n6_canonical_in_scope(path: string) -> bool {
+    if _project_name() != "n6-architecture" { return false }
+    let e = ext_of(path)
+    if e != ".md" { return false }
+    let bn = basename_of(path)
+    if bn == "CLAUDE.md" || bn == "README.md" || bn == "LICENSE.md" || bn == "CHANGELOG.md" { return false }
+    if bn.starts_with("_") { return false }
+    if path.starts_with("archive/") { return false }
+    if path.index_of("/_archive/") >= 0 { return false }
+    if path.index_of("/archive/") >= 0 { return false }
+    let in_papers = path.starts_with("papers/")
+    let in_domains = path.starts_with("domains/")
+    if !in_papers && !in_domains { return false }
+    return true
+}
+
+// 파일 전체에 canonical 양식 면제 마커가 있으면 true
+fn _n6_canonical_exempt(full: string) -> bool {
+    let m = to_int(_str(exec("grep -c '@allow-paper-canonical' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return true }
+    return false
+}
+
+// ─── N61-C1 (n6-architecture) — 6 섹션 헤더 모두 존재 ───
+// §1 WHY / §2 COMPARE / §3 STRUCT / §4 FLOW / §5 EVOLVE / §6 VERIFY
+fn check_n61_c1(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let mut missing = ""
+    let mut miss_count: i64 = 0
+    // §1 WHY: 당신의 삶 / Real-world / 실생활 효과
+    let s1 = to_int(_str(exec("grep -cE '당신의 삶|Real-world|실생활 효과' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s1 == 0 { missing = missing + " WHY"; miss_count = miss_count + 1 }
+    // §2 COMPARE: (성능 비교 OR Comparison) AND ASCII
+    let s2a = to_int(_str(exec("grep -cE '성능 비교|Comparison' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let s2b = to_int(_str(exec("grep -cE 'ASCII' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s2a == 0 || s2b == 0 { missing = missing + " COMPARE"; miss_count = miss_count + 1 }
+    // §3 STRUCT: (시스템 구조 OR System.*Architecture OR 구조도) AND ASCII
+    let s3a = to_int(_str(exec("grep -cE '시스템 구조|System.*Architecture|구조도' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s3a == 0 || s2b == 0 { missing = missing + " STRUCT"; miss_count = miss_count + 1 }
+    // §4 FLOW: (플로우 OR Flow OR 데이터.*에너지) AND ASCII
+    let s4a = to_int(_str(exec("grep -cE '플로우|Flow|데이터.*에너지' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s4a == 0 || s2b == 0 { missing = missing + " FLOW"; miss_count = miss_count + 1 }
+    // §5 EVOLVE: Mk.I OR 진화 OR Evolution
+    let s5 = to_int(_str(exec("grep -cE 'Mk\\.?I|진화|Evolution' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s5 == 0 { missing = missing + " EVOLVE"; miss_count = miss_count + 1 }
+    // §6 VERIFY: Python 검증 OR ```python
+    let s6 = to_int(_str(exec("grep -cE 'Python 검증|^\\`\\`\\`python' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if s6 == 0 { missing = missing + " VERIFY"; miss_count = miss_count + 1 }
+    if miss_count == 0 { return "" }
+    return "N61-C1|error|논문 6섹션 누락 " + to_string(miss_count) + "건 (WHY/COMPARE/STRUCT/FLOW/EVOLVE/VERIFY 중" + missing + ") (// @allow-paper-canonical)"
+}
+
+// ─── N61-A1 (n6-architecture) — 모든 ## 섹션 body 비어있지 않음 ───
+// 각 ## 헤더 후 다음 ## 전까지: 비어있지 않은 줄 ≥ 3 OR 코드/리스트/표/details ≥ 1
+fn check_n61_a1(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    // 라인 단위 마커는 awk 가 검출
+    let awk = "awk 'BEGIN{title=\"\";line=0;ne=0;blk=0;empty=0;empty_line=0;empty_title=\"\"} /^## / { if(title!=\"\" && ne<3 && blk==0 && skip==0){empty=1; empty_title=title; empty_line=line; exit} title=substr($0,4); line=NR; ne=0; blk=0; skip=0; next } /@allow-empty-section/ { skip=1 } /^\\`\\`\\`/ || /^[[:space:]]*[-*+] / || /^[[:space:]]*[0-9]+\\. / || /^\\|/ || /^<details/ { blk++ } NF>0 && !/^## / { ne++ } END { if(empty){print empty_line\"|\"empty_title} else if(title!=\"\" && ne<3 && blk==0 && skip==0){print line\"|\"title} }' '" + full + "' 2>/dev/null"
+    let res = _str(exec(awk)).trim()
+    if res == "" { return "" }
+    let bar = res.index_of("|")
+    if bar < 0 { return "" }
+    let lnum = res.substring(0, bar)
+    let title = res.substring(bar + 1, len(res))
+    return "N61-A1|error|섹션 '" + title + "' (line " + lnum + ") 비어있음 — 3줄 또는 블록/리스트/표 필수 (// @allow-empty-section)"
+}
+
+// ─── N61-B1 (n6-architecture) — ASCII 코드블록에 박스 경계 필수 ───
+// 코드블록 (``` ... ```) 전체에서 ┌└ 또는 ╭╰ 경계가 한 코드블록 단위로 있어야
+// 단순화: ASCII 섹션 (§2/§3/§4) 영역 내 코드블록 ≥1 + 박스 경계 ≥1
+fn check_n61_b1(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let m = to_int(_str(exec("grep -c '@allow-ascii-freeform' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    // 각 코드블록 단위로 box 경계 검증 — ascii 의도가 보이는 코드블록만 (─/│/┌/└/╭/╰/├/┼ 등 박스문자 1+)
+    // index() 사용 — BSD awk 의 [...] 멀티바이트 false positive 우회
+    let awk = "awk 'BEGIN{inblk=0;has_top=0;has_bot=0;has_box=0;bad=0;blkline=0} /^\\`\\`\\`/ { if(inblk){ if(has_box && (has_top==0 || has_bot==0)){bad=blkline; exit}; inblk=0; has_top=0; has_bot=0; has_box=0 } else { inblk=1; blkline=NR; has_top=0; has_bot=0; has_box=0 }; next } inblk { if(index($0,\"┌\")||index($0,\"╭\")) has_top=1; if(index($0,\"└\")||index($0,\"╰\")) has_bot=1; if(index($0,\"┌\")||index($0,\"└\")||index($0,\"╭\")||index($0,\"╰\")||index($0,\"├\")||index($0,\"┼\")||index($0,\"│\")||index($0,\"─\")) has_box=1 } END{print bad+0}' '" + full + "' 2>/dev/null"
+    let bad = to_int(_str(exec(awk)).trim())
+    if bad > 0 {
+        return "N61-B1|error|ASCII 코드블록 (line " + to_string(bad) + ") 박스 경계(┌└ or ╭╰) 없음 (// @allow-ascii-freeform)"
+    }
+    return ""
+}
+
+// ─── N61-B2 (n6-architecture) — §2 COMPARE 에 █ 바 차트 ≥3줄 ───
+fn check_n61_b2(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    // §2 = '성능 비교' 또는 'Comparison' 헤더
+    // 헤더부터 다음 ## 까지에서 █ 포함 라인 카운트
+    let awk = "awk '/^## .*(성능 비교|Comparison)/ { in_s=1; next } /^## / { in_s=0 } in_s && /█/ { c++ } END{print c+0}' '" + full + "' 2>/dev/null"
+    let bars = to_int(_str(exec(awk)).trim())
+    // §2 자체가 없으면 N61-C1 가 잡음 — 여기는 있는 경우만
+    let has_s2 = to_int(_str(exec("grep -cE '^## .*(성능 비교|Comparison)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has_s2 == 0 { return "" }
+    if bars < 3 {
+        return "N61-B2|error|§2 COMPARE 에 █ 바 차트 < 3줄 (현재 " + to_string(bars) + ") (// @allow-paper-canonical)"
+    }
+    return ""
+}
+
+// ─── N61-B3 (n6-architecture) — §3 STRUCT 에 ├ 또는 ┼ ≥1 ───
+fn check_n61_b3(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let has_s3 = to_int(_str(exec("grep -cE '^## .*(시스템 구조|System.*Architecture|구조도)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has_s3 == 0 { return "" }
+    let awk = "awk '/^## .*(시스템 구조|System.*Architecture|구조도)/ { in_s=1; next } /^## / { in_s=0 } in_s && (index($0,\"├\") || index($0,\"┼\")) { c++ } END{print c+0}' '" + full + "' 2>/dev/null"
+    let cnt = to_int(_str(exec(awk)).trim())
+    if cnt == 0 {
+        return "N61-B3|error|§3 STRUCT 에 ├ 또는 ┼ 분할 없음 (// @allow-paper-canonical)"
+    }
+    return ""
+}
+
+// ─── N61-B4 (n6-architecture) — §4 FLOW 에 ▼ 또는 → ≥3건 ───
+fn check_n61_b4(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let has_s4 = to_int(_str(exec("grep -cE '^## .*(플로우|Flow|데이터.*에너지)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has_s4 == 0 { return "" }
+    let awk = "awk '/^## .*(플로우|Flow|데이터.*에너지)/ { in_s=1; next } /^## / { in_s=0 } in_s { n1=gsub(/▼/,\"X\"); n2=gsub(/→/,\"X\"); c+=n1+n2 } END{print c+0}' '" + full + "' 2>/dev/null"
+    let cnt = to_int(_str(exec(awk)).trim())
+    if cnt < 3 {
+        return "N61-B4|error|§4 FLOW 에 ▼ 또는 → < 3건 (현재 " + to_string(cnt) + ") (// @allow-paper-canonical)"
+    }
+    return ""
+}
+
+// ─── N61-Mk1 (n6-architecture) — Mk 진화 섹션 존재 ───
+fn check_n61_mk1(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let has = to_int(_str(exec("grep -cE '^## .*(Mk\\.?I.*진화|Evolution|Mk[[:space:]]*진화)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has == 0 {
+        return "N61-Mk1|error|Mk 진화 섹션(## .*Mk.I.*진화 OR Evolution) 없음 (// @allow-paper-canonical)"
+    }
+    return ""
+}
+
+// ─── N61-Mk3 (n6-architecture) — Mk 진화 §5 내 <details> 래핑 + open 정확 1개 ───
+fn check_n61_mk3(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let m = to_int(_str(exec("grep -c '@allow-mk-freeform' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    // §5 영역에서 details 와 mk 헤더 카운트
+    let awk = "awk '/^## .*(Mk\\.?I.*진화|Evolution|Mk[[:space:]]*진화)/ { in_s=1; next } /^## / { in_s=0 } in_s { if(/<details/) det++; if(/<details[^>]*open/) opn++; if(/^### .*Mk\\.?[IVX0-9]+/) mk++ } END{print det+0\"|\"opn+0\"|\"mk+0}' '" + full + "' 2>/dev/null"
+    let res = _str(exec(awk)).trim()
+    if res == "" { return "" }
+    let parts = res.split("|")
+    if len(parts) < 3 { return "" }
+    let det = to_int(_str(parts[0]))
+    let opn = to_int(_str(parts[1]))
+    let mk = to_int(_str(parts[2]))
+    // mk 헤더가 0 이면 §5 자체가 비어 — N61-Mk1/A1 에서 잡음
+    if mk == 0 { return "" }
+    if det != mk {
+        return "N61-Mk3|error|Mk 헤더 " + to_string(mk) + "개 vs <details> " + to_string(det) + "개 — 모든 Mk 는 <details> 래핑 필수 (// @allow-mk-freeform)"
+    }
+    if opn != 1 {
+        return "N61-Mk3|error|<details open> 개수 " + to_string(opn) + " (정확히 1개 필요 — 최신 Mk 만 펼침) (// @allow-mk-freeform)"
+    }
+    return ""
+}
+
+// ─── N61-Mk4 (n6-architecture) — 첫 <details> 가 open 이어야 (최신이 맨 위) ───
+fn check_n61_mk4(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _n6_canonical_exempt(full) { return "" }
+    let m = to_int(_str(exec("grep -c '@allow-mk-freeform' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    // §5 안에서 첫 번째 <details> 라인 추출
+    let awk = "awk '/^## .*(Mk\\.?I.*진화|Evolution|Mk[[:space:]]*진화)/ { in_s=1; next } /^## / { in_s=0 } in_s && /<details/ { print; exit }' '" + full + "' 2>/dev/null"
+    let first = _str(exec(awk)).trim()
+    if first == "" { return "" }
+    if first.index_of("open") < 0 {
+        return "N61-Mk4|error|Mk 진화 순서 위반 — 첫 <details> 에 open 속성 없음 (최신 Mk 가 맨 위) (// @allow-mk-freeform)"
+    }
+    return ""
+}
+
+// ─── VP-M1 (n6-architecture) — ```python 블록에 'MISSING DATA' 금지 ───
+fn check_vp_m1(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let m = to_int(_str(exec("grep -c '@allow-missing-data' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    let awk = "awk '/^\\`\\`\\`python/{in_p=1;next} /^\\`\\`\\`/{in_p=0} in_p && /MISSING DATA/{c++} END{print c+0}' '" + full + "' 2>/dev/null"
+    let cnt = to_int(_str(exec(awk)).trim())
+    if cnt > 0 {
+        return "VP-M1|error|python 블록에 'MISSING DATA' 플레이스홀더 " + to_string(cnt) + "건 — 실제 검증 필수 (// @allow-missing-data)"
+    }
+    return ""
+}
+
+// ─── VP-M2 (n6-architecture) — ```python 블록에 (_, None, None, None) 튜플 금지 ───
+fn check_vp_m2(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let m = to_int(_str(exec("grep -c '@allow-missing-data' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    let awk = "awk '/^\\`\\`\\`python/{in_p=1;next} /^\\`\\`\\`/{in_p=0} in_p && /,[[:space:]]*None[[:space:]]*,[[:space:]]*None[[:space:]]*,[[:space:]]*None/{c++} END{print c+0}' '" + full + "' 2>/dev/null"
+    let cnt = to_int(_str(exec(awk)).trim())
+    if cnt > 0 {
+        return "VP-M2|error|python 블록에 (_, None, None, None) 플레이스홀더 " + to_string(cnt) + "건 — 실제 값 필수 (// @allow-missing-data)"
+    }
+    return ""
+}
+
+// ─── N6-JSONPAIR (n6-architecture) — 신규 도메인 문서 추가 시 papers/_registry.json 동반 ───
+// staged 에 papers/n6-*.md 또는 domains/*/*.md (status=A) + papers/_registry.json 미변경 → error
+// 파일별 호출이라 매번 같은 staged 상태를 검사. path 는 트리거 매칭에 사용.
+fn check_n6_jsonpair(path: string) -> string {
+    if _project_name() != "n6-architecture" { return "" }
+    // 트리거: 이 파일이 staged 신규 문서일 때만 한 번 검사
+    let bn = basename_of(path)
+    if ext_of(path) != ".md" { return "" }
+    let is_paper_md = path.starts_with("papers/n6-") && bn != "_registry.json"
+    let is_domain_md = path.starts_with("domains/") && path.index_of("/_archive/") < 0
+    if !is_paper_md && !is_domain_md { return "" }
+    // 이 파일이 added 상태인지 확인
+    let st = _str(exec("git diff --cached --name-status -- '" + path + "' 2>/dev/null | head -1")).trim()
+    if !st.starts_with("A") { return "" }
+    // 커밋 메시지 마커
+    let msg = _str(exec("cat '" + REPO_ROOT + "/.git/COMMIT_EDITMSG' 2>/dev/null")).trim()
+    if msg.index_of("@allow-no-registry-update") >= 0 { return "" }
+    // papers/_registry.json 이 staged 변경 목록에 있는지 (M 또는 A)
+    let reg = _str(exec("git diff --cached --name-only 2>/dev/null | grep -E '^papers/_registry\\.json$' | head -1")).trim()
+    if reg != "" { return "" }
+    return "N6-JSONPAIR|error|신규 도메인 문서 '" + path + "' 추가 시 papers/_registry.json 업데이트 필수 (// @allow-no-registry-update)"
+}
+
 // ─── AG6-S1 (airgenome 전용) — Mac 로컬 heavy compute 실행 전 원격 가드 필수 ───
 // 원칙: 원격(ubu/htz/hetzner) 자원 가용 시 Mac heavy compute 0. Mac은 오케스트레이션 전용.
 // 정적 탐지: heavy compute 호출(blowup/seed_engine/ouroboros) 이 파일에 존재하면
@@ -1247,6 +1494,34 @@ for f in files {
     // check_n62a (n6-architecture 전용): 논문 md 에 ```python 블록 필수
     let v16d = check_n62a(path)
     if v16d != "" { violations = violations.push(path + "|" + v16d) }
+
+    // ─── n6 논문 canonical 양식 12 규칙 (n6-architecture 전용) ───
+    if e == ".md" {
+        let n_c1 = check_n61_c1(path)
+        if n_c1 != "" { violations = violations.push(path + "|" + n_c1) }
+        let n_a1 = check_n61_a1(path)
+        if n_a1 != "" { violations = violations.push(path + "|" + n_a1) }
+        let n_b1 = check_n61_b1(path)
+        if n_b1 != "" { violations = violations.push(path + "|" + n_b1) }
+        let n_b2 = check_n61_b2(path)
+        if n_b2 != "" { violations = violations.push(path + "|" + n_b2) }
+        let n_b3 = check_n61_b3(path)
+        if n_b3 != "" { violations = violations.push(path + "|" + n_b3) }
+        let n_b4 = check_n61_b4(path)
+        if n_b4 != "" { violations = violations.push(path + "|" + n_b4) }
+        let n_mk1 = check_n61_mk1(path)
+        if n_mk1 != "" { violations = violations.push(path + "|" + n_mk1) }
+        let n_mk3 = check_n61_mk3(path)
+        if n_mk3 != "" { violations = violations.push(path + "|" + n_mk3) }
+        let n_mk4 = check_n61_mk4(path)
+        if n_mk4 != "" { violations = violations.push(path + "|" + n_mk4) }
+        let n_vm1 = check_vp_m1(path)
+        if n_vm1 != "" { violations = violations.push(path + "|" + n_vm1) }
+        let n_vm2 = check_vp_m2(path)
+        if n_vm2 != "" { violations = violations.push(path + "|" + n_vm2) }
+        let n_jp = check_n6_jsonpair(path)
+        if n_jp != "" { violations = violations.push(path + "|" + n_jp) }
+    }
 
     // check_project_rules: shared/rules/<project>.lint.jsonl 자동 로드 + 디스패치
     let v17 = check_project_rules(path)
