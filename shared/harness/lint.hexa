@@ -1105,12 +1105,13 @@ fn check_n61_v2(path: string) -> string {
 fn check_n61_v3(path: string) -> string {
     if path != "domains/sf-ufo/sf/sf.md" { return "" }
     let full = REPO_ROOT + "/" + path
-    let sub = to_int(_str(exec("grep -cE '^### §7\\.[0-9]+' '" + full + "' 2>/dev/null || echo 0")).trim())
+    // awk 사용 — grep -c 는 매치 0건시 "0\n"+echo "0" = "0\n0" to_int 실패 (N61-GRC 룰)
+    let sub = to_int(_str(exec("awk '/^### §7\\.[0-9]+/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if sub < 10 {
         return "N61-V3|error|§7 서브섹션 < 10 (현재 " + to_string(sub) + ") — §7.0~§7.10 n=6 정직성 10 카테고리 필수"
     }
-    let counter = to_int(_str(exec("grep -c 'COUNTER_EXAMPLES' '" + full + "' 2>/dev/null || echo 0")).trim())
-    let falsif = to_int(_str(exec("grep -c 'FALSIFIERS' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let counter = to_int(_str(exec("awk '/COUNTER_EXAMPLES/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    let falsif = to_int(_str(exec("awk '/FALSIFIERS/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if counter == 0 || falsif == 0 {
         return "N61-V3|error|§7 에 COUNTER_EXAMPLES 또는 FALSIFIERS 리스트 누락 — 반례/반증조건 정직성 필수"
     }
@@ -1122,9 +1123,39 @@ fn check_n61_v3(path: string) -> string {
 fn check_n61_v4(path: string) -> string {
     if path != "domains/sf-ufo/sf/sf.md" { return "" }
     let full = REPO_ROOT + "/" + path
-    let hits = to_int(_str(exec("grep -cE 'PASS \\(.*정직성' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let hits = to_int(_str(exec("awk '/PASS \\(.*정직성/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if hits == 0 {
         return "N61-V4|error|§7 python 에 'X/N PASS (...정직성...)' 집계 라벨 누락"
+    }
+    return ""
+}
+
+// ─── H-GRC (공통) — `grep -c ... || echo 0` 안티패턴 금지 ───
+// Why: 매치 0건시 grep="0" + rc=1 → || echo 0 추가 → "0\n0" to_int 실패.
+// How: awk '/pat/{c++} END{print c+0}' 로 대체 — 항상 단일 숫자 출력.
+fn check_h_grc(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let hits = to_int(_str(exec("awk '/\\|\\| echo 0/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if hits > 0 {
+        return "H-GRC|warn|`|| echo 0` 안티패턴 " + to_string(hits) + "건 — awk '/pat/{c++} END{print c+0}' 로 전환 권장 (to_int 실패 방지)"
+    }
+    return ""
+}
+
+// ─── H-DEFER (공통) — '다음 세션에서' 회피 문구 금지 ───
+// Why: 사용자 정책 — 버그/개선 발견 시 자동으로 하네스 룰 등록해서 강제. 연기 금지.
+fn check_h_defer(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".md" && e != ".hexa" && e != ".jsonl" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let bn = basename_of(path)
+    if bn == "CLAUDE.md" || bn == "README.md" { return "" }
+    if path.index_of("/memory/") >= 0 { return "" }
+    let hits = to_int(_str(exec("awk '/다음 세션에서 수정|다음 세션에서 처리|defer.*next.*session/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    if hits > 0 {
+        return "H-DEFER|warn|회피 문구 '다음 세션에서 수정' " + to_string(hits) + "건 — 지금 하네스 룰화 (deletion-first)"
     }
     return ""
 }
@@ -1950,6 +1981,38 @@ fn check_hexa_algorithm(path: string) -> string {
     return ""
 }
 
+// ─── H9: hook stdin round-trip contract (one-shot gate) ───
+// 원칙: 어떤 hook 이 commit 에 포함되어 있는데 `hexa` 래퍼가 stdin 을
+//   자식 stage0 까지 전달하지 못하면(systemMessage 사일런트) 커밋 차단.
+// 배경: hexa-lang self/main.hexa cmd_run 의 `( stage0 ) &` background
+//   서브셸은 POSIX asynchronous_list 규칙상 자식 stdin 을 /dev/null 로
+//   재지정 → Claude Code UserPromptSubmit hook 전체 조용한 실패.
+//   fix: exec 3<&0; ... <&3 (rt 35).
+// 동작: hook 파일이 없으면 무비용 스킵. 있으면 1회 프로브.
+fn check_h9_hook_stdin_gate(all_files: string) -> string {
+    let mut has_hook = false
+    let paths = all_files.split("\n")
+    for p in paths {
+        let ps = _str(p).trim()
+        if ps == "" { continue }
+        if ps.index_of("/hooks/") >= 0 && ps.ends_with(".hexa") {
+            has_hook = true
+        }
+    }
+    if !has_hook { return "" }
+
+    let pid = _str(exec("echo $$")).trim()
+    let probe = "STDIN_H9_OK_" + pid
+    let script = "/tmp/.h9_probe_" + pid + ".hexa"
+    try { write_file(script, "println(read_stdin())\n") } catch e { return "" }
+    let cmd = "printf '%s' '" + probe + "' | hexa '" + script + "' 2>&1"
+    let out = _str(exec(cmd)).trim()
+    exec("rm -f '" + script + "'")
+
+    if out == probe { return "" }
+    return "H9|error|hexa read_stdin() 회귀 — expected=[" + probe + "] got=[" + out + "] — ~/Dev/hexa-lang/scripts/regression_stdin.hexa 로 확인, self/main.hexa:565 fd 3 redirect 검사"
+}
+
 // ─── Gather files to lint ───
 
 fn get_staged_files() -> string {
@@ -2005,6 +2068,11 @@ if files_raw == "" {
 let files = files_raw.split("\n")
 let mut violations: [string] = []
 let mut checked: i64 = 0
+
+// ─── H9 one-shot gate: hook stdin round-trip 회귀 감지 ───
+// hooks/*.hexa 가 스코프에 있으면 1회만 실행. 없으면 조용히 스킵.
+let h9 = check_h9_hook_stdin_gate(files_raw)
+if h9 != "" { violations = violations.push("shared/hooks/*.hexa|" + h9) }
 
 for f in files {
     let path = _str(f).trim()
@@ -2173,6 +2241,8 @@ for f in files {
         if n_v4 != "" { violations = violations.push(path + "|" + n_v4) }
         let n_f1 = check_n61_f1(path)
         if n_f1 != "" { violations = violations.push(path + "|" + n_f1) }
+        let h_defer = check_h_defer(path)
+        if h_defer != "" { violations = violations.push(path + "|" + h_defer) }
         let n_dsync = check_n6_dag_sync(path)
         if n_dsync != "" { violations = violations.push(path + "|" + n_dsync) }
         let n_vm1 = check_vp_m1(path)
@@ -2208,6 +2278,10 @@ for f in files {
     // check_blow1 (공통): BLOWUP_LOCAL=1 금지
     let v19 = check_blow1(path)
     if v19 != "" { violations = violations.push(path + "|" + v19) }
+
+    // check_h_grc (공통): grep -c ... || echo 0 안티패턴 (hexa 파일만)
+    let v20 = check_h_grc(path)
+    if v20 != "" { violations = violations.push(path + "|" + v20) }
 
     // check_blow3 (공통): blowup 신규 파일 서브폴더 강제
     if e == ".hexa" {
