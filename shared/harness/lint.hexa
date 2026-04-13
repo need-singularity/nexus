@@ -270,31 +270,141 @@ fn _is_self_host_bare(bn: string) -> bool {
     return false
 }
 
-fn check_hx4(path: string) -> string {
-    if _project_name() != "hexa-lang" { return "" }
-    if _hx4_is_exempt(path) { return "" }
+// L1 확장자/파일명 whitelist
+fn _hx4_l1_ext(path: string) -> string {
     let e = ext_of(path)
     let bn = basename_of(path)
-
-    // L1: 확장자 whitelist
     if e == "" {
         if !_is_self_host_bare(bn) {
-            return "HX4|error|SELF-HOST 공리 — 허용되지 않은 파일 '" + bn + "'. hexa-lang 은 .hexa 전용 (허용: .c helper, docs, config)"
+            return "HX4-L1|error|SELF-HOST — 허용되지 않은 파일 '" + bn + "'"
         }
     } else {
         if !_is_self_host_ext(e) {
-            return "HX4|error|SELF-HOST 공리 — 소스 확장자 '" + e + "' 금지. .hexa 로 재작성 (ai-native algorism)"
+            return "HX4-L1|error|SELF-HOST — 소스 확장자 '" + e + "' 금지. .hexa 로 재작성"
         }
     }
+    return ""
+}
 
-    // L2: 외부 컴파일러/툴체인 언급 grep
+// L2 외부 툴체인 언급 grep
+fn _hx4_l2_toolchain(path: string) -> string {
+    let e = ext_of(path)
     if e != ".hexa" && e != ".md" && e != ".json" && e != ".jsonl" && e != ".sh" && e != ".yaml" && e != ".yml" && e != ".toml" { return "" }
     let full = REPO_ROOT + "/" + path
     let cmd = "grep -E '\\brust\\b|\\bRust\\b|\\bRUST\\b|\\bcargo\\b|\\bCargo\\b|\\brustc\\b|\\brustup\\b|target/(debug|release)' '" + full + "' 2>/dev/null | grep -v '@allow-rust-mention' | wc -l"
     let hits = to_int(_str(exec(cmd)).trim())
     if hits > 0 {
-        return "HX4|error|SELF-HOST 공리 — 외부 툴체인 언급 " + to_string(hits) + "건. 예외: // @allow-rust-mention"
+        return "HX4-L2|error|외부 툴체인 언급 " + to_string(hits) + "건 (// @allow-rust-mention)"
     }
+    return ""
+}
+
+// L3 런타임 FFI/dlopen 금지 — self/runtime.c 내부 API 만
+fn _hx4_l3_runtime(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let cmd = "grep -E '\\b(dlopen|dlsym|ffi_call|ffi_new|FFI\\.)' '" + full + "' 2>/dev/null | grep -v '@allow-ffi' | wc -l"
+    let hits = to_int(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "HX4-L3|error|런타임 외부 FFI/dlopen " + to_string(hits) + "건 (// @allow-ffi)"
+    }
+    return ""
+}
+
+// L4 문서 = hexa 실행 가능 예제 — spec/reference/grammar .md 에 ```hexa 블록 필수
+fn _hx4_l4_docs(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".md" { return "" }
+    if !path.starts_with("docs/") { return "" }
+    let bn = basename_of(path)
+    let is_spec = bn.index_of("spec") >= 0 || bn.index_of("reference") >= 0 || bn.index_of("grammar") >= 0 || bn.index_of("syntax") >= 0
+    if !is_spec { return "" }
+    let full = REPO_ROOT + "/" + path
+    let has_hexa = to_int(_str(exec("grep -c '```hexa' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if has_hexa == 0 {
+        return "HX4-L4|warn|spec/reference/grammar .md 에 \\`\\`\\`hexa 실행 예제 없음"
+    }
+    return ""
+}
+
+// L5 테스트 프레임워크 외부 의존 금지 — hexa 자체 테스트 사용
+fn _hx4_l5_tests(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" && e != ".sh" && e != ".yaml" && e != ".yml" && e != ".json" && e != ".jsonl" && e != ".md" && e != ".toml" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let cmd = "grep -E '\\b(pytest|cargo test|jest|mocha|phpunit|go test|rspec|junit)\\b' '" + full + "' 2>/dev/null | grep -v '@allow-ext-test' | wc -l"
+    let hits = to_int(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "HX4-L5|error|외부 테스트 프레임워크 " + to_string(hits) + "건 (// @allow-ext-test)"
+    }
+    return ""
+}
+
+// L6 CI = hexa — .github/workflows run: 스텝이 hexa 기반이어야
+fn _hx4_l6_ci(path: string) -> string {
+    if !path.starts_with(".github/workflows/") { return "" }
+    let e = ext_of(path)
+    if e != ".yml" && e != ".yaml" { return "" }
+    let full = REPO_ROOT + "/" + path
+    // run: 으로 시작하는 라인 중 hexa/./hexa 로 이어지지 않는 것 + uses:/setup-*/checkout 예외
+    let cmd = "grep -E '^[[:space:]]+run:[[:space:]]' '" + full + "' 2>/dev/null | grep -vE 'run:[[:space:]]*(hexa|\\./hexa|\\$\\{|echo |true$)|@allow-non-hexa-step' | wc -l"
+    let hits = to_int(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "HX4-L6|warn|CI run: 스텝 " + to_string(hits) + "건 비-hexa (// @allow-non-hexa-step)"
+    }
+    return ""
+}
+
+// L7 빌드 재귀 — 체인 파일 존재 sanity check
+fn _hx4_l7_build_chain(path: string) -> string {
+    // 체인 관련 파일 수정 시에만 sanity 확인
+    if path != "build_hexa.hexa" && path != "self/main.hexa" && path != "self/hexa_full.hexa" && path != "scripts/build/build_hexa.hexa" { return "" }
+    let missing = ""
+    if !file_exists(REPO_ROOT + "/build/hexa_stage0") && !file_exists(REPO_ROOT + "/build/hexa_stage0.new") {
+        return "HX4-L7|error|build/hexa_stage0 부재 — 빌드 체인 깨짐"
+    }
+    if !file_exists(REPO_ROOT + "/self/main.hexa") {
+        return "HX4-L7|error|self/main.hexa 부재"
+    }
+    if !file_exists(REPO_ROOT + "/self/hexa_full.hexa") {
+        return "HX4-L7|error|self/hexa_full.hexa 부재"
+    }
+    return ""
+}
+
+// L8 메타 = hexa AST transform — sed/awk 로 .hexa 조작 금지
+fn _hx4_l8_meta(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" && e != ".sh" { return "" }
+    let full = REPO_ROOT + "/" + path
+    let cmd = "grep -E 'exec\\([^)]*\"(sed|awk)[^\"]*\\.hexa' '" + full + "' 2>/dev/null | grep -v '@allow-meta-scripting' | wc -l"
+    let hits = to_int(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "HX4-L8|error|sed/awk .hexa 조작 " + to_string(hits) + "건. AST transform 은 hexa 로만 (// @allow-meta-scripting)"
+    }
+    return ""
+}
+
+fn check_hx4(path: string) -> string {
+    if _project_name() != "hexa-lang" { return "" }
+    if _hx4_is_exempt(path) { return "" }
+    let v1 = _hx4_l1_ext(path)
+    if v1 != "" { return v1 }
+    let v2 = _hx4_l2_toolchain(path)
+    if v2 != "" { return v2 }
+    let v3 = _hx4_l3_runtime(path)
+    if v3 != "" { return v3 }
+    let v4 = _hx4_l4_docs(path)
+    if v4 != "" { return v4 }
+    let v5 = _hx4_l5_tests(path)
+    if v5 != "" { return v5 }
+    let v6 = _hx4_l6_ci(path)
+    if v6 != "" { return v6 }
+    let v7 = _hx4_l7_build_chain(path)
+    if v7 != "" { return v7 }
+    let v8 = _hx4_l8_meta(path)
+    if v8 != "" { return v8 }
     return ""
 }
 
