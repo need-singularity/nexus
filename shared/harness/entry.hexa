@@ -9,6 +9,15 @@
 //   hexa run shared/harness/entry.hexa post_edit <file_path>   — PostToolUse Write|Edit 대체
 //   hexa run shared/harness/entry.hexa gate <cmd> <seed>       — cmd_gate 라우팅 (alias)
 //   hexa run shared/harness/entry.hexa health [mode] [flags]   — health 라우터 (atlas|nexus|all|list)
+//   hexa run shared/harness/entry.hexa git_fresh [check|force|state] — H-GIT-FRESH 수동 실행
+//   hexa run shared/harness/entry.hexa sync <list|diff|all|id>   — sync 라우터 위임
+//   hexa run shared/harness/entry.hexa errors <route|drain_check|count_open|promote|mark_fixed> ... — H-ERR 라우팅
+//   hexa run shared/harness/entry.hexa agent_ledger <register|complete|list|gc|dup_check> ... — H-AGENT-LEDGER 직접 호출
+//   hexa run shared/harness/entry.hexa broadcast <append|tail|...> ... — H-BROADCAST 전파
+//   hexa run shared/harness/entry.hexa session_lock <acquire|release|status> ... — H-SESSION-LOCK
+//   hexa run shared/harness/entry.hexa session_registry <register|heartbeat|list|peers> ... — H-SESSION-REGISTRY
+//   hexa run shared/harness/entry.hexa session_worktree <init|list|status|merge|prune|gc_branches> ... — H-SESSION-WORKTREE
+//   hexa run shared/harness/entry.hexa session_prompt_gen [args]  — 세션 이어받기 프롬프트 생성
 //   hexa run shared/harness/entry.hexa self_check              — 하네스 자가 진단
 //
 // 성공 조용, 실패 시끄럽게 (하네스 H1 원칙).
@@ -19,7 +28,12 @@ let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
 
 fn route(mode: str, rest: [str]) {
     if mode == "prompt" {
+        // H-GIT-FRESH — 사용자 입력 시 30분 stale 감지 + origin drift alert (silent on sync)
+        dispatch_file(HARNESS + "/git_fresh.hexa", ["check"])
         dispatch_file(HARNESS + "/prompt_scan.hexa", rest)
+    } else if mode == "git_fresh" {
+        // 명시적 호출: entry.hexa git_fresh [check|force|state]
+        dispatch_file(HARNESS + "/git_fresh.hexa", rest)
     } else if mode == "pre_tool" {
         dispatch_file(HARNESS + "/pre_tool_guard.hexa", rest)
     } else if mode == "post_bash" {
@@ -28,13 +42,58 @@ fn route(mode: str, rest: [str]) {
         dispatch_file(HARNESS + "/post_edit.hexa", rest)
     } else if mode == "gate" {
         dispatch_file(HARNESS + "/cmd_gate.hexa", rest)
+    } else if mode == "guard" {
+        // Agent 호출 전 — agent_ledger.register 위임 (H-AGENT-LEDGER)
+        // rest = [area, prompt_hash]
+        dispatch_agent_guard(rest)
     } else if mode == "health" {
         dispatch_file(HARNESS + "/health.hexa", rest)
+    } else if mode == "sync" {
+        dispatch_file(HARNESS + "/sync.hexa", rest)
+    } else if mode == "errors" {
+        dispatch_file(HARNESS + "/errors.hexa", rest)
+    } else if mode == "agent_ledger" {
+        dispatch_file(HARNESS + "/agent_ledger.hexa", rest)
+    } else if mode == "broadcast" {
+        dispatch_file(HARNESS + "/broadcast.hexa", rest)
+    } else if mode == "session_lock" {
+        dispatch_file(HARNESS + "/session_lock.hexa", rest)
+    } else if mode == "session_registry" {
+        dispatch_file(HARNESS + "/session_registry.hexa", rest)
+    } else if mode == "session_worktree" {
+        dispatch_file(HARNESS + "/session_worktree.hexa", rest)
+    } else if mode == "session_prompt_gen" {
+        dispatch_file(HARNESS + "/session_prompt_gen.hexa", rest)
     } else if mode == "self_check" {
         self_check()
     } else {
-        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|health|self_check")
+        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|self_check")
     }
+}
+
+fn dispatch_agent_guard(rest: [str]) {
+    // usage: entry.hexa guard <area> [prompt_hash]
+    //        entry.hexa guard complete <agent_id>    — 완료 마감
+    if rest.len() == 0 { return }
+    let script = HARNESS + "/agent_ledger.hexa"
+    if file_exists(script) == false { return }
+    let mut sub = "register"
+    let mut area = rest[0]
+    let mut hash = "na"
+    if rest.len() >= 2 {
+        // complete <agent_id> 특수 라우팅
+        if rest[0] == "complete" {
+            sub = "complete"
+            area = rest[1]
+            hash = ""
+        } else {
+            hash = rest[1]
+        }
+    }
+    let mut cmd = HEXA + " run " + script + " " + sub + " \"" + area.replace("\"", "\\\"") + "\""
+    if hash.len() > 0 { cmd = cmd + " \"" + hash.replace("\"", "\\\"") + "\"" }
+    let out = to_string(exec(cmd + " 2>&1"))
+    if out.trim().len() > 0 { print(out) }
 }
 
 fn dispatch_file(script: str, rest: [str]) {
@@ -59,7 +118,16 @@ fn self_check() {
         ["prompt_scan", HARNESS + "/prompt_scan.hexa"],
         ["pre_tool_guard", HARNESS + "/pre_tool_guard.hexa"],
         ["post_bash", HARNESS + "/post_bash.hexa"],
-        ["post_edit", HARNESS + "/post_edit.hexa"]
+        ["post_edit", HARNESS + "/post_edit.hexa"],
+        ["agent_ledger", HARNESS + "/agent_ledger.hexa"],
+        ["git_fresh", HARNESS + "/git_fresh.hexa"],
+        ["sync", HARNESS + "/sync.hexa"],
+        ["errors", HARNESS + "/errors.hexa"],
+        ["broadcast", HARNESS + "/broadcast.hexa"],
+        ["session_lock", HARNESS + "/session_lock.hexa"],
+        ["session_registry", HARNESS + "/session_registry.hexa"],
+        ["session_worktree", HARNESS + "/session_worktree.hexa"],
+        ["session_prompt_gen", HARNESS + "/session_prompt_gen.hexa"]
     ]
     let mut present = 0
     let mut missing = []
@@ -91,7 +159,7 @@ fn self_check() {
 fn main() {
     let argv = args()
     if argv.len() < 3 {
-        eprintln("usage: entry.hexa <mode> [args...]  — modes: prompt|pre_tool|post_bash|post_edit|gate|health|self_check")
+        eprintln("usage: entry.hexa <mode> [args...]  — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|self_check")
         return
     }
     let mode = argv[2]

@@ -38,6 +38,14 @@ engine (.hexa):
   broadcast.hexa            H-BROADCAST — shared/ 변경을 타 세션에 전파. post_edit 자동 append + prompt_scan 자동 tail 300s. SSOT: broadcast.jsonl. 우회: NEXUS_BROADCAST_OK=1
   session_worktree.hexa     H-SESSION-WORKTREE — opt-in git worktree 헬퍼 (init/list/status/merge/prune/gc_branches [--dry-run]). 자동 호출 X. 경로: .worktrees/{session_id}/
 
+policy (H-NOHOOK, 2026-04-14):
+  rule           hook 신규 금지 — 모든 자동 강제는 entry.hexa 자율 호출
+  pre_guard      check_no_hook_file/cmd  Write/Edit/Bash 차단
+  post_edit      H-NOHOOK                .claude/settings*.json hooks 키 비어있지 않으면 라우팅
+  lint           check_h_nohook          .claude·.git·shared hooks 신규 파일 + settings hooks 검출
+  exempt         shared/archive/, /archive/superseded-, /archive/deprecated_, .git/hooks/{commit-msg,pre-commit,post-commit,pre-push} (H-COMMIT), .githooks/{commit-msg,pre-commit}, *.sample
+  bypass         NEXUS_HOOK_OK=1 prefix 또는 파일/경로 내 '@allow-hook' 토큰
+
 convention (2026-04-14~ 훅 시스템 대체):
   사용자 입력 후       entry.hexa prompt
   Write|Edit 후        entry.hexa post write_edit
@@ -45,6 +53,14 @@ convention (2026-04-14~ 훅 시스템 대체):
   Agent 호출 전        entry.hexa guard <area> <prompt_hash>   → agent_id stdout (complete 시 사용)
   Agent 완료 후        entry.hexa guard complete <agent_id>
   smash|free 실행      shared/harness/exec_validated {mode} "{seed}" {engine} {args} (cmd_gate 적용, bin/ 심링크 가능)
+  sync 실행            entry.hexa sync <list|diff|all|id> [flags]       → sync.hexa 위임
+  errors 라우팅        entry.hexa errors <route|drain_check|...> ...    → errors.hexa 위임
+  agent_ledger 직접    entry.hexa agent_ledger <register|complete|list|gc|dup_check> ...
+  broadcast 전파       entry.hexa broadcast <append|tail|gc|list> ...    → broadcast.hexa 위임
+  session_lock 조작    entry.hexa session_lock <acquire|release|list|gc|derive> ...
+  session_registry     entry.hexa session_registry <register|heartbeat|list|peers> ...
+  session_worktree     entry.hexa session_worktree <init|list|status|merge|prune|gc_branches> ...
+  session_prompt_gen   entry.hexa session_prompt_gen [args]              → 세션 이어받기 프롬프트
   전 프로젝트 settings.json hooks={} — 자동 훅 없음. 위 호출은 Claude 자율 실행.
 
 logs (append-only):
