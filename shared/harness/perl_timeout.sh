@@ -1,4 +1,5 @@
 #!/bin/bash
+# @hexa-first-exempt — perl alarm wrapper for macOS (no gtimeout/timeout)
 # perl_timeout.sh — macOS 대응 timeout wrapper (gtimeout/timeout 없음)
 # usage: perl_timeout.sh <seconds> <cmd> [args...]
 #   e.g. perl_timeout.sh 45 hexa run script.hexa arg1 arg2

@@ -1,4 +1,5 @@
 #!/bin/bash
+# @hexa-first-exempt — mkdir-atomic advisory lock for macOS (no flock)
 # lock_gate.sh — mkdir-based advisory lock (flock 부재 환경용, macOS)
 # usage:
 #   lock_gate.sh acquire <name> [wait_seconds=0]   → exit 0 (hold) / 75 (busy)

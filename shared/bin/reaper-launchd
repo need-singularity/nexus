@@ -1,0 +1,61 @@
+#!/bin/bash
+# reaper-launchd — H-NOZOMBIE LaunchAgent 관리자 (5분 주기 reaper.hexa kill_old)
+# usage:
+#   reaper-launchd install     ~/Library/LaunchAgents/ 에 plist 복사 + bootstrap
+#   reaper-launchd uninstall   bootout + plist 삭제
+#   reaper-launchd status      현재 등록 상태
+#   reaper-launchd run         즉시 1회 실행 (테스트)
+#   reaper-launchd reload      uninstall + install
+#   reaper-launchd logs        stderr.log tail
+
+PLIST_SRC="/Users/ghost/Dev/nexus/shared/launchd/com.nexus.reaper.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.nexus.reaper.plist"
+LABEL="com.nexus.reaper"
+DOMAIN="gui/$(id -u)"
+
+cmd="$1"
+case "$cmd" in
+    install)
+        if [ ! -f "$PLIST_SRC" ]; then
+            echo "ERROR: plist src 부재: $PLIST_SRC" >&2
+            exit 1
+        fi
+        mkdir -p "$HOME/Library/LaunchAgents"
+        mkdir -p "/Users/ghost/Dev/nexus/shared/logs"
+        cp "$PLIST_SRC" "$PLIST_DST"
+        # bootstrap (load) — 이미 있으면 bootout 먼저
+        launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null
+        launchctl bootstrap "$DOMAIN" "$PLIST_DST"
+        echo "installed: $LABEL (5min interval)"
+        ;;
+    uninstall)
+        launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null
+        rm -f "$PLIST_DST"
+        echo "uninstalled: $LABEL"
+        ;;
+    status)
+        out=$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null)
+        if [ -n "$out" ]; then
+            echo "$out" | head -5
+            echo "(installed)"
+        else
+            echo "(not installed)"
+        fi
+        ;;
+    run)
+        # 즉시 1회 실행 (테스트)
+        launchctl kickstart -k "$DOMAIN/$LABEL" 2>&1
+        ;;
+    reload)
+        $0 uninstall
+        sleep 1
+        $0 install
+        ;;
+    logs)
+        tail -50 /Users/ghost/Dev/nexus/shared/logs/reaper.stderr.log 2>/dev/null
+        ;;
+    *)
+        echo "usage: reaper-launchd {install|uninstall|status|run|reload|logs}" >&2
+        exit 2
+        ;;
+esac

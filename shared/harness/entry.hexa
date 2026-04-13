@@ -108,10 +108,18 @@ fn route(mode: str, rest: [str]) {
         dispatch_file(HARNESS + "/cross_feed.hexa", rest)
     } else if mode == "thinking" {
         dispatch_file(HARNESS + "/thinking_engine.hexa", rest)
+    } else if mode == "route" {
+        dispatch_file(HARNESS + "/model_route.hexa", rest)
+    } else if mode == "security" {
+        dispatch_file(HARNESS + "/security_scan.hexa", rest)
+    } else if mode == "mcp_health" {
+        dispatch_file(HARNESS + "/mcp_health.hexa", rest)
+    } else if mode == "loop" {
+        dispatch_file(HARNESS + "/loop_controller.hexa", rest)
     } else if mode == "self_check" {
         self_check()
     } else {
-        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|gauge|instinct|audit|self_check")
+        eprintln("REJECT: unknown mode '" + mode + "' — modes: prompt|pre_tool|post_bash|post_edit|gate|guard|health|git_fresh|sync|errors|agent_ledger|broadcast|session_lock|session_registry|session_worktree|session_prompt_gen|gauge|instinct|audit|route|security|mcp_health|loop|self_check")
     }
 }
 
@@ -139,6 +147,15 @@ fn dispatch_agent_guard(rest: [str]) {
     if hash.len() > 0 { cmd = cmd + " \"" + hash.replace("\"", "\\\"") + "\"" }
     let out = to_string(exec(cmd + " 2>&1"))
     if out.trim().len() > 0 { print(out) }
+    // H-NOZOMBIE: register 시점에만 가이드 인젝션 (complete 은 skip)
+    if sub == "register" {
+        eprintln("[H-NOZOMBIE 가이드] Agent 가 .hexa 작성 시 안전 패턴 준수:")
+        eprintln("  - exec(cmd) 대신 safe_exec(cmd, 30) — include lib/safe_exec.hexa.inc")
+        eprintln("  - 장기실행: try_acquire_self_lock(\"name\", 5) — include lib/lock_acquire.hexa.inc")
+        eprintln("  - while true: loop_check(iter, max, started, sec, label) — include lib/loop_guard.hexa.inc")
+        eprintln("  - 시스템콜 wrapper .sh 는 '# @hexa-first-exempt' 헤더 명시")
+        eprintln("  - 룰: R-NOZ-EXEC-TIMEOUT / R-NOZ-WHILE-GUARD / R-NOZ-LOCK-DECL (lint.hexa)")
+    }
 }
 
 fn dispatch_file(script: str, rest: [str]) {
@@ -182,7 +199,11 @@ fn self_check() {
         ["sensor", HARNESS + "/sensor.hexa"],
         ["growth_tick", HARNESS + "/growth_tick.hexa"],
         ["cross_feed", HARNESS + "/cross_feed.hexa"],
-        ["thinking_engine", HARNESS + "/thinking_engine.hexa"]
+        ["thinking_engine", HARNESS + "/thinking_engine.hexa"],
+        ["model_route", HARNESS + "/model_route.hexa"],
+        ["security_scan", HARNESS + "/security_scan.hexa"],
+        ["mcp_health", HARNESS + "/mcp_health.hexa"],
+        ["loop_controller", HARNESS + "/loop_controller.hexa"]
     ]
     let mut present = 0
     let mut missing = []
@@ -190,7 +211,7 @@ fn self_check() {
         if file_exists(m[1]) {
             present = present + 1
         } else {
-            missing.push(m[0])
+            missing = missing.push(m[0])
         }
     }
     println("harness modules: " + to_string(present) + "/" + to_string(modules.len()) + " present")
@@ -224,7 +245,7 @@ fn main() {
     let mut rest = []
     let mut i = 3
     while i < argv.len() {
-        rest.push(argv[i])
+        rest = rest.push(argv[i])
         i = i + 1
     }
     route(mode, rest)
