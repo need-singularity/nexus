@@ -17,6 +17,8 @@ HOME_DIR="${HOME:-/Users/ghost}"
 NEXUS_ROOT="$HOME_DIR/Dev/nexus"
 HEXA="$NEXUS_ROOT/shared/bin/hexa"
 GATE="$NEXUS_ROOT/shared/harness/cmd_gate.hexa"
+LOCK_GATE="$NEXUS_ROOT/shared/harness/lock_gate.sh"
+HEXA_TIMEOUT="${NEXUS_HEXA_TIMEOUT:-60}"
 
 if [ "$#" -lt 3 ]; then
     echo "usage: exec_validated <cmd> \"<seed>\" <engine.hexa> [args...]" >&2
@@ -33,6 +35,55 @@ if [ ! -f "$GATE" ]; then
     exit 127
 fi
 
+# run_hexa: lock(mkdir advisory) + timeout(perl alarm) 적용 hexa 실행
+# bypass:  NEXUS_NO_TIMEOUT=1 → 기존 exec 동작
+#          NEXUS_NO_LOCK=1    → timeout 만 적용
+run_hexa() {
+    local engine="$1"; shift
+    local base
+    base=$(basename "$engine" .hexa)
+
+    if [ -n "$NEXUS_NO_TIMEOUT" ]; then
+        exec "$HEXA" run "$engine" "$@"
+    fi
+
+    # lock acquire
+    if [ -z "$NEXUS_NO_LOCK" ] && [ -x "$LOCK_GATE" ]; then
+        if ! "$LOCK_GATE" acquire "$base" 5; then
+            echo "BLOCK: lock_gate — '$base' 이미 실행중 (5s 대기 후 포기)" >&2
+            exit 75
+        fi
+        # shellcheck disable=SC2064
+        trap "\"$LOCK_GATE\" release \"$base\" 2>/dev/null" EXIT
+    fi
+
+    # timeout via perl alarm
+    perl -e '
+        use strict; use warnings;
+        my $t = shift; my @cmd = @ARGV;
+        my $pid = fork(); die "fork: $!" unless defined $pid;
+        if ($pid == 0) { exec @cmd; die "exec: $!"; }
+        my $timed_out = 0;
+        eval {
+            local $SIG{ALRM} = sub {
+                $timed_out = 1;
+                kill "TERM", $pid;
+                sleep 5;
+                kill "KILL", $pid;
+                die "timeout\n";
+            };
+            alarm $t;
+            waitpid($pid, 0);
+            alarm 0;
+        };
+        if ($timed_out || ($@ && $@ =~ /timeout/)) {
+            print STDERR "BLOCK: timeout ${t}s — process killed\n";
+            exit 124;
+        }
+        exit($? >> 8);
+    ' "$HEXA_TIMEOUT" "$HEXA" run "$engine" "$@"
+}
+
 gate_out="$("$HEXA" run "$GATE" "$cmd" "$seed" 2>&1)"
 
 case "$gate_out" in
@@ -40,9 +91,9 @@ case "$gate_out" in
         # OK:<cmd>:<validated_seed> 파싱
         prefix="OK:$cmd:"
         validated="${gate_out#$prefix}"
-        # 엔진 exec (validated seed를 첫 인자로)
+        # 엔진 실행 (validated seed를 첫 인자로) — timeout+lock 적용
         if [ -f "$engine" ]; then
-            exec "$HEXA" run "$engine" "$validated" "$@"
+            run_hexa "$engine" "$validated" "$@"
         else
             echo "ERROR: engine 부재: $engine" >&2
             exit 127
@@ -54,7 +105,7 @@ case "$gate_out" in
         # OK: 부분이 다음 줄에 있을 수도 — 마지막 OK: 추출
         validated="$(echo "$gate_out" | grep "^OK:$cmd:" | head -1 | sed "s|^OK:$cmd:||")"
         if [ -n "$validated" ] || [ -z "$seed" ]; then
-            exec "$HEXA" run "$engine" "$validated" "$@"
+            run_hexa "$engine" "$validated" "$@"
         fi
         ;;
     REJECT:*|*)

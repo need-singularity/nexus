@@ -536,6 +536,41 @@ fn check_no_hook_cmd(tool: str, arg: str) -> str {
     return ""
 }
 
+// H-NOZOMBIE: hexa 프로세스 예산 게이트 — 동시 활성 hexa N개 초과 시 BLOCK.
+// Why: nexus 에서 .hexa 프로세스가 30+ 누적 → Mac load 220 사고. 사후 청소 외 사전 차단 필수.
+// 대상: Bash tool 호출 중 cmd 에 hexa 호출이 포함된 경우.
+// 우회: NEXUS_BUDGET_OK=1 prefix 또는 cmd 내 @allow-many-hexa 토큰.
+// host 별 임계치: mac=8, hetzner/ubu/vast=32, 기타=12 (CPU 코어 기준 추정).
+// 자기참조 회피: pre_tool_guard.hexa 프로세스는 awk 에서 제외.
+fn check_hexa_budget(tool: str, arg: str) -> str {
+    if tool != "Bash" { return "" }
+    if arg.len() == 0 { return "" }
+    if arg.contains("NEXUS_BUDGET_OK=1") { return "" }
+    if arg.contains("@allow-many-hexa") { return "" }
+    // Bash 호출 자체가 hexa 가 아니면 무관 ("hexa" 토큰이 cmd 내 전혀 없으면 스킵)
+    if arg.contains("hexa") == false { return "" }
+
+    // host 감지
+    let host = to_string(exec("hostname -s 2>/dev/null || echo unknown")).trim()
+    let mut budget = 12
+    if host == "Mac" || host == "mac" { budget = 8 }
+    else if host.contains("hetzner") || host.contains("ubu") || host.contains("vast") { budget = 32 }
+
+    // 현재 활성 hexa 프로세스 수 카운트:
+    //   - '/hexa run' 절대경로 호출 또는 'hexa.real' 바이너리 매칭
+    //   - zsh wrapper 라인 제외 (/bin/zsh -c ... 안의 hexa 토큰은 셸 스폰 중간)
+    //   - awk 자체 및 pre_tool_guard.hexa 자기호출 제외
+    let count_str = to_string(exec(
+        "ps -axo command 2>/dev/null | " +
+        "awk '/\\/hexa[[:space:]]run|hexa\\.real/ && !/awk/ && !/\\/bin\\/zsh/ && !/pre_tool_guard\\.hexa/{n++} END{print n+0}'"
+    )).trim()
+    let count = to_int(count_str)
+    if count < budget { return "" }
+
+    return "REJECT: hexa 프로세스 예산 초과 (활성=" + count_str + "/임계=" + to_string(budget) +
+           " host=" + host + ") H-NOZOMBIE — 잠시 후 재시도. 우회: NEXUS_BUDGET_OK=1 prefix 또는 @allow-many-hexa 주석"
+}
+
 // L0/L1/L2 통합 게이트 — lockdown_gate watch 위임. BLOCK=L0, WARN=L1, ALLOW=L2/NONE.
 // L0 차단 우회는 사용자 직접 lockdown.json 수정으로만 (이 가드는 토큰 우회 미제공).
 fn check_lockdown_tier(tool: str, file_path: str) -> str {
@@ -594,6 +629,7 @@ fn main() {
         check_no_version_name(tool, file_path),
         check_no_hook_file(tool, file_path),
         check_no_hook_cmd(tool, file_path),
+        check_hexa_budget(tool, file_path),
         check_lockdown_tier(tool, file_path),
         check_session_lock(tool, file_path)
     ]

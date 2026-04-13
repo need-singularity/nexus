@@ -16,6 +16,52 @@ fn route_err(src: str, file: str, line: i64, code: str, msg: str) {
     if out.len() > 0 { println(out) }
 }
 
+// S1 관찰 버스 — observations.jsonl append (silent)
+// schema: {ts, tool, path, exit, pattern_key, session_id, project_hash, source}
+fn _observe(tool: str, path_or_cmd: str, exit_str: str, source: str) {
+    let HARNESS = env("HOME") + "/Dev/nexus/shared/harness"
+    let OBS = HARNESS + "/observations.jsonl"
+    let ts = to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()
+    // pattern_key: Bash → 첫 두 토큰
+    let trimmed = path_or_cmd.trim()
+    let mut pattern_key = ""
+    if tool == "Bash" {
+        let toks = trimmed.split(" ")
+        if toks.len() >= 2 {
+            pattern_key = to_string(toks[0]).trim() + ":" + to_string(toks[1]).trim()
+        } else if toks.len() == 1 {
+            pattern_key = to_string(toks[0]).trim()
+        }
+    } else {
+        // Write/Edit: ext 또는 dir 기반
+        if trimmed.contains("/shared/harness/") { pattern_key = "write:dir:shared/harness/" }
+        else if trimmed.contains("/shared/") { pattern_key = "write:dir:shared/" }
+        else {
+            let ext_cmd = "printf '%s' '" + trimmed.replace("'", "") + "' | awk -F. '{if (NF>1) print $NF}'"
+            let ext = to_string(exec(ext_cmd)).trim()
+            if ext.len() > 0 { pattern_key = "write:ext:*." + ext }
+            else { pattern_key = "write:other" }
+        }
+    }
+    let tsid_raw = to_string(exec("printf '%s' \"$TERM_SESSION_ID\" 2>/dev/null | /usr/bin/shasum -a 1 2>/dev/null | cut -c1-8")).trim()
+    let session_id = if tsid_raw.len() > 0 { tsid_raw } else { "nosess" }
+    let ph_cmd = "git remote get-url origin 2>/dev/null | /usr/bin/shasum -a 1 2>/dev/null | cut -c1-12"
+    let ph_raw = to_string(exec(ph_cmd)).trim()
+    let project_hash = if ph_raw.len() > 0 { ph_raw } else { "noremote" }
+    let esc_path = path_or_cmd.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    let esc_pk = pattern_key.replace("\\", "\\\\").replace("\"", "\\\"")
+    let row = "{\"ts\":\"" + ts + "\"," +
+              "\"tool\":\"" + tool + "\"," +
+              "\"path\":\"" + esc_path + "\"," +
+              "\"exit\":" + exit_str + "," +
+              "\"pattern_key\":\"" + esc_pk + "\"," +
+              "\"session_id\":\"" + session_id + "\"," +
+              "\"project_hash\":\"" + project_hash + "\"," +
+              "\"source\":\"" + source + "\"}"
+    let esc_row = row.replace("'", "'\\''")
+    exec("echo '" + esc_row + "' >> '" + OBS + "' 2>/dev/null")
+}
+
 fn main() {
     let argv = args()
     if argv.len() < 3 { return }
@@ -63,6 +109,27 @@ fn main() {
     if output.contains("commit ") && output.contains("master") == false && output.contains("main") == false {
         // bypass
     }
+
+    // 4. H-NOZOMBIE — 매 10회 post_bash 호출마다 reaper sweep (sampling, 비용 절감)
+    let HOME = env("HOME")
+    let counter_file = HOME + "/Dev/nexus/shared/harness/.reaper_counter"
+    let cur_str = to_string(exec("cat " + counter_file + " 2>/dev/null || echo 0")).trim()
+    let cur = to_int(cur_str.split("\n")[0].trim())
+    let nxt = cur + 1
+    exec("echo " + to_string(nxt) + " > " + counter_file + " 2>/dev/null")
+    if nxt % 10 == 0 {
+        let reaper = HOME + "/Dev/nexus/shared/harness/reaper.hexa"
+        let hexa_bin = HOME + "/Dev/nexus/shared/bin/hexa"
+        exec(hexa_bin + " run " + reaper + " sweep >/dev/null 2>&1 &")
+    }
+
+    // 5. S1 관찰 버스 — observation append (bash command + exit)
+    _observe("Bash", output, exit_code, "post_bash")
+
+    // 6. context_gauge tick (Track C 모듈, 부재 시 silent)
+    let HARNESS = HOME + "/Dev/nexus/shared/harness"
+    let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+    exec(HEXA + " run " + HARNESS + "/context_gauge.hexa tick 2>/dev/null")
 }
 
 main()

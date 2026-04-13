@@ -19,6 +19,85 @@ fn route_err(src: str, file: str, line: i64, code: str, msg: str) {
     if out.len() > 0 { println(out) }
 }
 
+// S1 관찰 버스 — observations.jsonl append (silent)
+fn _observe(tool: str, path_or_cmd: str, exit_str: str, source: str) {
+    let HARNESS = HOME + "/Dev/nexus/shared/harness"
+    let OBS = HARNESS + "/observations.jsonl"
+    let ts = to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()
+    let trimmed = path_or_cmd.trim()
+    let mut pattern_key = ""
+    if tool == "Bash" {
+        let toks = trimmed.split(" ")
+        if toks.len() >= 2 {
+            pattern_key = to_string(toks[0]).trim() + ":" + to_string(toks[1]).trim()
+        } else if toks.len() == 1 {
+            pattern_key = to_string(toks[0]).trim()
+        }
+    } else {
+        if trimmed.contains("/shared/harness/") { pattern_key = "write:dir:shared/harness/" }
+        else if trimmed.contains("/shared/") { pattern_key = "write:dir:shared/" }
+        else {
+            let ext_cmd = "printf '%s' '" + trimmed.replace("'", "") + "' | awk -F. '{if (NF>1) print $NF}'"
+            let ext = to_string(exec(ext_cmd)).trim()
+            if ext.len() > 0 { pattern_key = "write:ext:*." + ext }
+            else { pattern_key = "write:other" }
+        }
+    }
+    let tsid_raw = to_string(exec("printf '%s' \"$TERM_SESSION_ID\" 2>/dev/null | /usr/bin/shasum -a 1 2>/dev/null | cut -c1-8")).trim()
+    let session_id = if tsid_raw.len() > 0 { tsid_raw } else { "nosess" }
+    let ph_cmd = "git remote get-url origin 2>/dev/null | /usr/bin/shasum -a 1 2>/dev/null | cut -c1-12"
+    let ph_raw = to_string(exec(ph_cmd)).trim()
+    let project_hash = if ph_raw.len() > 0 { ph_raw } else { "noremote" }
+    let esc_path = path_or_cmd.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    let esc_pk = pattern_key.replace("\\", "\\\\").replace("\"", "\\\"")
+    let row = "{\"ts\":\"" + ts + "\"," +
+              "\"tool\":\"" + tool + "\"," +
+              "\"path\":\"" + esc_path + "\"," +
+              "\"exit\":" + exit_str + "," +
+              "\"pattern_key\":\"" + esc_pk + "\"," +
+              "\"session_id\":\"" + session_id + "\"," +
+              "\"project_hash\":\"" + project_hash + "\"," +
+              "\"source\":\"" + source + "\"}"
+    let esc_row = row.replace("'", "'\\''")
+    exec("echo '" + esc_row + "' >> '" + OBS + "' 2>/dev/null")
+}
+
+// H-NOZOMBIE: .hexa 파일 변경 시 자동 lint 호출 (cheap, single file)
+// 우회: NEXUS_NOAUTOLINT=1 env
+// 자기참조 회피: lint/post_edit/post_bash/cmd_gate 자체 변경 시 skip
+fn auto_lint_hexa(file_path: str) {
+    // .hexa / .hexa.inc 만 대상
+    let is_hexa = file_path.ends_with(".hexa") || file_path.ends_with(".hexa.inc")
+    if is_hexa == false { return }
+    // env 우회
+    if env("NEXUS_NOAUTOLINT").len() > 0 { return }
+    // 자기참조 회피
+    let skip_targets = ["/lint.hexa", "/post_edit.hexa", "/post_bash.hexa", "/cmd_gate.hexa"]
+    for s in skip_targets {
+        if file_path.contains(s) { return }
+    }
+    let lint = HOME + "/Dev/nexus/shared/harness/lint.hexa"
+    let hexa_bin = HOME + "/Dev/nexus/shared/bin/hexa"
+    // lint 자체가 부재 시 무시
+    let exists = to_string(exec("test -f '" + lint + "' && echo y || echo n")).trim()
+    if exists != "y" { return }
+    // perl_timeout 래퍼가 있으면 사용 (다른 Agent 가 작성 중)
+    let wrapper = HOME + "/Dev/nexus/shared/harness/perl_timeout.sh"
+    let wrapper_exists = to_string(exec("test -x '" + wrapper + "' && echo y || echo n")).trim()
+    let mut cmd = ""
+    if wrapper_exists == "y" {
+        cmd = "bash '" + wrapper + "' 30 " + hexa_bin + " run " + lint + " --file '" + file_path + "' 2>&1"
+    } else {
+        cmd = hexa_bin + " run " + lint + " --file '" + file_path + "' 2>&1"
+    }
+    let out = to_string(exec(cmd)).trim()
+    // lint 가 violation 보고하면 prefix 붙여서 출력 (silent-success H1)
+    if out.len() > 0 && out.contains("violation") {
+        println("[H-NOZOMBIE auto-lint] " + file_path)
+        println(out)
+    }
+}
+
 fn main() {
     let argv = args()
     if argv.len() < 3 { return }
@@ -35,9 +114,12 @@ fn main() {
         println("[SYNC HINT] commands.json 변경 — 모든 프로젝트에 반영. 새 세션 권장.")
     }
 
-    // 3. shared/n6/atlas.n6 수정 시 — 헬스체크 힌트
+    // 3. shared/n6/atlas.n6 수정 시 — 헬스체크 힌트 + cross_feed atlas_delta 자동 호출 (P4 Action)
     if file_path.contains("/shared/n6/atlas.n6") {
         println("[ATLAS HINT] atlas.n6 변경 — atlas_health.hexa 실행 권장 (shared/n6/atlas_health.hexa)")
+        let HARNESS_CF = HOME + "/Dev/nexus/shared/harness"
+        let HEXA_CF = HOME + "/Dev/nexus/shared/bin/hexa"
+        exec(HEXA_CF + " run " + HARNESS_CF + "/cross_feed.hexa atlas_delta >/dev/null 2>&1")
     }
 
     // 4. shared/harness/*.hexa 수정 시 — self_check 힌트
@@ -95,6 +177,17 @@ fn main() {
         let HEXA_BIN = HOME + "/Dev/nexus/shared/bin/hexa"
         exec(HEXA_BIN + " run " + HARNESS + "/broadcast.hexa append '" + file_path + "' edit >/dev/null 2>&1")
     }
+
+    // 8. H-NOZOMBIE: .hexa 파일 변경 시 자동 lint 호출 (마지막 — 다른 검증 후)
+    auto_lint_hexa(file_path)
+
+    // 9. S1 관찰 버스 — observation append (write/edit path)
+    _observe("Write", file_path, "0", "post_edit")
+
+    // 10. context_gauge tick (Track C 모듈, 부재 시 silent)
+    let HARNESS3 = HOME + "/Dev/nexus/shared/harness"
+    let HEXA3 = HOME + "/Dev/nexus/shared/bin/hexa"
+    exec(HEXA3 + " run " + HARNESS3 + "/context_gauge.hexa tick 2>/dev/null")
 }
 
 main()
