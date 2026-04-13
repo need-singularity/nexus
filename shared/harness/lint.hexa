@@ -1045,6 +1045,169 @@ fn check_vp_m2(path: string) -> string {
     return ""
 }
 
+// ─── VP runtime helper — paper.md 의 ```python 블록 추출 → /usr/bin/python3 실행 ───
+// 반환: "<rc>|<stdout_b64>|<stderr_b64>" 또는 "" (블록 없음/python3 없음/skip)
+// 블록 없으면 "" 반환 (skip pass), python3 미설치 시 "missing" 반환
+fn _vp_python_path() -> string {
+    // /usr/bin/python3 우선 (hetzner 라우팅 회피 — feedback_python_wrapper_gotcha)
+    let p1 = _str(exec("[ -x /usr/bin/python3 ] && echo y || echo n")).trim()
+    if p1 == "y" { return "/usr/bin/python3" }
+    return ""
+}
+
+fn _vp_sha1(path: string) -> string {
+    let r = _str(exec("printf '%s' '" + path + "' | shasum -a 1 2>/dev/null | cut -c1-12")).trim()
+    if r == "" { return "fallback" }
+    return r
+}
+
+// ```python 블록 1개 이상 존재 시 임시 .py 작성 + 실행
+// 결과: "missing" / "noblock" / "<rc>|<stdout>|<stderr>"
+// stdout/stderr 는 줄바꿈을 '\\n' literal 로 인코딩
+fn _vp_run_blocks(path: string) -> string {
+    let py = _vp_python_path()
+    if py == "" { return "missing" }
+    let full = REPO_ROOT + "/" + path
+    // 블록 카운트 확인
+    let cnt = to_int(_str(exec("grep -cE '^\\`\\`\\`python' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if cnt == 0 { return "noblock" }
+    // 임시 디렉토리 — N6_VERIFY_DIR 또는 /tmp
+    let env_dir = env("N6_VERIFY_DIR")
+    let mut base = env_dir
+    if base == "" { base = "/tmp" }
+    let sha = _vp_sha1(path)
+    let work = base + "/n6-verify-" + sha
+    let bn = basename_of(path)
+    // .md → .py 확장자 교체
+    let dot = _rfind(bn, ".")
+    let mut stem = bn
+    if dot > 0 { stem = bn.substring(0, dot) }
+    let py_file = work + "/" + stem + ".py"
+    exec("mkdir -p '" + work + "' 2>/dev/null")
+    // awk 로 ```python ... ``` 블록 본문만 추출 (시작/끝 펜스 제외)
+    let awk = "awk '/^\\`\\`\\`python/{in_p=1;next} /^\\`\\`\\`/{if(in_p){in_p=0;print \"\"}} in_p{print}' '" + full + "' > '" + py_file + "' 2>/dev/null"
+    exec(awk)
+    // 실행 (timeout 30s, stdout/stderr 분리)
+    let out_file = work + "/" + stem + ".out"
+    let err_file = work + "/" + stem + ".err"
+    let rc_file = work + "/" + stem + ".rc"
+    let cmd = "( cd '" + work + "' && /usr/bin/env -i HOME='" + env("HOME") + "' PATH=/usr/bin:/bin '" + py + "' -W ignore '" + py_file + "' > '" + out_file + "' 2> '" + err_file + "' ); echo $? > '" + rc_file + "'"
+    // 로컬 timeout (gtimeout 또는 perl 폴백)
+    let has_timeout = _str(exec("command -v timeout >/dev/null 2>&1 && echo y || command -v gtimeout >/dev/null 2>&1 && echo y || echo n")).trim()
+    if has_timeout == "y" {
+        let to_bin = _str(exec("command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null")).trim()
+        let cmd2 = "( cd '" + work + "' && '" + to_bin + "' 30 '" + py + "' -W ignore '" + py_file + "' > '" + out_file + "' 2> '" + err_file + "' ); echo $? > '" + rc_file + "'"
+        exec(cmd2)
+    } else {
+        exec(cmd)
+    }
+    let rc = _str(exec("cat '" + rc_file + "' 2>/dev/null")).trim()
+    let out_raw = _str(exec("cat '" + out_file + "' 2>/dev/null"))
+    let err_raw = _str(exec("cat '" + err_file + "' 2>/dev/null"))
+    // 줄바꿈 → '\n' literal (split 충돌 방지). 임시 파일은 디버깅 위해 보존.
+    let out_enc = out_raw.replace("\n", "\\n").replace("|", "/")
+    let err_enc = err_raw.replace("\n", "\\n").replace("|", "/")
+    return rc + "|" + out_enc + "|" + err_enc
+}
+
+// 결과 파싱 헬퍼 — index 0=rc, 1=stdout, 2=stderr
+fn _vp_part(res: string, idx: i64) -> string {
+    if res == "" || res == "missing" || res == "noblock" { return "" }
+    let parts = res.split("|")
+    if len(parts) < 3 { return "" }
+    if idx == 0 { return _str(parts[0]) }
+    if idx == 1 { return _str(parts[1]) }
+    if idx == 2 { return _str(parts[2]) }
+    return ""
+}
+
+// ─── VP-M7 (n6-architecture) — python 검증 코드 exit 0 ───
+fn check_vp_m7(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let m = to_int(_str(exec("grep -c '@allow-no-runtime' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    let res = _vp_run_blocks(path)
+    if res == "noblock" { return "" }
+    if res == "missing" {
+        return "VP-M7|warn|/usr/bin/python3 미설치 — 런타임 검증 스킵 (// @allow-no-runtime)"
+    }
+    let rc = _vp_part(res, 0)
+    let err = _vp_part(res, 2)
+    if rc == "0" && err == "" { return "" }
+    if rc == "0" { return "" }
+    // stderr 첫 줄 추출
+    let err_first = err.split("\\n")[0]
+    return "VP-M7|error|python 검증 코드 실행 실패 (exit " + rc + ") / stderr: " + _str(err_first) + " (// @allow-no-runtime)"
+}
+
+// ─── VP-M9 (n6-architecture) — python stdout 에 'SKIP' 단어 차단 ───
+fn check_vp_m9(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let m = to_int(_str(exec("grep -c '@allow-no-runtime' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    let res = _vp_run_blocks(path)
+    if res == "noblock" || res == "missing" { return "" }
+    let rc = _vp_part(res, 0)
+    if rc != "0" { return "" }  // VP-M7 가 잡음
+    let out = _vp_part(res, 1)
+    // SKIP 단어 카운트 — 줄바꿈 디코딩 후 grep
+    let lines = out.split("\\n")
+    let mut skip_cnt: i64 = 0
+    for ln in lines {
+        let s = _str(ln)
+        if s == "" { continue }
+        if s.index_of("SKIP") >= 0 { skip_cnt = skip_cnt + 1 }
+    }
+    if skip_cnt == 0 { return "" }
+    return "VP-M9|error|python 실행 결과에 'SKIP' 단어 " + to_string(skip_cnt) + "건 / MISSING DATA 잔존 (// @allow-no-runtime)"
+}
+
+// ─── VP-M10 (n6-architecture) — python stdout 에 N/N PASS 형식 요약 필수 ───
+fn check_vp_m10(path: string) -> string {
+    if !_n6_canonical_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    let m = to_int(_str(exec("grep -c '@allow-no-runtime' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return "" }
+    let res = _vp_run_blocks(path)
+    if res == "noblock" || res == "missing" { return "" }
+    let rc = _vp_part(res, 0)
+    if rc != "0" { return "" }  // VP-M7 가 잡음
+    let out = _vp_part(res, 1)
+    // 디코딩 후 임시 파일에 써서 grep — 단순화: hexa 내에서 직접 패턴 매칭
+    // 패턴 1: [0-9]+/[0-9]+ PASS  /  패턴 2: All N PASS  /  패턴 3: N/N PASS
+    let lines = out.split("\\n")
+    let mut found = false
+    for ln in lines {
+        let s = _str(ln)
+        if s == "" { continue }
+        // 'PASS' 가 있고 / 또는 'All' 동반
+        if s.index_of("PASS") < 0 { continue }
+        // X/Y PASS 매칭: 슬래시 앞뒤 숫자
+        let slash = s.index_of("/")
+        if slash > 0 {
+            // slash 직전·직후 숫자 검사
+            let before = s.substring(0, slash)
+            let after = s.substring(slash + 1, len(s))
+            // before 끝이 숫자, after 시작이 숫자
+            let bn_len = len(before)
+            if bn_len > 0 {
+                let bc = before.substring(bn_len - 1, bn_len)
+                if bc >= "0" && bc <= "9" {
+                    if len(after) > 0 {
+                        let ac = after.substring(0, 1)
+                        if ac >= "0" && ac <= "9" { found = true }
+                    }
+                }
+            }
+        }
+        if !found && s.index_of("All ") >= 0 && s.index_of(" PASS") >= 0 { found = true }
+    }
+    if found { return "" }
+    return "VP-M10|error|python 실행 결과에 'N/N PASS' 형식 요약 누락 (// @allow-no-runtime)"
+}
+
 // ─── N6-JSONPAIR (n6-architecture) — 신규 도메인 문서 추가 시 papers/_registry.json 동반 ───
 // staged 에 papers/n6-*.md 또는 domains/*/*.md (status=A) + papers/_registry.json 미변경 → error
 // 파일별 호출이라 매번 같은 staged 상태를 검사. path 는 트리거 매칭에 사용.
@@ -1398,6 +1561,125 @@ fn check_an2(path: string) -> string {
     return ""
 }
 
+// ─── AN-LOG: anima 학습 진입점 파일 감지 ───
+// scope: training/**/*.{py,hexa} OR core/train_*.{py,hexa} OR core/training/**/*.{py,hexa}
+//        OR basename train_*|trainer_*|*_trainer.*
+// 예외: archive/, tests/, fixtures/, // @allow-no-log
+fn _an_log_in_scope(path: string) -> bool {
+    if _project_name() != "anima" { return false }
+    let e = ext_of(path)
+    if e != ".py" && e != ".hexa" { return false }
+    if path.starts_with("archive/") { return false }
+    if path.index_of("/_archive/") >= 0 { return false }
+    if path.index_of("/archive/") >= 0 { return false }
+    if path.index_of("/tests/") >= 0 { return false }
+    if path.starts_with("tests/") { return false }
+    if path.index_of("/fixtures/") >= 0 { return false }
+    if path.starts_with("fixtures/") { return false }
+    if path.starts_with("shared/harness/") { return false }
+    let bn = basename_of(path)
+    // 디렉터리 패턴
+    if path.starts_with("training/") { return true }
+    if path.starts_with("core/training/") { return true }
+    // basename 패턴: train_*, trainer_*, *_trainer.*
+    if bn.starts_with("train_") { return true }
+    if bn.starts_with("trainer_") { return true }
+    // *_trainer.<ext>
+    let dot = _rfind(bn, ".")
+    if dot > 0 {
+        let stem = bn.substring(0, dot)
+        let st_len = len(stem)
+        if st_len >= 8 {
+            let suf = stem.substring(st_len - 8, st_len)
+            if suf == "_trainer" { return true }
+        }
+    }
+    return false
+}
+
+fn _an_log_exempt(full: string) -> bool {
+    let m = to_int(_str(exec("grep -c '@allow-no-log' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if m > 0 { return true }
+    return false
+}
+
+// ─── AN-LOG-2 — 학습 루프 안 주기 출력 (% N == 0 + log) ───
+fn check_an_log_2(path: string) -> string {
+    if !_an_log_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _an_log_exempt(full) { return "" }
+    let bn = basename_of(path)
+    // 단순화: 파일에 % [0-9]+ == 0 패턴 ≥1 AND 로깅 호출 ≥1
+    let mod_cnt = to_int(_str(exec("grep -cE '%[[:space:]]*[0-9]+[[:space:]]*==[[:space:]]*0' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let log_cnt = to_int(_str(exec("grep -cE '\\b(print|logger|wandb|tb|tensorboard|writer\\.add)\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if mod_cnt >= 1 && log_cnt >= 1 { return "" }
+    return "AN-LOG-2|error|학습 파일 '" + bn + "' 에 주기 출력 (% N == 0 + log) 패턴 없음 (// @allow-no-log)"
+}
+
+// ─── AN-LOG-3 — 필수 메트릭 키워드 (loss / step|epoch / throughput) ───
+fn check_an_log_3(path: string) -> string {
+    if !_an_log_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _an_log_exempt(full) { return "" }
+    let bn = basename_of(path)
+    let l = to_int(_str(exec("grep -ciE '\\bloss\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let s = to_int(_str(exec("grep -ciE '\\b(step|epoch)\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let t = to_int(_str(exec("grep -ciE '\\b(throughput|tps|samples/sec|samples_per_sec)\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if l >= 1 && s >= 1 && t >= 1 { return "" }
+    return "AN-LOG-3|error|학습 파일 '" + bn + "' 필수 메트릭 누락 (loss/step/throughput) (// @allow-no-log)"
+}
+
+// ─── AN-LOG-4 — 시작 metadata dump (model_size/batch_size/lr) ≥3 + log 동반 ───
+fn check_an_log_4(path: string) -> string {
+    if !_an_log_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _an_log_exempt(full) { return "" }
+    let bn = basename_of(path)
+    let meta = to_int(_str(exec("grep -cE '\\b(model_size|batch_size|lr|learning_rate)\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if meta < 3 {
+        return "AN-LOG-4|error|학습 파일 '" + bn + "' 시작 metadata (model_size/batch_size/lr) 누락 (// @allow-no-log)"
+    }
+    // 로깅 호출 동반 — 단순화: 파일 어딘가에 print/logger 호출 존재
+    let log_cnt = to_int(_str(exec("grep -cE '\\b(print|logger|wandb|tb|tensorboard|writer\\.add)\\b' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if log_cnt < 1 {
+        return "AN-LOG-4|error|학습 파일 '" + bn + "' 시작 metadata (model_size/batch_size/lr) 누락 (// @allow-no-log)"
+    }
+    return ""
+}
+
+// ─── AN-LOG-5 — 종료/체크포인트 final report (best_loss/total_steps/wall_time) ≥2 ───
+fn check_an_log_5(path: string) -> string {
+    if !_an_log_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _an_log_exempt(full) { return "" }
+    let bn = basename_of(path)
+    let cnt = to_int(_str(exec("grep -cE '\\b(best_loss|total_steps|wall_time|elapsed|final_)\\w*' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if cnt < 2 {
+        return "AN-LOG-5|error|학습 파일 '" + bn + "' 종료 final report (best_loss/total_steps/wall_time) 누락 (// @allow-no-log)"
+    }
+    return ""
+}
+
+// ─── AN-LOG-7 — 로그 SSOT 경로 (anima/logs/training/ 또는 logs/training/ 또는 LOG_DIR=) ───
+fn check_an_log_7(path: string) -> string {
+    if !_an_log_in_scope(path) { return "" }
+    let full = REPO_ROOT + "/" + path
+    if _an_log_exempt(full) { return "" }
+    let bn = basename_of(path)
+    // 임의 경로 직접 사용 차단
+    let bad = to_int(_str(exec("grep -cE '\"(/tmp/log|\\./out|\\./training_log|/var/log/train|~/log)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    let good = to_int(_str(exec("grep -cE '(anima/logs/training/|logs/training/|LOG_DIR[[:space:]]*=)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if bad > 0 && good == 0 {
+        return "AN-LOG-7|error|학습 파일 '" + bn + "' 로그 경로가 SSOT (anima/logs/training/) 아님 (// @allow-no-log)"
+    }
+    // 파일에 로그 출력 패턴 (open(.*log/ , logging.FileHandler 등) 있는데 SSOT 키워드 없으면
+    let log_open = to_int(_str(exec("grep -cE '(open\\([^)]*log|FileHandler\\(|to_csv\\(|json\\.dump.*log)' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if log_open >= 1 && good == 0 {
+        return "AN-LOG-7|error|학습 파일 '" + bn + "' 로그 경로가 SSOT (anima/logs/training/) 아님 (// @allow-no-log)"
+    }
+    return ""
+}
+
 fn check_hx4(path: string) -> string {
     if _project_name() != "hexa-lang" { return "" }
     if _hx4_is_exempt(path) { return "" }
@@ -1660,6 +1942,20 @@ for f in files {
     let v13 = check_an2(path)
     if v13 != "" { violations = violations.push(path + "|" + v13) }
 
+    // check_an_log_2/3/4/5/7 (anima 학습 진입점 .py/.hexa): 학습 로그 강제
+    if e == ".py" || e == ".hexa" {
+        let v13a = check_an_log_2(path)
+        if v13a != "" { violations = violations.push(path + "|" + v13a) }
+        let v13b = check_an_log_3(path)
+        if v13b != "" { violations = violations.push(path + "|" + v13b) }
+        let v13c = check_an_log_4(path)
+        if v13c != "" { violations = violations.push(path + "|" + v13c) }
+        let v13d = check_an_log_5(path)
+        if v13d != "" { violations = violations.push(path + "|" + v13d) }
+        let v13e = check_an_log_7(path)
+        if v13e != "" { violations = violations.push(path + "|" + v13e) }
+    }
+
     // check_vd1 (void 프로젝트 전용): Terminal.app 단일 참조
     let v14 = check_vd1(path)
     if v14 != "" { violations = violations.push(path + "|" + v14) }
@@ -1722,6 +2018,12 @@ for f in files {
         if n_vm1 != "" { violations = violations.push(path + "|" + n_vm1) }
         let n_vm2 = check_vp_m2(path)
         if n_vm2 != "" { violations = violations.push(path + "|" + n_vm2) }
+        let n_vm7 = check_vp_m7(path)
+        if n_vm7 != "" { violations = violations.push(path + "|" + n_vm7) }
+        let n_vm9 = check_vp_m9(path)
+        if n_vm9 != "" { violations = violations.push(path + "|" + n_vm9) }
+        let n_vm10 = check_vp_m10(path)
+        if n_vm10 != "" { violations = violations.push(path + "|" + n_vm10) }
         let n_jp = check_n6_jsonpair(path)
         if n_jp != "" { violations = violations.push(path + "|" + n_jp) }
     }
