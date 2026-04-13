@@ -14,8 +14,11 @@
 //   hexa shared/calc/auto_stubs_gen.hexa --emit                # manifest → .hexa
 //   hexa shared/calc/auto_stubs_gen.hexa --import-py           # 기존 .py → manifest 추출 (1회성 마이그레이션)
 //   hexa shared/calc/auto_stubs_gen.hexa --status              # manifest 라인 / 출력 .hexa 수 비교
+//   hexa shared/calc/auto_stubs_gen.hexa --append '<json>'     # manifest +1줄 + verify_<id>.hexa emit (id dedup)
+//   hexa shared/calc/auto_stubs_gen.hexa --append -            # stdin 으로 JSON 라인 1개 읽기
 //
 // 성공 조용, 실패 시끄럽게 (H1).
+// --append sentinel: stdout 마지막 줄 "__APPEND_RESULT__ <OK_NEW|OK_DUP|FAIL> [reason]"
 // ═══════════════════════════════════════════════════════════
 
 let HOME = env("HOME")
@@ -237,6 +240,81 @@ fn cmd_emit() -> i64 {
     return 0
 }
 
+// ─── --append: 단일 claim manifest+stub 발사 (외부 cron closure-sweep 용) ───
+//
+// 입력 JSON (라인 1개): {"id":"<10hex>","target":"<num>","expr":"<str>","hyp":"<str>","closure":"<str>"}
+// 동작:
+//   1. id 중복 체크 (manifest.jsonl scan) → 있으면 OK_DUP, 아무 파일도 수정 안 함 (idempotent)
+//   2. manifest.jsonl 에 append_file (trailing \n 보장)
+//   3. verify_<id>.hexa emit
+// sentinel (stdout 마지막 줄):
+//   __APPEND_RESULT__ OK_NEW <id>
+//   __APPEND_RESULT__ OK_DUP <id>
+//   __APPEND_RESULT__ FAIL <reason>
+
+fn manifest_has_id(id: string) -> bool {
+    if !file_exists(MANIFEST) { return false }
+    let raw = _str(read_file(MANIFEST))
+    if raw == "" { return false }
+    let needle = "\"id\":\"" + id + "\""
+    return raw.index_of(needle) >= 0
+}
+
+fn cmd_append(raw_json: string) -> i64 {
+    let line = _str(raw_json).trim()
+    if line == "" {
+        eprintln("ERR: --append got empty JSON")
+        println("__APPEND_RESULT__ FAIL empty-input")
+        return 1
+    }
+    if !line.starts_with("{") {
+        eprintln("ERR: --append JSON must start with '{' — got: " + line.substring(0, min_i64(40, len(line))))
+        println("__APPEND_RESULT__ FAIL not-json-object")
+        return 1
+    }
+    let id = jget(line, "id")
+    let target = jget(line, "target")
+    let expr = jget(line, "expr")
+    let hyp = jget(line, "hyp")
+    let closure = jget(line, "closure")
+    if id == "" {
+        eprintln("ERR: --append JSON missing 'id' field")
+        println("__APPEND_RESULT__ FAIL missing-id")
+        return 1
+    }
+    if target == "" || expr == "" {
+        eprintln("ERR: --append JSON missing required field (target/expr)  id=" + id)
+        println("__APPEND_RESULT__ FAIL missing-target-or-expr")
+        return 1
+    }
+    if manifest_has_id(id) {
+        eprintln("WARN: --append id already in manifest — skip  id=" + id)
+        println("__APPEND_RESULT__ OK_DUP " + id)
+        return 0
+    }
+    // emit stub
+    let body = render_stub(id, target, expr, hyp, closure)
+    let out = STUBS_DIR + "/verify_" + id + ".hexa"
+    try { write_file(out, body) } catch e {
+        eprintln("ERR: --append write failed " + out)
+        println("__APPEND_RESULT__ FAIL write-stub")
+        return 1
+    }
+    // append manifest (trailing newline guaranteed)
+    try { append_file(MANIFEST, line + "\n") } catch e {
+        eprintln("ERR: --append manifest append failed " + MANIFEST)
+        println("__APPEND_RESULT__ FAIL append-manifest")
+        return 1
+    }
+    println("__APPEND_RESULT__ OK_NEW " + id)
+    return 0
+}
+
+fn min_i64(a: i64, b: i64) -> i64 {
+    if a < b { return a }
+    return b
+}
+
 fn cmd_status() -> i64 {
     let mlines = _str(exec("wc -l < '" + MANIFEST + "' 2>/dev/null")).trim()
     let hexa_n = _str(exec("ls " + STUBS_DIR + "/verify_*.hexa 2>/dev/null | wc -l")).trim()
@@ -253,7 +331,7 @@ fn main() {
     // args(): [0]=binary [1]=script [2..]=user args
     let argv = args()
     if argv.len() < 3 {
-        println("usage: hexa shared/calc/auto_stubs_gen.hexa <--emit|--import-py|--status>")
+        println("usage: hexa shared/calc/auto_stubs_gen.hexa <--emit|--import-py|--status|--append <json>|-)>")
         return
     }
     let mode = _str(argv[2])
@@ -263,9 +341,24 @@ fn main() {
         cmd_import_py()
     } else if mode == "--status" {
         cmd_status()
+    } else if mode == "--append" {
+        // argv[3] == "-" or absent → stdin; else argv[3] is JSON literal
+        let mut payload = ""
+        if argv.len() >= 4 {
+            let a3 = _str(argv[3])
+            if a3 == "-" {
+                payload = _str(read_stdin())
+            } else {
+                payload = a3
+            }
+        } else {
+            payload = _str(read_stdin())
+        }
+        cmd_append(payload)
     } else {
-        println("ERR: unknown mode: " + mode)
-        println("usage: hexa shared/calc/auto_stubs_gen.hexa <--emit|--import-py|--status>")
+        eprintln("ERR: unknown mode: " + mode)
+        println("usage: hexa shared/calc/auto_stubs_gen.hexa <--emit|--import-py|--status|--append <json>|-)>")
+        println("__APPEND_RESULT__ FAIL unknown-mode")
     }
 }
 
