@@ -8,10 +8,10 @@
 #   usage-cache.json {"<name>":{week_all_pct,session_pct,error,resets}}
 #
 # Subcommands:
-#   cl              대시보드 (동일: cl u)
-#   cl u            usage bars
+#   cl              대화형 픽커 (tty) → 선택 → exec claude. 비-tty면 cl u 와 동일
+#   cl u            usage bars (비대화형 조회용)
 #   cl status       간단 요약
-#   cl pick [NAME]  활성 계정 전환. NAME 없으면 week_all_pct 최저 자동
+#   cl pick [NAME]  활성 계정 전환만(런칭 X). NAME 없으면 week_all_pct 최저 자동
 #   cl env          현재 활성 계정의 CLAUDE_CONFIG_DIR export 라인 출력
 #   cl help
 #
@@ -81,14 +81,21 @@ auto_pick() {
 }
 
 show_dashboard() {
+    render_dashboard -1
+}
+
+# render_dashboard <cursor_idx> — cursor_idx<0 이면 커서 표시 없음
+render_dashboard() {
+    local cursor="${1:--1}"
     local active; active="$(current_active)"
     local names; names="$(jq -r '.accounts[].name' "$ACCOUNTS")"
     printf "cl — Claude accounts    active=%s    store=%s\n" "${active:-none}" "$CL_HOME"
-    printf "  %-10s  %4s  %-20s  %4s  %-20s  %s\n" "name" "wk%" "[week_all]" "ss%" "[session]" "err"
-    echo "  ------------------------------------------------------------------------------"
+    printf "    %-3s  %-10s  %4s  %-20s  %4s  %-20s  %s\n" "no" "name" "wk%" "[week_all]" "ss%" "[session]" "err"
+    echo   "    -------------------------------------------------------------------------------"
+    local i=0
     while IFS= read -r name; do
         [ -z "$name" ] && continue
-        local week sess err wi si marker
+        local week sess err wi si act_mark pointer num_label
         if [ -f "$USAGE" ]; then
             week=$(jq -r --arg n "$name" '.[$n].week_all_pct // 0' "$USAGE" 2>/dev/null)
             sess=$(jq -r --arg n "$name" '.[$n].session_pct // 0' "$USAGE" 2>/dev/null)
@@ -98,11 +105,87 @@ show_dashboard() {
         fi
         wi=$(printf '%.0f' "${week:-0}")
         si=$(printf '%.0f' "${sess:-0}")
-        marker=" "
-        [ "$name" = "$active" ] && marker="*"
-        printf "%s %-10s  %3s%%  %s  %3s%%  %s  %s\n" \
-            "$marker" "$name" "$wi" "$(bar $wi)" "$si" "$(bar $si)" "${err:-}"
+        act_mark=" "
+        [ "$name" = "$active" ] && act_mark="*"
+        if [ "$i" -lt 9 ]; then num_label=$((i+1));
+        elif [ "$i" -eq 9 ]; then num_label="0";
+        else num_label="-"; fi
+        if [ "$i" -eq "$cursor" ]; then
+            pointer="\033[7m▶ "
+            printf " ${pointer}%-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s\033[0m\n" \
+                "$num_label" "$act_mark" "$name" "$wi" "$(bar $wi)" "$si" "$(bar $si)" "${err:-}"
+        else
+            printf "    %-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s\n" \
+                "$num_label" "$act_mark" "$name" "$wi" "$(bar $wi)" "$si" "$(bar $si)" "${err:-}"
+        fi
+        i=$((i+1))
     done <<< "$names"
+}
+
+# 단일 키 읽기 — 이스케이프 시퀀스(화살표) 결합 처리
+read_key() {
+    local key rest
+    IFS= read -rsn1 key
+    if [[ "$key" == $'\x1b' ]]; then
+        IFS= read -rsn2 -t 0.01 rest 2>/dev/null || true
+        key+="${rest:-}"
+    fi
+    printf '%s' "$key"
+}
+
+cmd_interactive() {
+    if ! { [ -t 0 ] && [ -t 1 ]; }; then
+        show_dashboard
+        return 0
+    fi
+    local names=()
+    while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < <(jq -r '.accounts[].name' "$ACCOUNTS")
+    local count=${#names[@]}
+    [ "$count" -gt 0 ] || { echo "ERROR(cl): 계정 없음" >&2; exit 1; }
+
+    local active; active="$(current_active)"
+    local auto;   auto="$(auto_pick)"
+    local cursor=0 i
+    if [ -n "$auto" ]; then
+        for i in "${!names[@]}"; do [ "${names[$i]}" = "$auto" ] && cursor=$i && break; done
+    elif [ -n "$active" ]; then
+        for i in "${!names[@]}"; do [ "${names[$i]}" = "$active" ] && cursor=$i && break; done
+    fi
+
+    local total_lines=$(( count + 4 ))   # 헤더1 + 컬럼1 + 구분1 + n + 푸터1
+    local first=1 selected="" key
+    while true; do
+        if [ $first -eq 1 ]; then first=0; else printf '\033[%dA\033[J' "$total_lines"; fi
+        render_dashboard "$cursor"
+        printf "  ↑↓←→ 이동  Enter 선택  1-9/0 점프  q 취소  (그 외 키 → auto: %s)\n" "${auto:-none}"
+
+        key=$(read_key)
+        case "$key" in
+            $'\x1b[A'|$'\x1b[D'|$'\x1bOA'|$'\x1bOD')
+                cursor=$(( (cursor - 1 + count) % count )) ;;
+            $'\x1b[B'|$'\x1b[C'|$'\x1bOB'|$'\x1bOC')
+                cursor=$(( (cursor + 1) % count )) ;;
+            "")  selected="${names[$cursor]}"; break ;;
+            [1-9])
+                idx=$(( key - 1 ))
+                if [ "$idx" -lt "$count" ]; then selected="${names[$idx]}"; break; fi ;;
+            0)
+                if [ "$count" -ge 10 ]; then selected="${names[9]}"; break; fi ;;
+            q|Q|$'\x1b')
+                printf '\n취소\n'; return 1 ;;
+            *)  selected="${auto:-${names[$cursor]}}"; break ;;
+        esac
+    done
+
+    set_active "$selected"
+    local dir; dir=$(config_dir_for "$selected")
+    printf '\n→ %s (%s)\n' "$selected" "$dir"
+    export CLAUDE_CONFIG_DIR="$dir"
+    if command -v claude >/dev/null 2>&1; then
+        exec claude
+    else
+        echo "WARN(cl): claude 바이너리 없음. env만 갱신" >&2
+    fi
 }
 
 show_status() {
@@ -136,21 +219,29 @@ cmd_env() {
     printf 'export CLAUDE_CONFIG_DIR=%q\n' "$dir"
 }
 
-case "${1:-dashboard}" in
-    ""|u|dashboard) show_dashboard ;;
-    status)         show_status ;;
-    pick)           shift || true; cmd_pick "${1:-}" ;;
-    env)            cmd_env ;;
+case "${1:-interactive}" in
+    ""|interactive)  cmd_interactive ;;
+    u|dashboard)     show_dashboard ;;
+    status)          show_status ;;
+    pick)            shift || true; cmd_pick "${1:-}" ;;
+    env)             cmd_env ;;
     help|-h|--help)
         cat <<USAGE
 cl — Claude Code multi-account launcher (nexus-managed)
 
-  cl              대시보드 (usage bars)
-  cl u            동일
+  cl              대화형 픽커 → 선택 → claude 런칭 (비-tty면 cl u)
+  cl u            대시보드만 (조회/스크립트용)
   cl status       요약
-  cl pick [NAME]  활성 계정 전환 (NAME 없으면 최저 week_all_pct 자동)
+  cl pick [NAME]  active 전환만 (런칭 X). NAME 없으면 자동
   cl env          eval "\$(cl env)" → CLAUDE_CONFIG_DIR export
   cl help
+
+대화형 키:
+  ↑↓←→     커서 이동
+  Enter    커서 위치 선택
+  1-9 / 0  번호 점프 (0 = 10번)
+  q / ESC  취소
+  그 외     auto-pick 즉시 진입
 
 Store: $CL_HOME
 USAGE
