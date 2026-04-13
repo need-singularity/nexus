@@ -60,15 +60,16 @@ list_accounts() {
     jq -r '.accounts[].name' "$ACCOUNTS" | sort -V
 }
 
-# pct(정수 0..100) → 20칸 바
-bar() {
-    local pct=${1:-0}
+# pct(정수 0..100) → 20칸 바. printf -v 로 변수 직접 작성 (no subshell, no pipe).
+# bar_to <var_name> <pct>
+bar_to() {
+    local __var=$1 pct=${2:-0}
     local filled=$(( (pct + 2) / 5 ))
     [ $filled -gt 20 ] && filled=20
     [ $filled -lt 0 ] && filled=0
-    local empty=$((20 - filled))
-    printf '%*s' "$filled" '' | tr ' ' '#'
-    printf '%*s' "$empty" '' | tr ' ' '.'
+    local hashes="####################"   # 20
+    local dots="...................."     # 20
+    printf -v "$__var" '%s%s' "${hashes:0:filled}" "${dots:0:$((20-filled))}"
 }
 
 # usage-cache 에서 week_all_pct 최저(error=null, <95) 계정 선택
@@ -86,23 +87,34 @@ auto_pick() {
 }
 
 show_dashboard() {
-    CL_EOL="" render_dashboard -1
+    local frame
+    CL_EOL="" build_frame_to frame -1
+    printf '%s' "$frame"
 }
 
-# render_dashboard <cursor_idx> — cursor_idx<0 이면 커서 표시 없음
+# build_frame_to <out_var> <cursor_idx> — 전체 대시보드를 단일 문자열로 빌드 (출력 X)
 # CL_EOL 환경변수로 행 끝 ANSI 제어 시퀀스 주입 (인터랙티브: \033[K, 비대화형: 빈문자)
-render_dashboard() {
-    local cursor="${1:--1}"
+# 모든 printf -v 사용 → 서브셸/파이프 없음. 한 번의 printf 로 atomic 출력 가능.
+build_frame_to() {
+    local __out=$1
+    local cursor="${2:--1}"
     local eol="${CL_EOL-}"
     local active; active="$(current_active)"
     local names; names="$(list_accounts)"
-    printf "cl — Claude accounts    active=%s    store=%s%s\n" "${active:-none}" "$CL_HOME" "$eol"
-    printf "    %-3s  %-10s  %4s  %-20s  %4s  %-20s  %s%s\n" "no" "name" "wk%" "[week_all]" "ss%" "[session]" "err" "$eol"
-    printf "    -------------------------------------------------------------------------------%s\n" "$eol"
-    local i=0
+    # NOTE: 내부 누적 변수는 _buf — caller 가 'frame' 같은 흔한 이름을 쓸 때
+    # printf -v "$__out" 가 dynamic scoping 으로 우리 local 을 덮는 사고 방지.
+    local _buf="" line b1 b2
+    local i=0 name week sess err wi si act_mark num_label
+
+    printf -v line "cl — Claude accounts    active=%s    store=%s%s\n" "${active:-none}" "$CL_HOME" "$eol"
+    _buf+="$line"
+    printf -v line "    %-3s  %-10s  %4s  %-20s  %4s  %-20s  %s%s\n" "no" "name" "wk%" "[week_all]" "ss%" "[session]" "err" "$eol"
+    _buf+="$line"
+    printf -v line "    -------------------------------------------------------------------------------%s\n" "$eol"
+    _buf+="$line"
+
     while IFS= read -r name; do
         [ -z "$name" ] && continue
-        local week sess err wi si act_mark pointer num_label
         if [ -f "$USAGE" ]; then
             week=$(jq -r --arg n "$name" '.[$n].week_all_pct // 0' "$USAGE" 2>/dev/null)
             sess=$(jq -r --arg n "$name" '.[$n].session_pct // 0' "$USAGE" 2>/dev/null)
@@ -110,24 +122,28 @@ render_dashboard() {
         else
             week=0; sess=0; err="no-cache"
         fi
-        wi=$(printf '%.0f' "${week:-0}")
-        si=$(printf '%.0f' "${sess:-0}")
+        printf -v wi '%.0f' "${week:-0}"
+        printf -v si '%.0f' "${sess:-0}"
+        bar_to b1 "$wi"
+        bar_to b2 "$si"
         act_mark=" "
         [ "$name" = "$active" ] && act_mark="*"
         if [ "$i" -lt 9 ]; then num_label=$((i+1));
         elif [ "$i" -eq 9 ]; then num_label="0";
         else num_label="-"; fi
-        # prefix 4 col 고정 — 커서/비커서 동일 시각 폭. ASCII '>' 로 wide-char 모호성 회피.
-        # 커서 행 전체 reverse video → 시각 명확. 행 폭은 비커서와 동일.
+        # prefix 4 col 고정. 커서 행 전체 reverse video. ASCII '>' (wide-char 모호성 회피).
         if [ "$i" -eq "$cursor" ]; then
-            printf "\033[7m  > %-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s\033[0m%s\n" \
-                "$num_label" "$act_mark" "$name" "$wi" "$(bar $wi)" "$si" "$(bar $si)" "${err:-}" "$eol"
+            printf -v line "\033[7m  > %-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s\033[0m%s\n" \
+                "$num_label" "$act_mark" "$name" "$wi" "$b1" "$si" "$b2" "${err:-}" "$eol"
         else
-            printf "    %-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s%s\n" \
-                "$num_label" "$act_mark" "$name" "$wi" "$(bar $wi)" "$si" "$(bar $si)" "${err:-}" "$eol"
+            printf -v line "    %-3s %s%-10s  %3s%%  %s  %3s%%  %s  %s%s\n" \
+                "$num_label" "$act_mark" "$name" "$wi" "$b1" "$si" "$b2" "${err:-}" "$eol"
         fi
+        _buf+="$line"
         i=$((i+1))
     done <<< "$names"
+
+    printf -v "$__out" '%s' "$_buf"
 }
 
 # 단일 키 읽기 — 이스케이프 시퀀스(화살표) 결합 처리
@@ -173,27 +189,32 @@ cmd_interactive() {
     # 인터랙티브에서는 행 끝에 \033[K 주입 → 덮어쓸 때 잔존 문자 제거
     local CL_EOL=$'\033[K'
 
+    local body prefix
     while true; do
+        # 1. 이동 prefix (첫 프레임 제외)
         if [ $first -eq 1 ]; then
-            first=0
+            prefix=""; first=0
         else
-            # 커서만 위로 올리고 같은 자리에 덮어쓰기. \033[J 생략 → 깜빡임 없음.
-            printf '\033[%dA\r' "$total_lines"
+            printf -v prefix '\033[%dA\r' "$total_lines"
         fi
-        CL_EOL="$CL_EOL" render_dashboard "$cursor"
 
-        # 푸터 미리보기 — moved 전후 분기
+        # 2. 대시보드 본문 (단일 문자열)
+        CL_EOL="$CL_EOL" build_frame_to body "$cursor"
+
+        # 3. 푸터 미리보기 — moved 전후 분기
         if [ "$moved" -eq 0 ] && [ -n "$auto" ] && [ "${names[$cursor]}" != "$auto" ]; then
-            footer=$(printf "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → %s 추천)" \
-                "${names[$cursor]}" "$auto")
+            printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → %s 추천)\033[K\n" \
+                "${names[$cursor]}" "$auto"
         elif [ "$moved" -eq 0 ]; then
-            footer=$(printf "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → 추천)" \
-                "${names[$cursor]}")
+            printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → 추천)\033[K\n" \
+                "${names[$cursor]}"
         else
-            footer=$(printf "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소" \
-                "${names[$cursor]}")
+            printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소\033[K\n" \
+                "${names[$cursor]}"
         fi
-        printf '%s\033[K\n' "$footer"
+
+        # 4. ATOMIC: 단일 printf 로 전체 프레임 한 번에 write → tty 가 부분 frame 못 봄
+        printf '%s%s%s' "$prefix" "$body" "$footer"
 
         key=$(read_key)
         case "$key" in
