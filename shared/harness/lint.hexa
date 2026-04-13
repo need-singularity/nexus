@@ -1643,6 +1643,82 @@ fn check_h_noname_v(path: string) -> string {
     return ""
 }
 
+// ─── H-NOHOOK (공통) — hook 시스템 신규 작성 금지 ───
+// Why: 사용자 정책 — 공용 규칙 코드 강제 부분에 hook 작성 자체 금지.
+//      모든 자동 강제는 harness/entry.hexa 자율 호출로 통합. settings.json hooks={} 고정.
+// 대상:
+//   - .claude/settings*.json — hooks 키 비어있지 않으면 위반
+//   - .claude/hooks/ 하위 신규 스크립트
+//   - .git/hooks/ 신규 hook (sample/H-COMMIT 4종 외)
+//   - .githooks/ H-COMMIT wrapper 외 신규
+//   - shared/hooks/ (deprecated symlink) 하위 신규
+// 격리 예외: shared/archive/, /archive/superseded-, /archive/deprecated_
+// 우회: 파일 내 '@allow-hook' 토큰
+fn check_h_nohook(path: string) -> string {
+    if len(path) == 0 { return "" }
+    // 자기참조
+    if path.index_of("shared/harness/lint.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/pre_tool_guard.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/post_edit.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/severity_map.json") >= 0 { return "" }
+    // archaeological 격리
+    if path.index_of("shared/archive/") >= 0 { return "" }
+    if path.index_of("/archive/superseded-") >= 0 { return "" }
+    if path.index_of("/archive/deprecated_") >= 0 { return "" }
+
+    let base = basename_of(path)
+
+    // 1) 경로 기반 — repo-relative 와 absolute 양쪽 매칭 (앞 '/' 유무)
+    let has_claude_hooks = path.index_of("/.claude/hooks/") >= 0 || path.starts_with(".claude/hooks/")
+    if has_claude_hooks {
+        return "H-NOHOOK|error|H-NOHOOK: .claude/hooks/ 스크립트 금지 — harness/entry.hexa 자율 호출로 대체. 우회: '@allow-hook' 토큰"
+    }
+    let has_shared_hooks = path.index_of("/shared/hooks/") >= 0 || path.starts_with("shared/hooks/")
+    if has_shared_hooks {
+        return "H-NOHOOK|error|H-NOHOOK: shared/hooks/ deprecated — shared/harness/ 사용. 우회: '@allow-hook' 토큰"
+    }
+    let has_git_hooks = path.index_of("/.git/hooks/") >= 0 || path.starts_with(".git/hooks/")
+    if has_git_hooks {
+        if base.ends_with(".sample") { return "" }
+        let h_commit_ok = (base == "commit-msg" || base == "pre-commit" || base == "post-commit" || base == "pre-push")
+        if h_commit_ok == false {
+            return "H-NOHOOK|error|H-NOHOOK: .git/hooks/" + base + " 신규 금지 — H-COMMIT 4종 외 추가 hook 불가. 우회: '@allow-hook'"
+        }
+    }
+    let has_githooks = path.index_of("/.githooks/") >= 0 || path.starts_with(".githooks/")
+    if has_githooks {
+        let h_commit_ok = (base == "commit-msg" || base == "pre-commit")
+        if h_commit_ok == false {
+            return "H-NOHOOK|error|H-NOHOOK: .githooks/" + base + " 신규 wrapper 금지 — H-COMMIT 외 추가 불가. 우회: '@allow-hook'"
+        }
+    }
+
+    // 2) settings.json / settings.local.json — hooks 키 비어있지 않으면 위반
+    let in_claude_dir = path.index_of("/.claude/") >= 0 || path.starts_with(".claude/")
+    if in_claude_dir {
+        if base == "settings.json" || base == "settings.local.json" {
+            let full = REPO_ROOT + "/" + path
+            if file_exists(full) {
+                let mut content = ""
+                try { content = read_file(full) } catch e {}
+                if content == "" { return "" }
+                if content.index_of("@allow-hook") >= 0 { return "" }
+                // 비어있지 않은 hooks 키 — `"hooks": {` 다음에 `}` 가 즉시 오지 않거나 `[` 가 오면 위반
+                // 단순 패턴: `"hooks": {}` / `"hooks":{}` / `"hooks": null` 만 통과
+                let empty_a = content.index_of("\"hooks\": {}") >= 0
+                let empty_b = content.index_of("\"hooks\":{}") >= 0
+                let empty_c = content.index_of("\"hooks\": null") >= 0
+                let no_hooks_key = content.index_of("\"hooks\"") < 0
+                if no_hooks_key { return "" }
+                if empty_a || empty_b || empty_c { return "" }
+                return "H-NOHOOK|error|H-NOHOOK: " + path + " — settings hooks 키 비어있지 않음. 정책: hooks={} + harness/entry.hexa 자율 호출. 우회: '@allow-hook'"
+            }
+        }
+    }
+
+    return ""
+}
+
 // ─── H-HEXA-EXIT (공통) — hexa 호출의 exit() 가 부모로 전파 안 됨 ───
 // Why: hexa 런타임 한계로 child script 의 exit(N) 이 부모 exec() 결과에 N 으로 전파되지 않음.
 // 예: health.hexa atlas → atlas_health.hexa 의 exit(1) WARN 이 0 으로 관측됨.
@@ -2265,8 +2341,9 @@ fn check_blow3(path: string) -> string {
 }
 
 // ─── BLOW6 (공통) — blowup 결과 R28 준수 (폐기된 JSON 발견 저장소 신규 쓰기 금지) ───
-// discovery_graph.json / discovery_log.jsonl / growth_bus.jsonl / verified_constants.jsonl
-// 은 2026-04-11 폐기. blowup 엔진은 atlas.n6 만 사용.
+// discovery_graph.json / discovery_log.jsonl / growth_bus.jsonl 는 2026-04-11 폐기.
+// blowup 엔진은 atlas.n6 만 사용.
+// verified_constants.jsonl 은 V-CONST 룰 (별도 빌더 경유) 에서 처리.
 fn check_blow6(path: string) -> string {
     let e = ext_of(path)
     if e != ".hexa" { return "" }
@@ -2274,10 +2351,31 @@ fn check_blow6(path: string) -> string {
     if path.index_of("/_archive/") >= 0 { return "" }
     let full = REPO_ROOT + "/" + path
     // write_file / append_file / shell redirect 대상에 금지 파일명 포함
-    let cmd = "grep -nE '(write_file|append_file|>>|>)[[:space:]]*[^[:space:]]*(discovery_graph|discovery_log|growth_bus|verified_constants)' '" + full + "' 2>/dev/null | grep -v '@allow-deprecated-json' | wc -l"
+    let cmd = "grep -nE '(write_file|append_file|>>|>)[[:space:]]*[^[:space:]]*(discovery_graph|discovery_log|growth_bus)' '" + full + "' 2>/dev/null | grep -v '@allow-deprecated-json' | wc -l"
     let hits = _to_int0(_str(exec(cmd)).trim())
     if hits > 0 {
         return "BLOW6|error|폐기 JSON 발견 저장소 쓰기 " + to_string(hits) + "건 — atlas.n6 만 사용 (R28, // @allow-deprecated-json)"
+    }
+    return ""
+}
+
+// ─── V-CONST (공통) — verified_constants.jsonl 직접 write 금지 ───
+// 공리: verified_constants.jsonl 은 shared/scripts/index_verified_constants.hexa 빌더 경유만.
+//       직접 write_file/append_file/shell redirect 는 인덱스 drift 유발.
+// 예외: index_verified_constants.hexa (빌더 본체), shared/harness/, archive/, // @allow-deprecated-json
+fn check_v_const(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" && e != ".sh" { return "" }
+    let bn = basename_of(path)
+    if bn == "index_verified_constants.hexa" { return "" }
+    if path.starts_with("shared/harness/") { return "" }
+    if path.starts_with("archive/") { return "" }
+    if path.index_of("/_archive/") >= 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    let cmd = "grep -nE '(write_file|append_file|>>|>)[[:space:]]*[^[:space:]]*verified_constants' '" + full + "' 2>/dev/null | grep -v '@allow-deprecated-json' | wc -l"
+    let hits = _to_int0(_str(exec(cmd)).trim())
+    if hits > 0 {
+        return "V-CONST|warn|verified_constants.jsonl 직접 쓰기 금지 " + to_string(hits) + "건 — shared/scripts/index_verified_constants.hexa 빌더 경유 (// @allow-deprecated-json)"
     }
     return ""
 }
@@ -3113,6 +3211,10 @@ for f in files {
     let v_nnv = check_h_noname_v(path)
     if v_nnv != "" { violations = violations.push(path + "|" + v_nnv) }
 
+    // check_h_nohook (공통, H-NOHOOK): hook 시스템 신규 작성 금지 — settings hooks/.claude·.git hooks 신규
+    let v_nh = check_h_nohook(path)
+    if v_nh != "" { violations = violations.push(path + "|" + v_nh) }
+
     // check_hexa_exit (공통, H-HEXA-EXIT): hexa child exit() 비전파 — stdout 마커 검사 권장 (.hexa)
     if e == ".hexa" {
         let v25 = check_hexa_exit(path)
@@ -3129,6 +3231,12 @@ for f in files {
     if e == ".hexa" {
         let v21 = check_blow6(path)
         if v21 != "" { violations = violations.push(path + "|" + v21) }
+    }
+
+    // check_v_const (공통, V-CONST): verified_constants.jsonl 직접 쓰기 금지
+    if e == ".hexa" || e == ".sh" {
+        let v_vc = check_v_const(path)
+        if v_vc != "" { violations = violations.push(path + "|" + v_vc) }
     }
 
 }

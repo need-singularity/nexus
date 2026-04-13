@@ -465,6 +465,77 @@ fn check_no_version_name(tool: str, file_path: str) -> str {
     return ""
 }
 
+// H-NOHOOK: hook 파일·설정 신규 작성 금지 — 모든 자동 강제는 harness/entry.hexa 자율 호출로.
+// Why: 사용자 정책 — 공용 규칙 코드 강제 부분에 hook 작성 자체 금지. settings.json hooks={}, .git/hooks 새 파일 금지.
+//      훅은 환경마다 silent 실패 + Claude 외 실행자 분기 + drift 원인. harness 단일 진입점이 SSOT.
+// 우회: NEXUS_HOOK_OK=1 prefix 또는 path 에 @allow-hook 토큰.
+// 격리 예외:
+//   - shared/archive/hooks-*, shared/archive/superseded-*, archive/deprecated_*    (archaeological)
+//   - .git/hooks/{commit-msg,pre-commit,post-commit,pre-push} + .githooks/{commit-msg,pre-commit}  (H-COMMIT wrapper)
+//   - .git/hooks/*.sample (git default, 비활성)
+fn check_no_hook_file(tool: str, file_path: str) -> str {
+    if tool != "Write" && tool != "Edit" { return "" }
+    if file_path.len() == 0 { return "" }
+    if env("NEXUS_HOOK_OK") == "1" { return "" }
+    if file_path.contains("@allow-hook") { return "" }
+    // archaeological 격리
+    if file_path.contains("shared/archive/") { return "" }
+    if file_path.contains("/archive/superseded-") { return "" }
+    if file_path.contains("/archive/deprecated_") { return "" }
+    // 본 가드 자체 (자기참조)
+    if file_path.contains("shared/harness/pre_tool_guard.hexa") { return "" }
+    if file_path.contains("shared/harness/lint.hexa") { return "" }
+    if file_path.contains("shared/harness/severity_map.json") { return "" }
+    if file_path.contains("shared/harness/post_edit.hexa") { return "" }
+
+    let base = to_string(exec("basename '" + file_path + "'")).trim()
+
+    // 1) .git/hooks/*  — sample 통과, H-COMMIT 4종 통과, 그 외 신규 차단
+    if file_path.contains("/.git/hooks/") {
+        if base.ends_with(".sample") { return "" }
+        let h_commit_allowed = (base == "commit-msg" || base == "pre-commit" || base == "post-commit" || base == "pre-push")
+        if h_commit_allowed { return "" }
+        return "REJECT: " + file_path + " — .git/hooks/ 신규 hook 작성 금지 (H-NOHOOK). harness/entry.hexa 자율 호출로 통합. 허용: commit-msg/pre-commit/post-commit/pre-push (H-COMMIT). 우회: NEXUS_HOOK_OK=1"
+    }
+
+    // 2) .githooks/* — H-COMMIT wrapper 외 신규 차단
+    if file_path.contains("/.githooks/") {
+        let h_commit_allowed = (base == "commit-msg" || base == "pre-commit")
+        if h_commit_allowed { return "" }
+        return "REJECT: " + file_path + " — .githooks/ 신규 hook wrapper 금지 (H-NOHOOK). H-COMMIT 외 추가 wrapper 불가. 우회: NEXUS_HOOK_OK=1"
+    }
+
+    // 3) .claude/hooks/* — Claude Code hook script 신규 작성 차단
+    if file_path.contains("/.claude/hooks/") {
+        return "REJECT: " + file_path + " — .claude/hooks/ 스크립트 신규 작성 금지 (H-NOHOOK). 모든 자동 행동은 harness/entry.hexa 호출로. 우회: NEXUS_HOOK_OK=1"
+    }
+
+    // 4) shared/hooks/ — symlink 격리 (deprecated). 신규 .hexa/.sh/.py/.json 차단
+    if file_path.contains("/shared/hooks/") {
+        return "REJECT: " + file_path + " — shared/hooks/ deprecated (H-NOHOOK). shared/harness/ 사용. 우회: NEXUS_HOOK_OK=1"
+    }
+
+    return ""
+}
+
+// H-NOHOOK Bash: git config core.hooksPath 변경 / chmod +x 새 hook 활성화 / 새 .git/hooks 파일 생성 차단.
+fn check_no_hook_cmd(tool: str, arg: str) -> str {
+    if tool != "Bash" { return "" }
+    if arg.len() == 0 { return "" }
+    if arg.contains("NEXUS_HOOK_OK=1") { return "" }
+    if arg.contains("@allow-hook") { return "" }
+
+    // git config core.hooksPath — wrapper 경로 변경 차단 (H-COMMIT 이미 .githooks 사용 중)
+    if arg.contains("git config core.hooksPath") || arg.contains("git config --global core.hooksPath") {
+        return "REJECT: git config core.hooksPath 변경 금지 (H-NOHOOK) — H-COMMIT .githooks/ 가 SSOT. 우회: NEXUS_HOOK_OK=1"
+    }
+    // claude code hook 추가 명령 (가설 — 정적 차단)
+    if arg.contains("claude hooks add") || arg.contains("claude config hooks") {
+        return "REJECT: claude hooks add 금지 (H-NOHOOK) — settings.json hooks={} SSOT. harness/entry.hexa 자율 호출로 대체. 우회: NEXUS_HOOK_OK=1"
+    }
+    return ""
+}
+
 // L0/L1/L2 통합 게이트 — lockdown_gate watch 위임. BLOCK=L0, WARN=L1, ALLOW=L2/NONE.
 // L0 차단 우회는 사용자 직접 lockdown.json 수정으로만 (이 가드는 토큰 우회 미제공).
 fn check_lockdown_tier(tool: str, file_path: str) -> str {
@@ -521,6 +592,8 @@ fn main() {
         check_no_archive_path(tool, file_path),
         check_no_archive_cmd(tool, file_path),
         check_no_version_name(tool, file_path),
+        check_no_hook_file(tool, file_path),
+        check_no_hook_cmd(tool, file_path),
         check_lockdown_tier(tool, file_path),
         check_session_lock(tool, file_path)
     ]

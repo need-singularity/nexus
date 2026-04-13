@@ -62,7 +62,34 @@ fn main() {
         }
     }
 
-    // 6. H-BROADCAST: shared/ 파일 변경 → broadcast.jsonl append (cross-session 전파)
+    // 6. H-NOHOOK: .claude/settings*.json 변경 시 hooks 키 비어있지 않으면 위반 라우팅
+    let bn = to_string(exec("basename '" + file_path + "'")).trim()
+    let is_settings = (bn == "settings.json" || bn == "settings.local.json")
+    let is_in_claude_dir = file_path.contains("/.claude/")
+    if is_settings && is_in_claude_dir {
+        // 격리 예외 — archive
+        let in_archive = file_path.contains("/archive/") || file_path.contains("/shared/archive/")
+        if in_archive == false {
+            // hooks: { ... } 비어있지 않은 경우 검출 — 첫 30줄만 봐도 충분
+            // jq 로 .hooks 키 본문 길이 확인 (jq 없으면 grep fallback)
+            let jq_ok = to_string(exec("command -v jq >/dev/null 2>&1 && echo y || echo n")).trim()
+            let mut hooks_nonempty = false
+            if jq_ok == "y" {
+                let cnt = to_string(exec("jq '(.hooks // {}) | length' '" + file_path + "' 2>/dev/null")).trim()
+                if cnt != "" && cnt != "0" { hooks_nonempty = true }
+            } else {
+                // fallback: 'hooks' 키 다음에 '{}' 가 아닌 경우
+                let n = to_string(exec("grep -E '\"hooks\"[[:space:]]*:[[:space:]]*\\{[[:space:]]*$|\"hooks\"[[:space:]]*:[[:space:]]*\\[' '" + file_path + "' | wc -l 2>/dev/null")).trim()
+                if n != "" && n != "0" { hooks_nonempty = true }
+            }
+            if hooks_nonempty {
+                println("[H-NOHOOK BLOCK] " + file_path + " — settings.json hooks 키 비어있지 않음. 정책: hooks={} 강제 + harness/entry.hexa 자율 호출로 통합")
+                route_err("post_edit", file_path, 0, "H-NOHOOK", "settings.json hooks 키 작성 금지 — entry.hexa 자율 호출로 대체")
+            }
+        }
+    }
+
+    // 7. H-BROADCAST: shared/ 파일 변경 → broadcast.jsonl append (cross-session 전파)
     if file_path.starts_with("shared/") || file_path.contains("/shared/") {
         let HARNESS = HOME + "/Dev/nexus/shared/harness"
         let HEXA_BIN = HOME + "/Dev/nexus/shared/bin/hexa"
