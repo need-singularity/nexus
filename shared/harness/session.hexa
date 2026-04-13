@@ -1,0 +1,81 @@
+// session.hexa — 하네스 session 라우터 (본문 위임)
+// modes: list | lock [args...] | registry [args...] | worktree [args...] | prompt_gen [args...]
+// delegates:
+//   session_lock.hexa        H-SESSION-LOCK — advisory lockdir
+//   session_registry.hexa    H-SESSION-REGISTRY — 세션 manifest + peers
+//   session_worktree.hexa    H-SESSION-WORKTREE — opt-in git worktree 헬퍼
+//   session_prompt_gen.hexa  세션 이어받기 프롬프트 자동 생성
+// 본문 4개는 그대로 유지 (직접 호출 경로 호환).
+
+let HOME = env("HOME")
+let HARNESS = HOME + "/Dev/nexus/shared/harness"
+let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+
+let SESSION_LOCK = HARNESS + "/session_lock.hexa"
+let SESSION_REGISTRY = HARNESS + "/session_registry.hexa"
+let SESSION_WORKTREE = HARNESS + "/session_worktree.hexa"
+let SESSION_PROMPT_GEN = HARNESS + "/session_prompt_gen.hexa"
+
+fn print_list() {
+    println("session modes:")
+    println("  lock         — H-SESSION-LOCK advisory lockdir → " + SESSION_LOCK)
+    println("  registry     — H-SESSION-REGISTRY 세션 manifest → " + SESSION_REGISTRY)
+    println("  worktree     — H-SESSION-WORKTREE git worktree 헬퍼 → " + SESSION_WORKTREE)
+    println("  prompt_gen   — 세션 이어받기 프롬프트 생성 → " + SESSION_PROMPT_GEN)
+    println("  list         — 이 목록")
+    println("usage: hexa run session.hexa <mode> [args...]")
+}
+
+fn dispatch_file(path: string, rest: [str]) -> i64 {
+    if file_exists(path) == false {
+        eprintln("REJECT: delegate not found: " + path)
+        return 2
+    }
+    let mut cmd = HEXA + " run " + path
+    for a in rest {
+        let safe = a.replace("\"", "\\\"")
+        cmd = cmd + " \"" + safe + "\""
+    }
+    let out = to_string(exec(cmd + " 2>&1"))
+    if out.trim().len() > 0 { print(out) }
+    return 0
+}
+
+fn main() {
+    let argv = args()
+    if argv.len() < 3 {
+        print_list()
+        return
+    }
+    let mode = argv[2].trim().to_lower()
+    let mut rest = []
+    let mut i = 3
+    while i < argv.len() {
+        rest = rest + [argv[i]]
+        i = i + 1
+    }
+    if mode == "list" || mode == "-h" || mode == "--help" || mode == "help" {
+        print_list()
+        return
+    }
+    if mode == "lock" {
+        let c = dispatch_file(SESSION_LOCK, rest)
+        exit(c)
+    }
+    if mode == "registry" {
+        let c = dispatch_file(SESSION_REGISTRY, rest)
+        exit(c)
+    }
+    if mode == "worktree" {
+        let c = dispatch_file(SESSION_WORKTREE, rest)
+        exit(c)
+    }
+    if mode == "prompt_gen" || mode == "prompt-gen" || mode == "promptgen" {
+        let c = dispatch_file(SESSION_PROMPT_GEN, rest)
+        exit(c)
+    }
+    eprintln("REJECT: unknown mode '" + mode + "' — modes: list|lock|registry|worktree|prompt_gen")
+    exit(2)
+}
+
+main()

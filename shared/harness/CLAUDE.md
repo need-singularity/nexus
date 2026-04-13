@@ -19,24 +19,25 @@ engine (.hexa):
   post_bash.hexa       PostToolUse(Bash) — exit 코드 + stderr 수집
   post_edit.hexa       PostToolUse(Write|Edit) — 산출 파일 검증
   lint.hexa            L1 — R1/R14/L0/pitfalls 체커. --staged/--all/--file
-  gc.hexa              L1 — drift/dead/violation 3종 스캔
+  gc.hexa              L1~L3 단일 라우터 — --scan/--drift/--violation/--dead/--rotate/--prompt-gc/--report/--weekly/--cleanup (gc-weekly + cleanup 흡수 2026-04-14)
   autofix.hexa         L2 — mistakes.jsonl 반복 패턴 감지 → 제안만
-  gc-weekly.hexa       L3 — 7일 쿨다운 래퍼 (growth-tick/cron 안전)
   bitter-gate.hexa     새 규칙 추가 전 mandatory — dormant 규칙 폐기 우선
   hook_stdin_gate.hexa  hexa binary read_stdin() round-trip 검증 (stale build 회귀 감지)
   global_claude_guard.hexa  ~/.claude/ 외부 설정 오염 감지 (hooks/CLAUDE.md 금지, settings.json 만 허용)
   handoff_write.hexa        세션 handoff MD writer — git delta + JSONL tail + next-actions → memory/handoff-latest.md
   cli_budget_gate.hexa      JSONL usage 합산 → 임계치 시 handoff_write 호출 + systemMessage (config: shared/config/cli_budget.json)
-  session_prompt_gen.hexa   새 세션 이어받기 프롬프트 자동 생성
   health.hexa               atlas + nexus 헬스 라우터 — list|atlas|nexus|all (atlas_health/nexus_ensure_running 위임)
   sync.hexa                 sync 라우터 v1 — 9 원본 sync*.hexa 통합 + N/M/T 신규. manifest SSOT: sync_manifest.json (29 태스크)
+  verify.hexa               verify 라우터 — v-const|sync-diff|atlas|all 4종 통합 검증 (lint/sync/atlas_health 위임, 본체 read-only)
   errors.hexa               H-ERR-ROUTE/DRAIN/PROMOTE CLI — severity_map 분류 → errors.jsonl 큐. lib: lib/errors.hexa.inc (copy-paste 소스)
   agent_ledger.hexa         H-AGENT-LEDGER — Agent 호출 전후 등록/마감. 동일 area 활성 시 WARN (block X). SSOT: work_registry.jsonl
   git_fresh.hexa            H-GIT-FRESH — 사용자 입력 시 30분 stale 감지 + origin drift alert (prompt_scan 자동). SSOT: .git_fresh_state.json
-  session_lock.hexa         H-SESSION-LOCK — 파일 area(harness/config/blowup/n6/rules/discovery) 기반 advisory lockdir (/tmp/nexus-lock-{area}/). pre_tool_guard Write/Edit 자동 acquire. WARN-only (exit 미전파). 우회: NEXUS_LOCK_OK=1
-  session_registry.hexa     H-SESSION-REGISTRY — 세션 수준 manifest + peers 표시. prompt_scan 자동 register/heartbeat. TERM_SESSION_ID 기반 sha1-12 안정 ID. SSOT: session_registry.jsonl. 우회: NEXUS_SESSION_OK=1
+  session.hexa              session 라우터 — lock|registry|worktree|prompt_gen 4종 위임
+    session_lock.hexa         H-SESSION-LOCK — 파일 area(harness/config/blowup/n6/rules/discovery) 기반 advisory lockdir (/tmp/nexus-lock-{area}/). pre_tool_guard Write/Edit 자동 acquire. WARN-only (exit 미전파). 우회: NEXUS_LOCK_OK=1
+    session_registry.hexa     H-SESSION-REGISTRY — 세션 수준 manifest + peers 표시. prompt_scan 자동 register/heartbeat. TERM_SESSION_ID 기반 sha1-12 안정 ID. SSOT: session_registry.jsonl. 우회: NEXUS_SESSION_OK=1
+    session_worktree.hexa     H-SESSION-WORKTREE — opt-in git worktree 헬퍼 (init/list/status/merge/prune/gc_branches [--dry-run]). 자동 호출 X. 경로: .worktrees/{session_id}/
+    session_prompt_gen.hexa   새 세션 이어받기 프롬프트 자동 생성
   broadcast.hexa            H-BROADCAST — shared/ 변경을 타 세션에 전파. post_edit 자동 append + prompt_scan 자동 tail 300s. SSOT: broadcast.jsonl. 우회: NEXUS_BROADCAST_OK=1
-  session_worktree.hexa     H-SESSION-WORKTREE — opt-in git worktree 헬퍼 (init/list/status/merge/prune/gc_branches [--dry-run]). 자동 호출 X. 경로: .worktrees/{session_id}/
 
 policy (H-NOHOOK, 2026-04-14):
   rule           hook 신규 금지 — 모든 자동 강제는 entry.hexa 자율 호출
@@ -86,8 +87,9 @@ principle:
 
 entrypoints:
   hexa lint.hexa --staged               매 커밋 자동
-  hexa gc.hexa --scan                   수동 또는 gc-weekly 경유
-  hexa gc-weekly.hexa                   쿨다운 자동 판정
+  hexa gc.hexa --scan                   drift+violation+dead+prompt_gc 전부
+  hexa gc.hexa --weekly                 7일 쿨다운 판정 (env HARNESS_GC_WEEKLY_MODE=force|status)
+  hexa gc.hexa --cleanup                shared_survey 폐기 후보 (env HARNESS_CLEANUP_MODE=apply|force)
   hexa autofix.hexa --analyze           mistakes 누적 후 수동
   hexa bitter-gate.hexa --audit         새 규칙 추가 전 mandatory
   hexa hook_stdin_gate.hexa             hexa binary 회귀 감지 (실패 시 mistakes.jsonl + stderr, 성공 무출력)
@@ -106,7 +108,7 @@ entrypoints:
   hexa agent_ledger.hexa list                             현재 active agent 목록
 
 pending:
-  hooks-config.json 등록   gc-weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)
+  hooks-config.json 등록   gc --weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)
   실제 검증                sandbox 블록 — 사용자 로컬 실행 필요
 
 parent: ../CLAUDE.md → "harness"
