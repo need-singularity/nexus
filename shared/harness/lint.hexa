@@ -345,18 +345,27 @@ fn _hx4_l3_runtime(path: string) -> string {
     return ""
 }
 
-// L4 문서 = hexa 실행 가능 예제 — spec/reference/grammar .md 에 ```hexa 블록 필수
+// L4 문서 = hexa 실행 가능 예제 — 언어 명세/튜토리얼 .md 에 ```hexa 블록 필수
+// 대상 패턴: spec/reference/grammar/syntax/tutorial/quickstart/guide/getting-started/intro
 fn _hx4_l4_docs(path: string) -> string {
     let e = ext_of(path)
     if e != ".md" { return "" }
     if !path.starts_with("docs/") { return "" }
+    // 문서 하위 카테고리 예외
+    if path.starts_with("docs/paper/") { return "" }
+    if path.starts_with("docs/history/") { return "" }
+    if path.starts_with("docs/superpowers/") { return "" }
+    if path.starts_with("docs/breakthroughs/") { return "" }
+    if path.starts_with("docs/victories/") { return "" }
     let bn = basename_of(path)
-    let is_spec = bn.index_of("spec") >= 0 || bn.index_of("reference") >= 0 || bn.index_of("grammar") >= 0 || bn.index_of("syntax") >= 0
+    if bn == "README.md" || bn == "CHANGELOG.md" { return "" }
+    let bn_lo = bn.to_lower()
+    let is_spec = bn_lo.index_of("spec") >= 0 || bn_lo.index_of("reference") >= 0 || bn_lo.index_of("grammar") >= 0 || bn_lo.index_of("syntax") >= 0 || bn_lo.index_of("tutorial") >= 0 || bn_lo.index_of("quickstart") >= 0 || bn_lo.index_of("guide") >= 0 || bn_lo.index_of("getting-started") >= 0 || bn_lo.index_of("intro") >= 0 || bn_lo.index_of("manual") >= 0
     if !is_spec { return "" }
     let full = REPO_ROOT + "/" + path
     let has_hexa = to_int(_str(exec("grep -c '```hexa' '" + full + "' 2>/dev/null || echo 0")).trim())
     if has_hexa == 0 {
-        return "HX4-L4|warn|spec/reference/grammar .md 에 \\`\\`\\`hexa 실행 예제 없음"
+        return "HX4-L4|warn|언어 문서(spec/reference/grammar/tutorial/guide) 에 ```hexa 실행 예제 없음 (// @allow-non-executable-doc)"
     }
     return ""
 }
@@ -389,19 +398,29 @@ fn _hx4_l6_ci(path: string) -> string {
     return ""
 }
 
-// L7 빌드 재귀 — 체인 파일 존재 sanity check
+// L7 빌드 재귀 — 체인 파일 존재 + 최소 크기 + SSOT↔산출물 일치
 fn _hx4_l7_build_chain(path: string) -> string {
-    // 체인 관련 파일 수정 시에만 sanity 확인
-    if path != "build_hexa.hexa" && path != "self/main.hexa" && path != "self/hexa_full.hexa" && path != "scripts/build/build_hexa.hexa" { return "" }
-    let missing = ""
-    if !file_exists(REPO_ROOT + "/build/hexa_stage0") && !file_exists(REPO_ROOT + "/build/hexa_stage0.new") {
+    if path != "build_hexa.hexa" && path != "self/main.hexa" && path != "self/hexa_full.hexa" && path != "scripts/build/build_hexa.hexa" && path != "self/hexa_full.json" { return "" }
+    let stage0 = REPO_ROOT + "/build/hexa_stage0"
+    if !file_exists(stage0) {
         return "HX4-L7|error|build/hexa_stage0 부재 — 빌드 체인 깨짐"
+    }
+    // stage0 바이너리 최소 크기 100KB (codesign 된 실행파일 하한)
+    let sz = to_int(_str(exec("stat -f '%z' '" + stage0 + "' 2>/dev/null || stat -c '%s' '" + stage0 + "' 2>/dev/null || echo 0")).trim())
+    if sz < 102400 {
+        return "HX4-L7|error|build/hexa_stage0 크기 " + to_string(sz) + " 바이트 < 100KB — 빌드 산출물 의심"
     }
     if !file_exists(REPO_ROOT + "/self/main.hexa") {
         return "HX4-L7|error|self/main.hexa 부재"
     }
     if !file_exists(REPO_ROOT + "/self/hexa_full.hexa") {
         return "HX4-L7|error|self/hexa_full.hexa 부재"
+    }
+    // hexa_full.hexa mtime > hexa_stage0 mtime 이면 재빌드 필요 — warn
+    let src_mt = to_int(_str(exec("stat -f '%m' '" + REPO_ROOT + "/self/hexa_full.hexa' 2>/dev/null || stat -c '%Y' '" + REPO_ROOT + "/self/hexa_full.hexa' 2>/dev/null || echo 0")).trim())
+    let bin_mt = to_int(_str(exec("stat -f '%m' '" + stage0 + "' 2>/dev/null || stat -c '%Y' '" + stage0 + "' 2>/dev/null || echo 0")).trim())
+    if src_mt > bin_mt {
+        return "HX4-L7|warn|self/hexa_full.hexa (mtime " + to_string(src_mt) + ") > build/hexa_stage0 (mtime " + to_string(bin_mt) + ") — 재빌드 필요"
     }
     return ""
 }
