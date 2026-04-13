@@ -50,7 +50,7 @@ fn _rfind(s: string, ch: string) -> i64 {
 fn scan_drift() -> [string] {
     let mut findings: [string] = []
     // 대상 CLAUDE.md 목록
-    let cmd = "find " + REPO_ROOT + " -maxdepth 4 -name 'CLAUDE.md' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null"
+    let cmd = "find " + REPO_ROOT + " -maxdepth 4 -name 'CLAUDE.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.claude/worktrees/*' -not -path '*/archive/*' -not -path '*/_archive/*' 2>/dev/null"
     let claude_files_raw = _str(exec(cmd)).trim()
     if claude_files_raw == "" { return findings }
 
@@ -81,7 +81,7 @@ fn scan_drift() -> [string] {
 fn scan_violations() -> [string] {
     let mut findings: [string] = []
     // R1: shared/ 아래 .rs/.py/.sh (exceptions: shared/scripts/, shared/bin/)
-    let cmd1 = "find " + SHARED_DIR + " -type f \\( -name '*.py' -o -name '*.sh' -o -name '*.rs' \\) -not -path '*/scripts/*' -not -path '*/bin/*' -not -path '*/.git/*' 2>/dev/null"
+    let cmd1 = "find " + SHARED_DIR + " -type f \\( -name '*.py' -o -name '*.sh' -o -name '*.rs' \\) -not -path '*/scripts/*' -not -path '*/bin/*' -not -path '*/.git/*' -not -path '*/.claude/worktrees/*' -not -path '*/archive/*' -not -path '*/_archive/*' 2>/dev/null"
     let r1_raw = _str(exec(cmd1)).trim()
     if r1_raw != "" {
         for f in r1_raw.split("\n") {
@@ -91,8 +91,8 @@ fn scan_violations() -> [string] {
             findings = findings.push("violation|error|" + rel + "|R1|HEXA-FIRST 위반: ai-native algorism 으로 재작성")
         }
     }
-    // R14: shared/rules/ 아래 .md 파일 (CLAUDE.md 제외)
-    let cmd2 = "find " + SHARED_DIR + "/rules -type f -name '*.md' 2>/dev/null"
+    // R14: shared/rules/ 아래 .md 파일 (CLAUDE.md 제외). .claude/worktrees/ 제외 방어.
+    let cmd2 = "find " + SHARED_DIR + "/rules -type f -name '*.md' -not -path '*/.claude/worktrees/*' 2>/dev/null"
     let r2_raw = _str(exec(cmd2)).trim()
     if r2_raw != "" {
         for f in r2_raw.split("\n") {
@@ -112,7 +112,7 @@ fn scan_violations() -> [string] {
 fn scan_dead() -> [string] {
     let mut findings: [string] = []
     // 대상: shared/ 아래 .hexa / .json 중 90일 이상 미변경
-    let cmd = "find " + SHARED_DIR + " -type f \\( -name '*.hexa' -o -name '*.json' \\) -mtime +90 -not -path '*/.git/*' -not -path '*/backups/*' -not -path '*/archive/*' 2>/dev/null"
+    let cmd = "find " + SHARED_DIR + " -type f \\( -name '*.hexa' -o -name '*.json' \\) -mtime +90 -not -path '*/.git/*' -not -path '*/.claude/worktrees/*' -not -path '*/archive/*' -not -path '*/_archive/*' -not -path '*/backups/*' -not -path '*/archive/*' 2>/dev/null"
     let files_raw = _str(exec(cmd)).trim()
     if files_raw == "" { return findings }
 
