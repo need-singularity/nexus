@@ -1,0 +1,130 @@
+#!/bin/bash
+# shared/scripts/bin/harness — NEXUS-6 harness CLI dispatcher
+# 서브커맨드 라우터. 서비스 연결(IDE/CI/cron/webhook)의 단일 진입점.
+# R1 예외: bash bootstrap (hexa 바이너리 resolver 후단 호출 전용).
+#
+# Usage:
+#   harness lint [--staged|--all|--file PATH] [--json]
+#   harness gc   [--scan|--drift|--violation|--dead|--report] [--json]
+#   harness autofix [--analyze|--report] [--threshold N] [--window N] [--json]
+#   harness audit   [--audit|--window N|--report] [--json]
+#   harness triage  [--json]
+#   harness cleanup [--apply] [--json]
+#   harness status   (요약: 최근 lint/gc/mistakes 카운트)
+#   harness version  (schema + HEAD commit)
+#   harness help
+
+set -e
+
+SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
+SELF_DIR="$(dirname "$SELF")"
+# hexa resolver 이웃 (shared/scripts/bin/hexa)
+HEXA_BIN_WRAP="$SELF_DIR/hexa"
+
+# REPO_ROOT — git 기준, 없으면 SELF 상위 3단 (shared/scripts/bin → repo)
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || realpath "$SELF_DIR/../../.." 2>/dev/null)"
+HARNESS_DIR="$REPO_ROOT/shared/harness"
+
+# JSON 모드 플래그 추출 (서브커맨드 분리 전)
+WANT_JSON=0
+FILTERED_ARGS=()
+for a in "$@"; do
+    case "$a" in
+        --json) WANT_JSON=1 ;;
+        *) FILTERED_ARGS+=("$a") ;;
+    esac
+done
+set -- "${FILTERED_ARGS[@]}"
+
+SUB="${1:-help}"
+shift || true
+
+run_hexa() {
+    local script="$1"; shift
+    local target="$HARNESS_DIR/$script"
+    [ -f "$target" ] || { echo "ERROR(harness): $script 없음 — $target" >&2; exit 2; }
+    exec "$HEXA_BIN_WRAP" "$target" "$@"
+}
+
+case "$SUB" in
+    lint)
+        # 기본값: --staged
+        [ $# -eq 0 ] && set -- --staged
+        run_hexa lint.hexa "$@"
+        ;;
+    gc)
+        [ $# -eq 0 ] && set -- --scan
+        run_hexa gc.hexa "$@"
+        ;;
+    autofix)
+        [ $# -eq 0 ] && set -- --analyze
+        run_hexa autofix.hexa "$@"
+        ;;
+    audit|bitter-gate)
+        [ $# -eq 0 ] && set -- --audit
+        run_hexa bitter-gate.hexa "$@"
+        ;;
+    triage)
+        run_hexa triage.hexa "$@"
+        ;;
+    cleanup)
+        if [ "${1:-}" = "--apply" ]; then
+            shift
+            HARNESS_CLEANUP_MODE=apply run_hexa cleanup.hexa "$@"
+        else
+            run_hexa cleanup.hexa "$@"
+        fi
+        ;;
+    status)
+        # 빠른 상태 — hexa 없이 bash 로 파일 카운트
+        lint_lines="$(wc -l < "$HARNESS_DIR/lint_log.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+        gc_lines="$(wc -l < "$HARNESS_DIR/gc_log.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+        mistakes_lines="$(wc -l < "$HARNESS_DIR/mistakes.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+        head="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        if [ "$WANT_JSON" = "1" ]; then
+            printf '{"schema":"nexus.harness.status.v1","head":"%s","lint_log_lines":%s,"gc_log_lines":%s,"mistakes_lines":%s}\n' \
+                "$head" "$lint_lines" "$gc_lines" "$mistakes_lines"
+        else
+            echo "HEAD      : $head"
+            echo "lint_log  : $lint_lines"
+            echo "gc_log    : $gc_lines"
+            echo "mistakes  : $mistakes_lines"
+        fi
+        ;;
+    version)
+        head="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        if [ "$WANT_JSON" = "1" ]; then
+            printf '{"schema":"nexus.harness.v1","head":"%s"}\n' "$head"
+        else
+            echo "nexus.harness.v1 @ $head"
+        fi
+        ;;
+    help|-h|--help|"")
+        cat <<'USAGE'
+harness — NEXUS-6 하네스 CLI
+
+Subcommands:
+  lint [--staged|--all|--file PATH]    P2 린트 (기본 --staged)
+  gc   [--scan|--drift|--violation|--dead|--report]   P3 가비지 컬렉션
+  autofix [--analyze|--report]         L2 제안 기반 교정
+  audit [--audit|--window N|--report]  Bitter-Lesson 규칙 감사
+  triage                               findings 분류 리포트
+  cleanup [--apply]                    survey 폐기 후보 실행 (기본 dry-run)
+  status                               최근 로그 카운트 요약
+  version                              schema + HEAD
+
+Global flags:
+  --json       기계 판독 출력 (status/version 지원, 그 외는 하위 스크립트 위임)
+
+Service integration:
+  CI:      harness lint --all --json
+  IDE:     harness lint --file PATH --json
+  cron:    harness gc --scan --json / harness audit --json
+  health:  harness status --json
+USAGE
+        ;;
+    *)
+        echo "ERROR(harness): unknown subcommand '$SUB' — 'harness help'" >&2
+        exit 64
+        ;;
+esac
