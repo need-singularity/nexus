@@ -1,0 +1,337 @@
+// session_worktree.hexa — H-SESSION-WORKTREE opt-in 툴
+// 역할: git worktree 기반 세션 isolation. 사용자가 `init` 으로 신규 워크스페이스 생성.
+// 자동 호출 X — opt-in only. 기존 main 브랜치 작업은 영향 없음.
+// SSOT: $NEXUS/.worktrees/{session_id}/
+//       브랜치: session/{session_id}
+//       session_id 캐시: /tmp/.session_id_{ppid}  (@allow-abspath)
+//
+// modes:
+//   init   [prefix=session] [--dry-run]  — git worktree add 실행/출력
+//   list                                  — 현재 worktree 목록 JSONL
+//   status                                — 현재 cwd worktree 여부 + ahead/behind vs main
+//   merge  <name> [--dry-run]             — rebase+merge 명령만 stdout (실행 X)
+//   prune  [--dry-run]                    — git worktree prune
+//   gc_branches                           — session/* 브랜치 중 worktree 없는 것 목록 (제거 X)
+//
+// 성공 조용, 실패 시끄럽게 (H1).
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let WT_ROOT = NEXUS + "/.worktrees"
+let GITIGNORE = NEXUS + "/.gitignore"
+
+// void-safe coercion — "".split() 첫 원소 void 반환 우회
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn _to_int0(s: string) -> i64 {
+    if s == "" { return 0 }
+    let first = _str(s.split("\n")[0]).trim()
+    if first == "" { return 0 }
+    return to_int(first)
+}
+
+fn now_unix() -> i64 {
+    return _to_int0(_str(exec("date +%s")).trim())
+}
+
+fn cur_ppid() -> string {
+    let p = _str(exec("echo $PPID")).trim()
+    if p == "" { return "0" }
+    return p
+}
+
+fn cur_cwd() -> string {
+    return _str(exec("pwd")).trim()
+}
+
+// ─── session_id: 캐시 공유(.session_id_{ppid}) → 없으면 PPID+ts 해시 8자 ───
+fn make_session_id() -> string {
+    let ppid = cur_ppid()
+    let cache = "/tmp/.session_id_" + ppid
+    if file_exists(cache) {
+        let cached = _str(read_file(cache)).trim()
+        if cached != "" { return cached }
+    }
+    let ts = to_string(now_unix())
+    let cmd = "printf '%s|%s' '" + ppid + "' '" + ts + "' | /usr/bin/shasum -a 256 2>/dev/null | cut -c1-8"
+    let r = _str(exec(cmd)).trim()
+    let mut sid = ""
+    if r == "" {
+        sid = "s" + ts
+    } else {
+        sid = "s" + r
+    }
+    try { write_file(cache, sid + "\n") } catch e {}
+    return sid
+}
+
+// ─── argv flag 검사 ───
+fn has_flag(argv: [string], flag: string) -> bool {
+    let mut i = 0
+    while i < argv.len() {
+        if _str(argv[i]).trim() == flag { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// ─── 첫 positional arg 추출 (mode 다음, -- 로 시작 X) ───
+fn first_positional(argv: [string], start: i64) -> string {
+    let mut i = start
+    while i < argv.len() {
+        let a = _str(argv[i]).trim()
+        if a != "" && !a.starts_with("--") {
+            return a
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+// ─── .gitignore 에 .worktrees/ 포함 여부 ───
+fn gitignore_has_worktrees() -> bool {
+    if file_exists(GITIGNORE) == false { return false }
+    let raw = read_file(GITIGNORE)
+    if raw.contains(".worktrees/") { return true }
+    if raw.contains("/.worktrees") { return true }
+    return false
+}
+
+// ─── init ───
+fn cmd_init(argv: [string]) {
+    let dry = has_flag(argv, "--dry-run")
+    let prefix_raw = first_positional(argv, 3)
+    let mut prefix = prefix_raw
+    if prefix == "" { prefix = "session" }
+
+    let sid = make_session_id()
+    let wt_path = WT_ROOT + "/" + sid
+    let branch = prefix + "/" + sid
+
+    // .gitignore 권장 (직접 수정 X)
+    if gitignore_has_worktrees() == false {
+        eprintln("[H-SESSION-WORKTREE WARN] `.worktrees/` 를 .gitignore 에 추가 권장 (현재 누락)")
+    }
+
+    let cmd = "cd '" + NEXUS + "' && git worktree add '" + wt_path + "' -b '" + branch + "'"
+
+    if dry {
+        println("DRY-RUN: " + cmd)
+        println("WOULD_CREATE: " + wt_path)
+        println("WOULD_BRANCH: " + branch)
+        return
+    }
+
+    // 실행
+    let full = cmd + " 2>&1; echo __RC__$?"
+    let out = _str(exec(full))
+    // 실행 결과 파싱
+    let parts = out.split("__RC__")
+    let body = _str(parts[0])
+    let mut rc: i64 = 1
+    if parts.len() >= 2 {
+        rc = _to_int0(_str(parts[1]).trim())
+    }
+
+    if rc != 0 {
+        eprintln("[H-SESSION-WORKTREE FAIL] git worktree add 실패 (rc=" + to_string(rc) + ")")
+        if body.trim().len() > 0 {
+            eprintln("  " + body.trim().replace("\n", "\n  "))
+        }
+        exit(1)
+    }
+
+    println("CREATED: " + wt_path)
+    println("BRANCH: " + branch)
+    println("전환: cd " + wt_path)
+}
+
+// ─── list ───
+fn cmd_list(argv: [string]) {
+    let cmd = "cd '" + NEXUS + "' && git worktree list --porcelain 2>/dev/null"
+    let raw = _str(exec(cmd))
+    if raw.trim() == "" { return }
+
+    // porcelain 블록 단위 파싱 — 빈 줄로 분리
+    // 각 블록: worktree <path> / HEAD <sha> / branch refs/heads/<name>
+    let mut path = ""
+    let mut head = ""
+    let mut branch = ""
+    for line in raw.split("\n") {
+        let l = _str(line)
+        if l.trim() == "" {
+            // 블록 종료 → emit
+            if path != "" {
+                let short_path = path.replace(NEXUS + "/", "")
+                let mut br = branch
+                if br.starts_with("refs/heads/") {
+                    br = br.replace("refs/heads/", "")
+                }
+                let row = "{\"path\":\"" + short_path + "\"," +
+                          "\"branch\":\"" + br + "\"," +
+                          "\"head\":\"" + head + "\"}"
+                println(row)
+            }
+            path = ""
+            head = ""
+            branch = ""
+            continue
+        }
+        if l.starts_with("worktree ") {
+            path = l.substring(9, l.len()).trim()
+        } else if l.starts_with("HEAD ") {
+            head = l.substring(5, l.len()).trim()
+            if head.len() > 7 { head = head.substring(0, 7) }
+        } else if l.starts_with("branch ") {
+            branch = l.substring(7, l.len()).trim()
+        }
+    }
+    // trailing 블록 처리 (porcelain 은 보통 빈 줄로 끝나지만 안전 장치)
+    if path != "" {
+        let short_path = path.replace(NEXUS + "/", "")
+        let mut br = branch
+        if br.starts_with("refs/heads/") {
+            br = br.replace("refs/heads/", "")
+        }
+        let row = "{\"path\":\"" + short_path + "\"," +
+                  "\"branch\":\"" + br + "\"," +
+                  "\"head\":\"" + head + "\"}"
+        println(row)
+    }
+}
+
+// ─── status ───
+fn cmd_status(argv: [string]) {
+    let cwd = cur_cwd()
+    let wt_prefix = WT_ROOT + "/"
+
+    // cwd 가 .worktrees/ 하위인지 확인
+    if cwd.starts_with(wt_prefix) == false {
+        println("not a worktree — main")
+        return
+    }
+
+    // 현재 worktree 브랜치
+    let branch = _str(exec("cd '" + cwd + "' && git symbolic-ref --short HEAD 2>/dev/null")).trim()
+    if branch == "" {
+        println("not a worktree — main")
+        return
+    }
+
+    // ahead/behind vs main
+    let ahead_cmd = "cd '" + cwd + "' && git rev-list --count main.." + branch + " 2>/dev/null"
+    let behind_cmd = "cd '" + cwd + "' && git rev-list --count " + branch + "..main 2>/dev/null"
+    let ahead = _to_int0(_str(exec(ahead_cmd)).trim())
+    let behind = _to_int0(_str(exec(behind_cmd)).trim())
+
+    println("current: " + cwd)
+    println("branch:  " + branch)
+    println("ahead:   " + to_string(ahead) + " commits")
+    println("behind:  " + to_string(behind) + " commits")
+}
+
+// ─── merge — 명령만 출력, 실행 X ───
+fn cmd_merge(argv: [string]) {
+    let name = first_positional(argv, 3)
+    if name == "" {
+        eprintln("usage: merge <name> [--dry-run]")
+        exit(2)
+    }
+    // dry-run 은 실제 같은 동작 — 이 툴은 무조건 출력만.
+    // (사용자 혼동 방지 — 둘 다 출력 모드)
+
+    let wt_path = ".worktrees/" + name
+    let branch = "session/" + name
+
+    println("# worktree 변경 확인")
+    println("cd " + wt_path + " && git status --porcelain")
+    println("")
+    println("# rebase")
+    println("git rebase main")
+    println("")
+    println("# conflict 시 abort")
+    println("# git rebase --abort")
+    println("")
+    println("# main 으로 이동 후 ff-only merge")
+    println("cd " + NEXUS + " && git merge --ff-only " + branch)
+    println("")
+    println("# worktree + 브랜치 정리")
+    println("git worktree remove " + wt_path)
+    println("git branch -D " + branch)
+    println("")
+    println("# 주의: 위 명령은 출력만 됨 — 사용자 확인 후 직접 실행")
+}
+
+// ─── prune ───
+fn cmd_prune(argv: [string]) {
+    let dry = has_flag(argv, "--dry-run")
+    let mut cmd = "cd '" + NEXUS + "' && git worktree prune"
+    if dry { cmd = cmd + " --dry-run" }
+    cmd = cmd + " 2>&1"
+    let out = _str(exec(cmd)).trim()
+    if out == "" {
+        // silent — 정리할 것 없음
+        return
+    }
+    println(out)
+}
+
+// ─── gc_branches — session/* 브랜치 중 worktree 없는 것 목록 (제거 X) ───
+fn cmd_gc_branches(argv: [string]) {
+    // 모든 session/ 브랜치
+    let branch_cmd = "cd '" + NEXUS + "' && git branch --list 'session/*' --format='%(refname:short)' 2>/dev/null"
+    let branches_raw = _str(exec(branch_cmd)).trim()
+    if branches_raw == "" {
+        // silent
+        return
+    }
+
+    // worktree 에 attached 된 브랜치 수집
+    let wt_cmd = "cd '" + NEXUS + "' && git worktree list --porcelain 2>/dev/null | grep '^branch ' | sed 's|^branch refs/heads/||'"
+    let attached_raw = _str(exec(wt_cmd)).trim()
+    let attached = attached_raw.split("\n")
+
+    for line in branches_raw.split("\n") {
+        let b = _str(line).trim()
+        if b == "" { continue }
+        // attached 인지 확인
+        let mut is_attached = false
+        let mut i = 0
+        while i < attached.len() {
+            let a = _str(attached[i]).trim()
+            if a == b {
+                is_attached = true
+                break
+            }
+            i = i + 1
+        }
+        if is_attached == false {
+            println(b)
+        }
+    }
+}
+
+fn main() {
+    let argv = args()
+    if argv.len() < 3 {
+        eprintln("usage: session_worktree <init|list|status|merge|prune|gc_branches> [args...]")
+        exit(2)
+    }
+    let mode = argv[2].trim()
+    if mode == "init" { cmd_init(argv) }
+    else if mode == "list" { cmd_list(argv) }
+    else if mode == "status" { cmd_status(argv) }
+    else if mode == "merge" { cmd_merge(argv) }
+    else if mode == "prune" { cmd_prune(argv) }
+    else if mode == "gc_branches" { cmd_gc_branches(argv) }
+    else {
+        eprintln("REJECT: unknown mode '" + mode + "' — modes: init|list|status|merge|prune|gc_branches")
+        exit(2)
+    }
+}
+
+main()

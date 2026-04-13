@@ -397,6 +397,74 @@ fn check_no_archive_cmd(tool: str, arg: str) -> str {
     return ""
 }
 
+// H-NONAME-V: 파일/폴더명 버전 suffix 금지 — git commit/branch/tag 이 유일 SSOT.
+// Why: 사용자 정책 — _v<N>/_mk<N>/_Mk.<ROMAN>/.v<N>/_new/_final/_copy/ copy/ (N) 은 drift 원인.
+// 대상: Write 타깃의 basename stem + 폴더 segment 말미.
+// 격리 예외: shared/backups/, shared/archive/, shared/discovery/archive/, archive/deprecated_json/
+// 우회: path 에 @allow-version-name 토큰. 기존 파일 덮어쓰기는 통과.
+fn _guard_noname_v_match(s: str) -> str {
+    if s.len() == 0 { return "" }
+    let suffixes = [
+        "_v1", "_v2", "_v3", "_v4", "_v5", "_v6", "_v7", "_v8", "_v9",
+        "_v10", "_v11", "_v12", "_v13", "_v14", "_v15",
+        "_V1", "_V2", "_V3", "_V4", "_V5",
+        "_mk1", "_mk2", "_mk3", "_mk4", "_mk5", "_mk6", "_mk7", "_mk8", "_mk9",
+        "_Mk1", "_Mk2", "_Mk3", "_Mk4", "_Mk5", "_Mk6", "_Mk7", "_Mk8", "_Mk9",
+        "_MK1", "_MK2", "_MK3",
+        ".v1", ".v2", ".v3", ".v4", ".v5", ".v6", ".v7", ".v8", ".v9",
+        ".V1", ".V2", ".V3",
+        ".mk1", ".mk2", ".mk3", ".mk4", ".mk5",
+        ".Mk1", ".Mk2", ".Mk3", ".Mk4", ".Mk5",
+        "_Mk.II", "_Mk.III", "_Mk.IV", "_Mk.V", "_Mk.VI", "_Mk.VII", "_Mk.VIII", "_Mk.IX", "_Mk.X",
+        "_mk.II", "_mk.III", "_mk.IV", "_mk.V", "_mk.VI", "_mk.VII",
+        "_new", "_final", "_copy", "-new", "-final", "-copy",
+        " copy", " (1)", " (2)", " (3)", " (4)", " (5)", " (6)", " (7)", " (8)", " (9)",
+        " copy 2", " copy 3", " copy 4", " copy 5"
+    ]
+    for sfx in suffixes {
+        if s.ends_with(sfx) { return sfx }
+    }
+    return ""
+}
+
+fn check_no_version_name(tool: str, file_path: str) -> str {
+    if tool != "Write" { return "" }
+    if file_path.len() == 0 { return "" }
+    if file_path.contains("@allow-version-name") { return "" }
+    if file_path.contains("shared/backups/") { return "" }
+    if file_path.contains("shared/archive/") { return "" }
+    if file_path.contains("shared/discovery/archive/") { return "" }
+    if file_path.contains("archive/deprecated_json/") { return "" }
+    // 기존 파일 덮어쓰기는 통과 — 마이그레이션/레거시
+    let exists = to_string(exec("test -f '" + file_path + "' && echo y || echo n")).trim()
+    if exists == "y" { return "" }
+
+    // basename 에서 stem (last '.' 앞) 추출
+    let base = to_string(exec("basename '" + file_path + "'")).trim()
+    let stem = to_string(exec("echo '" + base + "' | sed 's/\\.[^.]*$//'")).trim()
+    let h1 = _guard_noname_v_match(stem)
+    if h1 != "" {
+        return "REJECT: " + file_path + " — 파일명 '" + base + "' 에 버전 suffix '" + h1 + "' 금지 (H-NONAME-V). git commit/branch/tag 로 버전관리. 우회: path 에 @allow-version-name 토큰"
+    }
+    // dirname segment 검사
+    let dirname = to_string(exec("dirname '" + file_path + "'")).trim()
+    if dirname.len() > 0 && dirname != "." && dirname != "/" {
+        let segs_raw = to_string(exec("echo '" + dirname + "' | tr '/' '\\n'"))
+        let segs = segs_raw.split("\n")
+        for seg in segs {
+            let s = to_string(seg).trim()
+            if s.len() == 0 { continue }
+            if s == "." { continue }
+            if s == ".." { continue }
+            let h2 = _guard_noname_v_match(s)
+            if h2 != "" {
+                return "REJECT: " + file_path + " — 폴더명 '" + s + "' 에 버전 suffix '" + h2 + "' 금지 (H-NONAME-V). git commit/branch/tag 로 버전관리. 우회: path 에 @allow-version-name 토큰"
+            }
+        }
+    }
+    return ""
+}
+
 // L0/L1/L2 통합 게이트 — lockdown_gate watch 위임. BLOCK=L0, WARN=L1, ALLOW=L2/NONE.
 // L0 차단 우회는 사용자 직접 lockdown.json 수정으로만 (이 가드는 토큰 우회 미제공).
 fn check_lockdown_tier(tool: str, file_path: str) -> str {
@@ -408,6 +476,24 @@ fn check_lockdown_tier(tool: str, file_path: str) -> str {
     let result = to_string(exec(hexa + " " + gate + " watch '" + file_path + "' 2>/dev/null")).trim()
     if result.starts_with("BLOCK") {
         return "REJECT: " + file_path + " — L0 보호 파일 (lockdown_gate watch). 사용자 명시 승인 필요"
+    }
+    return ""
+}
+
+// H-SESSION-LOCK: 파일 area 기반 advisory lock — 다중 세션 동시 편집 race 방지.
+// WARN-only (exit 미전파 제약 + 기존 워크플로우 보존). 우회: NEXUS_LOCK_OK=1
+fn check_session_lock(tool: str, file_path: str) -> str {
+    if tool != "Write" && tool != "Edit" { return "" }
+    if file_path.len() == 0 { return "" }
+    if env("NEXUS_LOCK_OK") == "1" { return "" }
+    let h = env("HOME")
+    let HEXA_BIN = h + "/Dev/nexus/shared/bin/hexa"
+    let LOCK = h + "/Dev/nexus/shared/harness/session_lock.hexa"
+    let area = to_string(exec(HEXA_BIN + " run " + LOCK + " derive '" + file_path + "' 2>/dev/null")).trim()
+    if area == "" || area == "misc" { return "" }
+    let out = to_string(exec(HEXA_BIN + " run " + LOCK + " acquire '" + area + "' 600 2>&1")).trim()
+    if out.contains("BLOCK") {
+        eprintln("[H-SESSION-LOCK WARN] " + out)
     }
     return ""
 }
@@ -434,7 +520,9 @@ fn main() {
         check_roadmap_min(tool, file_path),
         check_no_archive_path(tool, file_path),
         check_no_archive_cmd(tool, file_path),
-        check_lockdown_tier(tool, file_path)
+        check_no_version_name(tool, file_path),
+        check_lockdown_tier(tool, file_path),
+        check_session_lock(tool, file_path)
     ]
 
     for c in checks {

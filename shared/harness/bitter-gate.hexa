@@ -56,7 +56,7 @@ fn hit_count(logfile: string, rule: string, window: i64) -> i64 {
     if !file_exists(logfile) { return 0 }
     let mut r: i64 = 0
     try {
-        let cmd = "tail -" + to_string(window) + " '" + logfile + "' 2>/dev/null | grep -c '\"rule\":\"" + rule + "\"' || echo 0"
+        let cmd = "tail -" + to_string(window) + " '" + logfile + "' 2>/dev/null | grep -c '\"rule\":\"" + rule + "\"' 2>/dev/null || true"
         r = to_int(_str(exec(cmd)).trim())
     } catch e {}
     return r
@@ -93,8 +93,14 @@ if len(ids) == 0 {
 // min_samples 가드 — 로그 누적 부족 시 "insufficient_data" 로 표기
 // 기본 50: lint_log + gc_log 전체 라인 수가 이보다 적으면 dormant 판정 미루고 보류
 let MIN_SAMPLES: i64 = 50
-let lint_lines = to_int(_str(exec("wc -l < '" + LINT_LOG + "' 2>/dev/null || echo 0")).trim())
-let gc_lines = to_int(_str(exec("wc -l < '" + GC_LOG + "' 2>/dev/null || echo 0")).trim())
+let mut lint_lines: i64 = 0
+if file_exists(LINT_LOG) {
+    try { lint_lines = to_int(_str(exec("wc -l < '" + LINT_LOG + "'")).trim()) } catch e {}
+}
+let mut gc_lines: i64 = 0
+if file_exists(GC_LOG) {
+    try { gc_lines = to_int(_str(exec("wc -l < '" + GC_LOG + "'")).trim()) } catch e {}
+}
 let total_samples = lint_lines + gc_lines
 let insufficient = total_samples < MIN_SAMPLES
 
@@ -102,7 +108,7 @@ let insufficient = total_samples < MIN_SAMPLES
 let LINT_SRC = SHARED_DIR + "/harness/lint.hexa"
 fn is_implemented(rule: string) -> bool {
     if !file_exists(LINT_SRC) { return false }
-    let cmd = "grep -c '\"" + rule + "|\\|\"" + rule + "-L' '" + LINT_SRC + "' 2>/dev/null || echo 0"
+    let cmd = "grep -c '\"" + rule + "|\\|\"" + rule + "-L' '" + LINT_SRC + "' 2>/dev/null || true"
     let c = to_int(_str(exec(cmd)).trim())
     return c > 0
 }

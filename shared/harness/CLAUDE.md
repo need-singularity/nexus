@@ -31,12 +31,19 @@ engine (.hexa):
   health.hexa               atlas + nexus 헬스 라우터 — list|atlas|nexus|all (atlas_health/nexus_ensure_running 위임)
   sync.hexa                 sync 라우터 v1 — 9 원본 sync*.hexa 통합 + N/M/T 신규. manifest SSOT: sync_manifest.json (29 태스크)
   errors.hexa               H-ERR-ROUTE/DRAIN/PROMOTE CLI — severity_map 분류 → errors.jsonl 큐. lib: lib/errors.hexa.inc (copy-paste 소스)
+  agent_ledger.hexa         H-AGENT-LEDGER — Agent 호출 전후 등록/마감. 동일 area 활성 시 WARN (block X). SSOT: work_registry.jsonl
+  git_fresh.hexa            H-GIT-FRESH — 사용자 입력 시 30분 stale 감지 + origin drift alert (prompt_scan 자동). SSOT: .git_fresh_state.json
+  session_lock.hexa         H-SESSION-LOCK — 파일 area(harness/config/blowup/n6/rules/discovery) 기반 advisory lockdir (/tmp/nexus-lock-{area}/). pre_tool_guard Write/Edit 자동 acquire. WARN-only (exit 미전파). 우회: NEXUS_LOCK_OK=1
+  session_registry.hexa     H-SESSION-REGISTRY — 세션 수준 manifest + peers 표시. prompt_scan 자동 register/heartbeat. TERM_SESSION_ID 기반 sha1-12 안정 ID. SSOT: session_registry.jsonl. 우회: NEXUS_SESSION_OK=1
+  broadcast.hexa            H-BROADCAST — shared/ 변경을 타 세션에 전파. post_edit 자동 append + prompt_scan 자동 tail 300s. SSOT: broadcast.jsonl. 우회: NEXUS_BROADCAST_OK=1
+  session_worktree.hexa     H-SESSION-WORKTREE — opt-in git worktree 헬퍼 (init/list/status/merge/prune/gc_branches [--dry-run]). 자동 호출 X. 경로: .worktrees/{session_id}/
 
 convention (2026-04-14~ 훅 시스템 대체):
   사용자 입력 후       entry.hexa prompt
   Write|Edit 후        entry.hexa post write_edit
   Bash 후              entry.hexa post bash
-  Agent 호출 전        entry.hexa guard
+  Agent 호출 전        entry.hexa guard <area> <prompt_hash>   → agent_id stdout (complete 시 사용)
+  Agent 완료 후        entry.hexa guard complete <agent_id>
   smash|free 실행      shared/harness/exec_validated {mode} "{seed}" {engine} {args} (cmd_gate 적용, bin/ 심링크 가능)
   전 프로젝트 settings.json hooks={} — 자동 훅 없음. 위 호출은 Claude 자율 실행.
 
@@ -47,6 +54,7 @@ logs (append-only):
   autofix_proposals.jsonl  L2 제안
   rules_usage.jsonl    규칙 히트 감사 (bitter-gate 산출)
   errors.jsonl         H-ERR 오류 큐 — severity/source/file/code/msg/status(open|fixed|stale), drain 임계치 10
+  work_registry.jsonl  H-AGENT-LEDGER — agent_id/area/prompt_hash/ts_start/ts_end/status(active|done|stale)
 
 cooldown:
   .gc_weekly_cooldown  unix ts — 7일 제한
@@ -75,6 +83,11 @@ entrypoints:
   hexa errors.hexa route <src> <file> <line> <code> [msg]  오류 라우팅 (severity_map 분류)
   hexa errors.hexa drain_check [N=10]   큐 임계치 체크 (prompt_scan 자동 호출, 우회=NEXUS_DRAIN_OK=1)
   hexa errors.hexa count_open|promote|mark_fixed <key>    통계/승격/완료 처리
+  hexa agent_ledger.hexa register <area> <prompt_hash>    Agent 등록 (동일 area 활성 시 stderr WARN)
+  hexa agent_ledger.hexa complete <agent_id>              Agent 마감
+  hexa agent_ledger.hexa dup_check <area>                 활성 동일 area 수 출력
+  hexa agent_ledger.hexa gc                               3600s+ active → stale (gc.hexa --scan 자동 포함)
+  hexa agent_ledger.hexa list                             현재 active agent 목록
 
 pending:
   hooks-config.json 등록   gc-weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)
