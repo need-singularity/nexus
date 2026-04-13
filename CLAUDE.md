@@ -2,7 +2,7 @@
 
 commands: shared/config/commands.json — autonomous 블록으로 Claude Code가 작업 중 smash/free/todo/go/keep 자율 판단·실행
 rules: shared/rules/common.json (R0~R27) + shared/rules/nexus.json (NX1~NX3)
-L0 Guard: `hexa $NEXUS/shared/harness/lockdown_gate.hexa <verify|status|watch|repair|safe-merge|log>` (legacy: `shared/harness/l0_guard.hexa` 보존, SUPERSEDED — 2026-04-14 lockdown→harness 완전 이동)
+L0 Guard: `hexa $NEXUS/shared/harness/lockdown_gate.hexa <verify|status|watch|repair|safe-merge|log>` (2026-04-14 lockdown→harness 단일화, l0_guard.hexa → shared/archive/superseded-20260414/)
 전역 불변식: todo/할일 실행은 반드시 shared/bin/hexa resolver 경유. 직접 바이너리 하드코딩 금지.
 
 harness (훅 시스템 대체, 2026-04-14~):
@@ -79,7 +79,7 @@ L0 보호 (평시 자유 수정, 유저 명시 요청 시만 승인 절차):
 ref:
   rules     shared/rules/common.json             R0~R27
   project   shared/rules/nexus.json              NX1~NX3
-  lock      shared/rules/lockdown.json           L0/L1/L2
+  lock      shared/lockdown/lockdown.json        L0/L1/L2
   cdo       shared/rules/convergence_ops.json    CDO 수렴
   registry  shared/config/projects.json          7프로젝트+번들/검증
   cfg       shared/config/project_config.json    CLI/관례/리소스
