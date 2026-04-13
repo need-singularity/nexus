@@ -74,6 +74,29 @@
       "threshold": "직접 push 차단, PR 필요 + 승인 태그 필수",
       "ossified_at": "2026-04-13",
       "ref_commit": "85f50e4b"
+    },
+    "PASSTHROUGH_MODE": {
+      "status": "PASS",
+      "value": "cl -- <args> (auto-pick) / cl NAME -- <args> (명시) → claude \"$@\"",
+      "threshold": "비-tty 에서도 동작. interactive 픽커 우회. 타 프로젝트 자동화에서 claude 대체재",
+      "ossified_at": "2026-04-13",
+      "ref_commit": "1e3724ab",
+      "rationale": "사용자 요청: 타 프로젝트 자동화(limit 걸린 계정 회피) 시 cl 을 claude 대신 호출. one-shot -p 용도가 주"
+    },
+    "LIST_ALIAS": {
+      "status": "PASS",
+      "value": "cl list = cl u (= show_dashboard)",
+      "threshold": "자동화 스크립트 계정 목록 조회용 의미론 별칭",
+      "ossified_at": "2026-04-13",
+      "ref_commit": "1e3724ab"
+    },
+    "RATE_LIMIT_RUNTIME_MARK": {
+      "status": "PASS",
+      "value": "passthrough 중 claude 실패 + stderr rate-limit 패턴 감지 → usage-cache[name].error=\"rate-limit-runtime\" 주입 + auto_pick 재선정으로 1회 재시도",
+      "threshold": "패턴: rate[- ]?limit / usage limit / quota / 429 / too many request. retry 는 1회만(무한 루프 방지)",
+      "ossified_at": "2026-04-13",
+      "ref_commit": "1e3724ab",
+      "rationale": "failed.LIMIT_DETECTION 해소 — 캐시 stale 로 실제 limit 계정 뽑혀도 런타임에 자동 배제"
     }
   },
 
@@ -119,10 +142,11 @@
       "threshold": "마커 존재 시 해당 계정 경고 표시 or refresh 트리거"
     },
     "LIMIT_DETECTION": {
-      "status": "FAIL",
+      "status": "RESOLVED",
       "value": "5h 세션 한도는 API 에러로만 드러남 — cache 에는 error=null",
       "symptom": "claude CLI 가 429/rate_limit 반환해도 usage-cache 업데이트 안 됨",
-      "threshold": "claude 런칭 실패 시 해당 계정 자동 블랙리스트 or error 필드 주입"
+      "threshold": "claude 런칭 실패 시 해당 계정 자동 블랙리스트 or error 필드 주입",
+      "mitigation": "ossified.RATE_LIMIT_RUNTIME_MARK (2026-04-13, 1e3724ab) — passthrough 경로에서 런타임 감지+마킹 구현. interactive exec 경로는 여전히 감시 불가(별도 래퍼 필요)"
     }
   },
 
@@ -134,10 +158,15 @@
       "priority": "high",
       "depends_on": "외부 refresh 스크립트 경로 확인 필요"
     },
-    "LIMIT_MARK": {
-      "value": "claude 런칭 후 종료 코드/stderr 모니터링 → rate_limit 패턴 감지 → 해당 계정 error 필드 주입",
-      "priority": "high",
-      "depends_on": "cl 가 exec 하므로 감시는 별도 래퍼 필요"
+    "LIMIT_MARK_INTERACTIVE": {
+      "value": "interactive exec 경로에서도 rate-limit 감지 — 현재는 exec 하므로 post-exec 감시 불가. 래퍼 스크립트 or claude 자체 hook 필요",
+      "priority": "med",
+      "note": "passthrough 경로는 2026-04-13 1e3724ab 에서 해소. 남은 건 대화형 exec 후 실패 케이스"
+    },
+    "MEMORY_SHARE": {
+      "value": "계정별 CLAUDE_CONFIG_DIR 독립으로 projects/memory 분리. 장기 memory 공유 필요 시 심링크 명령(cl link-memory) 신설",
+      "priority": "low",
+      "note": "one-shot -p 자동화는 stateless → 현재는 불필요. --resume 다계정 연속 작업이 생기면 진화"
     },
     "RATE_LIMITS_FIELD": {
       "value": "Claude CLI 2.1.90+ statusline rate_limits 필드 (5h + 7d windows) 활용",
@@ -152,6 +181,47 @@
       "value": "~/.airgenome 시드 로직 제거 (이행 완료 후)",
       "priority": "low",
       "depends_on": "모든 환경에서 ~/.claude-accounts/ 독립 가용 확인"
+    }
+  },
+
+  "interface": {
+    "_description": "타 프로젝트/에이전트가 cl 을 호출할 때 참조하는 ai-native API 명세 (PASSTHROUGH_MODE + LIST_ALIAS 골화 기준)",
+    "bin_path": "/Users/ghost/Dev/nexus/shared/bin/cl",
+    "commands": {
+      "cl": {"desc": "대화형 픽커 → claude 런칭 (tty only). 비-tty 면 dashboard 출력", "tty_required": true},
+      "cl list": {"desc": "계정 목록 + 사용률 바 표시", "tty_required": false, "stdout": "human-readable dashboard"},
+      "cl u": {"desc": "cl list 와 동일 (alias)", "tty_required": false},
+      "cl status": {"desc": "active/count/store 요약", "tty_required": false},
+      "cl pick [NAME]": {"desc": "active 전환만. NAME 없으면 auto_pick", "tty_required": false},
+      "cl env": {"desc": "CLAUDE_CONFIG_DIR export 라인 출력 — eval \"$(cl env)\" 로 사용", "tty_required": false},
+      "cl -- <args>": {"desc": "auto-pick (limit 없는 최저 wk%) → claude \"$@\"", "tty_required": false, "passthrough": true},
+      "cl NAME -- <args>": {"desc": "NAME 계정으로 claude \"$@\"", "tty_required": false, "passthrough": true}
+    },
+    "exit_codes": {
+      "0": "성공",
+      "1": "가용 계정 없음 / active 미설정 / 계정 없음",
+      "2": "accounts.json 없음",
+      "3": "jq 미설치",
+      "64": "unknown subcommand",
+      "127": "claude 바이너리 없음",
+      "other": "passthrough 시 claude 자체 exit code 그대로 전달 (retry 포함 후 최종 값)"
+    },
+    "environment": {
+      "CL_HOME": "store 디렉토리. 기본 ~/.claude-accounts",
+      "CLAUDE_CONFIG_DIR": "cl 이 선택된 계정에 맞춰 export. 각 계정별 projects/memory 가 이 경로 아래 독립",
+      "deps": ["bash", "jq"]
+    },
+    "automation_recipe": {
+      "one_shot": "result=$(cl -- -p \"프롬프트\" --output-format json)  # auto-pick, stateless",
+      "named": "cl claude7 -- -p \"...\"  # 특정 계정 고정",
+      "list_json": "jq '.accounts[].name' ~/.claude-accounts/accounts.json  # cl list 는 human-readable 이므로 JSON 은 직접 읽음",
+      "retry_behavior": "passthrough 내부에서 rate-limit 감지 시 auto_pick 재선정으로 1회 자동 재시도. 호출자는 추가 retry 불필요"
+    },
+    "memory_policy": {
+      "isolation": "각 계정의 ~/.claude-claudeN/projects/<slug>/ 완전 분리 — 세션/memory 독립",
+      "one_shot_safe": "claude -p 호출은 stateless → 계정 전환 무해",
+      "resume_caveat": "--resume <session-id> 은 세션 생성 계정에서만 가능 → cl NAME -- --resume ... 로 계정 고정",
+      "shared_memory": "현재 미제공. 필요 시 심링크 기반 cl link-memory 신설 예정 (evolving.MEMORY_SHARE)"
     }
   }
 }
