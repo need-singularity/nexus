@@ -538,6 +538,43 @@ fn check_ag4(path: string) -> string {
     return ""
 }
 
+// ─── AG5 (airgenome 전용) — 'filter' 네이밍 규율 ───
+// 공리 (L0 골화 2026-04-12): filter = raw bytes → 다른 byte 표현 transform.
+//       hot path 속도/메모리/IO 개선. cleanup/dedup/gzip/cron/sync/watcher/
+//       throttle/kickstart 는 filter 아님 (별도 이름 사용).
+// L1 (AG5-N1): 파일명에 'filter' 포함 → 헤더 주석에 raw + byte + (round-trip|latency|encode|decode) 키워드 필수
+// L3 (AG5-N3): 파일명에 'filter' 와 금지 보조작업 키워드가 동시 포함 → rename
+// 예외: // @allow-non-filter, archive/, shared/harness/, docs/
+fn check_ag5(path: string) -> string {
+    if _project_name() != "airgenome" { return "" }
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    if path.starts_with("archive/") { return "" }
+    if path.starts_with("shared/harness/") { return "" }
+    if path.starts_with("docs/") { return "" }
+    if path.index_of("/_archive/") >= 0 { return "" }
+    let bn = basename_of(path)
+    // filter 미포함 파일은 무관
+    if bn.index_of("filter") < 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    // 예외 마커
+    let marker = to_int(_str(exec("grep -c '@allow-non-filter' '" + full + "' 2>/dev/null || echo 0")).trim())
+    if marker > 0 { return "" }
+    // AG5-N3: filter + 보조작업 키워드 동시 파일명 금지
+    let bad = to_int(_str(exec("echo '" + bn + "' | grep -cE '(cleanup|dedup|gzip|cron|sync|watcher|throttle|kickstart)'")).trim())
+    if bad > 0 {
+        return "AG5-N3|error|파일명 '" + bn + "' 에 filter + 보조작업 키워드 공존 — rename 필요 (// @allow-non-filter)"
+    }
+    // AG5-N1: 헤더(상위 40줄) 주석에 raw + byte + (round-trip|latency|encode|decode) 필수
+    let head_has_raw  = to_int(_str(exec("head -40 '" + full + "' 2>/dev/null | grep -ciE '\\braw\\b' || echo 0")).trim())
+    let head_has_byte = to_int(_str(exec("head -40 '" + full + "' 2>/dev/null | grep -ciE '\\bbytes?\\b' || echo 0")).trim())
+    let head_has_rt   = to_int(_str(exec("head -40 '" + full + "' 2>/dev/null | grep -ciE '(round-?trip|latency|encode|decode)' || echo 0")).trim())
+    if head_has_raw == 0 || head_has_byte == 0 || head_has_rt == 0 {
+        return "AG5-N1|error|'" + bn + "' filter 헤더 주석 부적합 — raw + byte + (round-trip/latency/encode/decode) 키워드 필수 (// @allow-non-filter)"
+    }
+    return ""
+}
+
 // ─── 프로젝트별 규칙 JSONL 자동 로드 엔진 ───
 // 파일: shared/rules/<project>.lint.jsonl (한 줄 = 한 규칙)
 // 지원 kind: grep, grep_combo, grep_any, ext_blacklist, ext_blacklist_in_path,
@@ -1103,6 +1140,10 @@ for f in files {
     // check_ag4 (airgenome 프로젝트 전용): launcher cap ≤8
     let v16 = check_ag4(path)
     if v16 != "" { violations = violations.push(path + "|" + v16) }
+
+    // check_ag5 (airgenome 프로젝트 전용): 'filter' 네이밍 규율
+    let v16b = check_ag5(path)
+    if v16b != "" { violations = violations.push(path + "|" + v16b) }
 
     // check_project_rules: shared/rules/<project>.lint.jsonl 자동 로드 + 디스패치
     let v17 = check_project_rules(path)
