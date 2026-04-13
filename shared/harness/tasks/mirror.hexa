@@ -1,0 +1,52 @@
+// tasks/mirror.hexa — mode: mirror (디렉토리 미러)
+// usage: hexa run tasks/mirror.hexa <task_id> <src_dir> <dst_dir> <dry>
+
+let HOME = env("HOME")
+
+fn expand_path(p: str) -> str {
+    if p.substring(0, 1) == "/" { return p }
+    if p.substring(0, 2) == "~/" { return HOME + p.substring(1, p.len()) }
+    return HOME + "/Dev/nexus/" + p
+}
+
+fn main() {
+    let argv = args()
+    if argv.len() < 6 {
+        eprintln("usage: mirror <task_id> <src_dir> <dst_dir> <dry>")
+        exit(2)
+    }
+    let task_id = argv[2]
+    let src = expand_path(argv[3])
+    let dst = expand_path(argv[4])
+    let dry = argv[5] == "1"
+
+    let src_ok = to_string(exec("test -d '" + src + "' && echo y || echo n")).trim()
+    if src_ok != "y" {
+        println("[" + task_id + "] skip:src_dir_missing " + src)
+        return
+    }
+
+    if dry {
+        let n = to_string(exec("find '" + src + "' -type f 2>/dev/null | wc -l")).trim()
+        println("[" + task_id + "] dry:would_mirror " + n.trim() + " files " + src + " → " + dst)
+        return
+    }
+
+    try { exec("mkdir -p '" + dst + "'") } catch e {}
+    // rsync 선호, 없으면 cp -R
+    let has_rsync = to_string(exec("command -v rsync >/dev/null && echo y || echo n")).trim()
+    if has_rsync == "y" {
+        try { exec("rsync -a --delete '" + src + "/' '" + dst + "/'") } catch e {
+            println("[" + task_id + "] fail:rsync_error")
+            exit(1)
+        }
+    } else {
+        try { exec("cp -R '" + src + "/.' '" + dst + "/'") } catch e {
+            println("[" + task_id + "] fail:cp_error")
+            exit(1)
+        }
+    }
+    println("[" + task_id + "] mirrored " + dst)
+}
+
+main()

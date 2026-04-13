@@ -27,13 +27,15 @@ engine (.hexa):
   handoff_write.hexa        세션 handoff MD writer — git delta + JSONL tail + next-actions → memory/handoff-latest.md
   cli_budget_gate.hexa      JSONL usage 합산 → 임계치 시 handoff_write 호출 + systemMessage (config: shared/config/cli_budget.json)
   session_prompt_gen.hexa   새 세션 이어받기 프롬프트 자동 생성
+  health.hexa               atlas + nexus 헬스 라우터 — list|atlas|nexus|all (atlas_health/nexus_ensure_running 위임)
+  sync.hexa                 sync 라우터 v1 — 9 원본 sync*.hexa 통합 + N/M/T 신규. manifest SSOT: sync_manifest.json (29 태스크)
 
 convention (2026-04-14~ 훅 시스템 대체):
   사용자 입력 후       entry.hexa prompt
   Write|Edit 후        entry.hexa post write_edit
   Bash 후              entry.hexa post bash
   Agent 호출 전        entry.hexa guard
-  smash|free 실행      shared/bin/exec_validated {mode} "{seed}" {engine} {args} (cmd_gate 적용)
+  smash|free 실행      shared/harness/exec_validated {mode} "{seed}" {engine} {args} (cmd_gate 적용, bin/ 심링크 가능)
   전 프로젝트 settings.json hooks={} — 자동 훅 없음. 위 호출은 Claude 자율 실행.
 
 logs (append-only):
@@ -65,6 +67,8 @@ entrypoints:
   hexa global_claude_guard.hexa         ~/.claude/ 오염 감지 (CLAUDE.md/hooks/* 발견 시 mistakes.jsonl + stderr)
   hexa handoff_write.hexa <reason>      수동 handoff 저장 (reason ∈ commit|checkpoint|handoff|emergency|manual)
   hexa cli_budget_gate.hexa             세션 usage 임계치 감지 (UserPromptSubmit 자동 실행, cooldown 상태 파일로 중복 방지)
+  hexa health.hexa all                  atlas + nexus 종합 헬스 (cron 30분 주기 권장 — com.nexus.health)
+  hexa sync.hexa list|diff|all|<id>     sync 라우터 — list(29태스크)/diff(drift)/all(active)/단일(id) [--dry-run] [--no-git]
 
 pending:
   hooks-config.json 등록   gc-weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)

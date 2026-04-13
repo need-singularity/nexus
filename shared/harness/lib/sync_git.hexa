@@ -1,0 +1,31 @@
+// sync_git.hexa — add+commit+push (옵트인) 유틸
+// 역할: 9 원본에 공통된 git 커밋 푸시 로직 추출. do_git=false 시 silent skip.
+
+fn git_commit_push(repo_dir: str, files: str, msg: str, do_git: bool, dry: bool) -> str {
+    if do_git == false { return "skip:no_git" }
+    if dry { return "dry:would_push" }
+    let ok = to_string(exec("test -d '" + repo_dir + "/.git' && echo y || echo n")).trim()
+    if ok != "y" { return "skip:not_git_repo" }
+    // diff 체크 — 변경 없으면 skip
+    let diff = to_string(exec("bash -c 'cd " + repo_dir + " && git diff --quiet " + files + " 2>/dev/null && echo same || echo diff'")).trim()
+    if diff == "same" {
+        let staged = to_string(exec("bash -c 'cd " + repo_dir + " && git diff --cached --quiet " + files + " 2>/dev/null && echo same || echo diff'")).trim()
+        if staged == "same" { return "ok:no_change" }
+    }
+    try {
+        exec("bash", ["-c", "cd " + repo_dir + " && git add " + files + " && git commit -m '" + msg + "' && git push 2>/dev/null"])
+    } catch e { return "warn:commit_push_failed" }
+    return "pushed"
+}
+
+// commit-only (push 없음) — lenses 스타일
+fn git_commit_only(repo_dir: str, files: str, msg: str, do_git: bool, dry: bool) -> str {
+    if do_git == false { return "skip:no_git" }
+    if dry { return "dry:would_commit" }
+    let ok = to_string(exec("test -d '" + repo_dir + "/.git' && echo y || echo n")).trim()
+    if ok != "y" { return "skip:not_git_repo" }
+    try {
+        exec("bash", ["-c", "cd " + repo_dir + " && git add " + files + " 2>/dev/null; git diff --cached --quiet 2>/dev/null || git commit -m '" + msg + "'"])
+    } catch e { return "warn:commit_failed" }
+    return "committed"
+}

@@ -1,0 +1,41 @@
+// tasks/multi.hexa — mode: multi (lenses 처럼 다중 타겟 갱신)
+// usage: hexa run tasks/multi.hexa <task_id> <dry> <do_git>
+// 본 핸들러는 sync-nexus-lenses.hexa 를 직접 호출한다 (복잡 로직 재생산 회피).
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let HEXA = NEXUS + "/shared/bin/hexa"
+let ORIGINAL = NEXUS + "/shared/scripts/sync-nexus-lenses.hexa"
+
+fn main() {
+    let argv = args()
+    if argv.len() < 5 {
+        eprintln("usage: multi <task_id> <dry> <do_git>")
+        exit(2)
+    }
+    let task_id = argv[2]
+    let dry = argv[3] == "1"
+    // do_git 은 원본 스크립트 내부에서 결정 (기본 커밋 only, push 없음)
+
+    if file_exists(ORIGINAL) == false {
+        println("[" + task_id + "] skip:original_missing " + ORIGINAL)
+        return
+    }
+
+    if dry {
+        let test_file = HOME + "/Dev/n6-architecture/tools/nexus/tests/telescope_test.rs"
+        if file_exists(test_file) == false {
+            println("[" + task_id + "] dry:would_skip test_file_missing")
+            return
+        }
+        let n = to_string(exec("grep -oE 'reg\\.len\\(\\),\\s*[0-9]+' '" + test_file + "' | head -1 | grep -oE '[0-9]+$' 2>/dev/null")).trim()
+        println("[" + task_id + "] dry:would_update_lens_count=" + n)
+        return
+    }
+
+    let out = to_string(exec(HEXA + " run " + ORIGINAL + " 2>&1")).trim()
+    let summary = if out.len() > 0 { out.split("\n")[out.split("\n").len() - 1] } else { "silent" }
+    println("[" + task_id + "] " + summary)
+}
+
+main()

@@ -2,13 +2,13 @@
 
 commands: shared/config/commands.json — autonomous 블록으로 Claude Code가 작업 중 smash/free/todo/go/keep 자율 판단·실행
 rules: shared/rules/common.json (R0~R27) + shared/rules/nexus.json (NX1~NX3)
-L0 Guard: `hexa ~/Dev/nexus/shared/lockdown/l0_guard.hexa <verify|sync|merge|status>`
+L0 Guard: `hexa ~/Dev/nexus/shared/harness/lockdown_gate.hexa <verify|status|watch|repair|safe-merge|log>` (legacy: `shared/harness/l0_guard.hexa` 보존, SUPERSEDED — 2026-04-14 lockdown→harness 완전 이동)
 전역 불변식: todo/할일 실행은 반드시 shared/bin/hexa resolver 경유. 직접 바이너리 하드코딩 금지.
 
 harness (훅 시스템 대체, 2026-04-14~):
   dispatcher: shared/harness/entry.hexa <prompt|pretool|post|guard|self_check>
   sub-modules: prompt_scan.hexa / pre_tool_guard.hexa / post_bash.hexa / post_edit.hexa / cmd_gate.hexa
-  exec wrapper: shared/bin/exec_validated (smash/free seed gate, hexa exit 미전파 우회)
+  exec wrapper: shared/harness/exec_validated (smash/free seed gate, hexa exit 미전파 우회) — bin/ 심링크 유지
   permissions SSOT: shared/config/permissions_ssot.json (deny 28패턴)
   settings.json 정책: 전 프로젝트 hooks={} — 훅 실행 없음. 대신 Claude가 매 프롬프트/Write/Bash 후 entry.hexa 자율 호출.
   관례: 사용자 입력 직후 `entry.hexa prompt`, Write/Edit 후 `entry.hexa post write_edit`, Bash 후 `entry.hexa post bash`, Agent 호출 전 `entry.hexa guard`.
@@ -50,7 +50,7 @@ L0 보호 (평시 자유 수정, 유저 명시 요청 시만 승인 절차):
   shared/harness/entry.hexa — 하네스 dispatcher
   shared/harness/cmd_gate.hexa — seed 검증 gate
   shared/harness/{prompt_scan,pre_tool_guard,post_bash,post_edit}.hexa — sub-modules
-  shared/bin/exec_validated — gate 적용 실행 래퍼
+  shared/harness/exec_validated — gate 적용 실행 래퍼 (bin/ 심링크 유지)
   shared/config/permissions_ssot.json — deny 패턴 SSOT
   shared/blowup/core/blowup.hexa — 9-phase 파이프라인
   shared/blowup/modules/*.hexa — 6종 변종

@@ -1,0 +1,116 @@
+// tasks/bidir.hexa — mode: bidir (양방향 디렉토리 동기화, 충돌 시 abort)
+// usage: hexa run tasks/bidir.hexa <task_id> <dir_a> <dir_b> <dry>
+// 정책: a/b 양쪽 스캔 → a-only → b 로 복사 / b-only → a 로 복사 / both but different → abort
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+
+fn expand_path(p: str) -> str {
+    if p.substring(0, 1) == "/" { return p }
+    if p.substring(0, 2) == "~/" { return HOME + p.substring(1, p.len()) }
+    return NEXUS + "/" + p
+}
+
+fn main() {
+    let argv = args()
+    if argv.len() < 6 {
+        eprintln("usage: bidir <task_id> <dir_a> <dir_b> <dry>")
+        exit(2)
+    }
+    let task_id = argv[2]
+    let a = expand_path(argv[3])
+    let b = expand_path(argv[4])
+    let dry = argv[5] == "1"
+
+    let a_ok = to_string(exec("test -d '" + a + "' && echo y || echo n")).trim()
+    let b_ok = to_string(exec("test -d '" + b + "' && echo y || echo n")).trim()
+
+    if a_ok != "y" && b_ok != "y" {
+        println("[" + task_id + "] skip:both_missing " + a + " / " + b)
+        return
+    }
+
+    if a_ok != "y" {
+        if dry {
+            let n = to_string(exec("find '" + b + "' -type f 2>/dev/null | wc -l")).trim()
+            println("[" + task_id + "] dry:would_create_dir_a " + n.trim() + " files")
+        } else {
+            try { exec("mkdir -p '" + a + "'") } catch e {}
+            try { exec("cp -R '" + b + "/.' '" + a + "/'") } catch e {}
+            println("[" + task_id + "] seeded_a_from_b")
+        }
+        return
+    }
+    if b_ok != "y" {
+        if dry {
+            let n = to_string(exec("find '" + a + "' -type f 2>/dev/null | wc -l")).trim()
+            println("[" + task_id + "] dry:would_create_dir_b " + n.trim() + " files")
+        } else {
+            try { exec("mkdir -p '" + b + "'") } catch e {}
+            try { exec("cp -R '" + a + "/.' '" + b + "/'") } catch e {}
+            println("[" + task_id + "] seeded_b_from_a")
+        }
+        return
+    }
+
+    // 양쪽 존재 — 비교 & 충돌 감지
+    let a_only = to_string(exec("bash -c \"comm -23 <(cd '" + a + "' && find . -type f 2>/dev/null | sort) <(cd '" + b + "' && find . -type f 2>/dev/null | sort)\"")).trim()
+    let b_only = to_string(exec("bash -c \"comm -13 <(cd '" + a + "' && find . -type f 2>/dev/null | sort) <(cd '" + b + "' && find . -type f 2>/dev/null | sort)\"")).trim()
+    let both = to_string(exec("bash -c \"comm -12 <(cd '" + a + "' && find . -type f 2>/dev/null | sort) <(cd '" + b + "' && find . -type f 2>/dev/null | sort)\"")).trim()
+
+    // 충돌: both 에서 diff 있는 것
+    let mut conflicts = 0
+    let mut diffs_sample = ""
+    for raw in both.split("\n") {
+        let rel = raw.trim()
+        if rel.len() == 0 { continue }
+        let same = to_string(exec("diff -q '" + a + "/" + rel + "' '" + b + "/" + rel + "' 2>/dev/null && echo same || echo diff")).trim()
+        if same == "diff" {
+            conflicts = conflicts + 1
+            if diffs_sample.len() < 120 { diffs_sample = diffs_sample + " " + rel }
+        }
+    }
+
+    let mut a_only_n = 0
+    for raw in a_only.split("\n") { if raw.trim().len() > 0 { a_only_n = a_only_n + 1 } }
+    let mut b_only_n = 0
+    for raw in b_only.split("\n") { if raw.trim().len() > 0 { b_only_n = b_only_n + 1 } }
+
+    if conflicts > 0 {
+        println("[" + task_id + "] abort:conflicts=" + to_string(conflicts) + " sample=" + diffs_sample.trim())
+        return
+    }
+
+    if a_only_n == 0 && b_only_n == 0 {
+        println("[" + task_id + "] ok:nochange")
+        return
+    }
+
+    if dry {
+        println("[" + task_id + "] dry:would_sync a_only=" + to_string(a_only_n) + " b_only=" + to_string(b_only_n))
+        return
+    }
+
+    // a-only → b
+    for raw in a_only.split("\n") {
+        let rel = raw.trim()
+        if rel.len() == 0 { continue }
+        let dst_full = b + "/" + rel
+        let dst_parent = to_string(exec("dirname '" + dst_full + "'")).trim()
+        try { exec("mkdir -p '" + dst_parent + "'") } catch e {}
+        try { exec("cp '" + a + "/" + rel + "' '" + dst_full + "'") } catch e {}
+    }
+    // b-only → a
+    for raw in b_only.split("\n") {
+        let rel = raw.trim()
+        if rel.len() == 0 { continue }
+        let dst_full = a + "/" + rel
+        let dst_parent = to_string(exec("dirname '" + dst_full + "'")).trim()
+        try { exec("mkdir -p '" + dst_parent + "'") } catch e {}
+        try { exec("cp '" + b + "/" + rel + "' '" + dst_full + "'") } catch e {}
+    }
+
+    println("[" + task_id + "] synced a_only=" + to_string(a_only_n) + " b_only=" + to_string(b_only_n))
+}
+
+main()

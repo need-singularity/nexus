@@ -1,0 +1,65 @@
+// tasks/gen_sidecar.hexa — mode: gen_sidecar (atlas.n6 → deg/stats sidecar)
+// usage: hexa run tasks/gen_sidecar.hexa <task_id> <src_atlas> <dry>
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+
+fn expand_path(p: str) -> str {
+    if p.substring(0, 1) == "/" { return p }
+    if p.substring(0, 2) == "~/" { return HOME + p.substring(1, p.len()) }
+    return NEXUS + "/" + p
+}
+
+fn main() {
+    let argv = args()
+    if argv.len() < 5 {
+        eprintln("usage: gen_sidecar <task_id> <src_atlas> <dry>")
+        exit(2)
+    }
+    let task_id = argv[2]
+    let atlas = expand_path(argv[3])
+    let dry = argv[4] == "1"
+
+    if file_exists(atlas) == false {
+        println("[" + task_id + "] skip:atlas_missing " + atlas)
+        return
+    }
+
+    let stats_path = atlas + ".stats"
+    let deg_path = atlas + ".deg"
+
+    // mtime + size
+    let mtime = to_string(exec("stat -f '%m' '" + atlas + "' 2>/dev/null || stat -c '%Y' '" + atlas + "' 2>/dev/null")).trim()
+    let size = to_string(exec("stat -f '%z' '" + atlas + "' 2>/dev/null || stat -c '%s' '" + atlas + "' 2>/dev/null")).trim()
+    let lines = to_string(exec("wc -l < '" + atlas + "' 2>/dev/null")).trim()
+
+    // 기존 stats 의 mtime 과 비교 — 동일하면 skip
+    let mut skip = false
+    if file_exists(stats_path) {
+        let prev = read_file(stats_path)
+        if prev.contains("mtime:" + mtime) && prev.contains("size:" + size) {
+            skip = true
+        }
+    }
+    if skip {
+        println("[" + task_id + "] ok:nochange mtime=" + mtime)
+        return
+    }
+
+    if dry {
+        println("[" + task_id + "] dry:would_regen sidecar mtime=" + mtime + " size=" + size + " lines=" + lines.trim())
+        return
+    }
+
+    // stats 파일 — 간단 포맷
+    let stats_body = "# atlas.n6 sidecar stats — auto\nmtime:" + mtime + "\nsize:" + size + "\nlines:" + lines.trim() + "\n"
+    try { write_file(stats_path, stats_body) } catch e {}
+
+    // deg 파일 — blowup 의존, 기존 파일이 있으면 보존 (실제 생성은 blowup 엔진에서 진행)
+    if file_exists(deg_path) == false {
+        try { write_file(deg_path, "# atlas.n6.deg — blowup 엔진에서 갱신됨\n") } catch e {}
+    }
+    println("[" + task_id + "] regen " + stats_path)
+}
+
+main()

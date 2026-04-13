@@ -1,0 +1,30 @@
+// sync_marker.hexa — <!-- BEGIN:X -->...<!-- END:X --> 마커 주입 유틸
+// 역할: 9 원본 hexa 에 공통된 마커 기반 동기화 로직 추출.
+
+// 파일 내 마커 존재 확인
+fn has_marker(text: str, start: str) -> bool {
+    return text.contains(start)
+}
+
+// 마커 사이 교체 + 전체 텍스트 반환 (없으면 원본)
+fn replace_between(text: str, start: str, end: str, new_body: str) -> str {
+    if text.contains(start) == false { return text }
+    let before = text.split(start)[0] + start
+    let after_parts = text.split(end)
+    let mut after = end
+    if after_parts.len() >= 2 { after = end + after_parts[1] }
+    return before + "\n" + new_body + "\n" + after
+}
+
+// 파일에 마커 적용 + write (dry-run 지원). 반환: [changed_flag, reason]
+fn apply_marker(file: str, start: str, end: str, body: str, dry: bool) -> str {
+    let exists = to_string(exec("test -f '" + file + "' && echo y || echo n")).trim()
+    if exists != "y" { return "skip:missing" }
+    let text = read_file(file)
+    if text.contains(start) == false { return "skip:no_marker" }
+    let updated = replace_between(text, start, end, body)
+    if updated == text { return "ok:nochange" }
+    if dry { return "dry:would_change" }
+    try { write_file(file, updated) } catch e { return "skip:write_fail" }
+    return "changed"
+}
