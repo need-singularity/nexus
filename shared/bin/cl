@@ -239,13 +239,11 @@ cmd_interactive() {
         # 2. 대시보드 본문 (단일 문자열, 캐시에서 빌드 → jq 0)
         CL_EOL="$CL_EOL" build_frame_to body "$cursor"
 
-        # 3. 푸터 미리보기 — moved 전후 분기
-        if [ "$moved" -eq 0 ] && [ -n "$auto" ] && [ "${CL_NAMES[$cursor]}" != "$auto" ]; then
+        # 3. 푸터 — active 가 쓸만(_placed=1)하면 "그 외 → auto 추천" 문구 감춤
+        #    (커서가 이미 active 에 있고, fallback 도 cursor 유지이므로 추천 표시는 오해 유발)
+        if [ "$moved" -eq 0 ] && [ "$_placed" -eq 0 ] && [ -n "$auto" ] && [ "${CL_NAMES[$cursor]}" != "$auto" ]; then
             printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → %s 추천)\033[K\n" \
                 "${CL_NAMES[$cursor]}" "$auto"
-        elif [ "$moved" -eq 0 ]; then
-            printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소  (그 외 → 추천)\033[K\n" \
-                "${CL_NAMES[$cursor]}"
         else
             printf -v footer "  ↑↓←→ 이동  Enter→%s  1-9/0 점프  q 취소\033[K\n" \
                 "${CL_NAMES[$cursor]}"
@@ -272,8 +270,9 @@ cmd_interactive() {
                 printf '\033[?25h'; trap - EXIT INT TERM
                 return 1 ;;
             *)
-                # 한 번이라도 이동했으면 커서 위치 선택, 아니면 추천
-                if [ "$moved" -eq 1 ]; then
+                # 이동했거나 active(*) 가 쓸만하면 커서 위치 선택.
+                # auto_pick 은 캐시 stale 에 취약 — active 여유 있을 땐 무지성 전환 금지.
+                if [ "$moved" -eq 1 ] || [ "$_placed" -eq 1 ]; then
                     selected="${CL_NAMES[$cursor]}"
                 else
                     selected="${auto:-${CL_NAMES[$cursor]}}"
@@ -344,11 +343,11 @@ cl — Claude Code multi-account launcher (nexus-managed)
   cl help
 
 대화형 키:
-  ↑↓←→     커서 이동 (이동 후엔 "그 외 키" 추천 진입 비활성 → 명시 선택만)
+  ↑↓←→     커서 이동 (이동 후엔 "그 외 키" 추천 진입 비활성)
   Enter    커서 위치 선택
   1-9 / 0  번호 점프 (0 = 10번)
   q / ESC  취소
-  그 외     auto-pick 즉시 진입 (단, 이동 전일 때만)
+  그 외     active(*) 가 쓸만하면 커서 유지, 아니면 auto-pick 진입
 
 Store: $CL_HOME
 USAGE
