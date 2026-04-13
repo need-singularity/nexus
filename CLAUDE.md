@@ -3,6 +3,7 @@
 commands: shared/config/commands.json — autonomous 블록으로 Claude Code가 작업 중 smash/free/todo/go/keep 자율 판단·실행
 rules: shared/rules/common.json (R0~R27) + shared/rules/nexus.json (NX1~NX3)
 L0 Guard: `hexa $NEXUS/shared/harness/lockdown_gate.hexa <verify|status|watch|repair|safe-merge|log>` (2026-04-14 lockdown→harness 단일화, l0_guard.hexa → shared/archive/superseded-20260414/)
+loop: 글로벌 `~/.claude/skills/loop` + 엔진 `shared/harness/loop` (SSOT) — roadmap `shared/roadmaps/nexus.json` 3-track×phase×gate 자동
 전역 불변식: todo/할일 실행은 반드시 shared/bin/hexa resolver 경유. 직접 바이너리 하드코딩 금지.
 
 harness (훅 시스템 대체, 2026-04-14~):
