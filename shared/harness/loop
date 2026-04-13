@@ -1,0 +1,228 @@
+#!/bin/bash
+# loop — NEXUS-6 공용 7프로젝트 루프 엔진 (bash+jq, 인터럽티브)
+# 역할: cwd → project → projects.json.loop + roadmaps/<p>.json 조합
+#       → 현 phase tasks + track 매트릭스 출력 → Claude 가 읽어서 bg agent 발사
+# SSOT:
+#   shared/config/projects.json (.projects.<p>.loop)
+#   shared/roadmaps/<p>.json    (신 스키마 3-track × phase × gate)
+#   shared/roadmaps/SCHEMA.json
+# 미래: hexa stage1 `./hexa run` 회귀(T23~T29) 복구 시 shared/harness/loop.hexa 로 전환
+#
+# usage:
+#   loop                      — 현 프로젝트 풀사이클 계획 블록 출력
+#   loop list                 — 표1/표2/표3 (guard/hooks/phase)
+#   loop dry                  — 계획만
+#   loop all                  — 7프로젝트 순회
+#   loop only <sub>           — todo | guards | hooks | gate
+#   loop add <text>           — L5 규칙 추가
+#
+# 출력 규약 (Claude가 파싱하는 섹션):
+#   ===LOOP_BEGIN===<project>:<subcmd>===
+#   PROJECT: <p>
+#   PHASE: <id> <name> status=<s>
+#   TRACKS: T1,T2,T3
+#   TODOS: <json array of {track, tasks:[...]}>
+#   GUARD: L1,L2,...
+#   HOOKS: <id>=<engine>,...
+#   COMMIT_PREFIX: <prefix>
+#   BRANCH: <policy>
+#   ROADMAP: <path>
+#   DRY: <bool>
+#   ===LOOP_END===
+
+set -e
+
+HOME_="${HOME}"
+NEXUS="${HOME_}/Dev/nexus"
+CONF="${NEXUS}/shared/config/projects.json"
+ROADMAPS="${NEXUS}/shared/roadmaps"
+HARNESS="${NEXUS}/shared/harness"
+
+WHITELIST="nexus anima n6-architecture hexa-lang airgenome papers void"
+
+die() { echo "REJECT: $*" >&2; exit 2; }
+
+detect_project() {
+    local cwd bn top topbn
+    cwd="$(pwd)"
+    bn="$(basename "$cwd")"
+    for p in $WHITELIST; do [ "$bn" = "$p" ] && { echo "$p"; return 0; }; done
+    top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$top" ] && {
+        topbn="$(basename "$top")"
+        for p in $WHITELIST; do [ "$topbn" = "$p" ] && { echo "$p"; return 0; }; done
+    }
+    echo ""
+    return 1
+}
+
+current_phase_id() {
+    local roadmap="$1"
+    local pid
+    pid="$(jq -r '.phases[] | select(.status=="in_progress") | .id' "$roadmap" 2>/dev/null | head -1)"
+    if [ -z "$pid" ]; then
+        pid="$(jq -r '[.phases[] | select(.status=="planned")][0].id // .phases[0].id' "$roadmap" 2>/dev/null)"
+    fi
+    echo "$pid"
+}
+
+collect_todos() {
+    local roadmap="$1" phase_id="$2"
+    jq -c --arg pid "$phase_id" '
+      [.phases[] | select(.id == $pid) | .parallel[] |
+        {track: .track,
+         tasks: [.tasks[] | select(.status != "done") |
+                 {id, task, depends_on, ssot_ref, done_criteria, status}]}]
+    ' "$roadmap" 2>/dev/null
+}
+
+plan_print() {
+    local project="$1" dry="$2"
+    local roadmap="${ROADMAPS}/${project}.json"
+    [ -f "$roadmap" ] || die "roadmap $roadmap 없음"
+
+    local phase_id phase_name phase_status tracks
+    phase_id="$(current_phase_id "$roadmap")"
+    phase_name="$(jq -r --arg pid "$phase_id" '.phases[] | select(.id==$pid) | .name' "$roadmap")"
+    phase_status="$(jq -r --arg pid "$phase_id" '.phases[] | select(.id==$pid) | .status' "$roadmap")"
+    tracks="$(jq -r '.tracks | keys | join(",")' "$roadmap")"
+
+    local commit_prefix branch g_layers hooks
+    commit_prefix="$(jq -r --arg p "$project" '.projects[$p].loop.commit_prefix' "$CONF")"
+    branch="$(jq -r --arg p "$project" '.projects[$p].loop.branch_policy' "$CONF")"
+    g_layers="$(jq -r --arg p "$project" '.projects[$p].loop.guard_layers | join(",")' "$CONF")"
+    hooks="$(jq -c --arg p "$project" '[.projects[$p].loop.custom_hooks[] | {id, engine}]' "$CONF")"
+    local todos
+    todos="$(collect_todos "$roadmap" "$phase_id")"
+
+    local tag="loop"
+    [ "$dry" = "true" ] && tag="dry"
+    echo "===LOOP_BEGIN===${project}:${tag}==="
+    echo "PROJECT: ${project}"
+    echo "PHASE: ${phase_id} ${phase_name} status=${phase_status}"
+    echo "TRACKS: ${tracks}"
+    echo "TODOS: ${todos}"
+    echo "GUARD: ${g_layers}"
+    echo "HOOKS: ${hooks}"
+    echo "COMMIT_PREFIX: ${commit_prefix}"
+    echo "BRANCH: ${branch}"
+    echo "ROADMAP: ${roadmap}"
+    echo "DRY: ${dry}"
+    echo "===LOOP_END==="
+}
+
+list_tables() {
+    local project="$1"
+    local roadmap="${ROADMAPS}/${project}.json"
+    [ -f "$roadmap" ] || die "roadmap $roadmap 없음"
+
+    local phase_id total_phases done_phases tracks g_val hook_ids phase_name
+    phase_id="$(current_phase_id "$roadmap")"
+    total_phases="$(jq '.phases | length' "$roadmap")"
+    done_phases="$(jq '[.phases[] | select(.status=="done")] | length' "$roadmap")"
+    tracks="$(jq -r '.tracks | keys | join(",")' "$roadmap")"
+    phase_name="$(jq -r --arg pid "$phase_id" '.phases[] | select(.id==$pid) | .name' "$roadmap")"
+    g_val="$(jq -r --arg p "$project" '.projects[$p].loop.guard_layers | join(",")' "$CONF")"
+    hook_ids="$(jq -r --arg p "$project" '[.projects[$p].loop.custom_hooks[] | .id] | join(",")' "$CONF")"
+
+    echo "┌──────────────────────────────────────────────────────────────────┐"
+    printf "│  loop list — %-53s │\n" "$project"
+    echo "├──────────────────────────────────────────────────────────────────┤"
+    printf "│  Phase      %-10s %-44s │\n" "$phase_id" "(${done_phases}/${total_phases} done) ${phase_name}"
+    printf "│  Tracks     %-52s │\n" "$tracks"
+    printf "│  Guard      %-52s │\n" "$g_val"
+    printf "│  L7 Hooks   %-52s │\n" "$hook_ids"
+    echo "└──────────────────────────────────────────────────────────────────┘"
+
+    echo ""
+    echo "┌──────┬──────────┬─────────────────────────────────────────────────┐"
+    echo "│ Phase│ Status   │ Name                                            │"
+    echo "├──────┼──────────┼─────────────────────────────────────────────────┤"
+    jq -r '.phases[] | "│ \(.id)   │ \(.status | .[0:9]) \(" " * (9 - (.status | length))) │ \(.name | .[0:47]) \(" " * (47 - (.name | length)))│"' "$roadmap" 2>/dev/null || \
+      jq -r '.phases[] | "\(.id) \(.status) \(.name)"' "$roadmap"
+    echo "└──────┴──────────┴─────────────────────────────────────────────────┘"
+}
+
+run_guards() {
+    local project="$1"
+    local g_script="${HOME_}/Dev/${project}/.shared/hooks/loop-guard.hexa"
+    if [ -f "$g_script" ]; then
+        echo "─── L1~L6 loop-guard ───"
+        # 현재 hexa stage1 회귀로 --fix 실행은 불가, parse-check 만
+        ./hexa parse "$g_script" 2>&1 || echo "WARN: parse issue"
+    fi
+    echo "─── L7 project hooks ───"
+    jq -r --arg p "$project" '.projects[$p].loop.custom_hooks[].engine' "$CONF" 2>/dev/null | while read -r h; do
+        [ -z "$h" ] && continue
+        local full="${NEXUS}/${h}"
+        if [ -f "$full" ]; then
+            echo "  [ok] $h"
+        else
+            echo "  [MISS] $h — 미구현"
+        fi
+    done
+    echo "─── L8 gate_exit ───"
+    local roadmap="${ROADMAPS}/${project}.json"
+    local phase_id
+    phase_id="$(current_phase_id "$roadmap")"
+    echo "PHASE $phase_id gate_exit criteria (수동 확인):"
+    jq -r --arg pid "$phase_id" '.phases[] | select(.id==$pid) | .gate_exit.criteria | to_entries[] | "  - \(.value)"' "$roadmap"
+}
+
+run_all() {
+    echo "┌──────────────────────────────────────────────────────────────┐"
+    echo "│  loop all — 7프로젝트 순회 계획                             │"
+    echo "└──────────────────────────────────────────────────────────────┘"
+    for p in $WHITELIST; do
+        echo ""
+        echo "═══ $p ═══"
+        ( cd "${HOME_}/Dev/${p}" 2>/dev/null && plan_print "$p" "true" ) || echo "SKIP: ${HOME_}/Dev/${p} 없음"
+    done
+}
+
+add_rule() {
+    local project="$1"; shift
+    local rules="${HOME_}/Dev/${project}/loop-rules.json"
+    [ -f "$rules" ] || die "$rules 없음 — 이 프로젝트는 L5 규칙 미운영"
+    [ "$#" -gt 0 ] || die "추가할 규칙 텍스트 필요"
+    echo "TODO(add_rule): $* — $rules 추가 (스키마 기반 파싱 필요)"
+}
+
+main() {
+    local subcmd="${1:-loop}"
+    shift || true
+
+    if [ "$subcmd" = "all" ]; then
+        run_all
+        return
+    fi
+
+    local project
+    project="$(detect_project)"
+    [ -n "$project" ] || die "cwd 가 7프로젝트 디렉토리 안이 아님"
+
+    jq -e --arg p "$project" '.projects[$p].loop // empty' "$CONF" >/dev/null 2>&1 || \
+        die "projects.json 에 ${project}.loop 섹션 없음"
+
+    case "$subcmd" in
+        loop) plan_print "$project" "false" ;;
+        dry)  plan_print "$project" "true" ;;
+        list) list_tables "$project" ;;
+        only)
+            local sub="${1:-}"
+            [ -n "$sub" ] || die "only 는 인자 필요 (todo|guards|hooks|gate)"
+            case "$sub" in
+                todo)
+                    local roadmap="${ROADMAPS}/${project}.json"
+                    collect_todos "$roadmap" "$(current_phase_id "$roadmap")"
+                    ;;
+                guards|hooks|gate) run_guards "$project" ;;
+                *) die "unknown only subcmd '$sub'" ;;
+            esac
+            ;;
+        add) add_rule "$project" "$@" ;;
+        *) die "unknown subcmd '$subcmd' — loop|list|all|dry|only|add" ;;
+    esac
+}
+
+main "$@"

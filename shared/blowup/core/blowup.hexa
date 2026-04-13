@@ -434,13 +434,13 @@ fn batch_sector_classify(lines: list) {
     // 단일 grep -En 호출: 4섹터 패턴을 awk로 우선순위 매칭 (grep 1회 + awk 분류)
     let mut _batch_result = ""
     try {
-        _batch_result = to_string(exec("awk '{" +
-            "if(/" + _cosmo_re + "/)print $0\"\\t\"\"cosmology\";" +
-            "else if(/" + _quant_re + "/)print $0\"\\t\"\"quantum\";" +
-            "else if(/" + _n6_re + "/)print $0\"\\t\"\"n6\";" +
-            "else if(/" + _geom_re + "/)print $0\"\\t\"\"geometric\";" +
-            "else print $0\"\\t\"\"unknown\"" +
-            "}' '" + _tmp + "' 2>/dev/null")).trim()
+        _batch_result = to_string(exec("awk '{"
+            + "if(/" + _cosmo_re + "/)print $0\"\\t\"\"cosmology\";"
+            + "else if(/" + _quant_re + "/)print $0\"\\t\"\"quantum\";"
+            + "else if(/" + _n6_re + "/)print $0\"\\t\"\"n6\";"
+            + "else if(/" + _geom_re + "/)print $0\"\\t\"\"geometric\";"
+            + "else print $0\"\\t\"\"unknown\""
+            + "}' '" + _tmp + "' 2>/dev/null")).trim()
     } catch e {}
 
     // 4. 결과 파싱 → _sector_cache 저장
@@ -3445,109 +3445,109 @@ if logged > 0 {
         try {
             // ROI #21 fast-path: hubs.json + idx.json → O(1) hub lookup, skip O(n) topo scan
             // fallback: original O(n) topology scan if hub index unavailable
-            let adj_py = "import json,sys,os,mmap\n" +
-                "hubs_f='" + _hubs_path + "'\n" +
-                "idx_f='" + _idx_path + "'\n" +
-                "topo='" + _topo_path + "'\n" +
-                "adj_f='" + _edges_adj_path + "'\n" +
-                "atlas='" + _ATLAS_PATH + "'\n" +
-                "dom='" + domain + "'\n" +
-                "dom_lo=dom.lower()\n" +
-                "# atlas.n6에서 known domains 추출\n" +
-                "kd=set()\n" +
-                "try:\n" +
-                "  with open(atlas) as f:\n" +
-                "    for l in f:\n" +
-                "      if '\"domain\"' not in l: continue\n" +
-                "      for p in l.split('\"domain\"')[1:]:\n" +
-                "        v=p.lstrip(':').lstrip().lstrip('\"').split('\"')[0]\n" +
-                "        if v and len(v)>2: kd.add(v.lower())\n" +
-                "except: pass\n" +
-                "kd.discard(dom_lo)\n" +
-                "if not kd: sys.exit(0)\n" +
-                "my_ids=[]\n" +
-                "id2inv={}\n" +
-                "# ── ROI #21: O(1) hub index fast-path ──\n" +
-                "if os.path.exists(hubs_f) and os.path.exists(idx_f):\n" +
-                "  try:\n" +
-                "    hd=json.load(open(hubs_f))\n" +
-                "    ix=json.load(open(idx_f))\n" +
-                "    # hub IDs for this domain (already sorted by degree desc)\n" +
-                "    dom_hubs=hd.get('by_domain_hub',{}).get(dom,[])\n" +
-                "    # also get domain node IDs from idx\n" +
-                "    dom_nodes=ix.get('by_domain',{}).get(dom,[])\n" +
-                "    my_ids=dom_hubs if dom_hubs else dom_nodes[:50]\n" +
-                "    # get neighbor IDs directly from hub top_neighbors\n" +
-                "    nb_ids=set()\n" +
-                "    hubs_map=hd.get('hubs',{})\n" +
-                "    for nid in my_ids[:50]:\n" +
-                "      h=hubs_map.get(nid)\n" +
-                "      if h:\n" +
-                "        for nb in h.get('top_neighbors',[]):\n" +
-                "          nb_ids.add(nb[0])\n" +
-                "    # resolve neighbor domains from idx\n" +
-                "    nodes_map=ix.get('nodes',{})\n" +
-                "    dc={}\n" +
-                "    ms=set(my_ids)\n" +
-                "    for nid in nb_ids:\n" +
-                "      if nid in ms: continue\n" +
-                "      ni=nodes_map.get(nid,{})\n" +
-                "      nd=ni.get('domain','').lower()\n" +
-                "      if nd and nd in kd: dc[nd]=dc.get(nd,0)+1\n" +
-                "    if dc:\n" +
-                "      top=sorted(dc.items(),key=lambda x:-x[1])[:3]\n" +
-                "      print('|'.join(d for d,c in top))\n" +
-                "      sys.exit(0)\n" +
-                "  except: pass\n" +
-                "# ── fallback: O(n) topology scan ──\n" +
-                "my_ids=[]\n" +
-                "id2inv={}\n" +
-                "with open(topo) as f:\n" +
-                "  for line in f:\n" +
-                "    line=line.strip()\n" +
-                "    if not line: continue\n" +
-                "    try:\n" +
-                "      o=json.loads(line)\n" +
-                "      nid=o['id']\n" +
-                "      inv=str(o.get('singularity',{}).get('invariant','')).lower()\n" +
-                "      id2inv[nid]=inv\n" +
-                "      if dom_lo in inv: my_ids.append(nid)\n" +
-                "    except: pass\n" +
-                "if not my_ids:\n" +
-                "  print('')\n" +
-                "  sys.exit(0)\n" +
-                "sample=my_ids[:50]\n" +
-                "nb_ids=set()\n" +
-                "with open(adj_f,'rb') as f:\n" +
-                "  mm=mmap.mmap(f.fileno(),0,access=mmap.ACCESS_READ)\n" +
-                "  for nid in sample:\n" +
-                "    pat=('\"'+nid+'\":').encode()\n" +
-                "    pos=mm.find(pat)\n" +
-                "    if pos<0: continue\n" +
-                "    mm.seek(pos+len(pat))\n" +
-                "    depth=0; buf=b''\n" +
-                "    while True:\n" +
-                "      ch=mm.read(1)\n" +
-                "      if not ch: break\n" +
-                "      buf+=ch\n" +
-                "      if ch==b'[': depth+=1\n" +
-                "      elif ch==b']': depth-=1\n" +
-                "      if depth==0: break\n" +
-                "    try:\n" +
-                "      nbs=json.loads(buf)\n" +
-                "      for nb in nbs[:30]: nb_ids.add(nb[0])\n" +
-                "    except: pass\n" +
-                "  mm.close()\n" +
-                "dc={}\n" +
-                "ms=set(my_ids)\n" +
-                "for nid in nb_ids:\n" +
-                "  if nid in ms: continue\n" +
-                "  inv=id2inv.get(nid,'')\n" +
-                "  if not inv: continue\n" +
-                "  for d in kd:\n" +
-                "    if d in inv: dc[d]=dc.get(d,0)+1\n" +
-                "top=sorted(dc.items(),key=lambda x:-x[1])[:3]\n" +
-                "print('|'.join(d for d,c in top))\n"
+            let adj_py = "import json,sys,os,mmap\n"
+                + "hubs_f='" + _hubs_path + "'\n"
+                + "idx_f='" + _idx_path + "'\n"
+                + "topo='" + _topo_path + "'\n"
+                + "adj_f='" + _edges_adj_path + "'\n"
+                + "atlas='" + _ATLAS_PATH + "'\n"
+                + "dom='" + domain + "'\n"
+                + "dom_lo=dom.lower()\n"
+                + "# atlas.n6에서 known domains 추출\n"
+                + "kd=set()\n"
+                + "try:\n"
+                + "  with open(atlas) as f:\n"
+                + "    for l in f:\n"
+                + "      if '\"domain\"' not in l: continue\n"
+                + "      for p in l.split('\"domain\"')[1:]:\n"
+                + "        v=p.lstrip(':').lstrip().lstrip('\"').split('\"')[0]\n"
+                + "        if v and len(v)>2: kd.add(v.lower())\n"
+                + "except: pass\n"
+                + "kd.discard(dom_lo)\n"
+                + "if not kd: sys.exit(0)\n"
+                + "my_ids=[]\n"
+                + "id2inv={}\n"
+                + "# ── ROI #21: O(1) hub index fast-path ──\n"
+                + "if os.path.exists(hubs_f) and os.path.exists(idx_f):\n"
+                + "  try:\n"
+                + "    hd=json.load(open(hubs_f))\n"
+                + "    ix=json.load(open(idx_f))\n"
+                + "    # hub IDs for this domain (already sorted by degree desc)\n"
+                + "    dom_hubs=hd.get('by_domain_hub',{}).get(dom,[])\n"
+                + "    # also get domain node IDs from idx\n"
+                + "    dom_nodes=ix.get('by_domain',{}).get(dom,[])\n"
+                + "    my_ids=dom_hubs if dom_hubs else dom_nodes[:50]\n"
+                + "    # get neighbor IDs directly from hub top_neighbors\n"
+                + "    nb_ids=set()\n"
+                + "    hubs_map=hd.get('hubs',{})\n"
+                + "    for nid in my_ids[:50]:\n"
+                + "      h=hubs_map.get(nid)\n"
+                + "      if h:\n"
+                + "        for nb in h.get('top_neighbors',[]):\n"
+                + "          nb_ids.add(nb[0])\n"
+                + "    # resolve neighbor domains from idx\n"
+                + "    nodes_map=ix.get('nodes',{})\n"
+                + "    dc={}\n"
+                + "    ms=set(my_ids)\n"
+                + "    for nid in nb_ids:\n"
+                + "      if nid in ms: continue\n"
+                + "      ni=nodes_map.get(nid,{})\n"
+                + "      nd=ni.get('domain','').lower()\n"
+                + "      if nd and nd in kd: dc[nd]=dc.get(nd,0)+1\n"
+                + "    if dc:\n"
+                + "      top=sorted(dc.items(),key=lambda x:-x[1])[:3]\n"
+                + "      print('|'.join(d for d,c in top))\n"
+                + "      sys.exit(0)\n"
+                + "  except: pass\n"
+                + "# ── fallback: O(n) topology scan ──\n"
+                + "my_ids=[]\n"
+                + "id2inv={}\n"
+                + "with open(topo) as f:\n"
+                + "  for line in f:\n"
+                + "    line=line.strip()\n"
+                + "    if not line: continue\n"
+                + "    try:\n"
+                + "      o=json.loads(line)\n"
+                + "      nid=o['id']\n"
+                + "      inv=str(o.get('singularity',{}).get('invariant','')).lower()\n"
+                + "      id2inv[nid]=inv\n"
+                + "      if dom_lo in inv: my_ids.append(nid)\n"
+                + "    except: pass\n"
+                + "if not my_ids:\n"
+                + "  print('')\n"
+                + "  sys.exit(0)\n"
+                + "sample=my_ids[:50]\n"
+                + "nb_ids=set()\n"
+                + "with open(adj_f,'rb') as f:\n"
+                + "  mm=mmap.mmap(f.fileno(),0,access=mmap.ACCESS_READ)\n"
+                + "  for nid in sample:\n"
+                + "    pat=('\"'+nid+'\":').encode()\n"
+                + "    pos=mm.find(pat)\n"
+                + "    if pos<0: continue\n"
+                + "    mm.seek(pos+len(pat))\n"
+                + "    depth=0; buf=b''\n"
+                + "    while True:\n"
+                + "      ch=mm.read(1)\n"
+                + "      if not ch: break\n"
+                + "      buf+=ch\n"
+                + "      if ch==b'[': depth+=1\n"
+                + "      elif ch==b']': depth-=1\n"
+                + "      if depth==0: break\n"
+                + "    try:\n"
+                + "      nbs=json.loads(buf)\n"
+                + "      for nb in nbs[:30]: nb_ids.add(nb[0])\n"
+                + "    except: pass\n"
+                + "  mm.close()\n"
+                + "dc={}\n"
+                + "ms=set(my_ids)\n"
+                + "for nid in nb_ids:\n"
+                + "  if nid in ms: continue\n"
+                + "  inv=id2inv.get(nid,'')\n"
+                + "  if not inv: continue\n"
+                + "  for d in kd:\n"
+                + "    if d in inv: dc[d]=dc.get(d,0)+1\n"
+                + "top=sorted(dc.items(),key=lambda x:-x[1])[:3]\n"
+                + "print('|'.join(d for d,c in top))\n"
             let adj_result = exec("python3 -c \"" + adj_py + "\" 2>/dev/null").trim()
             if adj_result != "" {
                 let adj_doms = adj_result.split("|")
