@@ -1,0 +1,139 @@
+// cli_budget_gate.hexa — 세션 JSONL usage 합산 → 임계치 시 handoff 트리거
+// 성공 조용 (임계치 미만), 임계치 도달 시 systemMessage + handoff_write 호출
+// 호출: hexa cli_budget_gate.hexa   (growth-tick 등에서 쿨다운 후)
+
+let HOME = env("HOME")
+let MEM_ROOT = HOME + "/.claude-claude10/projects"
+let CONFIG = HOME + "/Dev/nexus/shared/config/cli_budget.json"
+let HANDOFF = HOME + "/Dev/nexus/shared/harness/handoff_write.hexa"
+let STATE_FILE = HOME + "/Dev/nexus/shared/harness/.cli_budget_state.json"
+
+fn cwd_to_dash(cwd: str) -> str {
+    let mut s = ""
+    let mut i = 0
+    while i < cwd.len() {
+        let ch = cwd.substring(i, i + 1)
+        if ch == "/" { s = s + "-" } else { s = s + ch }
+        i = i + 1
+    }
+    return s
+}
+
+fn cmd_out(cmd: str) -> str {
+    return to_string(exec(cmd)).trim()
+}
+
+fn json_number(raw: str, key: str) -> i64 {
+    let tag = "\"" + key + "\""
+    if raw.contains(tag) == false { return 0 }
+    let after = raw.split(tag)[1]
+    let parts = after.split(":")
+    if parts.len() < 2 { return 0 }
+    let s = parts[1].trim()
+    let mut end = 0
+    while end < s.len() {
+        let c = s.substring(end, end + 1)
+        if c == "," || c == "}" || c == "\n" || c == " " { break }
+        end = end + 1
+    }
+    let num = s.substring(0, end).trim()
+    return to_int(num)
+}
+
+fn json_float(raw: str, key: str) -> f64 {
+    let tag = "\"" + key + "\""
+    if raw.contains(tag) == false { return 0.0 }
+    let after = raw.split(tag)[1]
+    let parts = after.split(":")
+    if parts.len() < 2 { return 0.0 }
+    let s = parts[1].trim()
+    let mut end = 0
+    while end < s.len() {
+        let c = s.substring(end, end + 1)
+        if c == "," || c == "}" || c == "\n" || c == " " { break }
+        end = end + 1
+    }
+    return to_float(s.substring(0, end).trim())
+}
+
+fn main() {
+    let cwd = cmd_out("pwd")
+    if cwd.len() == 0 { exit(0) }
+
+    let dash = cwd_to_dash(cwd)
+    let proj_dir = MEM_ROOT + "/" + dash
+    if file_exists(proj_dir) == false { exit(0) }
+
+    // 최신 JSONL
+    let jsonl = cmd_out("ls -t " + proj_dir + "/*.jsonl 2>/dev/null | head -1")
+    if jsonl.len() == 0 { exit(0) }
+
+    // config
+    if file_exists(CONFIG) == false { exit(0) }
+    let cfg = read_file(CONFIG)
+    let session_out_cap = json_number(cfg, "session_output_tokens")
+    let th_notice = json_float(cfg, "notice")
+    let th_checkpoint = json_float(cfg, "checkpoint")
+    let th_handoff = json_float(cfg, "handoff")
+    let th_emergency = json_float(cfg, "emergency")
+
+    if session_out_cap == 0 { exit(0) }
+
+    // 누적 output_tokens — 모든 usage 엔트리 합산
+    // jq 대신 grep+awk 기반
+    let sum_cmd = "grep -oE '\"output_tokens\":[0-9]+' '" + jsonl + "' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}'"
+    let total_out_s = cmd_out(sum_cmd)
+    let total_out = to_int(total_out_s)
+
+    let ratio = if session_out_cap > 0 { (total_out * 10000) / session_out_cap } else { 0 }
+    let pct = ratio  // 만분율 (85% = 8500)
+
+    // 임계치 판정 (최고 단계만)
+    let mut level = ""
+    let mut reason = ""
+    if ratio >= (to_int(to_string(th_emergency * 10000.0)) - 0) {
+        level = "emergency"; reason = "emergency"
+    } else if ratio >= to_int(to_string(th_handoff * 10000.0)) {
+        level = "handoff"; reason = "handoff"
+    } else if ratio >= to_int(to_string(th_checkpoint * 10000.0)) {
+        level = "checkpoint"; reason = "checkpoint"
+    } else if ratio >= to_int(to_string(th_notice * 10000.0)) {
+        level = "notice"; reason = "notice"
+    } else {
+        exit(0)  // 임계치 미만 → 조용
+    }
+
+    // 상태 파일 중복 방지 (같은 세션 + 같은 레벨 중복 발사 방지)
+    let session_id = cmd_out("basename '" + jsonl + "' .jsonl")
+    let state_key = session_id + ":" + level
+    if file_exists(STATE_FILE) {
+        let st = read_file(STATE_FILE)
+        if st.contains(state_key) { exit(0) }
+    }
+
+    // handoff_write 호출 (checkpoint 이상)
+    if level != "notice" {
+        exec("hexa " + HANDOFF + " " + reason + " >/dev/null 2>&1 &")
+    }
+
+    // systemMessage 발사
+    let pct_int = ratio / 100  // 만분율 → %
+    let mut msg = ""
+    if level == "notice" {
+        msg = "📊 CLI 세션 output " + to_string(pct_int) + "% 소비"
+    } else if level == "checkpoint" {
+        msg = "📝 CLI 70% — handoff 체크포인트 저장 중 (memory/handoff-latest.md)"
+    } else if level == "handoff" {
+        msg = "⚠️ CLI 85% — 현재 작업/다음 단계를 memory/handoff-latest.md 에 저장. 한도 임박"
+    } else {
+        msg = "🚨 CLI 95% — 즉시 핵심 상태 memory 저장. 다음 세션 이어받기 필수"
+    }
+
+    println("{\"systemMessage\":\"" + msg + "\"}")
+
+    // 상태 업데이트 (중복 방지)
+    let prev = if file_exists(STATE_FILE) { read_file(STATE_FILE) } else { "" }
+    write_file(STATE_FILE, prev + state_key + "\n")
+}
+
+main()

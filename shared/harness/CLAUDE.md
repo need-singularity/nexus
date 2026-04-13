@@ -18,6 +18,8 @@ engine (.hexa):
   bitter-gate.hexa     새 규칙 추가 전 mandatory — dormant 규칙 폐기 우선
   hook_stdin_gate.hexa  hexa binary read_stdin() round-trip 검증 (stale build 회귀 감지)
   global_claude_guard.hexa  ~/.claude/ 외부 설정 오염 감지 (hooks/CLAUDE.md 금지, settings.json 만 허용)
+  handoff_write.hexa        세션 handoff MD writer — git delta + JSONL tail + next-actions → memory/handoff-latest.md
+  cli_budget_gate.hexa      JSONL usage 합산 → 임계치 시 handoff_write 호출 + systemMessage (config: shared/config/cli_budget.json)
 
 logs (append-only):
   lint_log.jsonl       모든 lint 실행 기록
@@ -46,6 +48,8 @@ entrypoints:
   hexa bitter-gate.hexa --audit         새 규칙 추가 전 mandatory
   hexa hook_stdin_gate.hexa             hexa binary 회귀 감지 (실패 시 mistakes.jsonl + stderr, 성공 무출력)
   hexa global_claude_guard.hexa         ~/.claude/ 오염 감지 (CLAUDE.md/hooks/* 발견 시 mistakes.jsonl + stderr)
+  hexa handoff_write.hexa <reason>      수동 handoff 저장 (reason ∈ commit|checkpoint|handoff|emergency|manual)
+  hexa cli_budget_gate.hexa             세션 usage 임계치 감지 (UserPromptSubmit 자동 실행, cooldown 상태 파일로 중복 방지)
 
 pending:
   hooks-config.json 등록   gc-weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)
