@@ -38,6 +38,10 @@ engine (.hexa):
     session_worktree.hexa     H-SESSION-WORKTREE — opt-in git worktree 헬퍼 (init/list/status/merge/prune/gc_branches [--dry-run]). 자동 호출 X. 경로: .worktrees/{session_id}/
     session_prompt_gen.hexa   새 세션 이어받기 프롬프트 자동 생성
   broadcast.hexa            H-BROADCAST — shared/ 변경을 타 세션에 전파. post_edit 자동 append + prompt_scan 자동 tail 300s. SSOT: broadcast.jsonl. 우회: NEXUS_BROADCAST_OK=1
+  context_gauge.hexa        컨텍스트 게이지 — 50/25 임계 tool-call 카운트, SSOT: gauge_state.json (gitignore). post_bash/post_edit 자동 tick (Track A).
+  instinct.hexa             인스팅트 — scan|score|promote|prune|status, SSOT: instincts/{projects,global}/
+  harness_audit.hexa        하네스 스코어카드 — 7 카테고리 0-10 (tool/ctx/qg/mem/eval/sec/cost) max total 70. SSOT: harness_score.jsonl. 모드: full|json|summary (default=full)
+  observations.jsonl        (log) 매 post_bash/post_edit 자동 append
 
 policy (H-NOHOOK, 2026-04-14):
   rule           hook 신규 금지 — 모든 자동 강제는 entry.hexa 자율 호출
@@ -62,6 +66,7 @@ convention (2026-04-14~ 훅 시스템 대체):
   session_registry     entry.hexa session_registry <register|heartbeat|list|peers> ...
   session_worktree     entry.hexa session_worktree <init|list|status|merge|prune|gc_branches> ...
   session_prompt_gen   entry.hexa session_prompt_gen [args]              → 세션 이어받기 프롬프트
+  gauge 게이지         entry.hexa gauge <tick|status|reset>              → context_gauge.hexa 위임 (post_bash/post_edit 자동 tick)
   전 프로젝트 settings.json hooks={} — 자동 훅 없음. 위 호출은 Claude 자율 실행.
 
 logs (append-only):
@@ -72,6 +77,7 @@ logs (append-only):
   rules_usage.jsonl    규칙 히트 감사 (bitter-gate 산출)
   errors.jsonl         H-ERR 오류 큐 — severity/source/file/code/msg/status(open|fixed|stale), drain 임계치 10
   work_registry.jsonl  H-AGENT-LEDGER — agent_id/area/prompt_hash/ts_start/ts_end/status(active|done|stale)
+  harness_score.jsonl  H-AUDIT — ts/scores{tool_coverage,context_eff,quality_gate,memory,eval,security,cost}/total/flags
 
 cooldown:
   .gc_weekly_cooldown  unix ts — 7일 제한
@@ -106,6 +112,8 @@ entrypoints:
   hexa agent_ledger.hexa dup_check <area>                 활성 동일 area 수 출력
   hexa agent_ledger.hexa gc                               3600s+ active → stale (gc.hexa --scan 자동 포함)
   hexa agent_ledger.hexa list                             현재 active agent 목록
+  hexa harness_audit.hexa [full|json|summary]             스코어카드 실행 — full=JSONL append+요약 / json=stdout JSON / summary=1줄
+  hexa context_gauge.hexa <tick|status|reset>             tool-call 누적 카운터 — 첫 50, 이후 25 간격 stderr WARN. SSOT: gauge_state.json
 
 pending:
   hooks-config.json 등록   gc --weekly 주간 체인 (shared/harness/hooks-config-patch.json 참조)
