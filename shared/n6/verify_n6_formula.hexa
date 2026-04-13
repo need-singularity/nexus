@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════
-// verify_n6_formula.hexa — n6 arithmetic formula numeric verifier
-// Agent/script formula pre-verification helper.
+// verify_n6_formula.hexa — n6 산술 공식 수치 검증 헬퍼 (R1 HEXA-FIRST)
+// Agent/script 가 공식 제안 시 사전 검증 용도.
 //
 // usage:
 //   hexa verify_n6_formula.hexa <target> <formula>
@@ -11,112 +11,81 @@
 // operators: + - * / ^ ( ) (^ is exponent, not XOR)
 // tolerance: 5% of target or 0.01 absolute minimum
 //
-// Converted from verify_n6_formula.py
+// Ported from verify_n6_formula.py (2026-04-14, harness-approved)
+// 함수명에 'verify' 키워드 직접 사용 금지 — hexa parser 충돌
 // ═══════════════════════════════════════════════════════════
 
-fn verify(target_str: string, formula: string) -> list {
-    // Returns [ok_str, target_str, computed_str, message]
-    // ok_str: "true" or "false"
+let argv = args()
 
-    // Parse target
-    let mut target: f64 = 0.0
-    let mut target_valid = false
-    try {
-        target = to_float(target_str)
-        target_valid = true
-    } catch e {}
-
-    if !target_valid {
-        return ["false", "0.0", "0.0", "invalid target: " + target_str]
-    }
-
-    // Normalize formula: ^ -> **, unicode superscripts
-    let mut expr = formula.replace("^", "**")
-    expr = expr.replace("\u00b2", "**2")
-    expr = expr.replace("\u00b3", "**3")
-
-    // Check for non-ASCII
-    let py_ascii = "import re,sys; print('1' if re.search(r'[^\\x00-\\x7f]', sys.argv[1]) else '0')"
-    let mut has_nonascii = false
-    try {
-        let check = to_string(exec("python3", ["-c", py_ascii, expr])).trim()
-        if check == "1" { has_nonascii = true }
-    } catch e {}
-
-    if has_nonascii {
-        return ["false", to_string(target), "0.0", "non-ASCII in formula: " + formula]
-    }
-
-    // Evaluate using python with n6 context
-    let py_eval = "import sys; ctx={'n':6,'sigma':12,'tau':4,'phi':2,'sopfr':5,'M3':7,'J2':24,'P2':28,'mu':1}; v=eval(sys.argv[1],{'__builtins__':{}},ctx); print(type(v).__name__+'\\t'+str(float(v)) if isinstance(v,(int,float)) else 'bad\\t0')"
-    let mut computed: f64 = 0.0
-    let mut eval_ok = false
-    try {
-        let result = to_string(exec("python3", ["-c", py_eval, expr])).trim()
-        let parts = result.split("\t")
-        if len(parts) >= 2 {
-            if parts[0] != "bad" {
-                computed = to_float(parts[1])
-                eval_ok = true
-            }
-        }
-    } catch e {}
-
-    if !eval_ok {
-        return ["false", to_string(target), "0.0", "eval error for: " + formula]
-    }
-
-    // Calculate tolerance and diff
-    let mut abs_target = target
-    if abs_target < 0.0 { abs_target = -abs_target }
-    let mut tol = abs_target * 0.05
-    if tol < 0.01 { tol = 0.01 }
-
-    let mut diff = computed - target
-    if diff < 0.0 { diff = -diff }
-
-    let ok = diff <= tol
-
-    // Build message — use python for formatting
-    let py_fmt = "import sys; print(f'{sys.argv[1]} = {float(sys.argv[2]):.6g} (target={float(sys.argv[3]):.6g}, diff={float(sys.argv[4]):.4f}, tol={float(sys.argv[5]):.4f})')"
-    let mut msg = formula + " = " + to_string(computed) + " (target=" + to_string(target) + ")"
-    try {
-        msg = to_string(exec("python3", ["-c", py_fmt, formula, to_string(computed), to_string(target), to_string(diff), to_string(tol)])).trim()
-    } catch e {}
-
-    let ok_str = if ok { "true" } else { "false" }
-    return [ok_str, to_string(target), to_string(computed), msg]
+if len(argv) < 4 {
+    eprintln("verify_n6_formula.hexa — n6 arithmetic formula numeric verifier")
+    eprintln("")
+    eprintln("usage:")
+    eprintln("    hexa verify_n6_formula.hexa <target> <formula>")
+    eprintln("    hexa verify_n6_formula.hexa 155 \"n*J2+sigma-mu\"")
+    eprintln("")
+    eprintln("n6 constants: n=6, sigma=12, tau=4, phi=2, sopfr=5, M3=7, J2=24, P2=28, mu=1")
+    eprintln("tolerance: 5% of target or 0.01 absolute minimum")
+    exit(2)
 }
 
-fn main() {
-    let a = args()
-    // args(): [interpreter, script, arg1, arg2, ...]
-    if len(a) < 4 {
-        println("verify_n6_formula.hexa -- n6 arithmetic formula numeric verifier")
-        println("")
-        println("usage:")
-        println("    hexa verify_n6_formula.hexa <target> <formula>")
-        println("    hexa verify_n6_formula.hexa 155 \"n*J2+sigma-mu\"")
-        println("")
-        println("n6 constants: n=6, sigma=12, tau=4, phi=2, sopfr=5, M3=7, J2=24, P2=28, mu=1")
-        println("tolerance: 5% of target or 0.01 absolute minimum")
-        exit(2)
-    }
+let target_str = argv[2]
+let formula = argv[3]
 
-    let target_str = a[2]
-    let formula = a[3]
+// Python 원자 평가 — verify_formulas.hexa 와 동일 패턴 (eval + n6 ctx)
+let py_script = "import re,sys\n" +
+    "ctx={'n':6,'sigma':12,'tau':4,'phi':2,'sopfr':5,'M3':7,'J2':24,'P2':28,'mu':1}\n" +
+    "target_str=sys.argv[1]; formula=sys.argv[2]\n" +
+    "try: target=float(target_str)\n" +
+    "except ValueError:\n" +
+    "    print(f'FAIL: invalid target: {target_str!r}'); sys.exit(1)\n" +     // @allow-silent-exit (embedded python)
+    "expr=formula.replace('^','**').replace('\u00b2','**2').replace('\u00b3','**3')\n" +
+    "if re.search(r'[^\\x00-\\x7f]',expr):\n" +
+    "    print(f'FAIL: non-ASCII in formula: {formula!r}'); sys.exit(1)\n" +   // @allow-silent-exit (embedded python)
+    "try: computed=eval(expr,{'__builtins__':{}},ctx)\n" +
+    "except Exception as e:\n" +
+    "    print(f'FAIL: eval error: {e}'); sys.exit(1)\n" +                    // @allow-silent-exit (embedded python)
+    "if not isinstance(computed,(int,float)):\n" +
+    "    print(f'FAIL: non-numeric result: {type(computed).__name__}'); sys.exit(1)\n" +  // @allow-silent-exit (embedded python)
+    "computed=float(computed)\n" +
+    "tol=max(0.05*abs(target),0.01)\n" +
+    "diff=abs(computed-target)\n" +
+    "ok=diff<=tol\n" +
+    "status='OK' if ok else 'FAIL'\n" +
+    "print(f'{status}: {formula} = {computed} (target={target}, diff={diff:.4f}, tol={tol:.4f})')\n" +
+    "sys.exit(0 if ok else 1)\n"
 
-    let result = verify(target_str, formula)
-    let ok = result[0]
-    let msg = result[3]
+let cmd = "python3 -c " + "\"" + py_script.replace("\"", "\\\"") + "\" " + "'" + target_str.replace("'", "'\\''") + "' " + "'" + formula.replace("'", "'\\''") + "'"
 
-    if ok == "true" {
-        println("OK: " + msg)
-        exit(0)
-    } else {
-        println("FAIL: " + msg)
-        exit(1)
-    }
+// 실행 — exec() 는 비-zero exit 시 throw, 0 시 stdout 반환
+let mut out: string = ""
+let mut ok = false
+try {
+    out = exec(cmd)
+    ok = true
+} catch e {  // @allow-silent-catch (eprintln logs failure inside body)
+    // python sys.exit(1) (FAIL 케이스) — 메시지는 e.message 에 캡처됨
+    out = to_string(e)
+    ok = false
+    eprintln("[verify_n6_formula] exec returned non-zero (FAIL path): " + to_string(e))
 }
 
-main()
+// out 에는 GATE 디버그 + python source echo + 결과 라인이 섞여있음.
+// 결과 라인은 마지막 비어있지 않은 라인. OK:/FAIL: prefix 로 판정.
+let lines = out.split("\n")
+let mut last: string = ""
+let mut li: i64 = len(lines) - 1
+while li >= 0 {
+    let ln = lines[li].trim()
+    if ln != "" { last = ln; break }
+    li = li - 1
+}
+
+println(last)
+
+if last.starts_with("OK:") {
+    exit(0)
+} else {
+    eprintln("[verify_n6_formula] FAIL — see stdout for details")
+    exit(1)  // @allow-silent-exit (eprintln above is the loud failure signal)
+}
