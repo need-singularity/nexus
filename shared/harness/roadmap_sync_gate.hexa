@@ -94,7 +94,8 @@ fn sync_repo(repo_path: string, roadmap_rel: string) {
             let msg_file = "/tmp/rsync_gate_msg_" + sh("echo $$") + ".txt"
             let body = "chore(roadmap): auto-sync [" + now_iso() + "]\n\nR-ROADMAP-SYNC-L0 gate enforcement.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n"
             let _ = write_file(msg_file, body)
-            let commit_out = sh("cd " + repo_path + " && NEXUS_COMMIT_OK=1 git commit -F " + msg_file + " 2>&1")
+            // -- <path> 로 스코프 제한: roadmap 외 staged 파일 건드리지 않음
+            let commit_out = sh("cd " + repo_path + " && NEXUS_COMMIT_OK=1 git commit -F " + msg_file + " -- " + roadmap_rel + " 2>&1")
             let _ = exec("rm -f " + msg_file)
             log_event(label, "committed", commit_out)
         }
