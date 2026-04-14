@@ -35,6 +35,7 @@ let NEXUS = HOME + "/Dev/nexus"
 let PLAN = NEXUS + "/shared/config/h100_plan.json"
 let HB_DIR = NEXUS + "/shared/state/h100_heartbeat"
 let ALERTS = NEXUS + "/shared/harness/h100_alerts.jsonl"
+let STATE = NEXUS + "/shared/harness/h100_state.json"
 let RUNPOD_CFG = HOME + "/.runpod/config.toml"
 
 fn sh(cmd: string) -> string {
@@ -286,9 +287,52 @@ fn main() {
         actions_taken = actions_taken + 1
     }
 
+    // Write realtime state snapshot (consumed by SPA)
+    write_state(running, costhr, actions_taken, projected, daily)
+
     println("")
     println("guard: " + to_string(actions_taken) + " action(s) emitted → " + ALERTS)
+    println("state: " + STATE)
     if dry { println("(dry-run — no terminations executed)") }
+}
+
+fn write_state(running: int, costhr: string, actions: int, projected: int, daily: int) {
+    let ts = iso_now()
+    let n = plan_pod_count()
+    let mut slots_json = ""
+    let mut i = 0
+    while i < n {
+        let slot = plan_pod_field(i, "slot")
+        let role = plan_pod_field(i, "role")
+        let track = plan_pod_field(i, "track")
+        let kill = plan_pod_int(i, "idle_kill_minutes")
+        let budget = plan_pod_int(i, "budget_usd_per_day_max")
+        let age = hb_age_seconds(slot)
+        let act = action_for_age(age, kill)
+        let comma = if i > 0 { "," } else { "" }
+        slots_json = slots_json + comma + "{" +
+            "\"slot\":\"" + slot + "\"," +
+            "\"role\":\"" + role.replace("\"", "\\\"") + "\"," +
+            "\"track\":\"" + track + "\"," +
+            "\"idle_kill_min\":" + to_string(kill) + "," +
+            "\"budget_usd_day\":" + to_string(budget) + "," +
+            "\"hb_age_sec\":" + to_string(age) + "," +
+            "\"action\":\"" + act + "\"" +
+        "}"
+        i = i + 1
+    }
+    let body = "{" +
+        "\"ts\":\"" + ts + "\"," +
+        "\"running_pods\":" + to_string(running) + "," +
+        "\"cost_per_hr_usd\":" + costhr + "," +
+        "\"projected_24h_usd\":" + to_string(projected) + "," +
+        "\"daily_budget_usd\":" + to_string(daily) + "," +
+        "\"actions_emitted\":" + to_string(actions) + "," +
+        "\"alerts_log\":\"shared/harness/h100_alerts.jsonl\"," +
+        "\"plan_source\":\"shared/config/h100_plan.json\"," +
+        "\"slots\":[" + slots_json + "]" +
+    "}"
+    write_file(STATE, body + "\n")
 }
 
 main()
