@@ -630,7 +630,12 @@
     }
 
     function fmtTime(d) {
-      return d.toLocaleTimeString("ko-KR", { hour12: false });
+      if (!(d instanceof Date) || isNaN(d.getTime())) return "—";
+      try {
+        return d.toLocaleTimeString("ko-KR", { hour12: false });
+      } catch (_) {
+        return d.toISOString().slice(11, 19);
+      }
     }
 
     async function fetchJson(url) {
@@ -820,7 +825,11 @@
       const projected = st.projected_24h_usd != null ? st.projected_24h_usd : 0;
       const daily = st.daily_budget_usd || limits.daily_budget_usd_total || 0;
       const overBudget = projected > daily;
-      const stateTs = st.ts ? new Date(st.ts) : null;
+      let stateTs = null;
+      if (st.ts) {
+        const d = new Date(st.ts);
+        if (!isNaN(d.getTime())) stateTs = d;
+      }
       const ageSec = stateTs ? Math.floor((Date.now() - stateTs.getTime()) / 1000) : null;
 
       elSummary.innerHTML = `
@@ -842,7 +851,7 @@
         <div class="h100-card">
           <div class="lbl">state age</div>
           <div class="val">${fmtAge(ageSec)}</div>
-          <div class="sub">snapshot: ${stateTs ? stateTs.toISOString().replace(".000","").replace("T"," ").replace("Z"," UTC") : "(none)"}</div>
+          <div class="sub">snapshot: ${stateTs ? (() => { try { return stateTs.toISOString().replace(".000","").replace("T"," ").replace("Z"," UTC"); } catch (_) { return "(invalid)"; } })() : "(none)"}</div>
         </div>
       `;
 
