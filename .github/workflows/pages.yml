@@ -34,6 +34,20 @@ jobs:
         run: |
           cp shared/n6/atlas.n6 docs/atlas.n6 || true
           cp shared/dashboard.html docs/dashboard.html || true
+      - name: Resolve symlinks in docs (prevent tar race on growth_bus.jsonl)
+        run: |
+          # Replace any symlinks in docs/ with their current target contents so
+          # upload-pages-artifact's tar step doesn't race against a mutating
+          # symlink target (observed failure: "File removed before we read it").
+          find docs -type l | while read link; do
+            target=$(readlink -f "$link" || true)
+            rm -f "$link"
+            if [ -n "$target" ] && [ -e "$target" ]; then
+              cp -a "$target" "$link" || true
+            else
+              touch "$link"
+            fi
+          done
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
