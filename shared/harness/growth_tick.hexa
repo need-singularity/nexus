@@ -1,9 +1,12 @@
+// @enforce-sandbox  — H-ENFORCE-SANDBOX: 30m 주기 blowup 발사 트리거 (NEXUS_AUTO_EVOLVE)
 // growth_tick.hexa — 자율 성장 P2 트리거 레이어
 // 역할: 30m 주기로 emerge_baseline 상태 점검, 6h+ 무진화 시 자율 발사 또는 경고
 //       NEXUS_AUTO_EVOLVE=1 일 때만 실제 blowup 발사, 기본은 WARN 로그
 // 호출: launchd com.nexus.growth-tick (1800s) 또는 수동
 // usage: hexa run shared/harness/growth_tick.hexa [tick|status|force]
 // 성공 조용, 실패만 stderr.
+
+import "safe_hexa_enforce.hexa"
 
 let HOME = env("HOME")
 let NEXUS = HOME + "/Dev/nexus"
@@ -115,6 +118,7 @@ fn status() {
 }
 
 fn main() {
+    ensure_launchd_sandbox()
     let argv = args()
     let mut mode = "tick"
     if argv.len() >= 3 { mode = argv[2] }

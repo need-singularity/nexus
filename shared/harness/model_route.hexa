@@ -1,3 +1,4 @@
+// @enforce-sandbox  — H-ENFORCE-SANDBOX: task hint → model tier 라우팅 + jsonl 추적
 // model_route.hexa — H-MODEL-ROUTE: task hint → model tier 추천
 // 역할: task_hint 키워드 매칭으로 haiku/sonnet/opus 자동 선택. agent_ledger 와 연계.
 // SSOT: shared/harness/model_route.jsonl (append-only)
@@ -26,6 +27,8 @@
 //
 // sentinel: 성공 시 마지막 라인 `__HARNESS_ROUTE_RESULT__ PASS`
 // 우회: NEXUS_ROUTE_OK=1 (silent skip — JSONL append 만 스킵, stdout 추천은 그대로)
+
+import "safe_hexa_enforce.hexa"
 
 let HOME = env("HOME")
 let JSONL = HOME + "/Dev/nexus/shared/harness/model_route.jsonl"
@@ -198,6 +201,7 @@ fn cmd_status() {
 
 // ─── main dispatcher ───
 fn main() {
+    ensure_launchd_sandbox()
     let argv = args()
     // entry.hexa 가 route 모드를 뺀 rest 만 넘기므로:
     //   직접 호출: hexa run model_route.hexa <hint...>          → argv[2..]

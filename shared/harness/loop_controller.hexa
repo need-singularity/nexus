@@ -1,3 +1,4 @@
+// @enforce-sandbox  — H-ENFORCE-SANDBOX: 자율 루프 감시 + jsonl 반복 스캔 (424줄)
 // loop_controller.hexa — autonomous loop stall + cost drift 감시
 // 역할: nexus 자율 루프(commands.json autonomous 블록)의
 //        ① stall 감지 — mistakes.jsonl 동일 {file,rule,fix} 2회 이상 반복
@@ -19,6 +20,8 @@
 //
 // @no-lock-needed (호출 짧음, atomic append + sed 만 사용)
 // @allow-bare-exec (date/grep/tail/awk/shasum 단발 호출 — perl_timeout 불필요)
+
+import "safe_hexa_enforce.hexa"
 
 let HOME = env("HOME")
 let HARNESS = HOME + "/Dev/nexus/shared/harness"
@@ -403,6 +406,7 @@ fn compute_cost_silent() -> i64 {
 }
 
 fn main() {
+    ensure_launchd_sandbox()
     let argv = args()
     if argv.len() < 3 {
         eprintln("usage: loop_controller.hexa <start|status|stall_check|cost_check|stop>")
