@@ -403,6 +403,13 @@ fn run_extend(project: str, force: bool, dry: bool) -> i64 {
 
 // ─── auto: next; 소진 시 extend → next ──────────────────────────
 
+// ─── L0 roadmap sync gate (post-modify) ─────────────────────────
+fn force_roadmap_sync() {
+    let gate = HARNESS + "/roadmap_sync_gate.hexa"
+    if file_exists(gate) == false { return }
+    let _ = exec(HEXA + " run " + gate + " 2>&1")
+}
+
 fn run_auto(project: str, force: bool) -> i64 {
     let rc = run_next(project)
     if rc == 0 { return 0 }
@@ -411,6 +418,7 @@ fn run_auto(project: str, force: bool) -> i64 {
     println("--- roadmap 소진 감지 → NEXUS 창발 extend ---")
     let ext = run_extend(project, force, false)
     if ext != 0 { return ext }
+    force_roadmap_sync()  // extend 후 즉시 sync
     println("--- 새 phase 추가됨 → next 재시도 ---")
     return run_next(project)
 }
@@ -532,6 +540,11 @@ fn main() {
         exit(delegate_guard(rest))
     } else if cmd == "help" || cmd == "--help" || cmd == "-h" {
         print_usage()
+        exit(0)
+    } else if cmd == "sync" {
+        // 수동 sync 트리거 (디버그/강제용)
+        force_roadmap_sync()
+        println("[roadmap] sync complete")
         exit(0)
     } else {
         eprintln("unknown subcommand: " + cmd)

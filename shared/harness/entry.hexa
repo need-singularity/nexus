@@ -58,7 +58,26 @@ fn wrap_prefix(script: str) -> str {
     return "bash " + WRAPPER + " " + to_string(DISPATCH_TIMEOUT_SEC) + " "
 }
 
+// ─── L0 roadmap sync gate ────────────────────────────────────────
+// 모든 하네스 호출 전 roadmap dirty/unpushed 상태 강제 동기화.
+// self_check, roadmap_sync 자체 호출은 재귀 방지를 위해 skip.
+let ROADMAP_GATE_SKIP = ["self_check"]
+
+fn roadmap_sync_gate(mode: str) {
+    for skip in ROADMAP_GATE_SKIP {
+        if mode == skip { return }
+    }
+    let gate_script = HARNESS + "/roadmap_sync_gate.hexa"
+    if file_exists(gate_script) == false { return }
+    // lockfile 기반 재진입 방지는 gate 내부에서 처리.
+    // 타임아웃 15초 — 네트워크 지연 시 하네스 블로킹 방지.
+    let prefix = ""
+    if file_exists(WRAPPER) { prefix = "bash " + WRAPPER + " 15 " }
+    let _ = exec(prefix + HEXA + " run " + gate_script + " 2>&1")
+}
+
 fn route(mode: str, rest: [str]) {
+    roadmap_sync_gate(mode)
     if mode == "prompt" {
         // H-GIT-FRESH — 사용자 입력 시 30분 stale 감지 + origin drift alert (silent on sync)
         dispatch_file(HARNESS + "/git_fresh.hexa", ["check"])
