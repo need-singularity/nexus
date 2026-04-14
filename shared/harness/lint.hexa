@@ -188,10 +188,9 @@ fn path_in_l0(path: string) -> bool {
 
 fn check_l0_lockdown(path: string) -> string {
     if !path_in_l0(path) { return "" }
-    let msg_raw = exec("cat '" + REPO_ROOT + "/.git/COMMIT_EDITMSG' 2>/dev/null").trim()
-    if msg_raw.index_of("chore(lockdown):") >= 0 { return "" }
-    if msg_raw.index_of("L0-approved") >= 0 { return "" }
-    return "L0|warn|L0 보호 영역 수정 — 커밋 메시지에 'chore(lockdown):' 또는 'L0-approved' 포함 권장"
+    // msg_check 는 commit-msg 훅 단계에서 commit.hexa msg_check 가 최종 검증
+    // pre-commit 단계의 COMMIT_EDITMSG 는 N-1 메시지라 구조적 오탐 원인
+    return "L0|warn|L0 보호 영역 staged — commit msg 에 'chore(lockdown):' 또는 'L0-approved' 권장 (commit-msg 단계 최종 검증)"
 }
 
 // ─── Check 4: pitfalls grep ───
@@ -1759,13 +1758,13 @@ fn check_hexa_exit(path: string) -> string {
     if content.index_of("@allow-hexa-exit") >= 0 { return "" }
     if content.index_of("check_hexa_exit") >= 0 { return "" }
     if content.index_of("H-HEXA-EXIT") >= 0 { return "" }
-    // 1단계: hexa 자식 호출 흔적
-    let call_hits = _to_int0(_str(exec("awk '/exec\\([^)]*\\.hexa|dispatch_file\\([^)]*\\.hexa/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    // 1단계: hexa 자식 호출 흔적 (주석 라인 제외)
+    let call_hits = _to_int0(_str(exec("awk '/exec\\([^)]*\\.hexa|dispatch_file\\([^)]*\\.hexa/ && !/^[[:space:]]*\\/\\//{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if call_hits == 0 { return "" }
-    // 2단계: exit code 의존 키워드 (같은 파일 어디든 — 간이 휴리스틱)
+    // 2단계: exit code 의존 키워드 (같은 파일 어디든 — 간이 휴리스틱, 주석 라인 제외)
     let mut dep_hits = 0
     let mut kinds = ""
-    let rc_hits = _to_int0(_str(exec("awk '/__RC=\\$\\?|echo \\$\\?|exit_code|exit_status/{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
+    let rc_hits = _to_int0(_str(exec("awk '/__RC=\\$\\?|echo \\$\\?|exit_code|exit_status/ && !/^[[:space:]]*\\/\\//{c++} END{print c+0}' '" + full + "' 2>/dev/null")).trim())
     if rc_hits > 0 { dep_hits = dep_hits + rc_hits; kinds = kinds + "exit_code/$?(" + to_string(rc_hits) + ") " }
     if dep_hits == 0 { return "" }
     return "H-HEXA-EXIT|warn|hexa 자식 호출 " + to_string(call_hits) + "건 + exit code 의존 패턴 " + kinds.trim() + "— hexa 런타임은 child exit(N) 을 부모 exec() 로 전파 안 함. stdout marker 검사 권장 (mistakes.jsonl H-HEXA-EXIT). 명시 예외: '// @allow-hexa-exit'"
@@ -2101,13 +2100,12 @@ fn check_n6_jsonpair(path: string) -> string {
     // 이 파일이 added 상태인지 확인
     let st = _str(exec("git diff --cached --name-status -- '" + path + "' 2>/dev/null | head -1")).trim()
     if !st.starts_with("A") { return "" }
-    // 커밋 메시지 마커
-    let msg = _str(exec("cat '" + REPO_ROOT + "/.git/COMMIT_EDITMSG' 2>/dev/null")).trim()
-    if msg.index_of("@allow-no-registry-update") >= 0 { return "" }
     // papers/_registry.json 이 staged 변경 목록에 있는지 (M 또는 A)
     let reg = _str(exec("git diff --cached --name-only 2>/dev/null | grep -E '^papers/_registry\\.json$' | head -1")).trim()
     if reg != "" { return "" }
-    return "N6-JSONPAIR|error|신규 도메인 문서 '" + path + "' 추가 시 papers/_registry.json 업데이트 필수 (// @allow-no-registry-update)"
+    // msg_check (@allow-no-registry-update) 은 commit.hexa msg_check (commit-msg 훅) 최종 검증
+    // pre-commit 단계 COMMIT_EDITMSG 는 N-1 메시지라 구조적 오탐 원인 — path 기반 error 유지
+    return "N6-JSONPAIR|error|신규 도메인 문서 '" + path + "' 추가 시 papers/_registry.json 업데이트 필수 (// @allow-no-registry-update) — commit-msg 단계 최종 검증"
 }
 
 // ─── AG6-S1 (airgenome 전용) — Mac 로컬 heavy compute 실행 전 원격 가드 필수 ───
@@ -2641,11 +2639,9 @@ fn _is_harness_log(path: string) -> bool {
 fn check_harness_modification(path: string) -> string {
     if !path.starts_with("shared/harness/") { return "" }
     if _is_harness_log(path) { return "" }
-    let msg_raw = _str(exec("cat '" + REPO_ROOT + "/.git/COMMIT_EDITMSG' 2>/dev/null")).trim()
-    // 커밋 메시지에 승인 마커 존재 여부
-    if msg_raw.index_of("(harness):") >= 0 { return "" }
-    if msg_raw.index_of("harness-approved") >= 0 { return "" }
-    return "HARNESS-LOCK|error|shared/harness/ 수정 — 커밋 메시지에 '(harness):' prefix 또는 'harness-approved' 필요"
+    // msg_check 는 commit.hexa msg_check (commit-msg 훅) 최종 검증
+    // pre-commit 단계 COMMIT_EDITMSG 는 N-1 메시지라 구조적 오탐 원인 — warn-only 로 완화
+    return "HARNESS-LOCK|warn|staged shared/harness/ — commit msg '(harness):' prefix 또는 'harness-approved' 필요 (commit-msg 단계 최종 검증)"
 }
 
 // ─── Check 8 (공통): 홈 디렉토리 절대경로 하드코딩 금지 (error) ───
@@ -2739,7 +2735,12 @@ fn check_hexa_algorithm(path: string) -> string {
     }
     let ac = _to_int0(_str(exec(sed_clean + " | grep -c 'args()'")).trim())
     if ac > 0 {
-        return "HEXA-ALGO|warn|args() 빈 배열 반환 — env var 또는 기본 모드 사용 권장"
+        // 면제: 같은 파일 내 argv.len() / a.len() / args.len() / `< N` 가드 존재 시 args() 사용 정상
+        // 주의: 'guard' 는 hexa 예약어 — _len_guard 사용
+        let _len_guard = _to_int0(_str(exec("grep -cE '(argv|args|a)\\.len\\(\\)|< *[0-9]+' '" + full + "' 2>/dev/null || echo 0")).trim())
+        if _len_guard == 0 {
+            return "HEXA-ALGO|warn|args() 빈 배열 반환 — env var 또는 기본 모드 사용 권장"
+        }
     }
     return ""
 }
@@ -3211,13 +3212,18 @@ fn check_nozombie_exec_timeout(path: string) -> string {
     let full = REPO_ROOT + "/" + path
     if !file_exists(full) { return "" }
 
+    // 면제: 파일에 wrap_prefix( 정의 또는 호출 존재하면 exec(cmd + ...) 변수형은 이미 wrap 된 것으로 간주
+    let wp_count = _to_int0(_str(exec("grep -c 'wrap_prefix(' '" + full + "' 2>/dev/null || echo 0")).trim())
     // awk 한 번에 카운트: exec( 라인 중 다음 모두 위반
     //   1) safe_exec / _safe_exec_wrap / perl_timeout 토큰 없음
     //   2) @allow-bare-exec 주석 없음
     //   3) fast 명령만 포함하지 않음 (kill|test|cat|date|hostname|printf|mkdir|rm|basename|dirname|wc|head|tail|echo|pwd|stat|ls|touch|chmod|grep|awk|sed|ln)
+    //   4) wrap_prefix( 존재 시 `exec(cmd` 변수형 (문자열 literal 아님) 은 면제
     // 간단 휴리스틱: exec("... 로 시작하는 라인에서 fast cmd prefix 검사
-    let cmd = "awk 'BEGIN{c=0}" +
+    let cmd = "awk -v WP=" + to_string(wp_count) + " 'BEGIN{c=0}" +
               "/exec\\(/ && !/safe_exec/ && !/_safe_exec_wrap/ && !/perl_timeout/ && !/@allow-bare-exec/ {" +
+              // WP>0 인데 exec(cmd 변수형이면 면제
+              " if (WP>0 && /exec\\(cmd/) next;" +
               " line=$0;" +
               // 첫 인자 문자열 추출: exec(" 뒤 ~ 다음 " 까지
               " sub(/.*exec\\(\"/, \"\", line); sub(/\".*/, \"\", line);" +

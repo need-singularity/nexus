@@ -51,6 +51,8 @@ policy (H-NOHOOK, 2026-04-14):
   exempt         shared/archive/, /archive/superseded-, /archive/deprecated_, .git/hooks/{commit-msg,pre-commit,post-commit,pre-push} (H-COMMIT), .githooks/{commit-msg,pre-commit}, *.sample
   bypass         NEXUS_HOOK_OK=1 prefix 또는 파일/경로 내 '@allow-hook' 토큰
 
+msg_check_rules: HARNESS-LOCK / L0 / N6-JSONPAIR (commit-msg 훅 최종 검증 — pre-commit COMMIT_EDITMSG 는 N-1 msg 라 구조적 오탐 회피)
+
 convention (2026-04-14~ 훅 시스템 대체):
   사용자 입력 후       entry.hexa prompt
   Write|Edit 후        entry.hexa post write_edit

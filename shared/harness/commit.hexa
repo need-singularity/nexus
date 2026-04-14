@@ -358,6 +358,138 @@ fn cmd_pre_commit(argv: [string]) {
 // mode: msg_check <msg_file>
 // ═══════════════════════════════════════════════════════════
 
+// ─── msg_check 헬퍼 (lint.hexa 로직 복제 — hexa stage1 include 미지원) ───
+// HARNESS-LOCK / L0 / N6-JSONPAIR 3룰. pre-commit 단계 COMMIT_EDITMSG 구조적 오탐
+// 회피용 — commit-msg 훅에서 실제 msg 받아 최종 검증.
+
+fn _rfind_msg(s: string, ch: string) -> i64 {
+    let n = len(s)
+    let mut i: i64 = n - 1
+    while i >= 0 {
+        if s.substring(i, i + 1) == ch { return i }
+        i = i - 1
+    }
+    return -1
+}
+
+fn _ext_of_msg(path: string) -> string {
+    let dot = _rfind_msg(path, ".")
+    if dot < 0 { return "" }
+    return path.substring(dot, len(path))
+}
+
+fn _basename_of_msg(path: string) -> string {
+    let slash = _rfind_msg(path, "/")
+    if slash < 0 { return path }
+    return path.substring(slash + 1, len(path))
+}
+
+fn _is_harness_log_msg(path: string) -> bool {
+    if path.index_of("_log.jsonl") >= 0 { return true }
+    if path == "shared/harness/mistakes.jsonl" { return true }
+    if path == "shared/harness/autofix_proposals.jsonl" { return true }
+    if path == "shared/harness/rules_usage.jsonl" { return true }
+    if path == "shared/harness/.gc_weekly_cooldown" { return true }
+    return false
+}
+
+// lockdown.json 에서 "path":"..." 값 전체 라인 추출
+fn _l0_path_lines_msg() -> string {
+    let LOCKDOWN = NEXUS + "/shared/lockdown/lockdown.json"
+    if !file_exists(LOCKDOWN) { return "" }
+    return _str(exec("grep -oE '\"path\"[[:space:]]*:[[:space:]]*\"[^\"]+\"' '" + LOCKDOWN + "' 2>/dev/null")).trim()
+}
+
+fn _extract_path_value_msg(line: string) -> string {
+    let last_q = _rfind_msg(line, "\"")
+    if last_q < 0 { return "" }
+    let before = line.substring(0, last_q)
+    let prev_q = _rfind_msg(before, "\"")
+    if prev_q < 0 { return "" }
+    return line.substring(prev_q + 1, last_q)
+}
+
+fn _path_in_l0_msg(path: string) -> bool {
+    let raw = _l0_path_lines_msg()
+    if raw == "" { return false }
+    let lines = raw.split("\n")
+    for ln in lines {
+        let l = _str(ln).trim()
+        if l == "" { continue }
+        let entry = _extract_path_value_msg(l)
+        if entry == "" { continue }
+        let e_len = len(entry)
+        if e_len >= 2 && entry.substring(e_len - 2, e_len) == "/*" {
+            let prefix = entry.substring(0, e_len - 2) + "/"
+            if path.starts_with(prefix) { return true }
+            continue
+        }
+        if e_len >= 1 && entry.substring(e_len - 1, e_len) == "/" {
+            if path.starts_with(entry) { return true }
+            continue
+        }
+        if path == entry { return true }
+    }
+    return false
+}
+
+fn _project_name_msg() -> string {
+    return _str(exec("basename '" + NEXUS + "' 2>/dev/null")).trim()
+}
+
+// 3룰 검증: staged 파일 + raw msg → BLOCK reason or ""
+// 반환: "" = PASS / "harness-lock ..." | "n6-jsonpair ..." = BLOCK
+fn msg_check_rules(raw_msg: string) -> string {
+    let staged = get_staged()
+    let proj = _project_name_msg()
+    // 캐시
+    let has_harness_marker = raw_msg.index_of("(harness):") >= 0 || raw_msg.index_of("harness-approved") >= 0
+    let has_l0_marker = raw_msg.index_of("chore(lockdown):") >= 0 || raw_msg.index_of("L0-approved") >= 0
+    let has_noreg_marker = raw_msg.index_of("@allow-no-registry-update") >= 0
+    // papers/_registry.json 포함 여부 (N6-JSONPAIR 용)
+    let mut reg_staged = false
+    let mut i = 0
+    while i < staged.len() {
+        let f = _str(staged[i])
+        if f == "papers/_registry.json" { reg_staged = true }
+        i = i + 1
+    }
+    // 파일 순회
+    i = 0
+    while i < staged.len() {
+        let f = _str(staged[i])
+        // HARNESS-LOCK
+        if f.starts_with("shared/harness/") && !_is_harness_log_msg(f) {
+            if !has_harness_marker {
+                return "harness-lock: shared/harness/ 수정 — msg '(harness):' prefix 또는 'harness-approved' 필요 (" + f + ")"
+            }
+        }
+        // L0 (warn-only — BLOCK 아님, stderr 경고)
+        if _path_in_l0_msg(f) {
+            if !has_l0_marker {
+                eprintln("[H-COMMIT WARN] L0 보호 영역 " + f + " — msg 에 'chore(lockdown):' 또는 'L0-approved' 권장")
+            }
+        }
+        // N6-JSONPAIR (n6-architecture 전용)
+        if proj == "n6-architecture" {
+            if _ext_of_msg(f) == ".md" {
+                let bn = _basename_of_msg(f)
+                let is_paper = f.starts_with("papers/n6-") && bn != "_registry.json"
+                let is_domain = f.starts_with("domains/") && f.index_of("/_archive/") < 0
+                if (is_paper || is_domain) && !reg_staged && !has_noreg_marker {
+                    // added 상태 확인
+                    let st = _str(exec("cd '" + NEXUS + "' && git diff --cached --name-status -- '" + f + "' 2>/dev/null | head -1")).trim()
+                    if st.starts_with("A") {
+                        return "n6-jsonpair: 신규 도메인 문서 '" + f + "' + papers/_registry.json 미변경 + msg '@allow-no-registry-update' 없음"
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
 // 첫 비어있지 않은 라인 추출
 fn first_line(s: string) -> string {
     let lines = s.split("\n")
@@ -443,6 +575,19 @@ fn cmd_msg_check(argv: [string]) {
     // harness-approved / L0-approved hint
     if raw.contains("harness-approved") || raw.contains("L0-approved") {
         eprintln("[H-COMMIT] approved marker detected")
+    }
+    // 3룰 검증 (HARNESS-LOCK / L0 / N6-JSONPAIR) — lint pre-commit 에서 msg 의존 제거된 대신 여기서 최종 검증
+    let rule_reason = msg_check_rules(raw)
+    if rule_reason != "" {
+        eprintln("[H-COMMIT] msg_check rules BLOCK: " + rule_reason)
+        log_commit("msg_check", "BLOCK", rule_reason)
+        if env("NEXUS_COMMIT_FORCE") == "1" {
+            log_mistake("commit_force", "forced PASS over msg-rule: " + rule_reason)
+            println(SENTINEL_PASS)
+            return
+        }
+        println(SENTINEL_BLOCK + " " + rule_reason)
+        return
     }
     log_commit("msg_check", "PASS", "")
     println(SENTINEL_PASS)
