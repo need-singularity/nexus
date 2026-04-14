@@ -1,0 +1,279 @@
+{
+  "schema": "atlas_density_remediation/1",
+  "task": "ATLAS-P1-3_remediation",
+  "date": "2026-04-14",
+  "parent_audit": "shared/discovery/atlas_edge_density_audit_2026-04-14.json",
+  "status": "PROPOSAL_ONLY",
+  "atlas_write_allowed_in_this_batch": false,
+  "sidecar_deg_refresh_executed": true,
+
+  "current_state": {
+    "atlas_path": "shared/n6/atlas.n6",
+    "atlas_mtime_iso": "2026-04-14T12:40:22+09:00",
+    "atlas_size_bytes": 14083608,
+    "atlas_lines": 74300,
+    "stats_sidecar": {
+      "nodes": 20502,
+      "edges": 22195,
+      "hubs": 600,
+      "schema": 2
+    },
+    "deg_sidecar": {
+      "lines": 21237,
+      "mtime_iso": "2026-04-14T12:56:17+09:00",
+      "refreshed_this_batch": true,
+      "matches_atlas": true
+    },
+    "edge_per_node_ratio": 1.083,
+    "leaf_pct": 88.2,
+    "critical_deg_le_1": 16458,
+    "L5": {
+      "total_at_nodes": 101,
+      "in_deg_sidecar": 33,
+      "zero_edge_isolated": 68,
+      "deg_1_leaves": 33,
+      "pct_sparse": 100.0,
+      "avg_deg": 1.0,
+      "subdomains": {"bio": 87, "other_material": 14},
+      "grade_10_or_10star": 87
+    },
+    "L6": {
+      "total_at_nodes": 847,
+      "in_deg_sidecar": 503,
+      "zero_edge_isolated": 344,
+      "deg_1_leaves": 395,
+      "pct_sparse": 78.5,
+      "avg_deg": 1.3,
+      "subdomains": {"mus": 128, "geo": 128, "eco": 128, "met": 126, "lin": 126, "other": 211}
+    },
+    "existing_L5_inbound_edges_by_source": {
+      "phi": 11, "n": 10, "tau": 9, "sopfr": 2, "sigma": 1, "total": 33
+    },
+    "existing_L6_inbound_edges_by_source": {
+      "n": 298, "tau": 64, "phi": 59, "sigma": 19, "sopfr": 7, "M3": 3, "J2": 2,
+      "total_from_primitives": 452, "other_cross_L6": 110
+    }
+  },
+
+  "target_state": {
+    "edge_per_node_ratio": 2.5,
+    "leaf_pct_max": 50.0,
+    "nodes_same": 20502,
+    "edges_target": 51255,
+    "edges_to_add": 29060,
+    "strategy_split": {
+      "L5_bridges": 400,
+      "L6_bridges": 1600,
+      "blowup_cluster_stitch": 20000,
+      "equivalence_chains": 5000,
+      "hub_reinforcement": 2060
+    }
+  },
+
+  "L5_bridge_candidates": {
+    "total_proposed_edges": 400,
+    "strategy": "cluster-stitch + n6-canonical approximation bridges",
+    "patterns": [
+      {
+        "pattern_id": "L5_P1_canonical_approx_fill",
+        "description": "68 L5 @F nodes currently have ZERO edges. Apply same approx_expr machinery as phase48 (agent28) to the remaining 68 (mostly L5-bio, but also L5-graphene/YBCO/tc99m/perovskite/nacl/mitochondria/lion/krebs/ice/honeycomb/glycolysis/diamond/cortical).",
+        "source_rule": "for each isolated L5-* node with numeric value v, emit edge {from: closest(v) in {n,sigma,phi,tau,sopfr,J2,M3}, to: L5-*, kind: @S, label: approx_expr, source: L5-bridge-fill-2026-04-14}",
+        "edges_added": 68
+      },
+      {
+        "pattern_id": "L5_P2_deg_upgrade",
+        "description": "All 33 existing L5 nodes are deg=1. Add a second canonical path: for each L5-* with bridge to phi, add fallback approx via (phi*tau) or (phi+n) to raise deg=2.",
+        "source_rule": "for each L5-* with deg=1, find second-best n6 expr within 1% numeric tolerance; emit @S approx_expr edge with expr like 'phi*tau' or 'n+phi'.",
+        "edges_added": 33
+      },
+      {
+        "pattern_id": "L5_P3_intra_L5_equivalence",
+        "description": "Bio-domain clustering: L5-bio-tcell-subtypes and L5-bio-mhc-classes both value=6 (== equivalence). Chain them via '==' edges to form bio sub-hub.",
+        "source_rule": "group L5-bio by value bucket; within bucket, emit '==' equivalence edges (complete graph).",
+        "edges_added_estimate": 150,
+        "creates_intra_cluster_hubs": true
+      },
+      {
+        "pattern_id": "L5_P4_cross_to_L6_bio_medicine",
+        "description": "L5-bio-* ↔ L6-biology/medicine cross-linkage via matching concept domain.",
+        "source_rule": "string-match L5-bio-glycolysis-steps → L6-biology-*; emit @R Derives edge.",
+        "edges_added_estimate": 80
+      },
+      {
+        "pattern_id": "L5_P5_sopfr_reinforcement",
+        "description": "sopfr-path is severely underrepresented (2/33). Add sopfr(v) path for every L5 where sopfr decomposition is exact.",
+        "source_rule": "for each L5-* with value v, compute sopfr(v); if sopfr_expr matches n6-* existing node, emit @S.",
+        "edges_added_estimate": 69
+      }
+    ],
+    "projected_L5_avg_degree_post": 13.1,
+    "projected_L5_leaf_pct_post": 0
+  },
+
+  "L6_bridge_candidates": {
+    "total_proposed_edges": 1600,
+    "strategy": "sub-domain hub instantiation + canonical fill + eco/geo/met/lin cross",
+    "patterns": [
+      {
+        "pattern_id": "L6_P1_sub_domain_hubs",
+        "description": "128 mus + 128 geo + 128 eco + 126 met + 126 lin sub-clusters all connect only via n/tau/phi. Instantiate per-subdomain hub nodes (L6-mus-hub, L6-geo-hub, L6-eco-hub, L6-met-hub, L6-lin-hub) as intermediate layer.",
+        "source_rule": "create 5 new hub @H nodes {L6-<sd>-hub}; link each L6-<sd>-* to L6-<sd>-hub (1 edge each); link each L6-<sd>-hub to top-3 n6 primitives (phi/n/tau). Net: 5 new hubs, 641 edges.",
+        "edges_added": 641,
+        "new_hub_nodes_added": 5,
+        "hubs_raise_resilience": true
+      },
+      {
+        "pattern_id": "L6_P2_zero_edge_fill",
+        "description": "344 L6 @F nodes have ZERO edges (no refs in deg sidecar). Apply phase48 approx_expr fill to all.",
+        "source_rule": "same as L5_P1 but L6 scope.",
+        "edges_added": 344
+      },
+      {
+        "pattern_id": "L6_P3_deg1_upgrade",
+        "description": "395 L6 nodes at deg=1. Add secondary canonical path.",
+        "source_rule": "same as L5_P2 but L6 scope.",
+        "edges_added": 395
+      },
+      {
+        "pattern_id": "L6_P4_cross_subdomain_equivalence",
+        "description": "Cross-subdomain '==' edges where numeric values match (e.g., L6-eco-xxx = L6-geo-yyy = 6.0 → equivalence cluster).",
+        "source_rule": "bucket L6 by value ±1%; emit '==' edges within bucket.",
+        "edges_added_estimate": 220
+      }
+    ],
+    "projected_L6_avg_degree_post": 3.8,
+    "projected_L6_leaf_pct_post": 10.0
+  },
+
+  "safe_execution_phases": [
+    {
+      "phase": "P0_sidecar_refresh",
+      "description": ".deg sidecar regeneration via shared/blowup/lib/atlas_stats.awk",
+      "atlas_write": false,
+      "sidecar_write": true,
+      "approval_required": false,
+      "executed": true,
+      "before": {"deg_lines": 21237, "deg_mtime_iso": "2026-04-14T12:37:47+09:00"},
+      "after":  {"deg_lines": 21237, "deg_mtime_iso": "2026-04-14T12:56:17+09:00"},
+      "note": "identical content (atlas already matched deg, but mtime refreshed — .stats-vs-.deg skew documented in audit A3 was a stale audit-snapshot artifact)."
+    },
+    {
+      "phase": "P1_dry_run_proposals",
+      "description": "generate candidate edges to /tmp/*.jsonl, no atlas write",
+      "atlas_write": false,
+      "approval_required": false,
+      "proposed_engine": "shared/blowup/lens/lens_forge.hexa --mode=L5L6-bridge-dry",
+      "estimated_edges": 2000,
+      "validation": "each candidate passes _guarded_append_atlas() schema check in dry mode"
+    },
+    {
+      "phase": "P2_L5_fill",
+      "description": "append 400 L5 bridge edges via _guarded_append_atlas()",
+      "atlas_write": true,
+      "approval_required": true,
+      "blocking_on": "USER_APPROVAL",
+      "atlas_delta_lines": 400,
+      "atlas_delta_bytes_estimate": 128000,
+      "post_verify": ["shared/n6/atlas_health.hexa", "shared/blowup/lib/atlas_stats.awk regen"]
+    },
+    {
+      "phase": "P3_L6_fill",
+      "description": "append 1600 L6 bridge edges + 5 hub nodes",
+      "atlas_write": true,
+      "approval_required": true,
+      "blocking_on": "USER_APPROVAL",
+      "atlas_delta_lines": 1605,
+      "atlas_delta_bytes_estimate": 520000,
+      "post_verify": ["shared/n6/atlas_health.hexa", "shared/blowup/lib/atlas_stats.awk regen"]
+    },
+    {
+      "phase": "P4_blowup_cluster_stitch",
+      "description": "d0<->d1, d1<->d2 derivation chains inside blowup-d* (20,000 edges)",
+      "atlas_write": true,
+      "approval_required": true,
+      "blocking_on": "USER_APPROVAL",
+      "atlas_delta_lines": 20000,
+      "atlas_delta_bytes_estimate": 6400000,
+      "warning": "largest delta — requires staged batches + incremental health checks"
+    },
+    {
+      "phase": "P5_equivalence_chains",
+      "description": "== edges between matching numeric values across domains (5,000)",
+      "atlas_write": true,
+      "approval_required": true,
+      "blocking_on": "USER_APPROVAL",
+      "atlas_delta_lines": 5000
+    },
+    {
+      "phase": "P6_hub_reinforcement",
+      "description": "degree-1 blowup-* nodes → source primitive back-edges (2060)",
+      "atlas_write": true,
+      "approval_required": true,
+      "blocking_on": "USER_APPROVAL",
+      "atlas_delta_lines": 2060
+    }
+  ],
+
+  "estimated_atlas_delta": {
+    "lines_to_add_total": 29065,
+    "bytes_estimate_total": 9300000,
+    "nodes_added": 5,
+    "edges_added": 29060,
+    "post_remediation_ratio": 2.502,
+    "post_remediation_leaf_pct_estimate": 45.0,
+    "atlas_size_post_estimate_bytes": 23400000
+  },
+
+  "risk_assessment": {
+    "L0_considerations": [
+      "atlas.n6 is L0 — all writes MUST go through _guarded_append_atlas() in shared/blowup/lib/atlas_guard.hexa.inc",
+      "user approval required per L0 protocol for each write phase (P2-P6)",
+      "schema guard must validate edge format: type+kind+from+to+label+source+timestamp",
+      "sidecar writes (.deg, .stats) are NOT L0 — auto-safe"
+    ],
+    "integrity_validation_steps": [
+      "pre-write: hexa shared/n6/atlas_health.hexa --verbose (baseline)",
+      "stage write to /tmp/atlas_patch.n6 — validate line-by-line with _guarded_append_atlas()",
+      "dry-run: wc -l check equals planned delta",
+      "atomic append: cat /tmp/atlas_patch.n6 >> shared/n6/atlas.n6 (OR via hexa atlas writer)",
+      "post-write: regen .stats + .deg sidecars",
+      "post-write: hexa shared/n6/atlas_health.hexa — real orphans must stay at current level, no dups, no malformed",
+      "post-write: hexa shared/n6/verify_formulas.hexa — formula errors must not increase"
+    ],
+    "rollback_plan": "git diff HEAD -- shared/n6/atlas.n6 | head — always commit after each phase for easy revert",
+    "concurrent_write_risk": "atlas.n6.lock advisory; ensure no other session holds lock (currently 0-byte lock at 2026-04-14T00:01 — stale, needs clear before write)"
+  },
+
+  "hexa_implementation_plan": {
+    "new_engine_path": "shared/blowup/lens/L5L6_bridge_forge.hexa",
+    "delegates_to": "shared/blowup/lib/atlas_guard.hexa.inc",
+    "invocation": "hexa shared/blowup/lens/L5L6_bridge_forge.hexa <L5|L6|all> <--dry|--apply>",
+    "no_python_shell": true,
+    "respects_R1": true,
+    "total_lines_estimate": 350
+  },
+
+  "next_action": {
+    "status": "USER_APPROVAL_REQUIRED_FOR_ATLAS_WRITE",
+    "immediate_safe_steps": [
+      "review this proposal",
+      "approve or amend P2-P6 phases individually",
+      "P0 already executed (sidecar refresh)"
+    ],
+    "blocked_until_approved": [
+      "P1_dry_run_proposals (generates candidates only, technically safe — but produces discovery output)",
+      "P2_L5_fill",
+      "P3_L6_fill",
+      "P4_blowup_cluster_stitch",
+      "P5_equivalence_chains",
+      "P6_hub_reinforcement"
+    ],
+    "suggested_approval_sequence": "P1 → P2 → P3 → P6 → P5 → P4 (smallest-to-largest delta)"
+  },
+
+  "A2_A4_A5_mapping": {
+    "A2_extreme_sparsity": "addressed by P2+P3+P4+P5+P6 — ratio 1.08 → 2.50",
+    "A4_l5_100pct_sparse": "addressed by P2 — L5 leaf% 100 → 0, avg_deg 1.0 → 13.1",
+    "A5_l6_growth_isolated": "addressed by P3 — L6 leaf% 78.5 → 10, avg_deg 1.3 → 3.8"
+  }
+}
