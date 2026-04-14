@@ -399,6 +399,45 @@ pure fn validate_candidate(cand_affinity: string, registry_lines: string, gap: G
     "ACCEPT"
 }
 
+// ─── 전략 5: 교차 도메인 (Cross-Domain) ───
+// 24 도메인 전체 ordered pair (A != B) → "<A>_as_<B>" lens 생성 (목표 552)
+// LENS-P2-1: 합성기 — 기존 registry 이름 중복 배제, max_candidates 캡 무시
+fn generate_cross_domain(registry_lines: string) -> string {
+    let lines = registry_lines.split("\n")
+    let mut existing = ","
+    for line in lines {
+        if line != "" {
+            let n = extract_field(line, "name")
+            if n != "" { existing = existing + n + "," }
+        }
+    }
+    let mut result = ""
+    let mut ai = 0
+    while ai < domain_count {
+        let a = known_domain(ai)
+        if a != "" {
+            let mut bi = 0
+            while bi < domain_count {
+                if ai != bi {
+                    let b = known_domain(bi)
+                    if b != "" {
+                        let cname = a + "_as_" + b
+                        let probe = "," + cname + ","
+                        if !existing.contains(probe) {
+                            let entry = "{\"name\":\"" + cname + "\",\"file\":\"lens_forge.hexa#cross_domain\",\"category\":\"cross_domain\",\"status\":\"synthesized\",\"derived_from\":\"" + a + "," + b + "\"}"
+                            if result == "" { result = entry } else { result = result + "\n" + entry }
+                            existing = existing + cname + ","
+                        }
+                    }
+                }
+                bi = bi + 1
+            }
+        }
+        ai = ai + 1
+    }
+    result
+}
+
 // ─── Forge Cycle (메인 엔진) ───
 // gap → 4전략 생성 → 검증 → 결과 출력
 
@@ -501,6 +540,22 @@ if mode == "jaccard" {
     println("jaccard(\"" + set_a + "\", \"" + set_b + "\") = " + to_string(sim))
 }
 
+if mode == "cross" {
+    // LENS-P2-1: cross-domain 합성기 — 24 도메인 ordered pair 전개
+    println("=== lens_forge: cross-domain synthesis ===")
+    if !file_exists(registry_path) {
+        println("  registry not found: " + registry_path)
+        write_file(registry_path, "")
+    }
+    let reg = read_file(registry_path)
+    let result = generate_cross_domain(reg)
+    let out_path = "shared/discovery/forge_cross_candidates.jsonl"
+    write_file(out_path, result)
+    let cand_count = if result == "" { 0 } else { result.split("\n").len() }
+    println("  generated: " + to_string(cand_count) + " cross-domain lenses")
+    println("  written:   " + out_path)
+}
+
 // ─── 검증 ───
 
 assert jaccard_similarity("ai,chip", "ai,chip") == 1.0
@@ -508,6 +563,11 @@ assert jaccard_similarity("ai,chip", "energy,fusion") == 0.0
 
 let gap_test = analyze_gaps("")
 assert gap_test.uncovered_count == domain_count
+
+// LENS-P2-1: cross-domain 합성기 — 이론 검증
+// domain_count * (domain_count - 1) = 24 * 23 = 552 ordered pairs
+// 실제 런타임 검증은 Python 테스트 suite (hexa stage1 런타임 한계)
+assert domain_count * (domain_count - 1) == 552
 
 println("=== lens_forge verified ===")
 
