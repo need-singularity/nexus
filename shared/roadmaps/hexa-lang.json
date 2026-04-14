@@ -17,19 +17,28 @@
     "COMPILER": {
       "owner": "$HEXA_LANG/self/",
       "host": "local+hetzner",
-      "independent_of": ["RUNTIME", "SELFHOST"],
+      "independent_of": [
+        "RUNTIME",
+        "SELFHOST"
+      ],
       "_comment": "build_c.hexa AOT 코드젠 + hexa_cc 파서 진화"
     },
     "RUNTIME": {
       "owner": "$HEXA_LANG/src/",
       "host": "local+hetzner",
-      "independent_of": ["COMPILER", "SELFHOST"],
+      "independent_of": [
+        "COMPILER",
+        "SELFHOST"
+      ],
       "_comment": "Rust 인터프리터 + fused 빌트인 + tagged-value 런타임 전환"
     },
     "SELFHOST": {
       "owner": "$HEXA_LANG/self/native/",
       "host": "local",
-      "independent_of": ["COMPILER", "RUNTIME"],
+      "independent_of": [
+        "COMPILER",
+        "RUNTIME"
+      ],
       "_comment": "hexa_cc → build_c.c → gcc → native 체인 + 부트스트랩 검증"
     }
   },
@@ -289,7 +298,9 @@
               "id": "RT-P3-2",
               "task": "subscripted value(533) + incompatible_type(494) 카테고리 우선 해소",
               "status": "todo",
-              "depends_on": ["RT-P3-1"],
+              "depends_on": [
+                "RT-P3-1"
+              ],
               "done_criteria": "gcc errors 1546 → 0, native interpreter binary 생성"
             }
           ]
@@ -300,16 +311,29 @@
             {
               "id": "SH-P3-1",
               "task": "self/native/hexa_v2 — native interpreter smoke test: ./hexa_native hello.hexa 정상 실행",
-              "status": "todo",
-              "depends_on": ["RT-P3-2"],
-              "done_criteria": "native interpreter 153 tests PASS (기존 Rust 인터프리터와 동일 결과)"
+              "status": "partial",
+              "depends_on": [
+                "RT-P3-2"
+              ],
+              "done_criteria": "native interpreter 153 tests PASS (기존 Rust 인터프리터와 동일 결과)",
+              "completed_at": "2026-04-14",
+              "note": "baseline binary build/artifacts/hexa_native (438KB, 2026-04-13, [postfix]/[primary] debug): 41/234 native PASS / 18/234 byte-match Rust 148. 2026-04-14 fix session 발견: 현 build/artifacts/hexa_native.c (22732 lines, [DBG] debug)는 baseline source와 다름 (build/ gitignore, baseline .c 소실). 재빌드 시 SIGSEGV in tokenize() → 0/234 회귀. VB1 정확화: 1546→20 default gcc errors (76.7x 감소), permissive flags(-Wno-error=int-conversion -include unistd.h)로 compile rc=0 가능하나 runtime 회귀 잔존. baseline 보호 (do_not list in shared/convergence/hexa-lang.json#VB1.do_not). 153 PASS 게이트는 (1) interpreter.hexa→클린 .c 재생성 + (2) RT-P3-1 tagged-value runtime 머지 의존. evidence: shared/discovery/hexalang_vb1_fix_2026-04-14.json + shared/discovery/hexalang_p3_sh_2026-04-14.json",
+              "fix_session_2026_04_14": "diagnosis-only — codegen/interpreter source 무수정. baseline binary 보존, regression 발견 + do_not 명문화. VB1 progress 정확화."
             },
             {
               "id": "SH-P3-2",
               "task": "VB1 해소 공식화 — pending_blockers VB1 DONE 선언 + convergence hexa-lang.json 업데이트",
-              "status": "todo",
-              "depends_on": ["SH-P3-1"],
-              "ssot_ref": "shared/convergence/hexa-lang.json#pending_blockers/VB1"
+              "status": "blocked",
+              "depends_on": [
+                "SH-P3-1"
+              ],
+              "ssot_ref": "shared/convergence/hexa-lang.json#pending_blockers/VB1",
+              "blocked_by": [
+                "SH-P3-1",
+                "RT-P3-1",
+                "RT-P3-2"
+              ],
+              "note": "VB1 (interpreter_compile: 1546 gcc type errors long↔hexa_arr cast) 미해소 — RT/COMP 트랙. SH-P3-1 측정 결과(18/234 byte-identical, 21 diff)가 잔존 cast 버그 정황과 일치. shared/convergence/hexa-lang.json#pending_blockers/VB1 미수정 (fabrication 회피, 에이전트 정직 보고). VB1 DONE 조건: (1) RT-P3-1/-2 머지, (2) 스모크 재실행 ≥148 byte-identical match. 별도 변경 없음. evidence: shared/discovery/hexalang_p3_sh_2026-04-14.json"
             }
           ]
         }
@@ -368,14 +392,19 @@
               "id": "SH-P4-1",
               "task": "end-to-end self-host — native hexa binary가 interpreter.hexa를 컴파일 → 동일 출력 검증",
               "status": "todo",
-              "depends_on": ["COMP-P4-1", "RT-P4-1"],
+              "depends_on": [
+                "COMP-P4-1",
+                "RT-P4-1"
+              ],
               "done_criteria": "hexa_native self/build_c.hexa interpreter.hexa → output == Rust-hexa output (byte-identical C)"
             },
             {
               "id": "SH-P4-2",
               "task": "SELF_HOSTING_P2 골화 업그레이드 — scaffolded_by_design → PASS (end-to-end 달성)",
               "status": "todo",
-              "depends_on": ["SH-P4-1"],
+              "depends_on": [
+                "SH-P4-1"
+              ],
               "ssot_ref": "shared/convergence/hexa-lang.json#SELF_HOSTING_P2"
             },
             {
