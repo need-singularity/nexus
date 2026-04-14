@@ -26,6 +26,32 @@ fn _safe_hexa_mode() -> string {
     return m
 }
 
+// breach → sandbox_breaches.jsonl append. 실패 시 silent (protection 본질은 stderr).
+// 경로: ~/Dev/nexus/shared/harness/sandbox_breaches.jsonl (append-only, 표준 nexus 관례)
+// 스키마: {ts, pid, ppid, mode, script, caller_cmd}
+fn _log_breach(mode: string) {
+    let home = env("HOME")
+    if home.len() == 0 { return }
+    let log = home + "/Dev/nexus/shared/harness/sandbox_breaches.jsonl"
+    let ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim()
+    let pid = exec("echo $$").trim()
+    let ppid = exec("ps -o ppid= -p $$").trim()
+    let argv = args()
+    let mut script = ""
+    if argv.len() > 1 { script = argv[1] }
+    // caller: ppid 의 커맨드라인 (shim 경유 추적)
+    let caller_cmd = exec("ps -o command= -p " + ppid + " 2>/dev/null | head -c 120").trim().replace("\"", "\\\"")
+    let line = "{\"ts\":\"" + ts + "\",\"pid\":" + pid + ",\"ppid\":" + ppid +
+               ",\"mode\":\"" + mode + "\",\"script\":\"" + script.replace("\"", "\\\"") +
+               "\",\"caller\":\"" + caller_cmd + "\"}"
+    // append-only, 실패 silent
+    try { exec("printf '%s\\n' " + _shq(line) + " >> " + _shq(log)) } catch e {}
+}
+
+fn _shq(s: string) -> string {
+    return "'" + s.replace("'", "'\\''") + "'"
+}
+
 fn ensure_launchd_sandbox() {
     let mode = _safe_hexa_mode()
     if mode == "off" { return }
@@ -35,6 +61,8 @@ fn ensure_launchd_sandbox() {
     eprintln("[safe_hexa_enforce]   jetsam=180 (Terminal 동급) → OOM 시 Terminal 동반 사망 위험")
     eprintln("[safe_hexa_enforce]   해결: hexa shim (~/Dev/nexus/shared/scripts/bin/hexa)")
     eprintln("[safe_hexa_enforce]   override: SAFE_HEXA_MODE=off")
+
+    _log_breach(mode)
 
     if mode == "strict" {
         eprintln("[safe_hexa_enforce] STRICT — 차단, exit 9")
