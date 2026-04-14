@@ -68,9 +68,10 @@ if [[ -z "$SYS_PROMPT" ]]; then
 fi
 
 # --disallowedTools 로 모든 도구 차단 — 순수 판단만
+# NOTE: --disallowedTools 는 variadic → 마지막 positional prompt 삼킴. 콤마 구분 단일 인자.
 RESULT=$("$CLAUDE_BIN" -p --effort "$EFFORT" \
     --append-system-prompt "$SYS_PROMPT" \
-    --disallowedTools "Bash" "Edit" "Write" "Read" "Glob" "Grep" "Task" "WebFetch" "WebSearch" \
+    --disallowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,WebFetch,WebSearch" \
     "$PAYLOAD" 2>&1)
 
 CLAUDE_EXIT=$?
