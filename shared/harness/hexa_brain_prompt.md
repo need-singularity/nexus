@@ -32,11 +32,24 @@ JSONL **단 한 줄**. 앞뒤 설명·markdown·코드블록·질문 금지.
 - idle: ss% < 30 AND wk% < 80
 - hot: ss% ≥ 80
 
-### recommend (비어도 됨)
-- 특정 hexa 파일 반복 runaway → "해당 파일 stage0 OOM 패턴 조사: <파일명>"
-- load 지속 상승 → "유휴 계정(claude6) 으로 heavy 작업 분산"
-- 메모리 파편화 → "claude Terminal 세션 일부 종료 권장"
-- 평상시 → `"recommend":[]`
+### recommend — 자원 최적화 기회가 보이면 proactively 제안
+
+**트리거 조건** (하나라도 해당되면 반드시 recommend 포함):
+- reflex kill/degrade 최근 발생 → "hexa 파일 stage0 OOM 패턴 조사: <파일명>"
+- load 지속 > 8 → "유휴 계정(<이름>) 으로 heavy 작업 분산"
+- disk cache > 500M 계정 여러 개 (claude*/projects) → "hexa_janitor report 실행 후 오래된 캐시 정리 검토"
+- idle claude processes count >= 2 → "hexa_janitor clean --yes 로 idle 세션 정리"
+- 계정 wk% >= 90% → "<계정> 휴식 — wk 리셋까지 대기"
+- mem pressure (pages free < 5% 등) → 구체 액션 (특정 proc 재기동 등)
+- **dispatch 정책 위반** (dispatch policy check 에 `violation:true`) → "heavy 작업 mac 위반 — PID <pid> 중지 후 <target_host> 에 재실행 (dispatch_state.selection.heavy=<host>)"
+- **반복 offender** (patterns 에 repeat offender N 회) → "<파일명> 24h 내 N회 runaway — hexa_stage0 OOM 패턴 의심, core 분석 필요"
+
+**평상시** (모든 트리거 miss): `"recommend":[]`
+
+**중요**: 
+- recommend 는 auto-queue 로 간다 (1h dedup).
+- 구체적·명령형으로 쓰기. ❌"모니터링 강화" / ⭕"hexa_janitor report 실행"
+- 하나의 rec 에 한 가지 액션만. 여러 액션이면 배열 여러 항목.
 
 ### urgent
 - true: 5분 내에 인간 개입 필요할 정도

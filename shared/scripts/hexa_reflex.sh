@@ -36,8 +36,13 @@ NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 emit() {
     local kind="$1" pid="$2" cpu="$3" etime="$4" action="$5" reason="$6" extra="${7:-{\}}"
-    printf '{"ts":"%s","tier":1,"kind":"%s","pid":%s,"cpu":%s,"etime":%s,"action":"%s","reason":"%s","extra":%s}\n' \
-        "$NOW_ISO" "$kind" "$pid" "$cpu" "$etime" "$action" "$reason" "$extra" >> "$LOG"
+    # 커맨드 추출 (proc 이 아직 살아있을 때만, 죽은 뒤엔 빈문자열)
+    local cmd=""
+    if [[ "$pid" != "0" ]]; then
+        cmd=$(ps -p "$pid" -o command= 2>/dev/null | head -c 200 | sed 's/"/\\"/g; s/\\/\\\\/g')
+    fi
+    printf '{"ts":"%s","tier":1,"kind":"%s","pid":%s,"cpu":%s,"etime":%s,"action":"%s","reason":"%s","cmd":"%s","extra":%s}\n' \
+        "$NOW_ISO" "$kind" "$pid" "$cpu" "$etime" "$action" "$reason" "$cmd" "$extra" >> "$LOG"
 }
 
 # 1) load avg 1m 정수부

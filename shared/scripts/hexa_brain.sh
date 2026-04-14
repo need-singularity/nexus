@@ -34,6 +34,32 @@ REFLEX_ACTIVE=0
 [[ -d "$LOG_DIR/hexa_reflex_state" ]] && \
     REFLEX_ACTIVE=$(find "$LOG_DIR/hexa_reflex_state" -type f 2>/dev/null | wc -l | tr -d ' ')
 
+# 대용량 claude 캐시 (정리 대상 추정)
+DISK_HOT=$(du -sh "$HOME"/.claude-claude*/projects 2>/dev/null \
+    | awk '{ s=$1; n=s+0; u=substr(s,length(s)); if (u=="G" || (u=="M" && n>=400)) print $1"  "$2 }' \
+    | head -5)
+[[ -z "$DISK_HOT" ]] && DISK_HOT="(none over 400M)"
+
+# 유휴 claude 프로세스 수
+IDLE_CLAUDES=$(ps -eo pid=,stat=,pcpu=,etime=,command= | awk '
+    function hrs(s,   p,n,d,hms,h) {
+        d=0; h=0; n=split(s,p,"-")
+        if (n==2) { d=p[1]; s=p[2] }
+        n=split(s,hms,":")
+        if (n==3) h=hms[1]
+        return d*24+h
+    }
+    /claude --effort/ && $3+0 < 0.5 && $2 ~ /^S/ && hrs($4) >= 4 { c++ }
+    END { print c+0 }')
+
+# dispatch 정책 위반 감지 (L2)
+DISPATCH_CHECK=$("$NEXUS/shared/scripts/hexa_dispatch_check.sh" 2>/dev/null)
+[[ -z "$DISPATCH_CHECK" ]] && DISPATCH_CHECK='{"violation":false,"reason":"checker unavailable"}'
+
+# 패턴 분석 (L3) — 반복 offender + escalate 통계
+PATTERNS_HINT=$("$NEXUS/shared/scripts/hexa_patterns.sh" brain-hint 2>/dev/null)
+[[ -z "$PATTERNS_HINT" ]] && PATTERNS_HINT="patterns: analyzer unavailable"
+
 # PROMPT 조립
 PAYLOAD=$(cat <<EOF
 ## Vitals snapshot (UTC $(now_iso))
@@ -52,6 +78,18 @@ $RECENT_REFLEX
 
 ### claude account utilization
 $CL_STATUS
+
+### disk cache hot (claude project states)
+$DISK_HOT
+
+### idle claude processes (>=4h sleep, 0% CPU)
+count=$IDLE_CLAUDES
+
+### dispatch policy check (AG6 — heavy 가 mac 이 아닐 때 mac 에서 heavy 중이면 위반)
+$DISPATCH_CHECK
+
+### patterns (L3 — 반복 offender + 통계)
+$PATTERNS_HINT
 
 ---
 
@@ -96,6 +134,20 @@ if printf '%s' "$RESULT" | tail -1 | jq -e . >/dev/null 2>&1; then
             [[ -z "$rec" ]] && continue
             "$ACTIONS_BIN" add brain "$rec" 1 >/dev/null 2>&1 || true
         done
+    fi
+
+    # CRIT / urgent=true → macOS push notification (L1.2)
+    BRAIN_STATUS=$(printf '%s' "$BRAIN_JSON" | jq -r '.status // ""' 2>/dev/null)
+    BRAIN_URGENT=$(printf '%s' "$BRAIN_JSON" | jq -r '.urgent // false' 2>/dev/null)
+    if [[ "$BRAIN_STATUS" == "CRIT" ]] || [[ "$BRAIN_URGENT" == "true" ]]; then
+        SUMMARY=$(printf '%s' "$BRAIN_JSON" | jq -r '.summary // "hexa-brain alert"' 2>/dev/null)
+        CAUSE=$(printf '%s' "$BRAIN_JSON" | jq -r '.cause // ""' 2>/dev/null)
+        MSG="$SUMMARY"
+        [[ -n "$CAUSE" ]] && [[ "$CAUSE" != "null" ]] && MSG="$MSG — $CAUSE"
+        # osascript — AppleScript 인자 escape
+        MSG_ESC=$(printf '%s' "$MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        TITLE="airgenome $BRAIN_STATUS"
+        /usr/bin/osascript -e "display notification \"$MSG_ESC\" with title \"$TITLE\" sound name \"Basso\"" 2>/dev/null || true
     fi
 fi
 
