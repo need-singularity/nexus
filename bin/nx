@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# nx — nexus project CLI (type=app 설치 + 실행 관리)
+#
+# 사용:
+#   nx install <name>       type=app 프로젝트 빌드 + /Applications 교체 배포
+#   nx uninstall <name>     /Applications/<bundle>.app 제거 (+ launchd bootout)
+#   nx open <name>          /Applications/<bundle>.app 실행 (open -a)
+#   nx list                 type=app 프로젝트 목록 + 배포 상태
+#   nx status [name]        launchd + .app 설치 상태
+#   nx help                 이 도움말
+#
+# 강제: type != "app" 이면 install/uninstall 거부. harness 가 단일 진입점.
+set -euo pipefail
+
+HOME_DIR="${HOME:-/Users/$(whoami)}"
+PROJECTS_JSON="$HOME_DIR/Dev/nexus/shared/config/projects.json"
+HARNESS="$HOME_DIR/Dev/nexus/shared/harness/app_build.hexa"
+HEXA="$HOME_DIR/Dev/hexa-lang/hexa"
+DEV_DIR_REL="$(jq -r '.dev_dir // "Dev"' "$PROJECTS_JSON" 2>/dev/null || echo Dev)"
+DEV="$HOME_DIR/$DEV_DIR_REL"
+
+usage() {
+    cat <<'USAGE'
+nx — nexus project CLI (type=app 관리)
+
+  nx install <name>       build + /Applications 교체 (harness 강제 경유)
+  nx uninstall <name>     /Applications/<bundle>.app 제거 + launchd bootout
+  nx open <name>          open -a <bundle> (GUI 실행)
+  nx list                 type=app 프로젝트 목록 + 설치 상태
+  nx status [name]        launchd + .app 설치 상태 한눈에
+  nx help                 이 도움말
+
+강제: type != "app" 인 프로젝트는 install/uninstall 거부.
+USAGE
+}
+
+get_type() {
+    jq -r ".projects.$1.type // \"\"" "$PROJECTS_JSON" 2>/dev/null
+}
+
+get_bundle() {
+    jq -r ".projects.$1.app.bundle_name // \"\"" "$PROJECTS_JSON" 2>/dev/null
+}
+
+get_apps_dir() {
+    jq -r ".projects.$1.app.applications_dir // \"/Applications\"" "$PROJECTS_JSON" 2>/dev/null
+}
+
+assert_app_type() {
+    local name="$1"
+    local t
+    t="$(get_type "$name")"
+    if [ "$t" != "app" ]; then
+        echo "❌ nx: project '$name' type='$t' — app 아님. install/uninstall 거부." >&2
+        exit 2
+    fi
+}
+
+cmd_install() {
+    local name="$1"
+    assert_app_type "$name"
+    if [ ! -x "$HEXA" ]; then
+        echo "❌ nx: hexa interpreter 없음: $HEXA" >&2; exit 1
+    fi
+    if [ ! -f "$HARNESS" ]; then
+        echo "❌ nx: harness 없음: $HARNESS" >&2; exit 1
+    fi
+    exec "$HEXA" run "$HARNESS" "$name"
+}
+
+cmd_uninstall() {
+    local name="$1"
+    assert_app_type "$name"
+    local bundle apps_dir
+    bundle="$(get_bundle "$name")"
+    apps_dir="$(get_apps_dir "$name")"
+    local dest="$apps_dir/$bundle"
+
+    # launchd bootout first — menubar 등 해당 프로젝트 관련 LaunchAgent
+    shopt -s nullglob
+    local plists=(
+        "$HOME/Library/LaunchAgents/com.$name".*.plist
+        "$HOME/Library/LaunchAgents/com.need-singularity.$name".*.plist
+    )
+    for plist in "${plists[@]}"; do
+        [ -f "$plist" ] || continue
+        local label
+        label="$(basename "$plist" .plist)"
+        launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    done
+    shopt -u nullglob
+
+    # launcher shim 제거
+    local launcher="$HOME/.local/bin/$name.app-launcher"
+    [ -f "$launcher" ] && rm -f "$launcher"
+
+    if [ -d "$dest" ]; then
+        rm -rf "$dest"
+        echo "✅ removed: $dest"
+    else
+        echo "⬡ nothing to remove — $dest 없음"
+    fi
+}
+
+cmd_open() {
+    local name="$1"
+    assert_app_type "$name"
+    local bundle apps_dir
+    bundle="$(get_bundle "$name")"
+    apps_dir="$(get_apps_dir "$name")"
+    local dest="$apps_dir/$bundle"
+    if [ ! -d "$dest" ]; then
+        echo "❌ nx: $dest 없음 — 먼저 'nx install $name'" >&2
+        exit 3
+    fi
+    open "$dest"
+}
+
+cmd_list() {
+    echo "⬡ nx type=app 프로젝트"
+    local names
+    names="$(jq -r '.projects | to_entries[] | select(.value.type=="app") | .key' "$PROJECTS_JSON")"
+    for name in $names; do
+        local bundle apps_dir dest status
+        bundle="$(get_bundle "$name")"
+        apps_dir="$(get_apps_dir "$name")"
+        dest="$apps_dir/$bundle"
+        if [ -d "$dest" ]; then
+            status="✅ installed"
+        else
+            status="⬜ not installed"
+        fi
+        printf "  %-12s  %-16s  %s\n" "$name" "$bundle" "$status"
+    done
+}
+
+cmd_status() {
+    local name="${1:-}"
+    if [ -n "$name" ]; then
+        assert_app_type "$name"
+        local bundle apps_dir dest
+        bundle="$(get_bundle "$name")"
+        apps_dir="$(get_apps_dir "$name")"
+        dest="$apps_dir/$bundle"
+        echo "⬡ nx status $name"
+        echo "  bundle:  $bundle"
+        echo "  dest:    $dest"
+        if [ -d "$dest" ]; then
+            echo "  state:   ✅ installed"
+            local bin
+            bin="$(jq -r '.CFBundleExecutable // "?"' <(plutil -convert json -o - "$dest/Contents/Info.plist" 2>/dev/null) 2>/dev/null || echo '?')"
+            echo "  exec:    $dest/Contents/MacOS/$bin"
+            ls -la "$dest/Contents/MacOS" 2>/dev/null | tail -n +2 | head -5
+        else
+            echo "  state:   ⬜ not installed"
+        fi
+        local procs
+        procs="$(pgrep -fl "$dest" 2>/dev/null | head -3)"
+        if [ -n "$procs" ]; then
+            echo "  running: $procs"
+        else
+            echo "  running: (none)"
+        fi
+    else
+        cmd_list
+    fi
+}
+
+main() {
+    case "${1:-help}" in
+        install)   shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_install "$1" ;;
+        uninstall) shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_uninstall "$1" ;;
+        open|run)  shift; [ $# -ge 1 ] || { usage; exit 1; }; cmd_open "$1" ;;
+        list|ls)   cmd_list ;;
+        status)    shift; cmd_status "${1:-}" ;;
+        help|-h|--help) usage ;;
+        *)         echo "❌ unknown: $1"; usage; exit 1 ;;
+    esac
+}
+
+main "$@"
