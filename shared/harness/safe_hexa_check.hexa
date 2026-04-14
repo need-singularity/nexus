@@ -1,0 +1,33 @@
+// safe_hexa_check.hexa — CLI wrapper for safe_hexa_enforce 라이브러리
+//
+// 사용:
+//   hexa run safe_hexa_check.hexa check   # exit 0:sandbox OK, 1:raw (무방비)
+//   hexa run safe_hexa_check.hexa ensure  # SAFE_HEXA_MODE 에 따라 warn 또는 exit 9
+
+import "safe_hexa_enforce.hexa"
+
+fn main() {
+    let argv = args()
+    let mut action = "check"
+    if argv.len() > 2 { action = argv[2] }
+
+    if action == "check" {
+        if _in_launchd_sandbox() {
+            println("OK: inside launchd sandbox")
+            exit(0)
+        }
+        println("WARN: outside launchd sandbox (raw hexa — jetsam=180)")
+        exit(1)
+    }
+
+    if action == "ensure" {
+        ensure_launchd_sandbox()
+        println("OK")
+        exit(0)
+    }
+
+    eprintln("usage: safe_hexa_check <check|ensure>")
+    exit(2)
+}
+
+main()
