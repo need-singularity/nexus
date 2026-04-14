@@ -20,7 +20,9 @@
     "reject": "pre_tool_guard 에서 stdout REJECT + stderr — Write/Edit/Bash 호출 차단",
     "error": "lint.hexa 가 error level 로 기록 + pre-commit 차단",
     "deny": "Claude Code permissions.deny 패턴 매칭 — tool 호출 자체 거부",
-    "block": "commit-msg 훅이 커밋 메시지 검증 실패 → commit abort"
+    "block": "commit-msg 훅이 커밋 메시지 검증 실패 → commit abort",
+    "inject_data": "prompt 단계에서 SSOT 실제 데이터 자동 dump — hint 가 아닌 raw 자료 context 주입",
+    "dispatch": "entry.hexa route — sub-module 실행 (info, non-blocking)"
   },
   "rules": [
     {
@@ -296,15 +298,42 @@
     },
     {
       "id": "H-PROJ-ALL",
-      "desc": "전체/모든 프로젝트 맥락 발화 시 projects.json SSOT 참조 힌트",
+      "desc": "전체/프로젝트 목록/정리/설계 맥락 발화 시 projects.json SSOT 데이터 자동 주입 (hint 아님, 실 자료 dump)",
       "scope": "global",
-      "bypass": [],
+      "bypass": ["env:NEXUS_PROJ_ALL_OK=1", "path:@allow-proj-all"],
+      "triggers": [
+        "전체 프로젝트",
+        "모든 프로젝트",
+        "프로젝트 전부",
+        "프로젝트 목록",
+        "프로젝트 리스트",
+        "프로젝트 정리",
+        "프로젝트 설계",
+        "프로젝트 다시",
+        "all projects",
+        "every project",
+        "project list"
+      ],
       "layers": {
         "prompt": {
           "file": "shared/harness/prompt_scan.hexa",
           "fn": "check_proj_all",
-          "action": "warn"
+          "action": "inject_data",
+          "module": "shared/harness/projects_list.hexa",
+          "mode": "table"
+        },
+        "entry_route": {
+          "file": "shared/harness/entry.hexa",
+          "mode": "projects",
+          "module": "shared/harness/projects_list.hexa",
+          "action": "dispatch"
         }
+      },
+      "ssot": {
+        "data": "shared/config/projects.json",
+        "schema_version": 4,
+        "categories": ["core(7)", "auxiliary", "launch_ops", "experimental", "private", "archived"],
+        "core_projects": ["nexus", "anima", "n6-architecture", "papers", "hexa-lang", "void", "airgenome"]
       }
     },
     {

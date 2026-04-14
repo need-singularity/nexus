@@ -1,0 +1,107 @@
+// projects_list.hexa — projects.json SSOT 쿼리 + 포맷 출력 (H-PROJ-ALL 코드 강제 실체)
+// usage: hexa run shared/harness/projects_list.hexa <mode>
+//   list       — core 프로젝트 이름 newline-delimited
+//   table      — core 7 + 하위 카테고리 요약 (default)
+//   json       — categories + schema 요약 JSON
+//   full       — 전체 projects.json pretty
+//   names      — 모든 카테고리 이름 flat (private/archived 제외)
+//   categories — .categories 블록만
+//
+// SSOT: shared/config/projects.json (schema_version 4)
+// 레지스트리: shared/harness/enforcement_registry.json (H-PROJ-ALL)
+// 호출자: prompt_scan.hexa check_proj_all / entry.hexa projects mode
+
+let HOME = env("HOME")
+let PROJECTS_JSON = HOME + "/Dev/nexus/shared/config/projects.json"
+
+fn print_list() {
+    let cmd = "/usr/bin/jq -r '.categories.core[]' '" + PROJECTS_JSON + "' 2>&1"
+    let out = to_string(exec(cmd)).trim()
+    if out.len() > 0 { println(out) }
+}
+
+fn print_table() {
+    println("[projects.json — SSOT shared/config/projects.json]")
+    let meta_cmd = "/usr/bin/jq -r '\"schema \\(._meta.schema_version)  updated \\(._meta.updated)  dev_dir \\(.dev_dir)\"' '" + PROJECTS_JSON + "' 2>&1"
+    let meta = to_string(exec(meta_cmd)).trim()
+    if meta.len() > 0 { println(meta) }
+
+    println("")
+    println("[core 7] icon  name  role  target")
+    let core_cmd = "/usr/bin/jq -r '.categories.core[] as $n | .projects[$n] // {} | \"\\(.icon // \"?\")  \\($n)  \\(.role // \"?\")  :: \\(.target // .description // \"?\")\"' '" + PROJECTS_JSON + "' 2>&1"
+    let core = to_string(exec(core_cmd)).trim()
+    if core.len() > 0 { println(core) }
+
+    let aux_cmd = "/usr/bin/jq -r '.auxiliary // {} | to_entries | map(select(.key != \"_comment\")) | .[] | \"\\(.value.icon // \"?\")  \\(.key)  \\(.value.role // \"?\")  :: \\(.value.description // \"?\")\"' '" + PROJECTS_JSON + "' 2>&1"
+    let aux = to_string(exec(aux_cmd)).trim()
+    if aux.len() > 0 {
+        println("")
+        println("[auxiliary]")
+        println(aux)
+    }
+
+    let lo_cmd = "/usr/bin/jq -r '.launch_ops // {} | to_entries | map(select(.key != \"_comment\")) | .[] | \"\\(.value.icon // \"?\")  \\(.key)  \\(.value.role // \"?\")  :: \\(.value.description // \"?\")\"' '" + PROJECTS_JSON + "' 2>&1"
+    let lo = to_string(exec(lo_cmd)).trim()
+    if lo.len() > 0 {
+        println("")
+        println("[launch_ops]")
+        println(lo)
+    }
+
+    let exp_cmd = "/usr/bin/jq -r '.experimental // {} | keys | map(select(. != \"_comment\")) | join(\", \")' '" + PROJECTS_JSON + "' 2>&1"
+    let exp = to_string(exec(exp_cmd)).trim()
+    if exp.len() > 0 {
+        println("")
+        println("[experimental] " + exp)
+    }
+
+    let arch_cmd = "/usr/bin/jq -r '.archived // {} | keys | map(select(. != \"_comment\")) | join(\", \")' '" + PROJECTS_JSON + "' 2>&1"
+    let arch = to_string(exec(arch_cmd)).trim()
+    if arch.len() > 0 { println("[archived] " + arch) }
+}
+
+fn print_json() {
+    let cmd = "/usr/bin/jq '{schema_version: ._meta.schema_version, updated: ._meta.updated, categories, projects_keys: (.projects | keys)}' '" + PROJECTS_JSON + "' 2>&1"
+    let out = to_string(exec(cmd)).trim()
+    if out.len() > 0 { println(out) }
+}
+
+fn print_full() {
+    let cmd = "/usr/bin/jq '.' '" + PROJECTS_JSON + "' 2>&1"
+    let out = to_string(exec(cmd)).trim()
+    if out.len() > 0 { println(out) }
+}
+
+fn print_names() {
+    let cmd = "/usr/bin/jq -r '[.categories.core[], (.auxiliary // {} | keys | map(select(. != \"_comment\")) | .[]), (.launch_ops // {} | keys | map(select(. != \"_comment\")) | .[]), (.experimental // {} | keys | map(select(. != \"_comment\")) | .[])] | .[]' '" + PROJECTS_JSON + "' 2>&1"
+    let out = to_string(exec(cmd)).trim()
+    if out.len() > 0 { println(out) }
+}
+
+fn print_categories() {
+    let cmd = "/usr/bin/jq '.categories' '" + PROJECTS_JSON + "' 2>&1"
+    let out = to_string(exec(cmd)).trim()
+    if out.len() > 0 { println(out) }
+}
+
+fn main() {
+    if file_exists(PROJECTS_JSON) == false {
+        eprintln("REJECT: SSOT missing — " + PROJECTS_JSON)
+        return
+    }
+    let argv = args()
+    let mut mode = "table"
+    if argv.len() >= 3 { mode = argv[2] }
+
+    if mode == "list" { print_list() }
+    else if mode == "table" { print_table() }
+    else if mode == "json" { print_json() }
+    else if mode == "full" { print_full() }
+    else if mode == "names" { print_names() }
+    else if mode == "categories" { print_categories() }
+    else {
+        eprintln("usage: projects_list.hexa <list|table|json|full|names|categories>")
+    }
+}
+
+main()

@@ -1,0 +1,270 @@
+{
+  "_meta": {
+    "name": "void — hexa-only AI-native 터미널 로드맵 (3-트랙 병렬)",
+    "project": "void",
+    "description": "hexa-only AI-native macOS 터미널 에뮬레이터. 참조 기준: Terminal.app 미니멀리즘. L1(OS브릿지)+L2(VT파서)+L3(앱+이벤트) 3-레이어 아키텍처. VB1 blocker 제거 후 V5 배포 목표.",
+    "updated": "2026-04-14",
+    "schema_version": "1.0",
+    "strategy": "parallel_3track_with_tier_gates",
+    "target": "V5 App Store 배포 — OSC7/settings UI/복사붙여넣기/alternate screen/glyph atlas",
+    "mode": "smash_free",
+    "exec_order": "phases[] 순서대로, 각 phase 내 parallel[] 는 SYS/TERM/APP 동시 실행. 트랙 게이트 실패 시 해당 트랙만 연장"
+  },
+  "tracks": {
+    "SYS": {
+      "owner": "$VOID/src/sys_pty.c + src/sys_appkit.m",
+      "host": "mac arm64 (clang)",
+      "independent_of": ["TERM", "APP"]
+    },
+    "TERM": {
+      "owner": "$VOID/src/ (smoke_*.hexa VT파서+스크린버퍼)",
+      "host": "hexa interpreter / native build_c",
+      "independent_of": ["SYS", "APP"]
+    },
+    "APP": {
+      "owner": "$VOID/src/smoke_app_entry.hexa + smoke_interactive.hexa",
+      "host": "mac arm64 AppKit",
+      "independent_of": ["SYS", "TERM"]
+    }
+  },
+  "phases": [
+    {
+      "id": "P0",
+      "name": "V1~V4 골화 완결 — 25/25 테스트 PASS",
+      "duration_hours": 0,
+      "status": "done",
+      "parallel": [
+        {
+          "track": "SYS",
+          "tasks": [
+            {
+              "id": "SYS-P0-1",
+              "task": "sys_pty.c — PTY forkpty/poll/TIOCSWINSZ/rlimit/setsid",
+              "status": "done",
+              "done_criteria": "L1 5건 골화 (VC-04,VC-05,VC-08)",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-04"
+            },
+            {
+              "id": "SYS-P0-2",
+              "task": "sys_appkit.m — HexaTermView Core Text glyph grid + AppKit 이벤트",
+              "status": "done",
+              "done_criteria": "SFMono 13pt + Terminal.app ANSI 팔레트 + drawRect 동작",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-04"
+            },
+            {
+              "id": "SYS-P0-3",
+              "task": "VOID.app 번들 + /Applications 설치 + Dock 아이콘",
+              "status": "done",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-10"
+            }
+          ]
+        },
+        {
+          "track": "TERM",
+          "tasks": [
+            {
+              "id": "TERM-P0-1",
+              "task": "6-state VT 파서 (GROUND/ESC/CSI/OSC_NUM/OSC_STR/CHARSET)",
+              "status": "done",
+              "done_criteria": "L2 6건 골화, T7 PTY→VT→screen 63바이트 검증"
+            },
+            {
+              "id": "TERM-P0-2",
+              "task": "UTF-8 멀티바이트 디코딩 (2/3/4바이트 → codepoint)",
+              "status": "done",
+              "done_criteria": "T10 한글 U+D55C=54620 검증",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-07"
+            },
+            {
+              "id": "TERM-P0-3",
+              "task": "SGR/CSI/OSC 0 title passthrough, scrollback section-ring (2048줄)",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "track": "APP",
+          "tasks": [
+            {
+              "id": "APP-P0-1",
+              "task": "AppKit poll + PTY poll_read + hexa_keys_to_pty 이벤트 루프",
+              "status": "done",
+              "done_criteria": "L3 5건 골화 (VC-05,VC-06,VC-09)",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-05"
+            },
+            {
+              "id": "APP-P0-2",
+              "task": "좌측 탭바 + Cmd+T/W/Q/1~9 + 프로파일 ~/.void/profiles.json",
+              "status": "done",
+              "ssot_ref": "$NEXUS/shared/convergence/void.json#VC-09"
+            },
+            {
+              "id": "APP-P0-3",
+              "task": "activity indicator + damage tracking + memory safety",
+              "status": "done",
+              "done_criteria": "25/25 self-test pass, binary 197544 bytes arm64"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "L1 5건 골화 PASS",
+          "L2 6건 골화 PASS",
+          "L3 5건 골화 PASS (총 19건)",
+          "self_test 25/25 pass",
+          "VOID.app /Applications 설치 동작"
+        ],
+        "fail_action": "해당 레이어만 재작업, 다른 트랙은 P1 진입"
+      }
+    },
+    {
+      "id": "P1",
+      "name": "VB1 blocker 제거 — native build_c 통합",
+      "duration_hours": 48,
+      "status": "in_progress",
+      "parallel": [
+        {
+          "track": "SYS",
+          "tasks": [
+            {
+              "id": "SYS-P1-1",
+              "task": "native build_c 경로 확인 + hexa→C transpile 인터프리터 대체",
+              "status": "in_progress",
+              "done_criteria": "빌드 시간 수분 → 수초 단축",
+              "ssot_ref": "$VOID/state.json#blockers.VB1"
+            }
+          ]
+        },
+        {
+          "track": "TERM",
+          "tasks": [
+            {
+              "id": "TERM-P1-1",
+              "task": "alternate screen buffer (smcup/rmcup) 구현",
+              "status": "todo",
+              "done_criteria": "vim/tmux alternate screen 전환 정상 동작"
+            }
+          ]
+        },
+        {
+          "track": "APP",
+          "tasks": [
+            {
+              "id": "APP-P1-1",
+              "task": "선택 + 복사/붙여넣기 (Cmd+C/V) 구현",
+              "status": "todo",
+              "done_criteria": "마우스 선택 범위 NSPasteboard 연동"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "VB1 제거 — native build_c 빌드 성공",
+          "alternate screen buffer T-test pass",
+          "Cmd+C/V 복사붙여넣기 동작"
+        ],
+        "fail_action": "VB1 미해결 시 SYS-P1-1 연장, TERM/APP 트랙 P2 선진입 허용"
+      }
+    },
+    {
+      "id": "P2",
+      "name": "V5 feature — OSC7/settings UI/glyph atlas",
+      "duration_hours": 96,
+      "status": "planned",
+      "parallel": [
+        {
+          "track": "SYS",
+          "tasks": [
+            {
+              "id": "SYS-P2-1",
+              "task": "OSC 7 CWD 파싱 (file autocomplete 기반)",
+              "status": "todo",
+              "done_criteria": "PTY child OSC 7 시그널 → CWD 업데이트"
+            }
+          ]
+        },
+        {
+          "track": "TERM",
+          "tasks": [
+            {
+              "id": "TERM-P2-1",
+              "task": "glyph atlas — Core Text 대신 pre-rendered bitmap cache",
+              "status": "todo",
+              "done_criteria": "drawRect 프레임 시간 측정 — glyph cache hit rate ≥ 90%"
+            }
+          ]
+        },
+        {
+          "track": "APP",
+          "tasks": [
+            {
+              "id": "APP-P2-1",
+              "task": "settings UI 창 (Cmd+, → profile 편집)",
+              "status": "todo",
+              "done_criteria": "profiles.json 편집 저장 + 실시간 반영"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "OSC 7 CWD 파싱 동작",
+          "glyph atlas cache hit rate ≥ 90%",
+          "settings UI 저장/반영 정상"
+        ],
+        "fail_action": "미완 트랙 연장, 완료 트랙은 P3 선진입"
+      }
+    },
+    {
+      "id": "P3",
+      "name": "V5 릴리스 — 테스트 강화 + App Store 준비",
+      "duration_hours": 72,
+      "status": "planned",
+      "parallel": [
+        {
+          "track": "SYS",
+          "tasks": [
+            {
+              "id": "SYS-P3-1",
+              "task": "notarization + code signing (Apple Distribution cert)",
+              "status": "todo",
+              "done_criteria": "xcrun notarytool submit 성공 + staple 완료"
+            }
+          ]
+        },
+        {
+          "track": "TERM",
+          "tasks": [
+            {
+              "id": "TERM-P3-1",
+              "task": "터미널 호환성 회귀 테스트 suite 확장 (현 25개 → 40개)",
+              "status": "todo",
+              "done_criteria": "40/40 self-test pass"
+            }
+          ]
+        },
+        {
+          "track": "APP",
+          "tasks": [
+            {
+              "id": "APP-P3-1",
+              "task": "App Store 메타데이터 + 스크린샷 + 프라이버시 선언",
+              "status": "todo",
+              "done_criteria": "App Store Connect 검토 통과"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "notarization 완료",
+          "40/40 self-test pass",
+          "App Store Connect 검토 통과"
+        ],
+        "fail_action": "실패 트랙 재작업, 통과 트랙 대기"
+      }
+    }
+  ]
+}

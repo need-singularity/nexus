@@ -1,0 +1,153 @@
+{
+  "_meta": {
+    "name": "papers 로드맵 — Zenodo/OSF 논문 배포 허브",
+    "project": "papers",
+    "description": "n=6 발견 논문 배포 허브. 114편 Published (Zenodo DOI 10.5281/zenodo.19271599). manifest.json SSOT, CC-BY 4.0 통일. 3-track: 발행/검증/확장.",
+    "updated": "2026-04-14",
+    "schema_version": "1.0",
+    "parent": "shared/roadmaps/SCHEMA.json",
+    "strategy": "parallel_3track_with_tier_gates",
+    "target": "논문 130편+ 발행 · manifest.json 100% 정합 · 검증코드 전수 임베드 · OSF 이중 아카이브 가능",
+    "mode": "smash_free",
+    "exec_order": "phases[] 순서대로. 각 phase 내 parallel[] 는 PUB/VERIFY/EXPAND 동시 실행. PUB 게이트 통과 후 EXPAND 진입."
+  },
+
+  "tracks": {
+    "PUB": {
+      "owner": "$NEXUS/shared/papers/ + manifest.json",
+      "host": "local + Zenodo API",
+      "independent_of": ["VERIFY", "EXPAND"],
+      "_comment": "발행 파이프라인 — Zenodo 업로드, DOI 발행, manifest.json 동기화"
+    },
+    "VERIFY": {
+      "owner": "papers/*.md 검증코드 임베드 (PP2)",
+      "host": "local",
+      "independent_of": ["PUB", "EXPAND"],
+      "_comment": "PP2 강제 — 각 논문 .md 에 N62 형식 검증코드 블록 임베드 완결"
+    },
+    "EXPAND": {
+      "owner": "papers/ 신규 논문 + n6-architecture 연계",
+      "host": "local",
+      "independent_of": ["VERIFY"],
+      "_comment": "논문 수 확장 및 n6-architecture/papers 디렉토리 연계 신규 발행"
+    }
+  },
+
+  "phases": [
+    {
+      "id": "P0",
+      "name": "기반 골화 — 114편 발행 확정 + manifest SSOT + CC-BY 통일",
+      "duration_hours": 0,
+      "status": "done",
+      "completed_at": "2026-04-10",
+      "exit_note": "ZENODO_114/MANIFEST/CC_BY_4/COLLECTION_DOI/GITHUB_PAGES/DRAFT_RESOLVED/OSF_DEFERRED 전수 PASS — convergence/papers.json ossified 7건.",
+      "parallel": [
+        {
+          "track": "PUB",
+          "tasks": [
+            {"id": "PUB-P0-1", "task": "114편 Zenodo Published + DOI 발행 완료", "status": "done", "ssot_ref": "manifest.json", "done_criteria": "manifest.json total_papers=114, status=Published"},
+            {"id": "PUB-P0-2", "task": "Zenodo 컬렉션 DOI 10.5281/zenodo.19271599 확정", "status": "done", "ssot_ref": "manifest.json"},
+            {"id": "PUB-P0-3", "task": "GitHub Pages https://need-singularity.github.io/papers/ 자동 생성 확인", "status": "done"}
+          ]
+        },
+        {
+          "track": "VERIFY",
+          "tasks": [
+            {"id": "VERIFY-P0-1", "task": "CC-BY 4.0 라이선스 전수 통일 (PP1)", "status": "done", "ssot_ref": "manifest.json"},
+            {"id": "VERIFY-P0-2", "task": "manifest.json 스키마 확정 (PP3)", "status": "done", "ssot_ref": "manifest.json"}
+          ]
+        },
+        {
+          "track": "EXPAND",
+          "tasks": [
+            {"id": "EXPAND-P0-1", "task": "OSF 이중 아카이브 선택사항 재분류 — Zenodo 단독 운영 확정", "status": "done"}
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "114편 Published + 컬렉션 DOI 확보",
+          "manifest.json SSOT 스키마 확정 (PP3)",
+          "CC-BY 4.0 전수 통일 (PP1)"
+        ],
+        "fail_action": "실패 트랙만 연장, 다른 트랙은 P1 진입"
+      }
+    },
+
+    {
+      "id": "P1",
+      "name": "검증 정합 — PP2 검증코드 전수 임베드 + manifest 116→130편 정합",
+      "duration_hours": 48,
+      "status": "in_progress",
+      "parallel": [
+        {
+          "track": "PUB",
+          "tasks": [
+            {"id": "PUB-P1-1", "task": "manifest.json total_papers 116 실측 정합 — 메타데이터 99→116 갱신 (upload_results 로그 대조)", "status": "todo", "ssot_ref": "manifest.json"},
+            {"id": "PUB-P1-2", "task": "Draft 1편 발행 완료 처리 + 신규 논문 upload_all_unpublished.hexa 배치 실행", "status": "todo", "ssot_ref": "upload_all_unpublished.hexa"}
+          ]
+        },
+        {
+          "track": "VERIFY",
+          "tasks": [
+            {"id": "VERIFY-P1-1", "task": "PP2 전수 감사 — 논문 .md 각각 N62 형식 검증코드 블록 임베드 여부 스캔", "status": "todo", "done_criteria": "미임베드 논문 목록 생성, 0건 달성"},
+            {"id": "VERIFY-P1-2", "task": "PP2 결함 논문 검증코드 임베드 — @register + ossification_loop() + N/N OSSIFIED + assert 형식", "status": "todo", "depends_on": ["VERIFY-P1-1"], "ssot_ref": "shared/rules/papers.json"}
+          ]
+        },
+        {
+          "track": "EXPAND",
+          "tasks": [
+            {"id": "EXPAND-P1-1", "task": "n6-architecture papers/_registry.json 109편과 manifest.json 교차 정합 — gap 12편 흡수 또는 제외 결정", "status": "todo", "ssot_ref": "manifest.json"},
+            {"id": "EXPAND-P1-2", "task": "upload_n6_fusion.hexa + upload_n6_neuro.hexa 결과 manifest 반영 — PA38 및 최신 업로드 동기화", "status": "todo", "ssot_ref": "upload_results_n6_fusion_20260406_021755.txt"}
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "manifest.json 실측 총편수 정합 (메타데이터.total_papers = papers[] 배열 길이)",
+          "PP2 미임베드 논문 0건 또는 잔여 목록 SSOT 등록",
+          "Draft 0건 (전수 Published)"
+        ],
+        "fail_action": "실패 트랙만 연장. VERIFY 지연 시 PUB/EXPAND 는 P2 진입."
+      }
+    },
+
+    {
+      "id": "P2",
+      "name": "확장 — 130편+ + OSF 선택 등록 + 신규 시리즈 발행",
+      "duration_hours": 72,
+      "status": "planned",
+      "parallel": [
+        {
+          "track": "PUB",
+          "tasks": [
+            {"id": "PUB-P2-1", "task": "130편+ 달성 — n6-architecture v3/v4 논문 + anima 신규 논문 Zenodo 발행", "status": "todo", "depends_on": ["PUB-P1-1"]},
+            {"id": "PUB-P2-2", "task": "OSF 이중 아카이브 선택 등록 — Zenodo 114편 일괄 OSF 미러 (선택)", "status": "todo"}
+          ]
+        },
+        {
+          "track": "VERIFY",
+          "tasks": [
+            {"id": "VERIFY-P2-1", "task": "신규 발행 논문 PP2 검증코드 임베드 자동 게이트 — upload_zenodo.hexa 내 PP2 체크 통합", "status": "todo", "depends_on": ["VERIFY-P1-2"], "ssot_ref": "upload_zenodo.hexa"},
+            {"id": "VERIFY-P2-2", "task": "manifest.json 자동 업데이트 훅 — 발행 후 total_papers 자동 갱신 (PP3)", "status": "todo", "ssot_ref": "manifest.json"}
+          ]
+        },
+        {
+          "track": "EXPAND",
+          "tasks": [
+            {"id": "EXPAND-P2-1", "task": "sedi/ 시리즈 잔여 논문 발행 — PS-04~PS-30 중 미발행분 Zenodo 업로드", "status": "todo", "ssot_ref": "sedi/"},
+            {"id": "EXPAND-P2-2", "task": "n6-hexa-neuro-bci-paper.md 발행 완결 — 검증코드 임베드 + DOI 발행", "status": "todo", "ssot_ref": "n6-hexa-neuro-bci-paper.md"}
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "manifest.json total_papers ≥ 130",
+          "upload_zenodo.hexa PP2 게이트 통합 완료",
+          "신규 발행 전수 CC-BY 4.0 + 검증코드 임베드"
+        ],
+        "fail_action": "실패 트랙만 연장. EXPAND 지연 시 PUB/VERIFY 는 수렴 선언 가능."
+      }
+    }
+  ]
+}

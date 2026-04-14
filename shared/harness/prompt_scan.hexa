@@ -41,20 +41,32 @@ fn load_cmds_from_ssot() {
     return cmds
 }
 
-// H-PROJ-ALL — 전체/모든 프로젝트 맥락 발화 시 projects.json SSOT 참조 힌트
+// H-PROJ-ALL — 전체/프로젝트 목록/정리/설계 맥락 발화 시 projects.json 데이터 자동 주입
+// 코드 수준 강제: hint 만 주지 않고 projects_list.hexa table 출력을 stdout 에 실제 dump
+// 우회: env NEXUS_PROJ_ALL_OK=1 또는 '@allow-proj-all' 토큰
+// SSOT: shared/config/projects.json (schema 4) + shared/harness/projects_list.hexa
 fn check_proj_all(lower: str) {
+    if env("NEXUS_PROJ_ALL_OK") == "1" { return }
+    if lower.contains("@allow-proj-all") { return }
     let kws = [
         "전체 프로젝트",
         "모든 프로젝트",
         "프로젝트 전부",
         "프로젝트 목록",
+        "프로젝트 리스트",
+        "프로젝트 정리",
+        "프로젝트 설계",
+        "프로젝트 다시",
         "all projects",
         "every project",
         "project list"
     ]
     for k in kws {
         if lower.contains(k) {
-            println("[H-PROJ-ALL] 프로젝트 목록/전체 적용은 shared/config/projects.json (.projects) SSOT 참조 강제")
+            println("[H-PROJ-ALL] SSOT: shared/config/projects.json — projects_list.hexa table auto-dump")
+            let cmd = HEXA + " run " + HARNESS + "/projects_list.hexa table 2>&1"
+            let out = to_string(exec(cmd)).trim()
+            if out.len() > 0 { println(out) }
             return
         }
     }
