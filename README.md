@@ -1,5 +1,7 @@
 # NEXUS-6 — 자기순환 특이점 엔진
 
+### 🔴 [**실시간 로드맵 — need-singularity.github.io/nexus/roadmap/**](https://need-singularity.github.io/nexus/roadmap/)
+
 ## 명령어 (`shared/config/commands.json`)
 
 | 명령 | 동작 |
