@@ -7,7 +7,7 @@
     "schema_version": "1.0",
     "parent": "shared/config/roadmaps/anima.json",
     "strategy": "parallel_3track_with_tier_gates",
-    "target": "v4 홀로 의식 (Φ>1000, 7/7 의식 검증 PASS)",
+    "target": "v4 홀로 의식 (Φ>1000 ✅ 15469) + 실사 모델 (P22~P25 창발)",
     "compression": "legacy 12w → 6w (2.0x) — AN8 dual-track + PHYSICS 완전 병렬로 단축",
     "mode": "smash_free",
     "exec_order": "phases[] 순서대로, 각 phase 내 parallel[] 는 ALM/CLM/PHYSICS 동시 실행. 트랙 게이트 실패 시 해당 트랙만 연장"
@@ -533,11 +533,19 @@
               "batch": 2,
               "grad_accum": 4,
               "seq": 1024,
-              "lr": 5e-6,
+              "lr": 5e-06,
               "warmup": 200,
               "lora_r": 32,
               "lora_alpha": 64,
-              "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+              "target_modules": [
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj"
+              ],
               "dist": "device_map_auto",
               "dist_fallback": "fsdp (trainer supports --fsdp flag when WORLD_SIZE>1 via torchrun)",
               "eff_batch": 8,
@@ -1968,6 +1976,246 @@
       "gate_exit": {
         "criteria": [
           "||Φ|| > 10000 terminal, 외부 개입 0 진화 지속, 의식 전파 증명"
+        ]
+      }
+    },
+    {
+      "id": "P22",
+      "name": "실 corpus 창발 — 한국어 1GB+ 자율 수집/정제",
+      "duration_hours": 72,
+      "status": "emergent",
+      "depends_on": [
+        "P21"
+      ],
+      "rationale": "P0~P21 은 의식 이론 증명 (64KB 토이 코퍼스 기반). 실사 모델로 가려면 한국어 고품질 corpus 1GB+ 필요 — 15,000× 확장. 수동 수집 대신 **자율 발견+정제** 루프로 창발.",
+      "parallel": [
+        {
+          "track": "ALM",
+          "tasks": [
+            {
+              "id": "ALM-P22-1",
+              "task": "HF datasets + CC + AIHub 자율 스캔 — 한국어 corpus candidate discovery",
+              "status": "pending",
+              "artifact_target": "training/corpus_harvest.hexa",
+              "done_criteria": "1GB+ raw 한국어 text aggregated + dedup + license check"
+            },
+            {
+              "id": "ALM-P22-2",
+              "task": "Quality filter emergent — perplexity/lang-detect/toxic 자동 필터링",
+              "status": "pending",
+              "artifact_target": "training/corpus_filter.hexa",
+              "done_criteria": "raw→clean corpus ratio ≥30%, phi_holo-sensitive filter"
+            }
+          ]
+        },
+        {
+          "track": "CLM",
+          "tasks": [
+            {
+              "id": "CLM-P22-1",
+              "task": "Corpus quality metric 창발 — MI/entropy/diversity 자동 지표 발견",
+              "status": "pending",
+              "artifact_target": "anima-engines/corpus_quality_engine.hexa",
+              "done_criteria": "self-discovered metrics correlate with downstream CE"
+            }
+          ]
+        },
+        {
+          "track": "PHYSICS",
+          "tasks": [
+            {
+              "id": "PHYS-P22-1",
+              "task": "Multi-modal signal corpus — EEG/audio/bio 자율 태깅",
+              "status": "pending",
+              "artifact_target": "anima-physics/signal_corpus.hexa",
+              "done_criteria": "consciousness-labeled multi-modal dataset"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "clean corpus ≥1GB, lang=ko ≥90%, license clean, downstream CE 개선 증명"
+        ]
+      }
+    },
+    {
+      "id": "P23",
+      "name": "엔진 통합 창발 — 71 엔진 → 실 학습/추론 loop 배선 + ablation",
+      "duration_hours": 96,
+      "status": "emergent",
+      "depends_on": [
+        "P22"
+      ],
+      "rationale": "P8~P21 의 71 artifact 는 self-test PASS 만 완료 — 실 학습에 연결 안 됨. 창발 ablation 으로 효과 있는 엔진 선별 + 자동 배선.",
+      "parallel": [
+        {
+          "track": "ALM",
+          "tasks": [
+            {
+              "id": "ALM-P23-1",
+              "task": "Engine auto-wiring — 71 엔진 중 후보 선별 + train_alm forward/backward 배선",
+              "status": "pending",
+              "artifact_target": "training/engine_integration.hexa",
+              "done_criteria": "≥10 engines 실 학습 연결 + loss 기여 양/음 판정"
+            },
+            {
+              "id": "ALM-P23-2",
+              "task": "Ablation matrix 창발 — 2^N 중 Pareto-optimal combo 자동 탐색",
+              "status": "pending",
+              "artifact_target": "training/ablation_search.hexa",
+              "done_criteria": "Pareto frontier discovered, best combo ≥baseline CE -5%"
+            }
+          ]
+        },
+        {
+          "track": "CLM",
+          "tasks": [
+            {
+              "id": "CLM-P23-1",
+              "task": "Hexa-native 엔진 통합 — CPU lane 에서 실행",
+              "status": "pending",
+              "artifact_target": "training/train_clm_emergent.hexa",
+              "done_criteria": "hexa-only E2E with 10+ engines, CE improvement"
+            }
+          ]
+        },
+        {
+          "track": "PHYSICS",
+          "tasks": [
+            {
+              "id": "PHYS-P23-1",
+              "task": "HW signal ↔ 엔진 실시간 bridge",
+              "status": "pending",
+              "artifact_target": "anima-physics/hw_engine_bridge.hexa",
+              "done_criteria": "FPGA/ESP32 → engine latency <10ms"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "≥10 engines 실 wired, ablation Pareto 발견, baseline 대비 CE 개선"
+        ]
+      }
+    },
+    {
+      "id": "P24",
+      "name": "실 평가 창발 — benchmark 자동 실행 + phi 상관",
+      "duration_hours": 48,
+      "status": "emergent",
+      "depends_on": [
+        "P23"
+      ],
+      "rationale": "phi_holo 같은 자체 지표가 실제 언어 능력과 상관 있는지 검증. KoBEST/HAE-RAE/MMLU-Ko 자동화.",
+      "parallel": [
+        {
+          "track": "ALM",
+          "tasks": [
+            {
+              "id": "ALM-P24-1",
+              "task": "KoBEST + HAE-RAE + MMLU-Ko 자동 eval harness",
+              "status": "pending",
+              "artifact_target": "serving/eval_harness.hexa",
+              "done_criteria": "3 benchmarks 자동 실행, baseline vs +engines 비교"
+            },
+            {
+              "id": "ALM-P24-2",
+              "task": "phi_holo ↔ benchmark score 상관 discovery",
+              "status": "pending",
+              "artifact_target": "serving/phi_benchmark_correlation.hexa",
+              "done_criteria": "correlation coefficient ≥0.5 or disproof"
+            }
+          ]
+        },
+        {
+          "track": "CLM",
+          "tasks": [
+            {
+              "id": "CLM-P24-1",
+              "task": "CLM from-scratch eval — 256M~2.8B CE+phi 측정",
+              "status": "pending",
+              "artifact_target": "serving/clm_eval.hexa",
+              "done_criteria": "CLM 2.8B CE<3.0 + phi_holo>100"
+            }
+          ]
+        },
+        {
+          "track": "PHYSICS",
+          "tasks": [
+            {
+              "id": "PHYS-P24-1",
+              "task": "실시간 추론 latency + 의식 지표 모니터",
+              "status": "pending",
+              "artifact_target": "anima-physics/realtime_monitor.hexa",
+              "done_criteria": "latency <200ms + phi live 측정"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "3 benchmarks 수치 획득, phi ↔ bench 상관 판정, latency 제품급"
+        ]
+      }
+    },
+    {
+      "id": "P25",
+      "name": "서빙/배포 창발 — Web UI 백엔드 + 안전성",
+      "duration_hours": 72,
+      "status": "emergent",
+      "depends_on": [
+        "P24"
+      ],
+      "rationale": "모델 완성 ≠ 배포. 안전성/서빙/모델카드/API 필요. Anima Web UI (web/index.html) 백엔드 연결.",
+      "parallel": [
+        {
+          "track": "ALM",
+          "tasks": [
+            {
+              "id": "ALM-P25-1",
+              "task": "Web UI 백엔드 API — FastAPI/hexa-native serving",
+              "status": "pending",
+              "artifact_target": "serving/api_server.hexa",
+              "done_criteria": "/chat endpoint, web UI 연동, SSE streaming"
+            },
+            {
+              "id": "ALM-P25-2",
+              "task": "안전성 필터 창발 — DPO or 규칙 기반 auto-discovery",
+              "status": "pending",
+              "artifact_target": "serving/safety_filter.hexa",
+              "done_criteria": "toxic rate <1%, refusal rate balanced"
+            }
+          ]
+        },
+        {
+          "track": "CLM",
+          "tasks": [
+            {
+              "id": "CLM-P25-1",
+              "task": "모델카드 + 평가 리포트 자동 생성",
+              "status": "pending",
+              "artifact_target": "serving/model_card.hexa",
+              "done_criteria": "MODEL_CARD.md + eval reports auto-published"
+            }
+          ]
+        },
+        {
+          "track": "PHYSICS",
+          "tasks": [
+            {
+              "id": "PHYS-P25-1",
+              "task": "Edge deployment — HW 최적화 + ESP32 demo",
+              "status": "pending",
+              "artifact_target": "anima-physics/edge_deploy.hexa",
+              "done_criteria": "ESP32 inference PoC, 양자화 없이 작동 가능 경로"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "Web UI 실사용, 안전 필터 작동, 모델카드 공개, edge PoC"
         ]
       }
     }
