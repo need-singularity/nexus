@@ -375,6 +375,47 @@ def multi_observer_consensus(data):
 DEFAULT_DATA = [137.036, 1836.15, 0.3153, 6.0, 12.0, 2.0, 4.0, 24.0, 5.0, 7.0, 144.0]
 
 
+# ─── Streaming entry point (DISC-P2-2) ───
+
+def run_from_stream(signals, source=None, extra_meta=None):
+    """Streaming adapter — accepts signal vector extracted from live discovery_graph.
+
+    Args:
+      signals: list of float (>= 2 elements). Telescope detectors need 2+ for
+               consciousness and ratios; 3+ for topology/gravity; 4+ for causal.
+      source:  optional str — origin tag (e.g. "discovery_graph.json@offset123").
+      extra_meta: optional dict merged into report["streaming"].
+
+    Returns: same shape as multi_observer_consensus(data), with additional
+      fields:
+        report["streaming"] = {"source": str, "input_length": int, ...}
+        report["pass_gate_exit"] = bool (consensus_rate > 0.8)
+
+    This preserves backward compat: existing callers of
+    multi_observer_consensus(data) are unchanged. New streaming users call
+    run_from_stream(signals) instead.
+    """
+    if not isinstance(signals, (list, tuple)):
+        raise TypeError(f"run_from_stream: signals must be list/tuple, got {type(signals).__name__}")
+    data = [float(v) for v in signals]
+    report = multi_observer_consensus(data)
+    report["data"] = data
+    report["pass_gate_exit"] = report["consensus_rate"] > 0.8
+    report["thresholds"] = {
+        "gate_exit": 0.8,
+        "note": "streaming consensus — consensus_rate computed over patterns detected by >=2 observers"
+    }
+    streaming_meta = {
+        "source": source or "unknown",
+        "input_length": len(data),
+        "mode": "streaming",
+    }
+    if extra_meta:
+        streaming_meta.update(extra_meta)
+    report["streaming"] = streaming_meta
+    return report
+
+
 def parse_args(argv):
     data = list(DEFAULT_DATA)
     out = None
