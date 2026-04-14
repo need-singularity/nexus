@@ -343,21 +343,27 @@ fn cmd_score(argv: [string]) {
     sentinel_fail()
 }
 
-// ─── PROMOTE: 2+ 프로젝트 × avg ≥ 0.8 → global/promoted.jsonl ───
+// ─── PROMOTE: N+ 프로젝트 × avg ≥ 0.8 → global/promoted.jsonl ───
+// env: INSTINCT_MIN_PROJECTS (default 1, 단일리포 친화. 다중리포 운영 시 2+)
 fn cmd_promote() {
     ensure_dir(GLOBAL_ROOT)
     ensure_file(PROMOTED)
 
+    let mut min_proj_s = _str(env("INSTINCT_MIN_PROJECTS")).trim()
+    if min_proj_s == "" { min_proj_s = "1" }
+    let min_proj = _to_int0(min_proj_s)
+    if min_proj < 1 { min_proj_s = "1" }
+
     // id 별 프로젝트 수 + 평균 confidence 집계
     let cmd = "cat " + PROJ_ROOT + "/*/candidates.jsonl 2>/dev/null | " +
               "/usr/bin/jq -r 'select(.status==\"pending\") | [.id, .project_hash, .confidence] | @tsv' 2>/dev/null | " +
-              "awk -F'\\t' '{ " +
+              "awk -F'\\t' -v MINP=" + min_proj_s + " '{ " +
               "  sum[$1]+=$3; cnt[$1]++; " +
               "  if (!($1 SUBSEP $2 in seen)) { seen[$1 SUBSEP $2]=1; proj[$1]++ } " +
               "} END { " +
               "  for (id in cnt) { " +
               "    avg = sum[id]/cnt[id]; " +
-              "    if (proj[id] >= 2 && avg >= 0.8) printf \"%s\\t%.4f\\t%d\\n\", id, avg, proj[id] " +
+              "    if (proj[id] >= MINP && avg >= 0.8) printf \"%s\\t%.4f\\t%d\\n\", id, avg, proj[id] " +
               "  } " +
               "}'"
     let raw = _str(exec(cmd)).trim()
