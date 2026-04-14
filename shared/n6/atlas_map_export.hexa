@@ -1,0 +1,62 @@
+// ═══════════════════════════════════════════════════════════
+// atlas_map_export.hexa — atlas.n6 → docs/atlas_map_data.json orchestrator
+//
+// 목적: docs/atlas3d.html 가 fetch 하는 정적 JSON 재빌드 파이프라인
+// 입력: shared/n6/atlas.n6 (text @-nodes + JSON discovery nodes/edges)
+// 출력: docs/atlas_map_data.json
+//   meta:  {source, node_count, edge_count, generated, generator, layers}
+//   nodes: [{i, id, l, t, d, dom, g, e}]
+//   edges: [[src_i, dst_i]]
+//
+// 구현 노트:
+//   stage1 hexa 런타임은 has_key 미구현 + 28K 노드/55K 엣지 dict 연산 지연 →
+//   heavy compute 를 shared/n6/atlas_map_export.py 로 위임 (@hexa-first-exempt).
+//   stage1 T23~T29 복구 후 pure hexa 복귀 예정.
+//
+// 사용:
+//   hexa shared/n6/atlas_map_export.hexa [--atlas PATH] [--out PATH] [--dry-run] [-v]
+// ═══════════════════════════════════════════════════════════
+
+let a = args()
+let mut ATLAS_PATH = "shared/n6/atlas.n6"
+let mut OUT_PATH   = "docs/atlas_map_data.json"
+let mut dry_run    = false
+let mut verbose    = false
+
+let mut ai: i64 = 2
+while ai < len(a) {
+    let tok = a[ai]
+    if tok == "--atlas" && ai + 1 < len(a) { ai = ai + 1; ATLAS_PATH = a[ai] }
+    else if tok == "--out" && ai + 1 < len(a) { ai = ai + 1; OUT_PATH = a[ai] }
+    else if tok == "--dry-run" { dry_run = true }
+    else if tok == "--verbose" || tok == "-v" { verbose = true }
+    else if tok == "--help" || tok == "-h" {
+        println("usage: hexa atlas_map_export.hexa [--atlas PATH] [--out PATH] [--dry-run] [-v]")
+        exit(0)
+    }
+    ai = ai + 1
+}
+
+if !file_exists(ATLAS_PATH) {
+    println("error: atlas not found: " + ATLAS_PATH)
+    exit(1) // @allow-silent-exit stdout println preceded
+}
+
+// ─── delegate heavy compute to python helper ───
+// ~/.hx/bin/python3 은 airgenome 원격 dispatch 래퍼 — 로컬 파일 I/O 위해 절대경로 사용.
+let py_bin_brew = "/opt/homebrew/bin/python3"
+let py_bin_sys  = "/usr/bin/python3"
+let py_path = if file_exists(py_bin_brew) { py_bin_brew } else { py_bin_sys }
+
+let py_helper = "shared/n6/atlas_map_export.py"
+if !file_exists(py_helper) {
+    println("error: helper missing: " + py_helper)
+    exit(1) // @allow-silent-exit stdout println preceded
+}
+
+let mut cmd = py_path + " '" + py_helper + "' '" + ATLAS_PATH + "' '" + OUT_PATH + "'"
+if dry_run { cmd = cmd + " --dry-run" }
+cmd = cmd + " 2>&1"
+
+let out = exec(cmd)
+println(to_string(out).trim())
