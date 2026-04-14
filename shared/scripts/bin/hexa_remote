@@ -1,0 +1,99 @@
+#!/bin/bash
+# hexa_remote — rsync + ssh wrapper to run hexa on a remote host (ubu default).
+# Purpose: AG6 Mac-compute-ZERO — heavy hexa work offloaded to ubu/hetzner.
+#
+# Eligibility is decided by the caller (shared/scripts/bin/hexa resolver).
+# This script trusts inputs and performs:
+#   1. Path mapping: $HOME/Dev/airgenome → ~/airgenome, $HOME/Dev/nexus → ~/Dev/nexus
+#   2. Incremental rsync of the project root to the remote
+#   3. ssh -T exec of hexa with the same args, at mapped cwd
+#
+# Env:
+#   HEXA_REMOTE_HOST     remote host (default: ubu)
+#   HEXA_REMOTE_BIN      remote hexa path (default: $HOME/Dev/hexa-lang/hexa)
+#   HEXA_REMOTE_NO_SYNC  skip rsync (assume tree already fresh)
+#
+# Exit 64 → caller should fall back to local (cwd not mappable).
+
+set -u
+
+# Pick host. Priority: HEXA_REMOTE_HOST env → dispatch_state.json compute → ubu.
+pick_host() {
+    if [ -n "${HEXA_REMOTE_HOST:-}" ]; then
+        printf '%s' "$HEXA_REMOTE_HOST"; return
+    fi
+    local state="$HOME/Dev/nexus/shared/dispatch_state.json"
+    if [ -r "$state" ] && command -v jq >/dev/null 2>&1; then
+        local h
+        h="$(jq -r '.selection.compute // "ubu"' "$state" 2>/dev/null)"
+        case "$h" in
+            ubu|ubu2|htz|hetzner) printf '%s' "$h"; return ;;
+            none|mac|"") ;;
+        esac
+    fi
+    printf 'ubu'
+}
+HOST="$(pick_host)"
+# Normalize htz → hetzner for ssh config.
+[ "$HOST" = "htz" ] && HOST="hetzner"
+
+# Reachability probe — 3s cap. Fail = signal caller to fall back locally.
+if ! ssh -o ConnectTimeout=3 -o BatchMode=yes "$HOST" true 2>/dev/null; then
+    echo "hexa_remote: $HOST unreachable, falling back to local" >&2
+    exit 64
+fi
+
+REMOTE_HEXA="${HEXA_REMOTE_BIN:-\$HOME/Dev/hexa-lang/hexa}"
+
+CWD="$(pwd -P)"
+# macOS case-insensitive FS: lowercase for detection only; preserve CWD for rsync source.
+CWD_LC="$(printf '%s' "$CWD" | tr '[:upper:]' '[:lower:]')"
+HOME_LC="$(printf '%s' "$HOME" | tr '[:upper:]' '[:lower:]')"
+case "$CWD_LC" in
+  "$HOME_LC/dev/airgenome"|"$HOME_LC/dev/airgenome"/*)
+    LOCAL_ROOT="${CWD%%/[Aa]irgenome*}/airgenome"
+    # actual path might be /Users/ghost/Dev/airgenome or /Users/ghost/dev/airgenome.
+    # Pick whichever exists.
+    for candidate in "$HOME/Dev/airgenome" "$HOME/dev/airgenome"; do
+        [ -d "$candidate" ] && LOCAL_ROOT="$candidate" && break
+    done
+    REMOTE_ROOT='$HOME/airgenome'
+    SYNC_EXCLUDES=(--exclude=archive/v1/ --exclude=data/ --exclude=__pycache__/
+                   --exclude=.git/ --exclude='*.log' --exclude=.DS_Store)
+    ;;
+  "$HOME_LC/dev/nexus"|"$HOME_LC/dev/nexus"/*)
+    for candidate in "$HOME/Dev/nexus" "$HOME/dev/nexus"; do
+        [ -d "$candidate" ] && LOCAL_ROOT="$candidate" && break
+    done
+    REMOTE_ROOT='$HOME/Dev/nexus'
+    SYNC_EXCLUDES=(--exclude=.git/ --exclude='*.log' --exclude=.DS_Store
+                   --exclude=.runtime/ --exclude=shared/blowup/lens/)
+    ;;
+  *)
+    exit 64 ;;
+esac
+
+# Relative path from LOCAL_ROOT (case-insensitive strip).
+LOCAL_ROOT_LC="$(printf '%s' "$LOCAL_ROOT" | tr '[:upper:]' '[:lower:]')"
+REL="${CWD_LC#$LOCAL_ROOT_LC}"
+REL="${REL#/}"
+
+if [ "${HEXA_REMOTE_NO_SYNC:-0}" != "1" ]; then
+  rsync -aH "${SYNC_EXCLUDES[@]}" "$LOCAL_ROOT/" "$HOST:${REMOTE_ROOT#\$HOME/}/" >/dev/null 2>&1 || {
+    echo "hexa_remote: rsync failed" >&2
+    exit 64
+  }
+fi
+
+quote_args() {
+  local out=''
+  local a
+  for a in "$@"; do
+    out+=" $(printf %q "$a")"
+  done
+  printf '%s' "$out"
+}
+
+REMOTE_CMD="cd \"$REMOTE_ROOT${REL:+/$REL}\" && HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 $REMOTE_HEXA$(quote_args "$@")"
+
+exec ssh -T "$HOST" "$REMOTE_CMD"

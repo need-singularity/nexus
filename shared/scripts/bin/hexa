@@ -8,6 +8,41 @@ set -e
 
 SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
 
+# Remote dispatch (AG6 Mac-compute-ZERO).
+# Why: heavy hexa workloads pin Mac CPU; ubu/hetzner sit idle. Default-ON:
+# eligible calls run on remote via hexa_remote (rsync + ssh). Opt-out = HEXA_LOCAL=1.
+# Blacklist covers FFI-bound scripts that must stay on Mac (Cocoa, launchctl).
+# Fallback: hexa_remote exits 64 if remote unreachable/unmappable → local path.
+remote_eligible() {
+    [ "${HEXA_LOCAL:-0}" != "1" ] || return 1
+    case "${1:-}" in
+        ""|version|--version|-V|help|--help|-h|lsp|cc|status|gc) return 1 ;;
+    esac
+    if [ "${1:-}" = "run" ] && [ -n "${2:-}" ]; then
+        case "$(basename "$2")" in
+            menubar.hexa|run.hexa|predictive_throttle.hexa) return 1 ;;
+        esac
+    fi
+    # macOS case-insensitive FS: cwd can be /Users/ghost/dev/... or /Users/ghost/Dev/...
+    local cwd_lc="$(pwd -P | tr '[:upper:]' '[:lower:]')"
+    local home_lc="$(printf '%s' "$HOME" | tr '[:upper:]' '[:lower:]')"
+    case "$cwd_lc" in
+        "$home_lc/dev/airgenome"|"$home_lc/dev/airgenome"/*) ;;
+        "$home_lc/dev/nexus"|"$home_lc/dev/nexus"/*) ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
+REMOTE_WRAP="$(dirname "$SELF")/hexa_remote"
+if [ -x "$REMOTE_WRAP" ] && remote_eligible "$@"; then
+    # set -e would kill the script on a non-zero exit from the wrapper; use || to capture.
+    __rc=0
+    "$REMOTE_WRAP" "$@" || __rc=$?
+    # 64 = "fallback to local" signal; any other code is the remote script's real result.
+    [ "$__rc" != "64" ] && exit "$__rc"
+    echo "hexa resolver: remote dispatch returned 64, running locally" >&2
+fi
+
 pick_exec() {
     local cand real
     cand="$1"
