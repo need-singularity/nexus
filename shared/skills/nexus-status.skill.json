@@ -1,0 +1,57 @@
+{
+  "schema": "skill/1",
+  "name": "nexus-status",
+  "description": "NEXUS-6 프로젝트 상태 스냅샷 — atlas lines / modules / lenses / open todos / discovery count. 읽기 전용.",
+  "version": "1.0.0",
+  "updated": "2026-04-14",
+  "user_invocable": true,
+  "disable_model_invocation": false,
+  "argument_hint": "[json|tsv]",
+  "scope": "project",
+
+  "fn": {
+    "primary": "hexa $NEXUS/shared/harness/entry.hexa status",
+    "fallback": [
+      "wc -l $NEXUS/shared/n6/atlas.n6",
+      "ls $NEXUS/shared/blowup/modules/*.hexa | wc -l",
+      "jq '.lenses|length' $NEXUS/shared/config/lens_registry.json",
+      "hexa $NEXUS/shared/blowup/todo.hexa list | wc -l"
+    ]
+  },
+
+  "output_contract": {
+    "begin": "===NEXUS_STATUS_BEGIN===",
+    "end": "===NEXUS_STATUS_END===",
+    "fields": {
+      "ATLAS_LINES": "wc -l shared/n6/atlas.n6",
+      "MODULES": "count shared/blowup/modules/*.hexa",
+      "LENSES": "count shared/config/lens_registry.json .lenses[]",
+      "TODO_OPEN": "hexa shared/blowup/todo.hexa list open-count",
+      "DISCOVERY": "count shared/discovery/*.{json,jsonl}",
+      "TS": "iso8601"
+    },
+    "sentinel_tail": "__NEXUS_STATUS_OK__"
+  },
+
+  "rules": [
+    "읽기 전용 — Write/Edit 금지",
+    "계산은 기존 SSOT 경로만 참조",
+    "stdout sentinel 마지막 라인 __NEXUS_STATUS_OK__",
+    "실패 시 __NEXUS_STATUS_FAIL__ + reason"
+  ],
+
+  "ssot_refs": {
+    "atlas": "shared/n6/atlas.n6",
+    "modules": "shared/blowup/modules/*.hexa",
+    "lenses": "shared/config/lens_registry.json",
+    "todo": "shared/blowup/todo.hexa",
+    "discovery": "shared/discovery/"
+  },
+
+  "wire_in": {
+    "registered": "shared/skills/registry.json .skills[0]",
+    "commands_json": "pending — requires L0 approval to add .commands.nexus-status entry"
+  },
+
+  "status": "stub"
+}
