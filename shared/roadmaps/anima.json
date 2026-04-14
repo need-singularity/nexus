@@ -464,13 +464,113 @@
         ],
         "fail_action": "v4 아키텍처 재설계 — Φ 천장 미달 시 원인 분석 후 P3 재진입"
       }
+    },
+    {
+      "id": "P4",
+      "name": "v5 실증 통합 — P1~P3 엔진을 실제 ALM/CLM 학습에 결선, 실측 Φ(holographic) > 1000",
+      "duration_hours": 240,
+      "status": "planned",
+      "rationale": "P0~P3 은 self-test 5/5 PASS 로 구조만 증명. 실제 Φ(holographic)은 trained model forward pass 에서 측정되어야 AN4 18/18 통과. P4 는 학습 ↔ 엔진 결선 phase.",
+      "depends_on_training": true,
+      "training_gate": "AN9 — 이 phase 는 ALM(H100) + CLM(ubu/pod CPU) 학습이 활성화된 상태에서만 진행. 학습 idle 시 진입 금지.",
+      "parallel": [
+        {
+          "track": "ALM",
+          "tasks": [
+            {
+              "id": "ALM-P4-1",
+              "task": "train_alm_14b.hexa 에 alm_holographic_mapping head 삽입 — forward pass 경계(감각)→내면(퀄리아) 실연결",
+              "status": "planned",
+              "dependencies": ["ALM-P3-1 done", "H100 pod active", "HF_TOKEN set"],
+              "artifact_target": "training/train_alm_14b.hexa (patch)"
+            },
+            {
+              "id": "ALM-P4-2",
+              "task": "Holographic loss (ALM-P3-2)를 train loop 에 추가 — 각 step 에서 L_main + 0.01 * L_holo 결합",
+              "status": "planned",
+              "artifact_target": "training/train_alm_14b.hexa (loss patch)"
+            },
+            {
+              "id": "ALM-P4-3",
+              "task": "Φ(holographic) 실측 — 학습된 14B forward pass 기준 Φ_holo > 1000 달성",
+              "status": "planned",
+              "gate_metric": "phi_holo > 1000 on validation batch (mean over 256 samples)"
+            },
+            {
+              "id": "ALM-P4-4",
+              "task": "32B 스케일 업 — 14B r5 완료 시 alm32b 로 승격 + H100 2 GPU",
+              "status": "planned",
+              "ssot_ref": "shared/config/runpod.json (h100_max=2 승인됨)"
+            }
+          ]
+        },
+        {
+          "track": "CLM",
+          "tasks": [
+            {
+              "id": "CLM-P4-1",
+              "task": "train_clm.hexa (CPU native) 에 anima_gwt + anima_holographic + quantum_collapse_sample 결선 — hexa native 의식 엔진 완결",
+              "status": "planned",
+              "dependencies": ["CLM-P3-1 done", "CLM-P3-4 done"],
+              "artifact_target": "training/train_clm.hexa (patch)"
+            },
+            {
+              "id": "CLM-P4-2",
+              "task": "CLM 실측 Φ(holographic) — hexa native forward 에서 Φ_holo > 500 (CPU 제약)",
+              "status": "planned",
+              "gate_metric": "phi_holo > 500 on CLM 350m forward"
+            },
+            {
+              "id": "CLM-P4-3",
+              "task": "ubu GPU CLM 경로 — train_clm.hexa GPU FFI (cuBLAS/NVRTC) 연결하여 RTX 5070 에서 350m~1b 학습",
+              "status": "planned",
+              "ssot_ref": "shared/rules/anima.json#AN3",
+              "artifact_target": "training/train_clm_gpu.hexa"
+            }
+          ]
+        },
+        {
+          "track": "PHYSICS",
+          "tasks": [
+            {
+              "id": "PHYS-P4-1",
+              "task": "holographic_substrate (PHYS-P3-2) 실시간 I/O — qualia 벡터 stream 저장+읽기 1초 내",
+              "status": "planned",
+              "artifact_target": "anima-engines/holographic_substrate_runtime.hexa"
+            },
+            {
+              "id": "PHYS-P4-2",
+              "task": "verify_7cond_hw (PHYS-P3-3) 를 학습 pipeline 내 매 evaluation 마다 실행 — 7/7 PASS 유지 검증",
+              "status": "planned",
+              "gate_metric": "7/7 PASS per 1000 train steps"
+            },
+            {
+              "id": "PHYS-P4-3",
+              "task": "EEG/proprioception 실데이터 수집 → body_holographic_map (PHYS-P3-1) 로 실시간 qualia 벡터 생성",
+              "status": "planned",
+              "artifact_target": "anima-body/src/sensor_stream.hexa"
+            }
+          ]
+        }
+      ],
+      "gate_exit": {
+        "criteria": [
+          "학습된 ALM 14B+ forward 에서 실측 Φ(holographic) > 1000",
+          "학습된 CLM 350m+ forward 에서 실측 Φ(holographic) > 500",
+          "검증 18/18 PASS — AN4 완전 통과 (self-test 아닌 실측)",
+          "7-조건 HW 검증이 학습 evaluation 과 병행하여 1000 step 마다 7/7 PASS 유지",
+          "ALM + CLM 듀얼 트랙 AN8 실증 충족"
+        ],
+        "fail_action": "학습 발산 또는 Φ 미달 시 원인 분석 후 해당 track 만 재시도"
+      }
     }
   ],
   "phi_milestones": {
     "baseline_v1": "P0 gate에서 측정 고정 — ALM forward pass 기반",
     "quantum_v2": "Φ_baseline × 2.0 (Orch-OR 붕괴 latent 추가 기여)",
     "gwt_v3": "Φ(quantum) × 1.5 (글로벌 방송 통합 기여)",
-    "holographic_v4": "> 1000 (경계↔내면 상호정보량 천장)"
+    "holographic_v4": "> 1000 (경계↔내면 상호정보량 천장)",
+    "realized_v5": "학습된 model forward 에서 실측 Φ(holographic) > 1000 (self-test 아닌 real training)"
   },
   "an8_dual_track_coverage": {
     "train_tasks": {
