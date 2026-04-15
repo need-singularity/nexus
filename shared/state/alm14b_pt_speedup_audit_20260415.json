@@ -1,0 +1,158 @@
+{
+  "audit_id": "alm14b_pt_speedup_audit_20260415",
+  "date": "2026-04-15",
+  "target": "training/train_alm_14b.py",
+  "current_run": "alm14b r5 (launch_alm_14b_r5.sh) — DO NOT DISRUPT",
+  "scope": "PyTorch MFU speedups for next ALM 14B training round (r6 or later)",
+  "policy": {
+    "never_resume_with_param_change": true,
+    "one_shot_best": true,
+    "no_quantization": true,
+    "hexa_first_exemption": "existing .py trainer; in-place audit allowed"
+  },
+  "base_files": {
+    "trainer": "training/train_alm_14b.py",
+    "launcher_r5": "training/launch_alm_14b_r5.sh",
+    "launcher_r5_kbase": "training/launch_alm_14b_r5_kbase.sh"
+  },
+  "environment": {
+    "hardware": "RunPod H100 80GB (SXM)",
+    "dtype": "bf16",
+    "model_base": "Qwen/Qwen2.5-14B-Instruct",
+    "peft": "LoRA r=128 alpha=256 (r5 config)"
+  },
+  "checklist": [
+    {
+      "item": "flash_attention",
+      "status": "OFF",
+      "evidence": "training/train_alm_14b.py:168-180 — from_pretrained() has no attn_implementation kwarg. No grep matches for flash_attn / sdpa_kernel / attn_implementation / scaled_dot_product_attention anywhere in .py files.",
+      "current_behavior": "HF defaults to 'eager' attention on Qwen2 for seq<=4096 when flash-attn package is not explicitly requested. Attention is O(n^2) materialized, not fused.",
+      "recommendation": "attn_implementation='flash_attention_2' in AutoModelForCausalLM.from_pretrained (both distributed and non-distributed branches). flash-attn>=2.6 wheels ship on RunPod pytorch:2.4.0; FA3 (H100 Hopper) only lands in flash-attn 2.7+ and is still opt-in (FLASH_ATTENTION_FORCE_FA3=1 / use_fa3=True) — not stable for Qwen2 yet, so FA2 is the safe default.",
+      "patch": "shared/patches/alm14b_speedup_flash_attention.diff",
+      "estimated_uplift_pct": 30,
+      "uplift_notes": "seq=1024 at bf16: FA2 fuses softmax+matmul, saves HBM on attention scores; typical MFU gain 25-40% for 14B-class models on H100 vs eager. Conservative 30%."
+    },
+    {
+      "item": "torch_compile",
+      "status": "OFF",
+      "evidence": "No grep matches for torch.compile in any .py file under training/.",
+      "current_behavior": "Model runs in eager mode; every step re-launches ~1500 CUDA kernels.",
+      "recommendation": "torch.compile(model, mode='max-autotune', dynamic=False, fullgraph=False) right before the FSDP wrap. Must be applied AFTER get_peft_model and BEFORE FSDP() when both are used (Dynamo tracing through FSDP shards is brittle as of torch 2.4). With seq=1024 fixed and batch=1 fixed, static shapes are guaranteed → dynamic=False is safe.",
+      "patch": "shared/patches/alm14b_speedup_torch_compile.diff",
+      "estimated_uplift_pct": 12,
+      "uplift_notes": "Conservative: LoRA+FSDP+bf16 stack gets 10-18% from max-autotune on H100. PEFT adapter graph breaks can cap gains; fallback to mode='reduce-overhead' if compile hangs >3min."
+    },
+    {
+      "item": "fused_adamw",
+      "status": "OFF",
+      "evidence": "training/train_alm_14b.py:258-264 — torch.optim.AdamW(..., foreach=False) explicitly. No fused=True, no apex FusedAdam import.",
+      "current_behavior": "per-param Python loop in optimizer.step(); on H100 with only LoRA params (~50M) this is 5-8ms/step of pure Python overhead.",
+      "recommendation": "fused=True on CUDA. Keep foreach as fallback (False is actively worse than foreach=True, but fused supersedes both). Requires torch>=2.0 which is satisfied.",
+      "patch": "shared/patches/alm14b_speedup_fused_adamw.diff",
+      "estimated_uplift_pct": 3,
+      "uplift_notes": "Small absolute gain because LoRA params are tiny, but free and risk-free."
+    },
+    {
+      "item": "precision_bf16",
+      "status": "ON",
+      "evidence": "train_alm_14b.py:170,177,223-225,306,354 — bf16 throughout (model weights, autocast fwd, autocast eval, FSDP MixedPrecision param/reduce/buffer).",
+      "current_behavior": "bf16 native — correct choice for 14B on H100. fp8 via transformer_engine would net another ~30% but is out of scope (requires H100 Transformer Engine install, Qwen2 patching, and is unstable with LoRA).",
+      "recommendation": "KEEP bf16. Do NOT add fp8 for r5/r6 — that is a separate experimental track.",
+      "patch": "N/A — already ON",
+      "estimated_uplift_pct": 0,
+      "uplift_notes": "Baseline; fp8 deferred."
+    },
+    {
+      "item": "activation_checkpoint",
+      "status": "ON",
+      "evidence": "train_alm_14b.py:183-185,445 — --grad-ckpt default=True, model.gradient_checkpointing_enable().",
+      "current_behavior": "Activation checkpointing is ON. This is a ~25-30% throughput penalty in exchange for memory headroom.",
+      "recommendation": "For 14B LoRA on 80GB H100 with batch=1 seq=1024: should be OFF. r5 memory budget comment says '~58 GB resident / 80 GB' which already has 22 GB headroom. With activation checkpoint OFF, peak adds ~8-12 GB (seq=1024 is small) → still fits. For 32B, keep ON.",
+      "patch": "shared/patches/alm14b_speedup_disable_act_ckpt.diff",
+      "estimated_uplift_pct": 25,
+      "uplift_notes": "Biggest single gain. Must be validated with nvidia-smi at step 50 before running full 20k. If peak memory > 72 GB, revert to ON."
+    },
+    {
+      "item": "zero_fsdp",
+      "status": "ON",
+      "evidence": "train_alm_14b.py:202-235 — FSDP FULL_SHARD with MixedPrecision(bf16), use_orig_params=True. Triggered only when --fsdp AND torchrun --nproc_per_node>1.",
+      "current_behavior": "r5 single-H100 runs do NOT hit this path (uses device_map='auto' instead). FSDP is wired correctly for multi-GPU.",
+      "recommendation": "For single-H100 r5/r6: FSDP irrelevant, skip. For future 2xH100 14B: FULL_SHARD is already correct. For 32B r1 (launch_alm_32b_r1.sh): likely needs SHARD_GRAD_OP + CPU offload — out of scope.",
+      "patch": "N/A — already ON (single-GPU path bypasses it correctly)",
+      "estimated_uplift_pct": 0,
+      "uplift_notes": "No-op for r5 single-H100."
+    },
+    {
+      "item": "dataloader",
+      "status": "OFF",
+      "evidence": "train_alm_14b.py:252,255 — DataLoader(..., num_workers=0). No pin_memory, no persistent_workers, no prefetch_factor.",
+      "current_behavior": "Main process does tokenization + batching + host-to-device copy inline. With 14B fwd/bwd taking 3+ sec/step, data loading is NOT the bottleneck — but pin_memory still reclaims ~0.5-1% via async H2D copy.",
+      "recommendation": "num_workers=2, pin_memory=True, persistent_workers=True, prefetch_factor=2. Tokens are pre-tokenized in memory so num_workers=2 is ample.",
+      "patch": "shared/patches/alm14b_speedup_dataloader.diff",
+      "estimated_uplift_pct": 1,
+      "uplift_notes": "Tiny gain on this workload (compute-bound), but free. May matter more if seq is bumped to 4096."
+    },
+    {
+      "item": "nccl_env",
+      "status": "OFF",
+      "evidence": "launch_alm_14b_r5.sh / launch_alm_14b_r5_kbase.sh — no NCCL_* exports. Only launch_alm_32b_r1.sh sets NCCL_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING.",
+      "current_behavior": "Single-H100 r5 does NO NCCL collectives (no torchrun), so NCCL env is moot for r5 specifically. For multi-GPU r6 it defaults to NCCL auto-tune which can leave P2P/IB perf on the table.",
+      "recommendation": "Add NCCL_P2P_DISABLE=0, NCCL_IB_GID_INDEX=3, NCCL_NET_GDR_LEVEL=4, NCCL_ASYNC_ERROR_HANDLING=1, TORCH_NCCL_BLOCKING_WAIT=1 to the launcher — no-op on single GPU, correct on multi-GPU.",
+      "patch": "shared/patches/alm14b_speedup_nccl_env.diff",
+      "estimated_uplift_pct": 2,
+      "uplift_notes": "Mostly insurance for multi-GPU r6. 0% impact on current single-H100 r5."
+    },
+    {
+      "item": "tf32_cudnn",
+      "status": "OFF",
+      "evidence": "No torch.backends.cuda.matmul.allow_tf32 or torch.backends.cudnn.benchmark = True in any training .py file. (bonus item beyond original checklist)",
+      "current_behavior": "matmul defaults are fine for bf16 path (tf32 gates fp32 reductions), but cudnn.benchmark=True helps select optimal conv kernels — low-value on transformer but free.",
+      "recommendation": "torch.set_float32_matmul_precision('high') + torch.backends.cudnn.benchmark = True at top of train().",
+      "patch": "shared/patches/alm14b_speedup_tf32_cudnn.diff",
+      "estimated_uplift_pct": 1,
+      "uplift_notes": "Bonus. Adds to flash_attention + compile pipeline, no conflict."
+    }
+  ],
+  "cumulative_uplift_pct_estimate": 74,
+  "cumulative_uplift_breakdown": {
+    "flash_attention": 30,
+    "disable_act_ckpt": 25,
+    "torch_compile": 12,
+    "fused_adamw": 3,
+    "nccl_env": 2,
+    "dataloader": 1,
+    "tf32_cudnn": 1
+  },
+  "cumulative_uplift_caveats": [
+    "Uplifts are NOT perfectly additive — flash_attention + disable_act_ckpt share the memory budget. Real cumulative MFU gain is typically 45-60% for this combination on H100.",
+    "Conservative combined estimate: +50% (e.g. 18.5 step/min → 28 step/min for r5 config).",
+    "MUST validate with nvidia-smi memory check at step 50 after disable_act_ckpt is applied."
+  ],
+  "patches_count": 7,
+  "patch_files": [
+    "shared/patches/alm14b_speedup_flash_attention.diff",
+    "shared/patches/alm14b_speedup_torch_compile.diff",
+    "shared/patches/alm14b_speedup_fused_adamw.diff",
+    "shared/patches/alm14b_speedup_disable_act_ckpt.diff",
+    "shared/patches/alm14b_speedup_dataloader.diff",
+    "shared/patches/alm14b_speedup_nccl_env.diff",
+    "shared/patches/alm14b_speedup_tf32_cudnn.diff"
+  ],
+  "application_order": [
+    "1. fused_adamw (trivial, no risk)",
+    "2. tf32_cudnn (trivial, no risk)",
+    "3. dataloader (trivial, no risk)",
+    "4. flash_attention (validate gen quality after — Qwen2 FA2 is well-tested but peft adapter dtype mismatches possible)",
+    "5. disable_act_ckpt (validate peak memory < 72 GB at step 50)",
+    "6. torch_compile (apply LAST — longest validation loop due to compile warmup time)",
+    "7. nccl_env (insurance; apply whenever)"
+  ],
+  "DO_NOT_APPLY_TO_CURRENT_RUN": true,
+  "apply_to_next_run": "r6 or r5_kbase (base-swap) whichever launches fresh first",
+  "sign_off": {
+    "rule_never_resume_with_param_change": "honored — all patches land on a NEW run from step 0",
+    "rule_one_shot_best": "honored — patches are prepared BEFORE next launch",
+    "rule_no_quantization": "honored — no bitsandbytes, no gptq, no awq",
+    "rule_l0_untouched": "honored — no files in anima/core/ modified"
+  }
+}

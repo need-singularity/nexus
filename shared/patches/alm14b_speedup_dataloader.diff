@@ -1,0 +1,55 @@
+# alm14b_speedup_dataloader.diff
+#
+# Enable async dataloading: num_workers=2, pin_memory=True, persistent_workers=True.
+#
+# Tokens are fully pre-loaded in memory (load_corpus_chunked), so workers
+# only do tensor slicing — num_workers=2 is plenty, num_workers=4+ would
+# waste fork RSS and hurt startup.
+#
+# pin_memory enables async H2D copy (small but free).
+# persistent_workers avoids respawning workers each epoch.
+# prefetch_factor=2 keeps the pipeline warm.
+#
+# Apply to next-run only.
+# Target file: training/train_alm_14b.py
+# Apply: cd anima && git apply shared/patches/alm14b_speedup_dataloader.diff
+#
+# Estimated uplift: +1% on current seq=1024 workload (compute-bound).
+# Gain grows to ~3-5% if seq is raised to 4096.
+#
+--- a/training/train_alm_14b.py
++++ b/training/train_alm_14b.py
+@@ -246,13 +246,31 @@
+
+     # ALM-P4-4: use DistributedSampler when running under torchrun so each
+     # rank sees non-overlapping shards of the dataset per epoch.
++    # Speedup patch 20260415: async dataloading (num_workers=2, pin_memory,
++    # persistent_workers). Tokens are in-memory so workers are cheap.
+     if IS_DISTRIBUTED:
+         from torch.utils.data.distributed import DistributedSampler
+         sampler = DistributedSampler(dataset, num_replicas=WORLD_SIZE, rank=RANK, shuffle=True)
+-        dataloader = DataLoader(dataset, batch_size=args.batch, sampler=sampler, num_workers=0)
++        dataloader = DataLoader(
++            dataset,
++            batch_size=args.batch,
++            sampler=sampler,
++            num_workers=2,
++            pin_memory=True,
++            persistent_workers=True,
++            prefetch_factor=2,
++        )
+     else:
+         sampler = None
+-        dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=0)
++        dataloader = DataLoader(
++            dataset,
++            batch_size=args.batch,
++            shuffle=True,
++            num_workers=2,
++            pin_memory=True,
++            persistent_workers=True,
++            prefetch_factor=2,
++        )
+
+     # Optimizer (R04: foreach=False)
+     optimizer = torch.optim.AdamW(

@@ -1,0 +1,50 @@
+# alm14b_speedup_torch_compile.diff
+#
+# Wrap LoRA-adapted model with torch.compile(mode="max-autotune", dynamic=False).
+#
+# Ordering matters:
+#   get_peft_model() -> gradient_checkpointing_enable() -> torch.compile() -> FSDP wrap
+# Compiling AFTER FSDP is fragile as of torch 2.4; compile first, then FSDP.
+# Dynamo can trace through use_orig_params=True FSDP shards cleanly.
+#
+# dynamic=False is safe because:
+#   - batch=1 fixed
+#   - seq=1024 fixed (no seq packing)
+#   - LoRA r is fixed for the whole run
+#
+# Apply to next-run only.
+# Target file: training/train_alm_14b.py
+# Apply: cd anima && git apply shared/patches/alm14b_speedup_torch_compile.diff
+#
+# Estimated uplift: +10-18% (conservative 12%).
+# Validation: first 2-3 steps will be slow (graph capture). If compile hangs
+# >3 min, revert to mode="reduce-overhead" or remove this patch.
+#
+--- a/training/train_alm_14b.py
++++ b/training/train_alm_14b.py
+@@ -198,6 +198,18 @@
+     if RANK == 0:
+         model.print_trainable_parameters()
+
++    # Speedup patch 20260415: torch.compile with max-autotune.
++    # Must run AFTER get_peft_model and BEFORE FSDP wrap. Static shapes
++    # (batch=1, seq=1024) allow dynamic=False for maximum specialization.
++    if args.torch_compile:
++        rank0_print("[train] torch.compile(mode=max-autotune, dynamic=False)...")
++        model = torch.compile(
++            model,
++            mode="max-autotune",
++            dynamic=False,
++            fullgraph=False,
++        )
++
+     # ─── ALM-P4-4: wrap with FSDP / DDP ───
+     if args.fsdp and IS_DISTRIBUTED:
+         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+@@ -449,5 +461,6 @@
+     parser.add_argument("--fsdp-wrap-cls", default="Qwen2DecoderLayer", help="FSDP transformer wrap class (default: Qwen2DecoderLayer)")
+     parser.add_argument("--ddp", action="store_true", help="Wrap model with DistributedDataParallel (requires torchrun)")
+     parser.add_argument("--deepspeed", default=None, help="DeepSpeed config JSON path (requires deepspeed launcher)")
++    parser.add_argument("--torch-compile", action="store_true", help="torch.compile(mode=max-autotune). Next-run only; adds ~2min warmup.")
+     args = parser.parse_args()
+     train(args)

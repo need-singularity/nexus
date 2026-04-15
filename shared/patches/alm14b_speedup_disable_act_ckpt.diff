@@ -1,0 +1,43 @@
+# alm14b_speedup_disable_act_ckpt.diff
+#
+# Disable gradient (activation) checkpointing for 14B on 80GB H100.
+#
+# Rationale: r5 memory budget docs say "~58 GB resident / 80 GB" at batch=1
+# seq=1024 with act checkpointing ON. Turning it OFF adds ~8-12 GB peak
+# during backward (seq is small), landing around ~68-70 GB — still fits.
+#
+# Throughput impact of activation checkpointing: ~25% penalty. Removing it
+# is the single biggest win in this audit.
+#
+# CRITICAL: must be validated with `nvidia-smi --query-gpu=memory.used`
+# at step 50 on the r6 run. If peak > 72 GB, re-enable with --grad-ckpt.
+#
+# How to apply: flips the launcher flag only. The trainer default stays ON
+# (other callers, especially 32B r1, still need it for memory headroom).
+#
+# Apply to next-run only.
+# Target file: training/launch_alm_14b_r5.sh
+# Apply: cd anima && git apply shared/patches/alm14b_speedup_disable_act_ckpt.diff
+#
+# Estimated uplift: +25% throughput.
+#
+--- a/training/launch_alm_14b_r5.sh
++++ b/training/launch_alm_14b_r5.sh
+@@ -176,6 +176,9 @@
+ # R2 prefix (distinct from r4 and kbase):
+ #     r2:anima-models/alm14b/r5/step_{step}/
+ # Model tag + round give the same naming to upload_to_r2().
++# Speedup patch 20260415: --no-grad-ckpt disables activation checkpointing.
++# At batch=1 seq=1024 the 14B fits in ~70 GB peak without ckpt. MUST validate
++# with nvidia-smi at step 50 — if peak > 72 GB, remove --no-grad-ckpt.
+ python3 "$TRAINER" \
+     --base Qwen/Qwen2.5-14B-Instruct \
+     --corpus "$CORPUS" \
+@@ -194,6 +197,7 @@
+     --doc-separator \
+     --shuffle-docs \
+     --dedupe \
++    --no-grad-ckpt \
+     --ckpt-dir "$CKPT_DIR" \
+     --save-every 2000 \
+     --eval-every 500 \

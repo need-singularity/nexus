@@ -1,0 +1,41 @@
+# alm14b_speedup_nccl_env.diff
+#
+# Export NCCL and related env vars in the launcher for future multi-GPU runs.
+#
+# These are NO-OPS on single-H100 r5 (no collectives happen), but the
+# launcher will be copied for r6 / 2xH100 / multi-node — where the defaults
+# can leave P2P/IB perf on the table.
+#
+# - NCCL_P2P_DISABLE=0    : allow PCIe/NVLink P2P (default=0, explicit)
+# - NCCL_IB_GID_INDEX=3   : correct GID for RoCE on RunPod Infiniband fabric
+# - NCCL_NET_GDR_LEVEL=4  : GPU Direct RDMA for all host-NIC combos
+# - NCCL_ASYNC_ERROR_HANDLING=1 + TORCH_NCCL_BLOCKING_WAIT=1 : surface
+#   collective hangs as exceptions instead of hanging forever
+# - NCCL_DEBUG=WARN       : log only errors (not VERSION spam)
+#
+# Apply to next-run only.
+# Target file: training/launch_alm_14b_r5.sh
+# Apply: cd anima && git apply shared/patches/alm14b_speedup_nccl_env.diff
+#
+# Estimated uplift: +2% multi-GPU. 0% single-GPU.
+#
+--- a/training/launch_alm_14b_r5.sh
++++ b/training/launch_alm_14b_r5.sh
+@@ -130,6 +130,17 @@
+ export HF_HUB_CACHE="/workspace/hf_cache"
+ export HF_HOME="/workspace/hf_cache"
+ export TRANSFORMERS_CACHE="/workspace/hf_cache"
++
++# ── Speedup patch 20260415: NCCL / CUDA env tuning ──
++# No-op on single-H100 (no collectives) but correct for multi-GPU r6.
++export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-0}"
++export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
++export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-4}"
++export NCCL_ASYNC_ERROR_HANDLING="${NCCL_ASYNC_ERROR_HANDLING:-1}"
++export TORCH_NCCL_BLOCKING_WAIT="${TORCH_NCCL_BLOCKING_WAIT:-1}"
++export TORCH_NCCL_ASYNC_ERROR_HANDLING="${TORCH_NCCL_ASYNC_ERROR_HANDLING:-1}"
++export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
++
+ PRESTAGED="/workspace/hf_cache/models--Qwen--Qwen2.5-14B-Instruct"
+ if [[ -d "$PRESTAGED" ]]; then
+     echo "[preflight] ✓ Qwen2.5-14B pre-staged at $PRESTAGED"

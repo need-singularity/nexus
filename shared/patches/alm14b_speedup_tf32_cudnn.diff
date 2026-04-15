@@ -1,0 +1,33 @@
+# alm14b_speedup_tf32_cudnn.diff
+#
+# Bonus patch beyond original audit: TF32 for fp32 residuals + cudnn autotune.
+#
+# - torch.set_float32_matmul_precision('high') : TF32 for fp32 matmuls
+#   (bf16 path isn't affected, but optimizer master weights / layernorm fp32
+#   residuals benefit).
+# - torch.backends.cudnn.benchmark = True : cudnn picks fastest conv algo
+#   per input shape. LoRA+attn has no convs but HF internals occasionally
+#   hit cudnn for positional embeddings — free speedup when relevant.
+#
+# Apply at top of train() before model load.
+# Target file: training/train_alm_14b.py
+# Apply: cd anima && git apply shared/patches/alm14b_speedup_tf32_cudnn.diff
+#
+# Estimated uplift: +1% (small but free, no risk).
+#
+--- a/training/train_alm_14b.py
++++ b/training/train_alm_14b.py
+@@ -135,6 +135,13 @@
+ # ─── Training ────────────────────────────────────────────────
+
+ def train(args):
++    # Speedup patch 20260415: TF32 for fp32 residuals + cudnn autotune.
++    # TF32 only affects fp32 matmuls (optimizer master weights, layernorm);
++    # bf16 forward/backward are unaffected. cudnn.benchmark=True picks
++    # fastest kernels per shape — static shapes here make it a win.
++    torch.set_float32_matmul_precision("high")
++    torch.backends.cudnn.benchmark = True
++
+     # ─── ALM-P4-4: init distributed if torchrun launched us ───
+     if IS_DISTRIBUTED:
+         if not torch.distributed.is_initialized():
