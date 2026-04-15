@@ -12,10 +12,12 @@ h1{color:#8ef;font-size:18px;margin:0 0 2px;}
 .panel.projects{border-color:#8ef;}
 .panel.cost{border-color:#f80;}
 .panel.failures{border-color:#f48;}
+.panel.race{border-color:#cc4;}
 .panel-title{background:#111;color:#8ef;padding:8px 12px;border-bottom:1px solid #2a3a2a;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;}
 .panel.volume .panel-title{color:#4a9;}
 .panel.cost .panel-title{color:#f80;}
 .panel.failures .panel-title{color:#f48;}
+.panel.race .panel-title{color:#cc4;}
 .panel-section{padding:10px 12px;border-bottom:1px solid #1a1a1a;}
 .panel-section:last-child{border-bottom:none;}
 .row{display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:11px;}
@@ -32,13 +34,14 @@ h1{color:#8ef;font-size:18px;margin:0 0 2px;}
 #status{color:#555;font-size:10px;margin-top:16px;}
 </style></head><body>
 <h1>nexus ledger BI</h1>
-<div class="meta">AGL-P7-1 · work_registry.jsonl → agents/projects/cost/failures · auto-refresh 60s · generated 2026-04-15T16:19:02Z</div>
+<div class="meta">AGL-P7-1 + AGL-P8-1 · work_registry + agent_race · 5 panels · auto-refresh 60s · generated 2026-04-15T17:54:15Z</div>
 <div id="status">Loading ledger_bi_latest.json...</div>
 <div class="grid2">
   <div class="panel volume"><div class="panel-title">P1 volume (7d)</div><div id="p-volume" class="panel-section">loading...</div></div>
   <div class="panel projects"><div class="panel-title">P2 by project</div><div id="p-projects" class="panel-section">loading...</div></div>
   <div class="panel cost"><div class="panel-title">P3 cost / tokens (30d)</div><div id="p-cost" class="panel-section">loading...</div></div>
   <div class="panel failures"><div class="panel-title">P4 failures (top 5)</div><div id="p-failures" class="panel-section">loading...</div></div>
+  <div class="panel race"><div class="panel-title">P5 race wins (distributed)</div><div id="p-race" class="panel-section">loading...</div></div>
 </div>
 <script>
 async function load(){
@@ -51,6 +54,7 @@ async function load(){
     renderProjects(d.projects);
     renderCost(d.cost);
     renderFailures(d.failures);
+    renderRace(d.race || {finished:0,planned:0,started:0,avg_time_to_first_sec:0,wins_7d:0,latest:[]});
   }catch(e){
     document.getElementById('status').textContent = 'Fetch failed ('+e.message+') — run: hexa $NEXUS/shared/harness/ledger_bi.hexa';
   }
@@ -102,6 +106,20 @@ function renderFailures(f){
     html += '<div class="bar-row"><span class="name">'+x.area+'</span><span class="bar" style="width:'+w+'%;background:#f48"></span><span class="count">'+x.count+'</span></div>';
   });
   document.getElementById('p-failures').innerHTML = html;
+}
+function renderRace(r){
+  let html = row('finished', r.finished, 'hi') + row('planned', r.planned) + row('started', r.started);
+  html += row('wins 7d', r.wins_7d, 'done');
+  html += row('avg time-to-first', r.avg_time_to_first_sec+'s');
+  if(r.latest && r.latest.length){
+    html += '<div style="margin-top:8px;color:#888;font-size:10px;">latest wins:</div>';
+    r.latest.forEach(x => {
+      html += '<div class="bar-row"><span class="name">'+x.race_id+'</span><span class="bar" style="width:'+Math.max(2, Math.min(100, x.time_to_first_sec*5))+'%;background:#cc4"></span><span class="count">'+x.time_to_first_sec+'s · '+x.winner+'</span></div>';
+    });
+  } else {
+    html += '<div style="color:#555;margin-top:6px;">(no race wins yet — run: hexa $NEXUS/shared/harness/agent_race.hexa simulate 3 3)</div>';
+  }
+  document.getElementById('p-race').innerHTML = html;
 }
 load();
 </script>
