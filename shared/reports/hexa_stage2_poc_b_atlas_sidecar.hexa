@@ -1,0 +1,109 @@
+// ═══════════════════════════════════════════════════════════
+// hexa_stage2_poc_b_atlas_sidecar.hexa — HEXA-P8-1 PoC B
+// 목적: atlas.n6.stats sidecar v2 schema PoC — orphan/dup/grade cache
+// 대상: shared/n6/atlas_health.hexa 4~7번 exec pipeline
+// 측정: (1) cold (현 atlas_health 로직 시뮬) vs (2) v2 sidecar 캐시-히트 경로
+// 변경범위: 읽기 전용. atlas_health.hexa 수정 안함. atlas.n6.stats 기록 안함.
+// ═══════════════════════════════════════════════════════════
+// @allow-unsafe-inline — 측정 스크립트
+// @allow-silent-catch
+
+let HOME = env("HOME")
+let ATLAS = HOME + "/Dev/nexus/shared/n6/atlas.n6"
+let STATS = ATLAS + ".stats"
+
+fn _now() -> f64 { return to_float(exec("date +%s.%N").trim()) }
+
+println("=== HEXA stage2 PoC-B: atlas.n6 sidecar v2 ===")
+println("atlas: " + ATLAS)
+if !file_exists(ATLAS) {
+    println("ERROR: atlas not found — abort")
+    exit(0)
+}
+
+// ─── Phase 1: v1 baseline — 현 atlas_health.hexa 동작 시뮬 (cold path) ───
+let t0 = _now()
+
+// 1a) unique nodes
+let uniq_raw = to_string(exec("awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' '" + ATLAS + "' 2>/dev/null | sort -u | wc -l")).trim()
+let mut uniq_nodes: i64 = 0
+try { uniq_nodes = to_int(uniq_raw) } catch e {}
+let t1 = _now()
+
+// 1b) orphan comm -23 (가장 비싼 pipe)
+let tmp = "/tmp/.poc_b_orphan." + to_string(exec("echo $$").trim())
+try { exec("bash", ["-c", "comm -23 <(awk '/\"type\":\"edge\"/ { match($0, /\"from\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+8, RLENGTH-9); match($0, /\"to\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+6, RLENGTH-7) }' '" + ATLAS + "' | sort -u) <( { awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' '" + ATLAS + "' ; awk '/^@[A-Z]+ /{print $2}' '" + ATLAS + "' ; } | sort -u) > '" + tmp + "' 2>/dev/null"]) } catch e {}
+let real_orphan_raw = to_string(exec("grep -cvE '^(n6-|bt-|foundation-)' '" + tmp + "' 2>/dev/null")).trim()
+let mut real_orphan: i64 = 0
+try { real_orphan = to_int(real_orphan_raw) } catch e {}
+try { exec("rm -f '" + tmp + "'") } catch e {}
+let t2 = _now()
+
+// 1c) dup data lines
+let dup_raw = to_string(exec("grep -v '^#' '" + ATLAS + "' 2>/dev/null | grep -v '^//' | grep -v '^$' | grep -v '^[[:space:]]' | sort | uniq -d | wc -l")).trim()
+let mut dup: i64 = 0
+try { dup = to_int(dup_raw) } catch e {}
+let t3 = _now()
+
+// 1d) grade histogram (top 12)
+let grade_raw = to_string(exec("grep -oE ' \\[[0-9]+[?*]*\\]$' '" + ATLAS + "' 2>/dev/null | sort | uniq -c | sort -rn | head -12"))
+let t4 = _now()
+
+let dt_v1_total = t4 - t0
+println("")
+println("v1 baseline (cold — current atlas_health pipeline):")
+println("  1a uniq_nodes:       " + to_string(t1 - t0) + "s (n=" + to_string(uniq_nodes) + ")")
+println("  1b orphan comm:      " + to_string(t2 - t1) + "s (real_orphan=" + to_string(real_orphan) + ")")
+println("  1c dup sort uniq-d:  " + to_string(t3 - t2) + "s (dup=" + to_string(dup) + ")")
+println("  1d grade histogram:  " + to_string(t4 - t3) + "s")
+println("  TOTAL v1:            " + to_string(dt_v1_total) + "s")
+
+// ─── Phase 2: v2 sidecar 시뮬 — 가정적 JSON read + parse ───
+// 실제 schema v2 확장을 read-only 로 시뮬. v1 sidecar 가 있으면 mtime 만 확인, 그 외 필드는 dummy 로 채움.
+let t5 = _now()
+let mut v2_orphan: i64 = real_orphan  // 실제 값 (cache 성공 시 동일)
+let mut v2_dup: i64 = dup
+let mut v2_grade_hash = ""
+if file_exists(STATS) {
+    let mut raw = ""
+    try { raw = read_file(STATS).trim() } catch e {}
+    if raw != "" {
+        // 아주 단순한 key:value 파싱 (실제 atlas_health 의 _json_int 와 동일)
+        let marker_o = "\"orphan_real\":"
+        let idx_o = raw.index_of(marker_o)
+        if idx_o >= 0 {
+            let after = raw.substring(idx_o + len(marker_o), len(raw))
+            let mut end = after.index_of(",")
+            let end2 = after.index_of("}")
+            if end < 0 || (end2 >= 0 && end2 < end) { end = end2 }
+            if end > 0 {
+                try { v2_orphan = to_int(after.substring(0, end).trim()) } catch e {}
+            }
+        }
+        // dup/grade_hash 동일 패턴 — 생략 (v2 가 있다고 가정)
+    }
+}
+let t6 = _now()
+let dt_v2 = t6 - t5
+println("")
+println("v2 sidecar cache-hit (simulated — reads atlas.n6.stats):")
+println("  v2 total:            " + to_string(dt_v2) + "s (orphan=" + to_string(v2_orphan) + ")")
+
+let speedup = if dt_v2 > 0.0 { dt_v1_total / dt_v2 } else { 0.0 }
+println("")
+println("=== verdict ===")
+println("v1 baseline:  " + to_string(dt_v1_total) + "s")
+println("v2 sidecar:   " + to_string(dt_v2) + "s")
+println("speedup:      " + to_string(speedup) + "x")
+
+// ─── proposed v2 schema example (JSON commentary) ───
+println("")
+println("=== proposed v2 schema (DRAFT, not written) ===")
+let example_v2 = "{\"schema\":2,\"mtime\":<mtime>,\"size\":<size>,\"line_count\":<ln>,\"head_hash\":\"<md5>\",\"nodes\":<n>,\"edges\":<e>,\"hubs\":<h>,\"orphan_real\":<or>,\"virtual_refs\":<vr>,\"dup_data_lines\":<d>,\"malformed_lines\":<m>,\"grade_dist_top12\":\"<g1>|<g2>|...\"}"
+println(example_v2)
+
+// ─── JSON result append ───
+let out = "{\"ts\":" + to_string(to_int(_now())) + ",\"poc\":\"B\",\"v1_total\":" + to_string(dt_v1_total) + ",\"v2_hit\":" + to_string(dt_v2) + ",\"speedup\":" + to_string(speedup) + ",\"orphan\":" + to_string(real_orphan) + ",\"dup\":" + to_string(dup) + "}"
+try { append_file(HOME + "/Dev/nexus/shared/reports/hexa_stage2_poc_results.jsonl", out + "\n") } catch e {}
+println("")
+println("result appended: shared/reports/hexa_stage2_poc_results.jsonl")

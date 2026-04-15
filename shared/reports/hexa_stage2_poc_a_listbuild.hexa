@@ -1,0 +1,72 @@
+// ═══════════════════════════════════════════════════════════
+// hexa_stage2_poc_a_listbuild.hexa — HEXA-P8-1 PoC A
+// 목적: hexa-script-level list-build 최적화 대안 비교
+// 대상: blowup.hexa (45 push sites), lint.hexa (11 while+push)
+// 변경범위: hexa 바이너리 수정 없음. 기존 패턴 vs PoC 패턴만 측정.
+// ═══════════════════════════════════════════════════════════
+// @allow-unsafe-inline — 측정 스크립트, prod path 아님
+// @allow-silent-catch
+
+let _N = 5000
+
+fn _now() -> f64 { return to_float(exec("date +%s.%N").trim()) }
+
+println("=== HEXA stage2 PoC-A: list-build strategies ===")
+println("scale: N=" + to_string(_N))
+
+// ─── Scenario A1 (baseline): push-reassign (현 blowup.hexa 패턴) ───
+let t0 = _now()
+let mut a1 = []
+let mut i: i64 = 0
+while i < _N {
+    a1 = a1.push(i * 2)
+    i = i + 1
+}
+let t1 = _now()
+let dt_a1 = t1 - t0
+println("A1 push-reassign (current):        " + to_string(dt_a1) + "s  (len=" + to_string(len(a1)) + ")")
+
+// ─── Scenario A2: mutating push (no reassign) ───
+let t2 = _now()
+let mut a2 = []
+let mut j: i64 = 0
+while j < _N {
+    a2.push(j * 2)
+    j = j + 1
+}
+let t3 = _now()
+let dt_a2 = t3 - t2
+let speedup_a2 = if dt_a2 > 0.0 { dt_a1 / dt_a2 } else { 0.0 }
+println("A2 push-mutate (no-reassign):      " + to_string(dt_a2) + "s  speedup=" + to_string(speedup_a2) + "x")
+
+// ─── Scenario A3: range.map lambda ───
+let t4 = _now()
+let a3 = (0.._N).map(|x| x * 2)
+let t5 = _now()
+let dt_a3 = t5 - t4
+let speedup_a3 = if dt_a3 > 0.0 { dt_a1 / dt_a3 } else { 0.0 }
+println("A3 range.map lambda:               " + to_string(dt_a3) + "s  speedup=" + to_string(speedup_a3) + "x  (len=" + to_string(len(a3)) + ")")
+
+// ─── Scenario A4: for x in range + mutating push ───
+let t6 = _now()
+let mut a4 = []
+for x in 0.._N { a4.push(x * 2) }
+let t7 = _now()
+let dt_a4 = t7 - t6
+let speedup_a4 = if dt_a4 > 0.0 { dt_a1 / dt_a4 } else { 0.0 }
+println("A4 for-range + push-mutate:        " + to_string(dt_a4) + "s  speedup=" + to_string(speedup_a4) + "x")
+
+// ─── Verdict ───
+println("")
+println("=== verdict ===")
+println("A1 (current)   baseline")
+println("A2 push-mutate " + to_string(speedup_a2) + "x — drop-in, low risk")
+println("A3 range.map   " + to_string(speedup_a3) + "x — best for pure transforms")
+println("A4 for + mut   " + to_string(speedup_a4) + "x — hybrid compromise")
+
+// ─── JSON result append ───
+let out = "{\"ts\":" + to_string(to_int(_now())) + ",\"poc\":\"A\",\"N\":" + to_string(_N) + ",\"A1_push_reassign\":" + to_string(dt_a1) + ",\"A2_push_mutate\":" + to_string(dt_a2) + ",\"A3_range_map\":" + to_string(dt_a3) + ",\"A4_for_mut\":" + to_string(dt_a4) + "}"
+try { append_file("/Users/ghost/Dev/nexus/shared/reports/hexa_stage2_poc_results.jsonl", out + "\n") } catch e {}
+
+println("")
+println("result appended: shared/reports/hexa_stage2_poc_results.jsonl")

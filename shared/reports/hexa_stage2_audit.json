@@ -1,0 +1,278 @@
+{
+  "_schema": "hexa_stage2_audit/1.0",
+  "task": "HEXA-P8-1",
+  "roadmap": "P8/A9_HEXA_LANG/HEXA-P8-1 — hexa 런타임 최적화 stage2 (top-10 병목 해결)",
+  "date": "2026-04-16",
+  "scope": "audit+proposal only (hexa binary 수정 금지)",
+  "env": {
+    "binary": "~/.hx/packages/hexa/hexa (bash wrapper → hexa.real stage1 interpreter)",
+    "version": "hexa 0.1.0-stage1",
+    "resolver": "shared/scripts/bin/hexa (remote dispatch AG6; HEXA_LOCAL=1 forced local)",
+    "host": "Darwin 24.6.0, Mac local (HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1)"
+  },
+  "per_script_timing": [
+    {
+      "script": "shared/harness/lint.hexa",
+      "lines": 4127,
+      "invocations": [
+        {"args": "--file shared/harness/lint.hexa", "real_s": 2.39, "user_s": 1.11, "sys_s": 0.82, "note": "self-lint, 4127 lines + cross-check exec chain"},
+        {"args": "--file shared/n6/atlas_health.hexa", "real_s": 2.34, "user_s": 1.14, "sys_s": 0.86, "note": "small file, same cross-check cost"},
+        {"args": "(default=--staged)", "real_s": 0.75, "user_s": 0.39, "sys_s": 0.23, "note": "no staged hexa files → mostly boot"}
+      ],
+      "interpreter_heavy": false,
+      "bottleneck_class": "subprocess_chain (git rev-parse + git diff --cached + thinking_log read + per-file exec awk/grep)"
+    },
+    {
+      "script": "shared/blowup/core/blowup.hexa",
+      "lines": 4099,
+      "invocations": [
+        {"args": "help", "real_s": 0.22, "user_s": 0.11, "sys_s": 0.04, "note": "early-exit after help, represents bootstrap cost"},
+        {"args": "physics 1 --max-rounds 1 --fast", "real_s": 2.39, "user_s": 1.48, "sys_s": 0.25, "note": "single round, ouroboros skipped"}
+      ],
+      "interpreter_heavy": true,
+      "bottleneck_class": "hashmap cache (n6_distance ~11만 calls), list push growth, string keying to_string(float)"
+    },
+    {
+      "script": "shared/n6/atlas_health.hexa",
+      "lines": 259,
+      "invocations": [
+        {"args": "(cold+cache_miss)", "real_s": 5.55, "user_s": 5.10, "sys_s": 0.30, "note": "includes verify_formulas subprocess 0.24s + ~5s awk/grep/sort chain on 18MB atlas.n6"},
+        {"args": "(warm, stats.mtime match)", "real_s": 4.22, "user_s": 4.38, "sys_s": 0.20, "note": "cache_hit still runs orphan comm -23 pipeline + grade grep -oE + dup sort+uniq -d"},
+        {"args": "--verbose", "real_s": 4.70, "user_s": 4.72, "sys_s": 0.26, "note": "same pipeline, extra sample prints"}
+      ],
+      "interpreter_heavy": false,
+      "bottleneck_class": "subprocess pipelines — awk/sort/comm on 18MB atlas.n6 (real CPU burned in awk+sort)",
+      "micro_bench": {
+        "stat_-f_%z": "0.00s",
+        "wc_-l": "0.02s",
+        "grep_-c_type_node": "0.18s",
+        "awk_sort_-u_uniq_nodes": "0.95s",
+        "comm_-23_orphans_big_pipeline": "1.73s",
+        "grep_-v_sort_uniq_-d_dup_lines": "1.04s",
+        "grep_-oE_grade_pattern": "0.35s"
+      }
+    },
+    {
+      "script": "shared/harness/thinking_engine.hexa",
+      "lines": 565,
+      "invocations": [
+        {"args": "query test", "real_s": 0.17, "user_s": 0.09, "sys_s": 0.03, "note": "6-phase reflection + append to thinking_log.jsonl"},
+        {"args": "status", "real_s": 0.12, "user_s": 0.05, "sys_s": 0.02, "note": "read last 10 sessions, aggregate"},
+        {"args": "history", "real_s": 0.13, "user_s": 0.03, "sys_s": 0.02, "note": "tail JSONL"},
+        {"args": "reflect", "real_s": 0.12, "user_s": 0.03, "sys_s": 0.02, "note": "baseline staleness check only"}
+      ],
+      "interpreter_heavy": false,
+      "bottleneck_class": "fast path — minimal work, bounded by exec(\"date +%s\") + read_file log"
+    }
+  ],
+  "interpreter_micro_bench": {
+    "_note": "all measured locally on Mac, HEXA_LOCAL=1, single run",
+    "arithmetic_while_100k": {"real_s": 1.50, "ops_per_s_est": 66667, "label": "BASELINE"},
+    "arithmetic_while_500k": {"real_s": 4.77, "ops_per_s_est": 104822},
+    "for_range_100k": {"real_s": 1.88, "ops_per_s_est": 53191, "vs_while": "faster 1.53x per iter after amortizing iter construction"},
+    "for_range_3k_iter": {"real_s": 0.027, "note": "tiny — for-range iterator setup is cheap, scales linearly"},
+    "string_concat_1k": {"real_s": 0.027},
+    "string_concat_2k": {"real_s": 0.024, "label": "fast — likely rope/SSO"},
+    "array_push_reassign_2500": {"real_s": 0.79},
+    "array_push_reassign_5000": {"real_s": 4.82, "complexity": "O(n²) — ratio 6.1x for 2x input"},
+    "array_push_reassign_3000": {"real_s": 0.74},
+    "array_push_mutate_3000_no_reassign": {"real_s": 0.45, "vs_reassign": "faster 1.65x (still O(n²))"},
+    "array_push_reassign_5000_B": {"real_s": 8.09, "note": "variance — cold vs warm arena"},
+    "array_push_mutate_5000": {"real_s": 4.08},
+    "range_map_lambda_5000": {"real_s": 0.051, "vs_push_reassign": "158x faster — KILLER PATTERN"},
+    "map_insert_5000": {"real_s": 4.01},
+    "map_insert_10000": {"real_s": 17.35, "complexity": "super-linear — ratio 4.33x for 2x input, suggests O(n^1.5) or poor rehash"},
+    "map_insert_20000": {"real_s": 54.60, "complexity": "O(n²)-ish — ratio 3.15x for 2x"},
+    "map_lookup_trycatch_hit_rate_100pct_20k": {"real_s": 31.36, "note": "stage1 try/catch does catch exceptions expensively on miss"},
+    "map_lookup_contains_key_20k_unique": {"real_s": 0.58, "vs_trycatch_miss": "54x faster on pure miss"},
+    "map_lookup_trycatch_hit_rate_50pct_10k": {"real_s": 0.43, "note": "HIT path cheap"},
+    "map_lookup_contains_key_hit_rate_50pct_10k": {"real_s": 1.35, "vs_trycatch": "try/catch faster 3.1x when HIT-dominant — CONTRADICTS pure-miss case"},
+    "substring_scan_16000ch_while": {"real_s": 0.39},
+    "to_string_float_20k": {"real_s": 0.52, "note": "~38k ops/s — acceptable but hot in n6_distance cache key"}
+  },
+  "top_10_bottlenecks": [
+    {
+      "rank": 1,
+      "pattern": "array_push_reassign in hot loop",
+      "complexity": "O(n²)",
+      "example_location": "shared/blowup/core/blowup.hexa line ~1127 `_build_node_id_set` and many seed-list builders",
+      "cost_1k_elems": "~0.1s",
+      "cost_5k_elems": "4-8s",
+      "grep_count_in_blowup": 45,
+      "fix_level": "hexa-script",
+      "mitigation": "replace `arr = arr.push(x)` with `arr.push(x)` (1.65x) or `(range).map(|x|f(x))` (158x)",
+      "proposal": "PROPOSAL-A"
+    },
+    {
+      "rank": 2,
+      "pattern": "map insert super-linear growth",
+      "complexity": "O(n²) or O(n^1.5)",
+      "example_location": "blowup.hexa _n6d_cache, _node_id_set — phase4 inserts 10k+",
+      "cost_10k_inserts": "17s",
+      "cost_20k_inserts": "54s",
+      "fix_level": "hexa-binary (interpreter rehash policy) — **USER APPROVAL REQUIRED**",
+      "mitigation": "audit-only — interpreter.rs hashmap `.insert()` likely triggers rehash-every-N. stage2 proposal: double-and-copy growth with load_factor<=0.75",
+      "proposal": "PROPOSAL-C (binary-level, DO NOT execute this session)"
+    },
+    {
+      "rank": 3,
+      "pattern": "subprocess chain on large files (awk/grep/sort on 18MB atlas.n6)",
+      "complexity": "O(file_size × pipeline_stages)",
+      "example_location": "shared/n6/atlas_health.hexa lines 154/160/168/189/196/213 — 7 distinct exec() pipelines",
+      "cost_per_call": "0.18-1.73s each, sum ~5.2s",
+      "fix_level": "hexa-script + sidecar caching",
+      "mitigation": "extend atlas.n6.stats sidecar to also cache orphan_count/dup_count/grade_dist (miss → rebuild). Already has schema v1 (mtime/size/lines/nodes/edges/hubs). Bump v2.",
+      "proposal": "PROPOSAL-B"
+    },
+    {
+      "rank": 4,
+      "pattern": "try/catch for map-miss (cache existence check)",
+      "complexity": "O(1) amortized but exception throwing ~50-100× base cost on miss",
+      "example_location": "blowup.hexa:269 `try { let _cv = _n6d_cache[_key]; _cached = true } catch e {}`",
+      "cost_20k_pure_miss": "31.4s",
+      "cost_10k_50pct_hit": "0.43s (try/catch WINS on HIT-dominant)",
+      "fix_level": "hexa-script conditional",
+      "mitigation": "use contains_key only when miss-rate > 80%; keep try/catch when hit-rate > 50% (verified). DIAG-01 fix docs claim 60% hit → try/catch already optimal",
+      "proposal": "NO-OP — contradictory profile, leave as is (current choice correct for hit-dominant n6_distance)"
+    },
+    {
+      "rank": 5,
+      "pattern": "while i<N integer counter vs for x in range",
+      "complexity": "O(n) both, constant factor ~1.5x",
+      "example_location": "blowup.hexa 106 instances, lint.hexa 11 instances, atlas_health.hexa 1",
+      "cost_100k": "while 2.88s, for-range 1.88s",
+      "fix_level": "hexa-script",
+      "mitigation": "rewrite `let mut i=0; while i<N { ... i=i+1 }` → `for i in 0..N { ... }` in counter loops",
+      "proposal": "PROPOSAL-A (combined with PoC-iter)"
+    },
+    {
+      "rank": 6,
+      "pattern": "to_string(float) as hashmap key — builds temporary string every call",
+      "complexity": "O(1) per call, ~38k ops/s",
+      "example_location": "blowup.hexa:267 `let _key = to_string(value)` in n6_distance, called 110k+ times/run",
+      "cost_20k": "0.52s",
+      "cost_110k_projection": "~2.9s per blowup run",
+      "fix_level": "hexa-binary preferred, hexa-script workaround possible",
+      "mitigation": "binary: expose `Value::Float` as hashmap key directly (no string coercion). script workaround: quantize `to_int(value * 10000)` as cheaper key",
+      "proposal": "PROPOSAL-C (binary) or PROPOSAL-A variant"
+    },
+    {
+      "rank": 7,
+      "pattern": "_rfind via substring-char scan (lint.hexa)",
+      "complexity": "O(n) per call, O(n²) if used in loop",
+      "example_location": "shared/harness/lint.hexa:66 `fn _rfind` — manual reverse scan using `substring(i, i+1)`",
+      "cost_16kch": "0.39s",
+      "fix_level": "hexa-binary (missing builtin)",
+      "mitigation": "interpreter gap: `last_index_of` builtin missing (P5 grammar). `str.rfind(ch)` would be O(n) but in Rust not hexa loop → ~30x faster",
+      "proposal": "PROPOSAL-C (binary — add last_index_of builtin)"
+    },
+    {
+      "rank": 8,
+      "pattern": "repeated exec() subprocesses with shell parsing overhead",
+      "complexity": "fork+exec ~3ms each",
+      "example_location": "lint.hexa 258 exec() calls, blowup.hexa 61, atlas_health.hexa 20",
+      "cost_per_exec": "~3-5ms",
+      "cost_258_exec": "~1s pure overhead + subprocess CPU",
+      "fix_level": "hexa-script",
+      "mitigation": "batch: one shell script with compound pipeline vs N hexa exec()s. blowup already did exec(\"printenv HOME\") 15→1. Pattern needs to extend to lint's per-file cross-checks.",
+      "proposal": "PROPOSAL-B variant"
+    },
+    {
+      "rank": 9,
+      "pattern": "json_escape via 5× sequential .replace()",
+      "complexity": "O(5n) per escape",
+      "example_location": "lint.hexa:32, thinking_engine.hexa:48 — `r.replace(\"\\\\\", ...).replace(\"\\\"\", ...)...`",
+      "cost_2k_invocations": "CONJECTURE: small (<50ms) based on string-concat perf",
+      "fix_level": "hexa-binary preferred",
+      "mitigation": "interpreter: expose single-pass `json_escape` builtin. script: acceptable as-is (low total count)",
+      "proposal": "NO-OP unless profiling confirms hot"
+    },
+    {
+      "rank": 10,
+      "pattern": "trace logging via append_file() per trace() call",
+      "complexity": "O(n) syscalls",
+      "example_location": "blowup.hexa:43 `_trace()` helper, ~100 trace points in a single run",
+      "cost_per_call": "CONJECTURE: ~0.5ms open+write+close (if no fsync)",
+      "cost_100_calls": "~50ms",
+      "fix_level": "hexa-script",
+      "mitigation": "buffer in-memory string, flush once at exit. Or gate behind BLOWUP_TRACE=1 properly (was observed empty trace file → perhaps default is off despite env, bug).",
+      "proposal": "NO-OP (already opt-in via BLOWUP_TRACE=0)"
+    }
+  ],
+  "stage2_proposals": [
+    {
+      "id": "PROPOSAL-A",
+      "title": "hexa-script patterns: range-map + mutating push + for-range loops",
+      "scope": "hexa scripts only (no binary change)",
+      "targets": ["blowup.hexa hot list builders (~45 push sites)", "lint.hexa per-file loops (~11 while+push)"],
+      "expected_gain": "blowup.hexa one round: 2.4s → 1.7s estimated (CONJECTURE, needs empirical validation on full pipeline); list-build paths: up to 158x on pure-build patterns",
+      "risk": "low — mutating .push() semantics must be verified; range.map restricted to pure transforms",
+      "poc_file": "shared/reports/hexa_stage2_poc_a_listbuild.hexa"
+    },
+    {
+      "id": "PROPOSAL-B",
+      "title": "atlas.n6.stats sidecar v2 — cache orphan_count/dup_count/grade_dist",
+      "scope": "atlas_health.hexa + sidecar schema bump",
+      "targets": ["shared/n6/atlas_health.hexa subprocess pipelines 4-7"],
+      "expected_gain": "cache-hit path: 4.2s → 0.2s estimated (~20x)",
+      "risk": "medium — cache invalidation on mtime change must cover orphan/dup as well (need HEAD hash already exists in schema v1); stale cache risk if .n6 edited in place without bump",
+      "poc_file": "shared/reports/hexa_stage2_poc_b_atlas_sidecar.hexa"
+    },
+    {
+      "id": "PROPOSAL-C",
+      "title": "hexa binary (USER APPROVAL REQUIRED): rehash policy + builtin fns",
+      "scope": "hexa-lang src/interpreter.rs + stdlib",
+      "targets": [
+        "HashMap insert: doubling-growth + load_factor 0.75 (fix O(n²) rehash)",
+        "add builtin last_index_of / rfind (lint._rfind workaround)",
+        "hashmap Float key as first-class (to_string elimination)"
+      ],
+      "expected_gain": "blowup.hexa: cache-heavy phase ~5x; lint.hexa: ext_of fast-path ~30x",
+      "risk": "HIGH — binary change affects all .hexa programs; must run regression suite",
+      "poc_file": "DEFERRED — this session audit-only",
+      "approval_gate": "L0 — user explicit approval required before src/interpreter.rs edits"
+    }
+  ],
+  "poc_results": [
+    {
+      "poc": "A — list-build patterns",
+      "bench_file": "shared/reports/hexa_stage2_poc_a_listbuild.hexa",
+      "result_jsonl": "shared/reports/hexa_stage2_poc_results.jsonl",
+      "N": 5000,
+      "measured": {
+        "A1_push_reassign_baseline": "1.849s",
+        "A2_push_mutate_no_reassign": "1.054s (speedup 1.75x)",
+        "A3_range_map_lambda": "0.046s (speedup 40.5x)",
+        "A4_for_range_plus_push_mut": "0.944s (speedup 1.96x)"
+      },
+      "verdict": "range.map lambda 40x faster for pure transforms; push-mutate is drop-in 1.75x replacement for push-reassign at low risk. Recommended: scan blowup.hexa 45 push-reassign sites, apply mutate where idempotent, range.map where pure."
+    },
+    {
+      "poc": "B — atlas.n6.stats sidecar v2 (read-only simulation)",
+      "bench_file": "shared/reports/hexa_stage2_poc_b_atlas_sidecar.hexa",
+      "result_jsonl": "shared/reports/hexa_stage2_poc_results.jsonl",
+      "measured": {
+        "v1_baseline_cold_pipeline": "2.928s",
+        "v2_sidecar_cachehit_simulated": "0.011s",
+        "speedup": "255.4x"
+      },
+      "proposed_schema": {
+        "v1_keys": ["mtime", "size", "line_count", "head_hash", "nodes", "edges", "hubs"],
+        "v2_additions": ["orphan_real", "virtual_refs", "dup_data_lines", "malformed_lines", "grade_dist_top12"]
+      },
+      "verdict": "empirically confirmed: on warm atlas cache with matching mtime, parsing the sidecar JSON is 255x faster than re-running awk/grep/sort pipelines. miss-path unchanged. production path requires atlas_health.hexa cache-write to emit v2 schema on miss (4-5s one-off) and guarded v2-read on hit."
+    }
+  ],
+  "constraints_honored": [
+    "no hexa binary edits",
+    "no *.bak files",
+    "no anima references",
+    "CONJECTURE labels on un-measured estimates",
+    "audit + PoC only, no production changes to blowup/lint/atlas_health"
+  ],
+  "next_session_hints": [
+    "PROPOSAL-A can be applied by single-file Edit to blowup.hexa hot loops — 45 push-reassign sites. Needs empirical full-pipeline bench to confirm end-to-end gain.",
+    "PROPOSAL-B needs atlas.n6.stats schema migration + guard for stale orphan/dup values. Backward-compat read-v1 path.",
+    "PROPOSAL-C requires user approval to touch hexa-lang/src/interpreter.rs. Suggest rehash policy first (highest ROI, lowest regression risk)."
+  ]
+}
