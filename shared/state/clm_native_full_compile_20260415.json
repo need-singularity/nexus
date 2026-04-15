@@ -1,0 +1,131 @@
+{
+  "timestamp": "2026-04-15",
+  "task": "CLM full-loop native compile spike — train_clm.hexa end-to-end via hexa build",
+  "predecessor": "shared/state/hexa_native_compile_spike_20260415.json (phi_cache_loader spike, 393.8x)",
+  "build_status": "PARTIAL",
+  "verdict": "PARTIAL",
+  "verdict_note": "Binary BUILDS and RUNS. Full train_step semantic correctness blocked by known stage0 struct-literal codegen bug (same bug documented in predecessor spike); a microbench that reproduces the train_step forward-pass compute pattern using only array primitives (no struct literal fields) PASSES semantic equivalence vs interpreter and delivers ~193x median native speedup. Full-binary smoke hits the struct bug at runtime → exits with 'array[0]: container is not an array' mid-forward, so whole-binary step-latency cannot be measured honestly.",
+
+  "compile_target": {
+    "file": "training/train_clm.hexa",
+    "loc_src": 2183,
+    "flat_bundle_loc": 3310,
+    "use_imports_flattened": ["phi_cache_loader", "anima_quantum_clm", "anima_quantum", "quantum_types"],
+    "generated_c_path": "build/artifacts/train_clm_bin.c",
+    "generated_c_loc": 2775,
+    "binary_path": "training/build/artifacts/train_clm_bin",
+    "binary_size_bytes": 298720,
+    "build_command": "HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 /Users/ghost/Dev/hexa-lang/hexa.real build training/train_clm.hexa -o training/build/artifacts/train_clm_bin",
+    "build_wall_seconds_approx": 3
+  },
+
+  "microbench": {
+    "file": "training/bench_train_step_native.hexa",
+    "loc": 290,
+    "binary": "training/build/artifacts/bench_train_step_bin",
+    "binary_size_bytes": 150432,
+    "purpose": "Reproduces decoder-layer forward compute (RMSNorm -> QKV matmul -> softmax attn -> SwiGLU FFN -> residual) with array-only primitives (no struct literals in no-arg fns) so both native and interpreted paths do the SAME real arithmetic.",
+    "config": {
+      "seq": 4,
+      "d_model": 16,
+      "d_ff": 64,
+      "n_layer": 2,
+      "n_iters": 10
+    },
+    "native_per_step_ns_samples": [1416200, 2093000, 1984500, 2008900, 2933100, 2654600, 2318900, 2137500, 1951800],
+    "native_per_step_ns_median": 2093000,
+    "native_per_step_ms_median": 2.093,
+    "native_per_step_ns_min": 1416200,
+    "native_per_step_ns_max": 2933100,
+    "interpreted_per_step_ns": 404658400,
+    "interpreted_per_step_ms": 404.658,
+    "interpreted_total_10step_ms": 4046.584,
+    "native_total_10step_ms_median": 20.93,
+    "speedup_median": 193.3,
+    "speedup_best": 285.7,
+    "speedup_worst": 138.0,
+    "semantic_equivalence": {
+      "native_final_h0": -0.139614,
+      "interpreted_final_h0": -0.139614,
+      "native_final_h15": 0.0464731,
+      "interpreted_final_h15": 0.0464731,
+      "verdict": "byte-identical on h[0] and h[15] — no fp drift at this config"
+    }
+  },
+
+  "gaps_found_in_full_build": [
+    {
+      "kind": "lexer",
+      "description": "Scientific notation float literals (1.0e30, 1.0e-12, 1.0e-9) tokenise as float-followed-by-identifier, blowing up parser downstream. Codebase already has two `0.000000000001 == 1e-12 expanded for stage1 parser` workarounds at train_clm.hexa:1513 and :1885.",
+      "sites_fixed": [
+        "training/train_clm.hexa:703 (-1.0e30 → 0.0 - 1e30-expanded)",
+        "training/train_clm.hexa:715 (> 1.0e-12 → > 1e-12-expanded)",
+        "training/train_clm.hexa:886 (if p[t] < 1.0e-12 → expanded)",
+        "training/train_clm.hexa:1963-1964 (loss + 1.0e-9 → expanded)"
+      ],
+      "semantic_impact": "none — float values bit-identical"
+    },
+    {
+      "kind": "codegen_c2",
+      "description": "`theorem ... { assert ... }` block (line 2160) emits `[codegen_c2] ERROR: unhandled statement kind: TheoremStmt` warning (non-fatal on emit) but the PARSER still tries to parse `assert DECODER_EPS < 0.001` inside and rejects `0.001` as float operand after identifier. Full block commented out for native build.",
+      "site_fixed": "training/train_clm.hexa:2160 (theorem scale_invariants block commented out with explanation)",
+      "semantic_impact": "none at runtime — theorem block was compile-time only; interpreted path still parses if uncommented"
+    },
+    {
+      "kind": "codegen_c2",
+      "description": "Single-pass codegen cannot forward-reference `comptime const` declarations. C41_N_DOMAINS, C41_HOLO_SCALE, C41_AUX_COEF were declared at line 1326 but used at lines 1191-1222. Moved declarations above first-use.",
+      "site_fixed": "training/train_clm.hexa:32-44 (consts moved; original sites commented-out stubs)",
+      "semantic_impact": "none — pure relocation of comptime const declarations"
+    },
+    {
+      "kind": "runtime_stage0",
+      "description": "Pre-existing from predecessor spike: struct literal field init inside a no-arg fn body (e.g. ScaleConfig{...}, decoder_model_new(), train_init()) produces map-backed HexaVal that loses field NAMES at first access. Result: `map key 'step' not found` warnings cascading through forward/backward pass, eventually `array[0]: container is not an array (tag=4)` because hidden array is nil. train_clm self-test hits this path → full binary cannot execute a real step.",
+      "blocker_status": "NOT FIXED in this spike — same root cause as predecessor, fix lives in self/native/hexa_v2 emit_struct_literal (task #17 scope). Microbench routes around it by using only array returns.",
+      "semantic_impact": "blocks whole-binary step-latency measurement; microbench is the honest substitute"
+    },
+    {
+      "kind": "codegen_c2_nitpick",
+      "description": "Emitted C has `state;` stray expression at :1925 with -Wunused-value. Non-blocking warning.",
+      "site": "build/artifacts/train_clm_bin.c:1925",
+      "semantic_impact": "none"
+    }
+  ],
+
+  "full_binary_smoke_run": {
+    "command": "./training/build/artifacts/train_clm_bin",
+    "exit_code": 1,
+    "wall_ns_end_to_end": 0.0005,
+    "reason_exit_1": "expected — self-test run hits struct-bug map misses, then `array[0]: container is not an array (tag=4)` when accessing model.tok_emb inside decoder_forward. Proves BINARY LINKS AND RUNS; proves nothing about step latency because real forward didn't execute.",
+    "printed_headers": "scale configs, manifest, smoke marker, Real decoder pipeline test, phi_cache loader, 3 step markers",
+    "printed_data": "all struct fields hollow (map misses)",
+    "conclusion": "binary is RUNNABLE, not USEFUL until struct codegen bug fixed"
+  },
+
+  "interpreted_baseline_attempt_full_file": {
+    "command": "/Users/ghost/Dev/hexa-lang/hexa.real run training/train_clm.hexa",
+    "wall_seconds_to_first_output": "> 120",
+    "final_output": "none — killed at 120s with 0 lines",
+    "conclusion": "interpreted train_clm.hexa does not emit first output within 2 minutes on this Mac (stage0 parse+ast+init phase), confirming interpreter has massive O(N) startup overhead on 3310-line flattened bundles. Does not affect microbench comparison."
+  },
+
+  "compliance": {
+    "R1_HEXA_FIRST": "only hexa tooling invoked, no .py/.rs/.sh new files",
+    "L0_untouched": "anima/core/* not modified",
+    "self_native_hexa_v2_untouched": "hexa_v2 compiler not modified (task #17 scope)",
+    "train_clm_semantic_preservation": "only syntactic workarounds: scientific-notation float expansion, theorem block comment-out, comptime const forward-move",
+    "stage0_unmodified": "hexa binary used as-is",
+    "background_tasks": "builds + interpreter attempt run as run_in_background tasks",
+    "no_running_clm_disrupted": "PID 71811 external hexa_stage0 (~5GB RSS) left untouched per R19"
+  },
+
+  "next_unblock": "Task #17 must fix hexa_v2 emit_struct_literal so no-arg constructor fns produce struct values that retain field names through map_get_ic. Once that lands, train_clm_bin's self-test will produce real loss/phi_holo/phi_gwt numbers and whole-binary step latency becomes directly measurable. Expected: 1-5 ms/step native vs 400+ ms/step interpreted at tiny config → 100-400x speedup range depending on config size.",
+
+  "artifacts": {
+    "state_json": "shared/state/clm_native_full_compile_20260415.json",
+    "train_clm_binary": "training/build/artifacts/train_clm_bin",
+    "train_clm_c_source": "build/artifacts/train_clm_bin.c",
+    "microbench_source": "training/bench_train_step_native.hexa",
+    "microbench_binary": "training/build/artifacts/bench_train_step_bin",
+    "microbench_c_source": "build/artifacts/bench_train_step_bin.c"
+  }
+}
