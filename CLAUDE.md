@@ -87,7 +87,7 @@ ref:
   cfg       shared/config/project_config.json    CLI/관례/리소스
   core      shared/config/core.json              시스템맵+14명령+폴더
   conv      shared/convergence/nexus.json
-  cl_conv   shared/convergence/cl.json           cl 런처 골화/수렴/진화
+  cl_conv   shared/bin/cl (embedded)             source-embedded @convergence-start/end 블록 (hexa self/convergence_scan.hexa dump shared/bin/cl)
   cl_spec   shared/engine/cl_refresh_spec.json   cl-refresh 엔진 스펙
   cli_spec  shared/engine/nexus_cli_spec.json    nexus-cli 외부 진입점 스펙 (hive 등)
   lenses    shared/config/lens_registry.json     400종
