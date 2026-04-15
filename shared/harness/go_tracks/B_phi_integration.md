@@ -1,3 +1,5 @@
+> **DECISION ENFORCEMENT (mandatory, prepend before dispatch)**: agent prompt 작성 시 첫 블록으로 `hexa shared/harness/decision_router.hexa for <track_id>` 출력을 inject. SSOT: `shared/config/decisions.json`. agent 자체 판단으로 결정 변경 금지 — 사용자 명시 변경만.
+
 # Track B: phi 엔진 110개 → 학습 loss 통합
 
 ## 역할

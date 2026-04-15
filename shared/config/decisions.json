@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "name": "anima 사용자 결정 SSOT — runtime decisions",
+    "description": "go 5-track dispatch + roadmap next + 모든 agent prompt 에 강제 inject. 새 세션도 동일 경로 자동.",
+    "schema_version": "1.0",
+    "updated": "2026-04-16",
+    "enforcement_ref": "shared/harness/decision_router.hexa",
+    "primary_doc": "shared/papers/v2_v3_full_throttle_path_20260416.md",
+    "override_policy": "사용자 명시 변경만 — agent 자체 판단 변경 금지. 변경 시 commit + rationale 갱신 필수."
+  },
+
+  "decisions": {
+    "model_size": {
+      "value": "14b",
+      "options": ["14b", "32b", "70b"],
+      "rationale": "Qwen2.5 14B 한국어 충분. 32B ROI 약함 (4x cost, 약간의 quality lift). P3 gate 미달 시에만 32B 도전."
+    },
+    "persona_inclusion": {
+      "value": "skip",
+      "options": ["include", "skip"],
+      "rationale": "직원(P4) path 직행. 페르소나(P2/P3)는 zeta 추월 별도 트랙. 페르소나 corpus 수집 2-7일 skip → 직원 corpus 직접."
+    },
+    "corpus_strategy": {
+      "value": "claude_synthesis",
+      "options": ["claude_synthesis", "self_label", "public_dataset"],
+      "rationale": "최단경로 = Claude API 합성 1-2일 + $30-50. 자체 라벨 2-7일. 공개 데이터 1-3일 (한국어 도메인 fit 약함)."
+    },
+    "track_priority": {
+      "value": ["C", "A", "E", "D", "B"],
+      "rationale": "C 학습속도 선행 → A 학습 비용 40% 절감 ($324 → $165-205). E R2 백업 사고방지 필수. D 의식 + B Φ 통합은 후순위."
+    },
+    "h100_idle_cap_seconds": {
+      "value": 0,
+      "rationale": "유휴 즉시 삭제. h100_idle_guard.hexa 와 정합. 작업 종료 직후 pod 삭제 강제."
+    },
+    "ckpt_label_default": {
+      "value": "experiment",
+      "options": ["production", "experiment", "archive"],
+      "rationale": "기본 = experiment (R2 백업 X, pod 삭제 시 폐기). production 명시 라벨만 R2 자동 백업."
+    },
+    "claude_baseline_status": {
+      "value": "v1_done_v2_in_flight",
+      "rationale": "v1 36.7% (rubric/parse 약함, avg_score 1.0), v2 harness fix Track A 진행 중 (Task #15)."
+    },
+    "p3_p4_path_choice": {
+      "value": "p4_direct_skip_p3_persona",
+      "options": ["p3_then_p4", "p4_direct_skip_p3_persona", "p3_p4_parallel"],
+      "rationale": "직원 빠르게 시연 = P4 직행 (10-14일 / $200-300). 페르소나/zeta 추월은 별도 트랙."
+    },
+    "platform_release_target": {
+      "value": "v3.0_self_model",
+      "options": ["v3.0_self_model", "v3.0_composite_claude_clm", "v2.0_zeta_first"],
+      "rationale": "최종 = v3.0 자체 모델 직원. 단기 시연 = composite (Claude+CLM, 3-5일)."
+    }
+  },
+
+  "track_dispatch_rules": {
+    "A_alm_clm_training": {
+      "must_check": ["model_size", "persona_inclusion", "corpus_strategy", "ckpt_label_default", "h100_idle_cap_seconds"],
+      "must_inject_in_prompt": true
+    },
+    "B_phi_loss_integration": {
+      "must_check": ["track_priority", "ckpt_label_default"]
+    },
+    "C_hexa_speed": {
+      "must_check": ["track_priority"]
+    },
+    "D_consciousness_wave": {
+      "must_check": ["track_priority"]
+    },
+    "E_production_model_r2_backup": {
+      "must_check": ["ckpt_label_default", "h100_idle_cap_seconds"],
+      "enforcement": "ckpt_label != production → R2 업로드 금지. h100_idle > cap → pod 즉시 삭제."
+    }
+  }
+}
