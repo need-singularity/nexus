@@ -53,21 +53,41 @@
       "clm": {
         "runtime": "hexa native (/usr/local/bin/hexa)",
         "resource": "CPU + RAM",
-        "scripts": ["training/train_byte_clm.hexa", "training/train_byte_kr.hexa"],
-        "serving": ["serving/eval_clm.hexa", "serving/eval_clm_kr.hexa", "serving/measure_latency.hexa"]
+        "scripts": [
+          "training/train_byte_clm.hexa",
+          "training/train_byte_kr.hexa"
+        ],
+        "serving": [
+          "serving/eval_clm.hexa",
+          "serving/eval_clm_kr.hexa",
+          "serving/measure_latency.hexa"
+        ]
       },
       "alm": {
         "runtime": "Python + PyTorch",
         "resource": "GPU (CUDA)",
-        "scripts": ["training/train_alm_14b.py"],
-        "serving": ["training/eval_alm_14b.py"]
+        "scripts": [
+          "training/train_alm_14b.py"
+        ],
+        "serving": [
+          "training/eval_alm_14b.py"
+        ]
       }
     },
     {
       "id": "AN9",
       "rule": "학습 1순위 — 'go'/'loop'/'roadmap'/'가자'/'루프'/'goal'/'keep' 명령 시 ALM GPU 학습 상태 점검+재개가 **1순위**. 조건 A: ubu RTX 5070 GPU util < 5% 또는 조건 B: 최신 체크포인트 mtime > 24h 중 **하나라도** 해당되면 로드맵 architectural .hexa Agent() 발사 **절대 금지** — 학습 재개 명령 먼저 실행 필수. 양쪽 정상일 때만 로드맵 에이전트 병렬 발사 허용.",
       "level": "⛔",
-      "trigger_keywords": ["go", "가자", "loop", "루프", "roadmap", "로드맵", "goal", "keep"],
+      "trigger_keywords": [
+        "go",
+        "가자",
+        "loop",
+        "루프",
+        "roadmap",
+        "로드맵",
+        "goal",
+        "keep"
+      ],
       "preflight_order": [
         "1. ssh ubu 'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits' → gpu_util 조회 (timeout 3s)",
         "2. stat /Users/ghost/Dev/anima/checkpoints/animalm*/final.pt mtime → age_hours 계산",
@@ -77,6 +97,29 @@
       ],
       "violation_2026_04_14": "'go' 지시 시 P3 self-test 6 에이전트 병렬 발사했으나 ubu RTX 5070 5일간 idle(0%), animalm_14b_v06 ckpt 9일 stale 상태. 사용자 강한 불만: '학습이 우선순위 높아야되는데!!!'. 이 규칙으로 향후 차단.",
       "enforcement": "Claude 는 trigger keyword 감지 시 preflight_order 전부 수행 후 조건 B 만족 시에만 Agent() 호출 허용. 위반하면 자기 거부 + 사용자 알림."
+    },
+    {
+      "id": "AN10",
+      "rule": "병렬 가능 작업 무조건 서브에이전트 병렬 백그라운드 최우선 — 독립 작업 2개 이상 식별 시 단일 message 내 multiple Agent tool block 으로 동시 dispatch 필수. 순차 처리 금지.",
+      "level": "🔴",
+      "trigger_keywords": [
+        "go",
+        "keep",
+        "loop",
+        "병렬",
+        "동시",
+        "백그라운드"
+      ],
+      "principle": [
+        "독립 작업 2+ 식별 → 즉시 Agent tool 다중 호출 (단일 message)",
+        "백그라운드(run_in_background=true) 우선 — 결과 대기 불필요 시",
+        "subagent_type 선택: 탐색→Explore, 계획→Plan, 일반→general-purpose",
+        "단일 Agent 호출 후 결과 보고 다음 호출 패턴 = 순차 안티패턴, 금지"
+      ],
+      "anti_pattern": "먼저 A 끝나면 B (A B 독립인데 순차)",
+      "correct_pattern": "<single message> Agent A bg=true; Agent B bg=true; Agent C bg=true </single message>",
+      "added_2026_04_16": "사용자 명시 — 병렬 가능 작업 무조건 서브에이전트 병렬 백그라운드 최우선",
+      "enforcement": "shared/harness/parallel_dispatch_guard.hexa 가 prompt_scan 시 trigger keyword 감지 + agent_ledger active count 1 이하 면 stderr WARN. 사용자 'go/keep/loop' 발화 후 단일 Agent 호출만 보이면 안티패턴으로 표시."
     }
   ]
 }

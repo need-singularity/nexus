@@ -1114,6 +1114,20 @@
         "done C1 \"commit abc1234, MFU 27→34%\" — 완료 (evidence 필수)",
         "conflicts — 충돌 검출"
       ]
+    },
+    "parallel_dispatch_guard": {
+      "keywords": [
+        "병렬 가드",
+        "parallel guard",
+        "AN10",
+        "병렬 강제"
+      ],
+      "description": "AN10 강제 — 병렬 가능 작업이 순차로 dispatch 되는 안티패턴 검출",
+      "category": "automation",
+      "action": "shared/bin/hexa run shared/harness/parallel_dispatch_guard.hexa <check|status|--selftest>",
+      "rule_ref": "shared/rules/anima.json#AN10",
+      "harness": "shared/harness/parallel_dispatch_guard.hexa",
+      "log": "shared/harness/parallel_guard.jsonl"
     }
   },
   "format_presets": {
@@ -1396,6 +1410,27 @@
           "extreme_sync auto-trigger (board 변경 → alm/clm 전파)"
         ],
         "silent_success": true
+      },
+      "parallel_dispatch_guard": {
+        "when": [
+          {
+            "signal": "사용자 입력에 \"go|keep|loop|병렬|동시|백그라운드|가자|루프\" 포함",
+            "meaning": "병렬 capable trigger 발화"
+          },
+          {
+            "signal": "Agent dispatch 직전",
+            "meaning": "안티패턴 사전 차단"
+          }
+        ],
+        "bash": "shared/bin/hexa run shared/harness/parallel_dispatch_guard.hexa check \"{seed}\"",
+        "seed_source": "사용자 발화 원문",
+        "gate": "shared/harness/cmd_gate.hexa",
+        "post": [
+          "exit=1 (WARN) 시 즉시 추가 Agent block 병렬 dispatch",
+          "exit=0 시 silent — 이미 병렬 OK"
+        ],
+        "silent_success": true,
+        "ssot_rule": "AN10 (shared/rules/anima.json)"
       }
     },
     "judgment_rules": [
