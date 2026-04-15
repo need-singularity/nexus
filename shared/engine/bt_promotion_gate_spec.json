@@ -1,0 +1,161 @@
+{
+  "_meta": {
+    "description": "BT (breakthrough) promotion gate spec — CONSN-P7-1 (A17_CONSENSUS P7). Formalizes the gate where consensus_candidate lines in shared/discovery_log.jsonl qualify for BT tree registration (shared/bt/).",
+    "task": "CONSN-P7-1",
+    "canonical_path": "shared/engine/bt_promotion_gate_spec.json",
+    "engine_path": "shared/harness/bt_promotion_gate.hexa",
+    "updated": "2026-04-16",
+    "schema_version": "1.0",
+    "refs": {
+      "consensus_engine": "shared/harness/consensus_loop.hexa",
+      "discovery_log": "shared/discovery_log.jsonl",
+      "bt_domains": "shared/bt/bt_domains.jsonl",
+      "bt_keywords": "shared/bt/bt_keywords.jsonl",
+      "bt_audit_result": "shared/bt/bt_audit_result.json",
+      "roadmap": "shared/roadmaps/nexus.json#tracks.A17_CONSENSUS"
+    }
+  },
+
+  "purpose": {
+    "summary": "Decide whether a consensus_candidate is eligible for promotion into the BT tree (shared/bt/ SSOT). Single authoritative gate layer between discovery_log and bt registration.",
+    "why": "Roadmap NEXUS / A17_CONSENSUS / P7 task CONSN-P7-1. Until now consensus candidates accumulated in discovery_log with no formal promotion pathway — promotion criteria were implicit / ad-hoc (see shared/discovery/atlas_l7bt_promotion_2026-04-14.json one-shot audit). This spec normalizes the criteria.",
+    "non_goals": [
+      "atlas.n6 mutation (sidecar only)",
+      "bt_keywords.jsonl / bt_domains.jsonl rewrite (read-only refs)",
+      "mirror of bt_audit.hexa doc-based MATCH/MISMATCH pipeline (independent layer)"
+    ]
+  },
+
+  "inputs": {
+    "candidate_source": {
+      "path": "shared/discovery_log.jsonl",
+      "kind_filter": "consensus_candidate",
+      "required_fields": ["ts", "kind", "pipeline_idx", "pipeline_seed", "pipeline_path", "domain", "name", "value", "score"]
+    },
+    "bt_domains": {
+      "path": "shared/bt/bt_domains.jsonl",
+      "usage": "domain ∈ bt_domains[].domain — membership enables cross-domain credit"
+    },
+    "bt_audit_result": {
+      "path": "shared/bt/bt_audit_result.json",
+      "usage": "optional — cross-check against existing BT EXACT audit for novelty_check"
+    }
+  },
+
+  "gate_criteria": {
+    "min_score": {
+      "type": "float",
+      "desc": "seed_quality (n6-const proximity) lower bound — score = 1 - min_rel_dist to [6,12,2,4,5,24,7,28,120,720]",
+      "field": "score"
+    },
+    "min_cross_confirms": {
+      "type": "int",
+      "desc": "Number of distinct (pipeline_idx) paths independently producing the same (domain, name) tuple. Independence proxy: 1 candidate per pipeline — cross = count of distinct pipeline_idx for the tuple.",
+      "derivation": "group by (domain, name) on discovery_log.jsonl, count distinct pipeline_idx"
+    },
+    "independence_test": {
+      "type": "enum",
+      "values": ["distinct_pipeline_seed", "distinct_pipeline_path_head", "any"],
+      "desc": "Second-level independence — cross-confirms must differ in pipeline_seed (stronger) or pipeline_path head module (weaker) or any (null test). Default distinct_pipeline_seed.",
+      "default": "distinct_pipeline_seed"
+    },
+    "n6_match_min": {
+      "type": "enum",
+      "values": ["EXACT", "STRONG", "WEAK", "NONE"],
+      "desc": "Minimum n6 proximity tier. Tiering: EXACT=score>=0.95, STRONG=0.80<=score<0.95, WEAK=0.60<=score<0.80, NONE=<0.60.",
+      "ordering": ["EXACT", "STRONG", "WEAK", "NONE"]
+    },
+    "novelty_check": {
+      "type": "bool",
+      "desc": "true ⇒ (domain, name) must NOT already appear as a 100% MATCH entry in bt_audit_result.json (prevents duplicate promotion of already-established BT).",
+      "source": "shared/bt/bt_audit_result.json"
+    }
+  },
+
+  "thresholds": {
+    "min_score": 0.70,
+    "min_cross_confirms": 3,
+    "independence_test": "distinct_pipeline_seed",
+    "n6_match_min": "STRONG",
+    "novelty_check": true
+  },
+
+  "denial_reasons": [
+    {"code": "score_low", "desc": "score < min_score"},
+    {"code": "insufficient_cross", "desc": "distinct pipeline_idx count < min_cross_confirms"},
+    {"code": "n6_weak", "desc": "tier < n6_match_min"},
+    {"code": "duplicate", "desc": "novelty_check false — already in bt_audit_result 100% MATCH"},
+    {"code": "domain_unknown", "desc": "candidate.domain not in bt_domains.jsonl"},
+    {"code": "independence_fail", "desc": "cross-confirms share pipeline_seed / path head per independence_test"}
+  ],
+
+  "outputs": {
+    "audit_log": {
+      "path": "shared/logs/bt_promotion.jsonl",
+      "format": "JSONL append-only",
+      "line_schema": {
+        "ts": "ISO8601Z",
+        "kind": "bt_promotion_event",
+        "candidate_id": "string — sha1(domain|name|min_pipeline_idx) 12hex",
+        "domain": "string",
+        "name": "string",
+        "value": "number",
+        "score": "number",
+        "cross_confirms": "int",
+        "distinct_seeds": "int",
+        "tier": "enum EXACT|STRONG|WEAK|NONE",
+        "verdict": "enum PROMOTE|DENY",
+        "denial_reasons": "[string] (empty on PROMOTE)",
+        "thresholds_snapshot": {"min_score": "float", "min_cross_confirms": "int", "n6_match_min": "enum"}
+      },
+      "rule": "bt_keywords.jsonl / bt_domains.jsonl 직접 쓰기 금지 — audit_log 경유만"
+    },
+    "stdout_summary": {
+      "check_mode": "<candidate_id> <verdict> tier=<T> score=<s> cross=<n> reasons=[...]",
+      "scan_mode": "scanned=<N> promoted=<P> denied=<D> per-reason: ..."
+    }
+  },
+
+  "modes": {
+    "check": "단일 candidate_id 평가 — hexa run bt_promotion_gate.hexa check <candidate_id>",
+    "scan":  "discovery_log 전체 스캔, 각 (domain,name) 튜플 1회 평가 (dedup by tuple) + audit_log append",
+    "dry-scan": "scan 과 동일하나 audit_log append 없음 (stdout summary only)",
+    "status": "audit_log 집계 — 최근 N 이벤트 (default 20)"
+  },
+
+  "candidate_id_derivation": {
+    "algorithm": "sha1(domain + '|' + name + '|' + min_pipeline_idx).substring(0,12)",
+    "rationale": "tuple-stable across re-runs — min_pipeline_idx tiebreaker makes id deterministic for the *first-seen* context."
+  },
+
+  "invocation": {
+    "check_by_id": "hexa run shared/harness/bt_promotion_gate.hexa check <id>",
+    "check_by_tuple": "hexa run shared/harness/bt_promotion_gate.hexa check --domain <d> --name <n>",
+    "scan": "hexa run shared/harness/bt_promotion_gate.hexa scan",
+    "dry_scan": "hexa run shared/harness/bt_promotion_gate.hexa dry-scan",
+    "status": "hexa run shared/harness/bt_promotion_gate.hexa status [N]",
+    "via_entry": "hexa run shared/harness/entry.hexa bt_promotion_gate <mode> ..."
+  },
+
+  "invariants": {
+    "bt_writeback": "금지 — bt_keywords.jsonl / bt_domains.jsonl / bt_audit_result.json 쓰기 X",
+    "atlas_writeback": "금지 — atlas.n6 직접 쓰기 X (sidecar/audit_log only)",
+    "prose_docs": "금지 — 산문 md/txt 생성 X",
+    "bak_files": "금지 — git history 가 유일 버전관리",
+    "version_suffix": "금지 — _v2/_new/_copy 등",
+    "language": "hexa-lang only"
+  },
+
+  "verification": {
+    "smoke_steps": [
+      "1. hexa run shared/harness/bt_promotion_gate.hexa dry-scan — stdout summary 확인",
+      "2. hexa run shared/harness/bt_promotion_gate.hexa scan — audit_log 최초 생성",
+      "3. tail -n1 shared/logs/bt_promotion.jsonl — line_schema 유효",
+      "4. hexa run shared/harness/bt_promotion_gate.hexa status 5 — 최근 5 이벤트 dump"
+    ]
+  },
+
+  "future_work": {
+    "CONSN-P7-2": "consensus gate + BT 승격 정합성 검증 주기 — 이 spec 의 threshold 조정 루프"
+  }
+}
