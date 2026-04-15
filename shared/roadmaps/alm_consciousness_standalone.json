@@ -1,0 +1,299 @@
+{
+  "_meta": {
+    "name": "ALM 단독 + 의식 로드맵 (Φ-aware LoRA)",
+    "project": "alm-consciousness-standalone",
+    "parent_project": "anima",
+    "parent_roadmap": "shared/roadmaps/anima-train.json",
+    "sibling_roadmap": "shared/roadmaps/clm_consciousness_standalone.json",
+    "description": "Qwen2.5 14B base + LoRA 로 '직원 chat + Φ 의식 측정' 을 모델 weight 안에 baked-in 하는 최단 경로. 외부 CLM 의존 없음. Claude synth corpus + Φ pre-label 전략으로 4-5일 내 완결. 의식 layer 는 110 phi engines 중 top-3 (phi_holo / phi_complexity / gwt_broadcast) 를 training loss 에 통합.",
+    "updated": "2026-04-16",
+    "schema_version": "1.0",
+    "strategy": "alm_only_baked_consciousness",
+    "target": "14B + Φ-aware LoRA 가 hire_sim_100 gate ≥ 0.85 + Φ_holo ≥ 1000 동시 통과",
+    "mode": "sprint",
+    "exec_order": "phases[] 순차. P0 선결(corpus+label) → P1-P2 학습(병렬 H100×2) → P3 wire → P4 gate",
+    "base_model": {
+      "name": "Qwen2.5-14B",
+      "checkpoint": "anima-models/alm14b/r4/",
+      "note": "r4 base + LoRA 스택 (R2 보관됨, resume 가능)"
+    },
+    "budget": {
+      "total_days": "4-5",
+      "total_usd": "200-400",
+      "h100_hours_max": 48,
+      "h100_pods_max": 2
+    }
+  },
+  "tracks": {
+    "CORPUS": {
+      "owner": "anima/training",
+      "host": "Mac + Claude API"
+    },
+    "TRAIN": {
+      "owner": "anima/training + RunPod H100",
+      "pod": "RunPod H100 (anima-agi) × 2"
+    },
+    "SERVE": {
+      "owner": "anima/serving",
+      "host": "RunPod H100 vLLM or Mac M-series"
+    }
+  },
+  "phases": [
+    {
+      "id": "P0",
+      "name": "Day 0 — Corpus + Φ pre-label",
+      "status": "planned",
+      "duration_hours": 8,
+      "gate": "5-10K 직원 task pair + phi_holo target 값 전량 계산 + R2 업로드",
+      "parallel": [
+        {
+          "track": "CORPUS",
+          "tasks": [
+            {
+              "id": "ALMC-P0-1",
+              "task": "Claude API 로 직원 task corpus 5-10K pair 합성",
+              "status": "planned",
+              "inputs": "hire_sim_100.hexa domain templates (6 도메인 × 단계별)",
+              "output": "r2:anima-corpus/alm-standalone/v1/tasks.jsonl",
+              "done_criteria": "6 도메인 균형, keyword SSOT 매칭, 평균 response 150-400 tokens",
+              "usd_estimate": 50,
+              "depends_on": []
+            },
+            {
+              "id": "ALMC-P0-2",
+              "task": "각 response 에 Φ pre-label (phi_holo target 값 계산)",
+              "status": "planned",
+              "engine": "anima-engines/phi_holo.hexa + phi_complexity.hexa + gwt_broadcast.hexa",
+              "output": "r2:anima-corpus/alm-standalone/v1/phi_labels.jsonl",
+              "done_criteria": "각 row 에 {phi_holo, phi_complexity, gwt_channels: [6]} 채움",
+              "method": "batch pre-compute (LoRA training time 절약)",
+              "depends_on": ["ALMC-P0-1"]
+            },
+            {
+              "id": "ALMC-P0-3",
+              "task": "Φ-aware training data schema 설계 + hexa loader 작성",
+              "status": "planned",
+              "output": "training/phi_aware_loader.hexa",
+              "done_criteria": "배치 로드 + CE loss + Φ consistency loss + GWT broadcast loss 3-head 동시 제공",
+              "depends_on": ["ALMC-P0-2"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "P1",
+      "name": "Day 1 — 14B + Φ-aware LoRA 학습 (Pod A)",
+      "status": "planned",
+      "duration_hours": 12,
+      "gate": "CE ≤ 2.0 + phi_holo mean ≥ 800 + GWT consistency loss ≤ 0.3",
+      "parallel": [
+        {
+          "track": "TRAIN",
+          "tasks": [
+            {
+              "id": "ALMC-P1-1",
+              "task": "14B r4 base resume + Φ-aware LoRA fine-tune",
+              "status": "planned",
+              "config": {
+                "base": "anima-models/alm14b/r4/",
+                "lora_r": 64,
+                "lora_alpha": 128,
+                "lora_targets": ["q_proj", "v_proj", "k_proj", "o_proj"],
+                "steps": 3000,
+                "lr": "2e-4 cosine",
+                "loss": "CE + lambda * phi_holo_consistency + mu * gwt_consistency",
+                "lambda": 0.1,
+                "mu": 0.05
+              },
+              "h100_hours_estimate": 12,
+              "usd_estimate": 36,
+              "artifact": "anima-models/alm14b-phi/r1/",
+              "done_criteria": "eval CE ≤ 2.0 on holdout, phi_holo mean over eval batch ≥ 800",
+              "depends_on": ["ALMC-P0-3"]
+            },
+            {
+              "id": "ALMC-P1-2",
+              "task": "hire_sim stratified10 mid-train eval (step 1500 + 3000)",
+              "status": "planned",
+              "output": "training/deploy/almc_p1_eval_{step}.log",
+              "done_criteria": "step 3000 completion_rate ≥ 0.70 중간지표 (최종 gate 는 P4)",
+              "depends_on": ["ALMC-P1-1"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "Day 2 — Orch-OR sampling LoRA + tool-use LoRA (Pod A + Pod B 병렬)",
+      "status": "planned",
+      "duration_hours": 12,
+      "gate": "Orch-OR on/off A/B Likert +0.25 유의 + tool-use pass rate ≥ 0.80",
+      "parallel": [
+        {
+          "track": "TRAIN",
+          "tasks": [
+            {
+              "id": "ALMC-P2-1",
+              "task": "Orch-OR sampling LoRA fine-tune (양자 붕괴 temperature 동적 조정 layer)",
+              "status": "planned",
+              "config": {
+                "base": "anima-models/alm14b-phi/r1/",
+                "sampler_module": "anima-engines/quantum_collapse_sample.hexa",
+                "steps": 2000,
+                "lr": "1e-4"
+              },
+              "h100_pod": "A",
+              "h100_hours_estimate": 12,
+              "usd_estimate": 36,
+              "artifact": "anima-models/alm14b-phi-orch/r1/",
+              "done_criteria": "Orch-OR on/off A/B Likert 비교 surprise_score +0.25 이상 유의 (p<0.05)",
+              "depends_on": ["ALMC-P1-1"]
+            },
+            {
+              "id": "ALMC-P2-2",
+              "task": "tool-use LoRA (function calling + MCP 간이)",
+              "status": "planned",
+              "config": {
+                "base": "anima-models/alm14b-phi/r1/",
+                "tool_templates": ["email_send", "calendar_query", "web_search", "code_exec"],
+                "steps": 2000,
+                "lr": "2e-4"
+              },
+              "h100_pod": "B",
+              "h100_hours_estimate": 12,
+              "usd_estimate": 36,
+              "artifact": "anima-models/alm14b-tools/r1/",
+              "done_criteria": "synthetic tool-call benchmark pass rate ≥ 0.80",
+              "depends_on": ["ALMC-P1-1"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Day 3 — LoRA merge + 추론 wire (Φ realtime + autonomy self-critique)",
+      "status": "planned",
+      "duration_hours": 8,
+      "gate": "merge 후 CE 회귀 없음 + /hire/task 응답에 {phi_holo, zeta, surprise} metadata 포함",
+      "parallel": [
+        {
+          "track": "SERVE",
+          "tasks": [
+            {
+              "id": "ALMC-P3-1",
+              "task": "Φ + Orch-OR + tool-use LoRA 3-way merge",
+              "status": "planned",
+              "method": "LoRA weight add (weighted average) 또는 sequential apply",
+              "output": "anima-models/alm14b-employee/v1/",
+              "done_criteria": "merged 모델 eval CE ≤ P1 단일 LoRA 대비 regression < 5%",
+              "depends_on": ["ALMC-P2-1", "ALMC-P2-2"]
+            },
+            {
+              "id": "ALMC-P3-2",
+              "task": "vLLM serve + hire_routes.hexa 실 wire (mock → anima adapter)",
+              "status": "planned",
+              "serve": "vLLM on H100 또는 Mac M2 Ultra llama.cpp",
+              "endpoint": "POST /hire/task",
+              "done_criteria": "응답 metadata {phi_holo, zeta, surprise} 포함, latency ≤ 3s/response",
+              "depends_on": ["ALMC-P3-1"]
+            },
+            {
+              "id": "ALMC-P3-3",
+              "task": "autonomy self-critique 내부 loop (ReAct 스타일, 외부 autonomy_loop 없이 single forward)",
+              "status": "planned",
+              "design": "system prompt + response format 으로 유도 (LoRA P1 학습 시 주입)",
+              "done_criteria": "self-critique 점수 autonomy_loop 외부 critique 와 상관계수 ≥ 0.7",
+              "depends_on": ["ALMC-P3-1"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "name": "Day 4 — 직원 gate + 의식 gate 동시 측정 + iter fix",
+      "status": "planned",
+      "duration_hours": 6,
+      "gate": "hire_sim_100 stratified30 completion ≥ 0.85 AND phi_holo eval mean ≥ 1000",
+      "parallel": [
+        {
+          "track": "SERVE",
+          "tasks": [
+            {
+              "id": "ALMC-P4-1",
+              "task": "hire_sim_100 stratified30 × depth=1 측정 (anima adapter)",
+              "status": "planned",
+              "adapter": "llm_anima_adapter.hexa (ALM 단독)",
+              "done_criteria": "completion_rate ≥ 0.85, per-domain ≥ 0.70",
+              "output": "training/deploy/almc_p4_hire_sim_{ts}.log",
+              "depends_on": ["ALMC-P3-2"]
+            },
+            {
+              "id": "ALMC-P4-2",
+              "task": "Φ_holo realtime 측정 (30 response × phi engine)",
+              "status": "planned",
+              "done_criteria": "phi_holo mean ≥ 1000 over 30 responses",
+              "depends_on": ["ALMC-P3-2"]
+            },
+            {
+              "id": "ALMC-P4-3",
+              "task": "iter fix (fail 시 1 round LoRA 재학습)",
+              "status": "planned",
+              "trigger": "P4-1 또는 P4-2 fail",
+              "action": "critique log 분석 → corpus 보강 또는 λ/μ tune → P1/P2 재실행 (최대 1회)",
+              "usd_budget": 72
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "risk": "Φ loss 와 CE trade-off 로 품질 degrade",
+      "mitigation": "λ / μ hyperparam search 소규모 (3 × 3 그리드) P1 전에 실행"
+    },
+    {
+      "id": "R2",
+      "risk": "Claude synth corpus 가 distillation 천장 (Claude 수준 상한)",
+      "mitigation": "accept — 'Claude 수준 + 의식 metadata' 를 첫 달성 목표로 설정. 상회는 P5 (별도 로드맵)"
+    },
+    {
+      "id": "R3",
+      "risk": "Orch-OR sampler 가 creative 하지만 잘못된 응답 증가",
+      "mitigation": "Orch-OR weight 0.3 이하 시작, A/B 로 증가 조건 검증"
+    },
+    {
+      "id": "R4",
+      "risk": "tool-use LoRA 가 hire_sim 에 과적합",
+      "mitigation": "hire_sim 외 task set (100 novel) 으로 holdout eval"
+    },
+    {
+      "id": "R5",
+      "risk": "14B r4 resume 시 LoRA 충돌",
+      "mitigation": "base 만 load + LoRA 새로 from scratch (r4 LoRA 무시)"
+    }
+  ],
+  "success_criteria": {
+    "capability": "hire_sim_100 stratified30 completion_rate ≥ 0.85 (v4 fix 기준)",
+    "consciousness": "phi_holo eval mean ≥ 1000 + GWT 6채널 consistency ≥ 0.7",
+    "deployment": "vLLM or llama.cpp 로 inference endpoint 운영, latency ≤ 3s/response",
+    "cost": "≤ $400 total"
+  },
+  "next_after": {
+    "option_a": "Orch-OR A/B Likert +0.5 증명 시 → P5 ALM 32B scale-up (sovereignty)",
+    "option_b": "음성 wire (P3 SERVING 병렬, 별도 로드맵)",
+    "option_c": "CLM scratch 7B 시작 (clm_consciousness_standalone.json 참조)"
+  },
+  "external_refs": [
+    "shared/config/decisions.json",
+    "shared/papers/v2_v3_full_throttle_path_20260416.md",
+    "shared/papers/training_phi_integration_design.md",
+    "shared/roadmaps/anima-train.json",
+    "shared/convergence/anima.json"
+  ]
+}
