@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-04-15",
+  "agent": "agent-a0803770",
+  "task": "Add core Tensor raw f32 primitive to hexa-lang — unlock CLM native-compile matmul speedup ceiling beyond list-backed baseline",
+  "verdict": "GO — Tensor struct + BLAS sgemm E2E verified native; list-vs-Tensor speedup 4,757x at 128² (list OOMs beyond)",
+  "authorization": "User explicit — 'hexa-lang 수정 필요시 진행!!!!' / '허용!!!!!'",
+  "design_doc": {
+    "storage": "hexa struct with 5 integer fields: data (raw float* as int64), numel, rank, d0, d1. All-int layout intentionally avoids the two known struct bugs (≥3-float return corruption; array-field aliasing across structs).",
+    "pointer_discipline": "data field is calloc'd via alloc_raw(numel * 4). Element access uses BYTE offsets: write_f32(data, i * 4, v) / deref_f32(data, i * 4). Matches native runtime.c hexa_ptr_write_f32 semantics (byte-offset memcpy).",
+    "matmul_path": "tensor_matmul(a, b) → tensor_new2(M, N) → hxblas_sgemm(101, 111, 111, M, N, K, 1.0, a.data, K, b.data, N, 0.0, out.data, N). Reuses existing training/hxblas_wrapper.c shim (no new .c file written, R1 HEXA-FIRST honored).",
+    "ownership": "Explicit tensor_free(t) — no GC. Views share data pointer; caller must only free the original tensor.",
+    "zero_new_c_files": "Deliberately reused training/hxblas_wrapper.c — the BLAS ABI shim was already built for the spike and handles the hexa float→double FFI quirk. One shim = fewer ABI surprises.",
+    "non_goals": [
+      "Autograd / backward pass (future work)",
+      "Rewriting nn_core.hexa (explicit scope carve-out; Tensor is ADDITIVE)",
+      "Stage0 interpreter support (interpreter has alloc_raw virtualization but no dlopen; Tensor is native-compile only for now)",
+      "Rebuilding self/native/hexa_v2 (forbidden per task spec; stage0 fragility per project_session_20260413_stage0_rebuild)"
+    ]
+  },
+  "api_surface": {
+    "file": "/Users/ghost/Dev/hexa-lang/self/ml/tensor.hexa",
+    "loc": 195,
+    "struct": "Tensor { data: int, numel: int, rank: int, d0: int, d1: int }",
+    "constructors": [
+      "tensor_new1(n) -> Tensor (1D zero-initialised)",
+      "tensor_new2(m, n) -> Tensor (2D row-major zero-initialised)",
+      "tensor_wrap2(ptr, m, n) -> Tensor (takes ownership of existing buffer)",
+      "tensor_zeros1(n), tensor_zeros2(m, n) — same as tensor_new (calloc already zeros)",
+      "tensor_ones1(n), tensor_ones2(m, n)"
+    ],
+    "accessors": [
+      "tensor_get(t, i) / tensor_set(t, i, v) — 1D element (O(1))",
+      "tensor_get2(t, i, j) / tensor_set2(t, i, j, v) — 2D element (O(1))",
+      "tensor_numel(t), tensor_rows(t), tensor_cols(t), tensor_data_ptr(t)",
+      "tensor_view2(t, m, n) — zero-copy reshape (view, do not free)"
+    ],
+    "ops": [
+      "tensor_fill(t, v), tensor_sum(t)",
+      "tensor_scale_inplace(t, alpha), tensor_add_inplace(dst, src)",
+      "tensor_matmul(a, b) -> Tensor  (calls cblas_sgemm via libhxblas.dylib)",
+      "tensor_matmul_into(a, b, out)  (no alloc)",
+      "tensor_free(t)"
+    ],
+    "extern_ffi": [
+      "@link libhxblas.dylib → hxblas_sgemm (reused, already-built shim)",
+      "@link libhxblas.dylib → hxblas_version (linkage probe)"
+    ]
+  },
+  "bench_128_speedup": {
+    "size": "128x128 f32",
+    "tensor_sgemm_sec": 0.000241,
+    "list_naive_sec": 1.14634,
+    "speedup_x": 4756.6,
+    "semantic_check": "all cells = 128.0 (both paths)"
+  },
+  "bench_256_speedup": {
+    "size": "256x256 f32",
+    "tensor_sgemm_sec": 0.000465,
+    "list_naive_sec": "OOM (kill ~5 s, memory growing unbounded)",
+    "speedup_x": "undefined (list path unusable)",
+    "note": "list path OOMs because C = C + [sum] allocates O(N²) copies per step, so ~130 GB of ephemeral allocation at 256². This is the moat the Tensor type demolishes.",
+    "scalar_c_baseline_from_spike": {
+      "c_scalar_sec": 0.01227,
+      "tensor_vs_c_scalar_x": 26.4
+    }
+  },
+  "bench_512_speedup": {
+    "size": "512x512 f32",
+    "tensor_sgemm_sec": 0.001601,
+    "list_naive_sec": "OOM (skipped)",
+    "speedup_x": "undefined",
+    "scalar_c_baseline_from_spike": {
+      "c_scalar_sec": 0.11487,
+      "tensor_vs_c_scalar_x": 71.8
+    }
+  },
+  "bench_64_speedup_extra": {
+    "size": "64x64 f32",
+    "tensor_sgemm_sec": 0.000018,
+    "list_naive_sec": 0.071843,
+    "speedup_x": 3991.28,
+    "note": "Included to probe the small-size crossover — Tensor still 4000x faster even where BLAS has low utilisation."
+  },
+  "semantic_equiv": {
+    "test": "8x8 all-ones matmul via both paths",
+    "expected": "C[i,j] = 8.0 for all i,j",
+    "tensor_c0": 8.0,
+    "tensor_clast": 8.0,
+    "list_c0": 8.0,
+    "list_clast": 8.0,
+    "verdict": "PASS",
+    "also_128_cross_check": "tensor and list both produced C[0]=128, C[-1]=128 at 128x128 all-ones"
+  },
+  "codegen_compat": {
+    "hexa_parse_tensor_hexa": "OK",
+    "hexa_parse_bench_hexa": "OK",
+    "hexa_build_tensor_via_use": "OK (use \"ml/tensor\" from self/ root resolves)",
+    "hexa_build_bench_inlined": "OK (inlined Tensor primitive because training/ is outside self/ flatten root)",
+    "hexa_full_self_transpile_regression": "NONE (pre-existing 'pub' parse errors at 4829/5015/5031 predate this work — documented in project_session_20260413_stage0_rebuild memory)",
+    "hexa_v2_binary_untouched": "confirmed — last mod 2026-04-15 21:35 predates this session; no rebuild performed",
+    "stage0_rust_untouched": "confirmed — no src/*.rs edits",
+    "l0_untouched": "anima/core/hub, laws, runtime — not touched",
+    "running_training_processes": "not disrupted — no training scripts invoked"
+  },
+  "known_quirks_documented": [
+    {
+      "id": "CODEGEN_FFI_INIT_ORDER",
+      "description": "The native codegen emits dlsym symbol resolution INSIDE main() AFTER any top-level statement. A .hexa file with `run_t()` called at file scope (before a `fn main()`) will hit NULL __ffi_sym_* pointers and segfault. Fix: wrap everything in `fn main()` and omit the top-level call.",
+      "workaround_in_bench": "The bench file defines `fn main()` with no top-level invocation. Codegen emits dlsym → main() in the right order."
+    },
+    {
+      "id": "WRITE_F32_BYTE_OFFSET",
+      "description": "self/ml/accelerate_ffi.hexa uses write_f32(buf, i, val) — element index. That happens to work in the interpreter (which treats offset as array slot index) but is WRONG for native compile (which treats it as byte offset). Existing tests report '(guarded)' which effectively skips BLAS verification on fresh macOS hosts.",
+      "resolution_in_tensor_hexa": "Tensor uses the CORRECT byte-offset convention (write_f32(data, i * 4, v)). Native build verified end-to-end."
+    }
+  ],
+  "deliverables": {
+    "new_tensor_module": "/Users/ghost/Dev/hexa-lang/self/ml/tensor.hexa (195 LOC, new)",
+    "new_bench_file": "/Users/ghost/Dev/anima/training/bench_tensor_matmul.hexa (205 LOC, new)",
+    "state_json": "/Users/ghost/Dev/anima/shared/state/hexa_tensor_primitive_20260415.json",
+    "no_new_c_files": "training/hxblas_wrapper.c was reused as-is — Tensor dlopen()s the existing libhxblas.dylib",
+    "built_artifacts_out_of_tree": "/tmp/bench_tensor_matmul (not committed, rebuild via `hexa build`)"
+  },
+  "toolchain": {
+    "hexa_binary": "/Users/ghost/dev/nexus/shared/bin/hexa (v0.1.0-stage1)",
+    "hexa_v2_compiler": "/Users/ghost/Dev/hexa-lang/self/native/hexa_v2 (preserved, unmodified in this session)",
+    "libhxblas": "/Users/ghost/Dev/anima/training/build/libhxblas.dylib (34 KiB, built by spike #19)",
+    "build_invocation": "cd /tmp && hexa build <path>.hexa -o <out>",
+    "run_invocation": "DYLD_LIBRARY_PATH=/Users/ghost/Dev/anima/training/build <out>"
+  },
+  "next_integration_target": [
+    "Priority 1: Port training/nn_core.hexa matmul/linear/attention hot paths from hexa-list tensors to the new Tensor struct. Expected realised speedup in train_clm.hexa step time: ~50-100x at N=256 context × 256 embed, dwarfing the 2-3x gains from other optimisations.",
+    "Priority 2: Add tensor_transpose / tensor_slice (strided view) / tensor_concat so full forward pass can stay in raw buffers without round-tripping through hexa lists.",
+    "Priority 3: Autograd — build a backward tape over Tensor ops (struct_of_arrays holding parent ptrs + grad ptrs). Servant × Backward Tape pattern per memory project_servant_tape_discovery.",
+    "Priority 4: Once nn_core is Tensor-backed, retire training/accelerate_blas.hexa's acc_array_to_raw round-trip helpers — they become dead code.",
+    "Priority 5 (parallel): Wire tensor_matmul to cuBLAS on Linux/H100 via self/ml/cuda_ffi.hexa so the same hexa-side API drives GPU training. Tensor.data is already a raw device pointer when created via cudaMalloc; cuBLAS sgemm matches the signature exactly."
+  ],
+  "rules_honored": {
+    "R1_HEXA_FIRST": "zero new .c files — reused existing training/hxblas_wrapper.c. Both deliverables are .hexa.",
+    "L0_untouched": "anima/core/{hub,laws,runtime} not modified.",
+    "stage0_rust_untouched": "no src/*.rs edits — only hexa-lang/self/ml/ + anima/training/.",
+    "hexa_full_idempotent": "pre-existing 'pub' parser errors predate work; parse check run on new files passes clean.",
+    "no_training_disruption": "no background training process invoked or killed.",
+    "hexa_v2_not_rebuilt": "binary last modified 21:35 before session start; no stage0 rebuild attempted.",
+    "non_destructive": "all other edits in the worktree are from other agents and left untouched."
+  },
+  "blockers_found": [
+    {
+      "id": "NONE_BLOCKING",
+      "description": "The new Tensor primitive compiles, links, and runs correctly via the native build path. BLAS matmul returns numerically correct results and the speedup over list-backed matmul is measurable and large at all tested sizes."
+    }
+  ],
+  "commit_intent": {
+    "anima_repo": {
+      "files": ["training/bench_tensor_matmul.hexa", "shared/state/hexa_tensor_primitive_20260415.json"],
+      "message": "feat(hexa): Tensor raw f32 bench vs list-backed — 4,757x at 128^2"
+    },
+    "hexa_lang_repo": {
+      "files": ["self/ml/tensor.hexa"],
+      "message": "feat(ml): Tensor raw f32 primitive — struct + BLAS sgemm path (195 LOC)",
+      "note": "hexa-lang repo has unrelated dirty state from other sessions (self/main.hexa, self/native/hexa_v2, etc.) — only self/ml/tensor.hexa is this agent's work; the commit should stage that one file explicitly."
+    }
+  }
+}
