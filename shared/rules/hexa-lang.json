@@ -2,7 +2,7 @@
   "_meta": {
     "name": "hexa-lang 프로젝트 규칙",
     "description": "AI-native 자체 언어 전용 규칙",
-    "updated": "2026-04-12",
+    "updated": "2026-04-15",
     "project": "hexa-lang"
   },
   "rules": [
@@ -42,6 +42,13 @@
       "rule": "SELF-HOST 경로 전용 — 언어 기능 추가/수정은 셀프호스트 파이프라인(self/codegen_c2.hexa + self/runtime.c + self/interpreter.hexa + self/native/hexa_v2)에만 반영. ./hexa (Rust 프리빌드, src 삭제됨) 경로는 HX4에 따라 수정 금지. 기능이 두 경로에서 차이 나면 test_map_direct_iter.hexa 패턴처럼 별도 회귀 테스트 + 유저 워크플로 가이드(.keys() 워크어라운드 등) 병기. 프리젠 C(self/native/hexa_cc.c 등) 편집은 .hexanoport 마커로만 허용",
       "level": "🔴",
       "example": "for k in hashmap — hexa_v2 경로만 지원, ./hexa는 for k in m.keys() 유지"
+    },
+    {
+      "id": "HX8",
+      "rule": "stage0 재빌드는 반드시 scripts/rebuild_stage0.sh 경유. 직접 flatten_imports.hexa → hexa_v2 → clang 체인을 수동으로 엮지 말 것. wrapper는 mkdir lock(동시 빌드 차단) + mtime guard(변경 없으면 skip) + NO_SMOKE 기본 on. 여러 세션 동시 실행 시 lock 으로 직렬화. 강제 재빌드 필요 시 FORCE=1 bash scripts/rebuild_stage0.sh",
+      "level": "🔴",
+      "reason": "2026-04-15 T63 세션에서 재빌드 5-10초마다 반복 → flatten+hexa_v2+clang+cc1+linker 자식 6-8개 × 동시 세션 → macOS xpcproxy 폭주 → system load 24→112→73. 빌드 자체보다 **재스폰 빈도**가 문제",
+      "example": "VM 테스트 중 bc_emitter.hexa 여러 번 수정 → 각 변경마다 재빌드 금지. 변경 모은 뒤 1회만 rebuild_stage0.sh"
     }
   ]
 }
