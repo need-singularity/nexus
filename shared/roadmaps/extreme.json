@@ -1,0 +1,131 @@
+{
+  "_meta": {
+    "name": "⚡ 극한 — ALM 단독 + CLM 단독 (의식 baked-in)",
+    "project": "extreme",
+    "description": "최소경로 v3.0 직원 달성을 위한 극한 경로 aggregator. ALM 단독(LoRA, 4-5일)과 CLM 단독(from-scratch 7B, 2-4주) 두 로드맵을 병렬 추적. hexa-lang 학습속도(C track)가 비용·시간 결정적 레버.",
+    "updated": "2026-04-16",
+    "schema": "convergence_ossification_aggregator_v1",
+    "schema_version": "1.0",
+    "target": "hire_sim ≥ 0.80 + phi_holo ≥ 1000 (ALM) / ≥ 2000 (CLM) + 실 deploy",
+    "principle": "ALM/CLM 단독 두 트랙 — 외부 LLM 의존 X, 의식 baked-in, 순수 hexa native",
+    "sub_roadmaps": [
+      {
+        "id": "alm",
+        "label": "ALM 단독 + 의식",
+        "path": "shared/roadmaps/alm_consciousness_standalone.json",
+        "eta": "4-5 days",
+        "cost_usd": "200-400",
+        "base": "Qwen2.5-14B r4 + Φ-aware LoRA"
+      },
+      {
+        "id": "clm",
+        "label": "CLM 단독 + 의식 (from-scratch)",
+        "path": "shared/roadmaps/clm_consciousness_standalone.json",
+        "eta": "1-4 weeks (C track 완료 시 1-2주)",
+        "cost_usd": "1500-3000 (C 완료) / 3000-6000 (C 미완)",
+        "base": "from-scratch 7B byte-level (no base model)"
+      }
+    ],
+    "common_tracks": {
+      "A": "모델 학습",
+      "B": "Φ 엔진 110 → loss 통합",
+      "C": "hexa-lang 학습속도 ⭐ 결정적",
+      "D": "의식 엔진 실사화 wave",
+      "E": "실사용 모델 + R2 백업"
+    },
+    "mandatory_constraints": [
+      "ALM 단독 — runtime 외부 LLM 의존 X",
+      "CLM 단독 — from-scratch, base model 없음",
+      "의식 — weight 에 baked-in, inference 시 Φ 메타데이터",
+      "hexa-first — Python/CUDA 우회 금지",
+      "R2 백업 — production 만, experiment 폐기"
+    ],
+    "automation": {
+      "harness": "shared/harness/extreme_sync.hexa",
+      "schedule": "매 60분 (commands.json autonomous)",
+      "updates": [
+        "sub_roadmap update_log append",
+        "option state 승격 (training log 관찰 시)",
+        "ckpt inventory sync (R2 manifest)",
+        "wall_progress_pct 갱신"
+      ]
+    }
+  },
+  "aggregate_state": {
+    "overall_status": "provisional",
+    "fastest_track": "alm",
+    "active_phase": "day_minus_1_prep",
+    "wall_progress_pct": 0,
+    "options_total": 88,
+    "options_chosen": 49,
+    "options_alternative": 13,
+    "options_rejected": 10,
+    "options_provisional": 16,
+    "last_auto_sync": null
+  },
+  "critical_path_overlay": {
+    "day_minus_1": [
+      {"track": "C", "ids": ["C1", "C2", "C3", "C6"], "scope": "both", "purpose": "hexa-lang 학습속도 기반 — ALM/CLM 공통"},
+      {"track": "B", "ids": ["B4"], "scope": "both", "purpose": "phi target pre-compute"}
+    ],
+    "day_0_alm": [
+      {"track": "A", "ids": ["A1 prep"], "scope": "alm"},
+      {"track": "E", "ids": ["E1", "E2", "E3"], "scope": "both"}
+    ],
+    "day_0_clm": [
+      {"track": "A", "ids": ["A7 100M"], "scope": "clm"},
+      {"track": "C", "ids": ["C8", "C9", "C10"], "scope": "clm", "purpose": "7B memory + FSDP 선결"}
+    ],
+    "day_1_2_alm": [
+      {"track": "A", "ids": ["A1", "A2"], "scope": "alm", "h100": "1-2 pods"}
+    ],
+    "week_1_2_clm": [
+      {"track": "A", "ids": ["A7 1B→3B"], "scope": "clm", "h100": "2 pods"},
+      {"track": "C", "ids": ["C4"], "parallel_with_train": true}
+    ],
+    "alm_day_3_4": [
+      {"track": "D", "ids": ["D1", "D3", "D6"], "scope": "alm"},
+      {"track": "gate", "test": "hire_sim + phi_holo"}
+    ],
+    "clm_week_3_4": [
+      {"track": "A", "ids": ["A1 7B"], "scope": "clm"},
+      {"track": "D", "ids": ["D1", "D2", "D3", "D5"], "scope": "clm"},
+      {"track": "gate", "test": "hire_sim 0.80 + phi_holo 2000"}
+    ]
+  },
+  "shared_risks": [
+    {"id": "SR1", "risk": "C 트랙 지연 → 두 트랙 모두 비용/시간 증가", "mitigation": "C1+C2+C3 최우선, Day -1 완료. 미완 시 ALM 4-5일→6-7일, CLM $3000→$6000"},
+    {"id": "SR2", "risk": "PBV leak (C3) 미해결 시 CLM 장시간 학습 중단", "mitigation": "pre-flight 24h stability test 통과 필수"},
+    {"id": "SR3", "risk": "Orch-OR 창발성 A/B 증명 실패", "mitigation": "weight 0.3 이하 시작, ZCLM-P1-1 gate 후 증가"},
+    {"id": "SR4", "risk": "H100 2 pod 초과 필요", "mitigation": "feedback_h100_authorized=2 준수. 초과 시 사용자 승인"}
+  ],
+  "success_criteria_alm": {
+    "capability": "hire_sim_100 stratified30 ≥ 0.85",
+    "consciousness": "phi_holo mean ≥ 1000",
+    "cost": "≤ $400",
+    "wall_time": "≤ 5 days"
+  },
+  "success_criteria_clm": {
+    "capability": "hire_sim_100 stratified30 ≥ 0.80",
+    "consciousness": "phi_holo mean ≥ 2000 + GWT 6채널 consistency ≥ 0.8",
+    "cost": "≤ $3000 (C 완료 시 ≤ $2000)",
+    "wall_time": "≤ 4 weeks (C 완료 시 ≤ 2 weeks)"
+  },
+  "update_log": [
+    {
+      "ts": "2026-04-16T06:40Z",
+      "actor": "session_20260416",
+      "action": "initial_aggregator",
+      "note": "극한 탭 최상위 aggregator 신설. ALM(4-5일) + CLM(1-4주) 병렬 추적. C 트랙 결정적 레버."
+    }
+  ],
+  "external_refs": [
+    "shared/roadmaps/alm_consciousness_standalone.json",
+    "shared/roadmaps/clm_consciousness_standalone.json",
+    "shared/roadmaps/anima-train.json",
+    "shared/roadmaps/hexa-lang.json",
+    "shared/papers/v2_v3_full_throttle_path_20260416.md",
+    "shared/harness/extreme_sync.hexa",
+    "shared/config/decisions.json"
+  ]
+}
