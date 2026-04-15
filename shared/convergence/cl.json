@@ -1,7 +1,7 @@
 {
   "_meta": {
     "project": "shared/bin/cl",
-    "updated": "2026-04-14",
+    "updated": "2026-04-15",
     "strategy": "Claude Code 멀티 계정 런처 TUI 픽커 — 기능별 골화/수렴/진화 추적",
     "lockdown": "L0",
     "approval_tag": "cl-approved",
@@ -134,6 +134,22 @@
       "threshold": "shared/bin/cl 에 .airgenome 문자열 0건",
       "ossified_at": "2026-04-14",
       "ref_commit": "TBD-cl-migration"
+    },
+    "LAUNCHD_PATH_HARDENED": {
+      "status": "PASS",
+      "value": "plist EnvironmentVariables.PATH 선두에 /Users/ghost/.local/bin — cron 컨텍스트에서 command -v claude 성공",
+      "threshold": "refresh_via_cli 정상 동작 + IP rate_limit 우회 작동. 로그에 refreshed(cli): 다수 등장",
+      "ossified_at": "2026-04-15",
+      "ref_commit": "dba4246f",
+      "rationale": "2026-04-15 재발 사고: claude=/Users/ghost/.local/bin/claude 인데 plist PATH(/opt/homebrew/bin:/usr/local/bin:...) 누락 → refresh_via_cli 조기 리턴 → direct POST CAP=2 캐스케이드 → fail=11 도달. 로그 전체에 refreshed(cli): 1건만 존재."
+    },
+    "AUTO_PICK_SPREAD": {
+      "status": "PASS",
+      "value": "auto_pick 후보군 (avail >= top_avail - CL_PICK_SPREAD, 기본 10%) 안에서 $RANDOM 픽",
+      "threshold": "state-less 분산 (락/히스토리 파일 0). CL_PICK_SPREAD=0 으로 기존 top-1 고정 동작 복구 가능",
+      "ossified_at": "2026-04-15",
+      "ref_commit": "cee38b4d",
+      "rationale": "멀티세션 동시 실행 시 모든 세션이 top-1 계정에 쏠려 5h 세션 한도 조기 도달. PID 기반 $RANDOM 으로 세션마다 후보군 내 독립 픽 → 자연 분산."
     }
   },
 
@@ -219,7 +235,8 @@
     },
     "PICKER_HISTORY": {
       "value": "마지막 N번 선택/성공/실패 기록 → auto_pick 가중치 반영",
-      "priority": "low"
+      "priority": "low",
+      "note": "2026-04-15 AUTO_PICK_SPREAD 로 state-less 분산 해소 — history 영속화는 당분간 불필요. 다계정 정책 가중치가 필요해지면 재검토."
     },
     "REFRESH_BACKOFF_PERSISTENCE": {
       "value": "cl-refresh 실패 계정별 지수 backoff 상태를 shared/.runtime/accounts/cl-refresh-cooldown.json 에 영속 — 현재는 매 사이클 재시도",
