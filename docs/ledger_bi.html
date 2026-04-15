@@ -1,0 +1,108 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<title>nexus ledger BI</title>
+<meta http-equiv="refresh" content="60">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font:12px 'SF Mono','Menlo',monospace;background:#0a0a0a;color:#c8d0c0;padding:16px;max-width:1200px;margin:0 auto;line-height:1.5;}
+h1{color:#8ef;font-size:18px;margin:0 0 2px;}
+.meta{color:#555;font-size:10px;margin-bottom:14px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+.panel{background:#0d0d0d;border:1px solid #2a3a2a;border-radius:4px;overflow:hidden;}
+.panel.volume{border-color:#4a9;}
+.panel.projects{border-color:#8ef;}
+.panel.cost{border-color:#f80;}
+.panel.failures{border-color:#f48;}
+.panel-title{background:#111;color:#8ef;padding:8px 12px;border-bottom:1px solid #2a3a2a;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;}
+.panel.volume .panel-title{color:#4a9;}
+.panel.cost .panel-title{color:#f80;}
+.panel.failures .panel-title{color:#f48;}
+.panel-section{padding:10px 12px;border-bottom:1px solid #1a1a1a;}
+.panel-section:last-child{border-bottom:none;}
+.row{display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:11px;}
+.row .k{color:#888;}
+.row .v{color:#c8d0c0;font-weight:500;}
+.row .v.hi{color:#8ef;}
+.bar-row{display:flex;align-items:center;margin:3px 0;font-size:10px;}
+.bar-row .name{width:130px;color:#888;text-align:right;padding-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.bar-row .bar{height:12px;background:#4a9;border-radius:2px;min-width:2px;}
+.bar-row .count{color:#888;padding-left:6px;font-size:10px;}
+.stale{color:#f48;}
+.active{color:#f80;}
+.done{color:#4a9;}
+#status{color:#555;font-size:10px;margin-top:16px;}
+</style></head><body>
+<h1>nexus ledger BI</h1>
+<div class="meta">AGL-P7-1 · work_registry.jsonl → agents/projects/cost/failures · auto-refresh 60s · generated 2026-04-15T16:19:02Z</div>
+<div id="status">Loading ledger_bi_latest.json...</div>
+<div class="grid2">
+  <div class="panel volume"><div class="panel-title">P1 volume (7d)</div><div id="p-volume" class="panel-section">loading...</div></div>
+  <div class="panel projects"><div class="panel-title">P2 by project</div><div id="p-projects" class="panel-section">loading...</div></div>
+  <div class="panel cost"><div class="panel-title">P3 cost / tokens (30d)</div><div id="p-cost" class="panel-section">loading...</div></div>
+  <div class="panel failures"><div class="panel-title">P4 failures (top 5)</div><div id="p-failures" class="panel-section">loading...</div></div>
+</div>
+<script>
+async function load(){
+  try{
+    const r = await fetch('../shared/reports/ledger_bi_latest.json?t='+Date.now());
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    document.getElementById('status').textContent = 'Loaded: '+d.generated_at+' · '+d.volume.total+' ledger rows · '+d.volume.sessions_active+' active sessions';
+    renderVolume(d.volume);
+    renderProjects(d.projects);
+    renderCost(d.cost);
+    renderFailures(d.failures);
+  }catch(e){
+    document.getElementById('status').textContent = 'Fetch failed ('+e.message+') — run: hexa $NEXUS/shared/harness/ledger_bi.hexa';
+  }
+}
+function row(k,v,cls){return '<div class="row"><span class="k">'+k+'</span><span class="v '+(cls||'')+'">'+v+'</span></div>';}
+function renderVolume(v){
+  let html = row('total', v.total, 'hi') + row('done', v.done, 'done') + row('active', v.active, 'active') + row('stale', v.stale, 'stale');
+  html += row('success %', v.success_rate_pct+'%');
+  html += row('avg duration', v.avg_duration_sec+'s');
+  html += '<div style="margin-top:8px;color:#888;font-size:10px;">daily 7d:</div>';
+  const maxD = Math.max(1, ...v.daily_7d.map(x=>x.agents));
+  v.daily_7d.forEach(d => {
+    const w = Math.max(2, d.agents/maxD*100);
+    html += '<div class="bar-row"><span class="name">'+d.day+'</span><span class="bar" style="width:'+w+'%"></span><span class="count">'+d.agents+'</span></div>';
+  });
+  document.getElementById('p-volume').innerHTML = html;
+}
+function renderProjects(projs){
+  const max = Math.max(1, ...projs.map(p=>p.agents));
+  let html = '';
+  projs.forEach(p => {
+    const w = Math.max(2, p.agents/max*100);
+    html += '<div class="bar-row"><span class="name">'+p.name+'</span><span class="bar" style="width:'+w+'%"></span><span class="count">'+p.agents+' ('+p.avg_duration_sec+'s)</span></div>';
+  });
+  document.getElementById('p-projects').innerHTML = html || '<div style="color:#555">(no data)</div>';
+}
+function renderCost(c){
+  let html = row('tokens total', c.tokens_est_total, 'hi');
+  html += '<div style="margin-top:8px;color:#888;font-size:10px;">30d buckets (tokens):</div>';
+  const b = c.buckets_30d;
+  const labels = [['w-3',b.w_minus_3],['w-2',b.w_minus_2],['w-1',b.w_minus_1],['7d',b.last_7d],['today',b.today]];
+  const max = Math.max(1, ...labels.map(x=>x[1]));
+  labels.forEach(([l,n]) => {
+    const w = Math.max(2, n/max*100);
+    html += '<div class="bar-row"><span class="name">'+l+'</span><span class="bar" style="width:'+w+'%;background:#f80"></span><span class="count">'+n+'</span></div>';
+  });
+  if(c.by_model && c.by_model.length){
+    html += '<div style="margin-top:8px;color:#888;font-size:10px;">by model:</div>';
+    c.by_model.forEach(m => { html += row(m.model || '(none)', m.tokens_est+' tok'); });
+  }
+  document.getElementById('p-cost').innerHTML = html;
+}
+function renderFailures(f){
+  if(!f.top5 || !f.top5.length){ document.getElementById('p-failures').innerHTML = '<div style="color:#4a9">no failures — all agents done/active within SLA</div>'; return; }
+  const max = Math.max(1, ...f.top5.map(x=>x.count));
+  let html = '';
+  f.top5.forEach(x => {
+    const w = Math.max(2, x.count/max*100);
+    html += '<div class="bar-row"><span class="name">'+x.area+'</span><span class="bar" style="width:'+w+'%;background:#f48"></span><span class="count">'+x.count+'</span></div>';
+  });
+  document.getElementById('p-failures').innerHTML = html;
+}
+load();
+</script>
+</body></html>
