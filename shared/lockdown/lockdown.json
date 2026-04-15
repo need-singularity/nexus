@@ -1,10 +1,11 @@
 {
   "_meta": {
-    "name": "L0 잠금 체계 (Lockdown)",
-    "description": "전 프로젝트 동심원 보호 — L0 불변 / L1 보호 / L2 자유",
+    "name": "L0/L3 잠금 체계 (Lockdown)",
+    "description": "전 프로젝트 동심원 보호 — L0 불변 / L1 보호 / L2 자유 + L3 메타-잠금 (rules/lockdown 자체)",
     "principle": "Source code dependencies must point only inward.",
-    "updated": "2026-04-11",
-    "origin": "Clean/Onion/Hexagonal Architecture"
+    "updated": "2026-04-16",
+    "origin": "Clean/Onion/Hexagonal Architecture",
+    "l3_intro": "2026-04-16 LOCK-P8-1 — L3 meta-lockdown 도입. rules/* 및 lockdown.json/enforcement_registry.json 자체를 잠그는 상위 메타룰."
   },
   "levels": {
     "L0": {
@@ -21,6 +22,28 @@
       "label": "자유",
       "icon": "🟢",
       "rule": "자유 수정 — 테스트만 통과하면 OK"
+    },
+    "L3": {
+      "label": "메타-잠금",
+      "icon": "🟣",
+      "rule": "룰 잠금 자체 — rules/*, lockdown.json, enforcement_registry.json 은 기본 잠금. 해제는 NEXUS_L3_UNLOCK=<signer>:<reason> 환경변수 sentinel 로만 (감사 로그 자동 기록)",
+      "protected_paths": [
+        "shared/rules/",
+        "shared/lockdown/lockdown.json",
+        "shared/harness/enforcement_registry.json"
+      ],
+      "unlock_protocol": {
+        "env_var": "NEXUS_L3_UNLOCK",
+        "format": "<signer>:<reason>",
+        "signer_required": true,
+        "reason_required": true,
+        "min_reason_len": 8,
+        "audit_log": "shared/logs/l3_unlock.jsonl",
+        "commit_trailer": "lockdown-approved"
+      },
+      "locked_by_default": true,
+      "enforcement": "shared/harness/l3_guard.hexa (verify|watch|unlock|log) + pre_tool_guard.check_l3_meta_lock",
+      "bypass_policy": "L3 는 NEXUS_ARCHIVE_OK/NEXUS_HOOK_OK 등 타 sentinel 로 우회 불가 — 전용 NEXUS_L3_UNLOCK 만 유효"
     }
   },
   "global_invariants": {

@@ -296,6 +296,24 @@ fn check_no_hook_file(tool: str, file_path: str) -> str {
     return ""
 }
 
+// L3: meta-lockdown — rules/*, lockdown.json, enforcement_registry.json 잠금.
+// 해제는 NEXUS_L3_UNLOCK=<signer>:<reason(>=8chars)> sentinel 로만.
+// 다른 sentinel (NEXUS_ARCHIVE_OK 등) 으로 우회 불가 — L3 전용.
+fn check_l3_meta_lock(tool: str, file_path: str) -> str {
+    if tool != "Write" && tool != "Edit" { return "" }
+    if file_path.len() == 0 { return "" }
+    let h = env("HOME")
+    let hexa = h + "/Dev/nexus/shared/bin/hexa"
+    let gate = h + "/Dev/nexus/shared/harness/l3_guard.hexa"
+    let exists = to_string(exec("test -f '" + gate + "' && echo y || echo n")).trim()  // @allow-bare-exec
+    if exists != "y" { return "" }
+    let result = to_string(exec(hexa + " run " + gate + " watch '" + file_path + "' '" + tool + "' 2>/dev/null | tail -1")).trim()  // @allow-bare-exec
+    if result.starts_with("BLOCK") {
+        return "REJECT: " + file_path + " — L3 meta-lockdown (rules/lockdown 자체 잠금). 해제: NEXUS_L3_UNLOCK=<signer>:<reason(>=8chars)> prefix"
+    }
+    return ""
+}
+
 // L0: lockdown_gate watch 위임. BLOCK=L0, WARN=L1, ALLOW=L2/NONE.
 fn check_lockdown_tier(tool: str, file_path: str) -> str {
     if tool != "Write" && tool != "Edit" { return "" }
@@ -575,6 +593,7 @@ fn _run_write_checks(tool: str, file_path: str) -> str {
         check_no_archive_path(tool, file_path),
         check_no_version_name(tool, file_path),
         check_no_hook_file(tool, file_path),
+        check_l3_meta_lock(tool, file_path),
         check_lockdown_tier(tool, file_path),
         check_session_lock(tool, file_path)
     ]
