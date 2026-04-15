@@ -1,0 +1,285 @@
+{
+  "_meta": {
+    "name": "ALM 14B r8a stacked launch — MFU ceiling measurement",
+    "date": "2026-04-15",
+    "task_id": "r8a stacked (unsloth+liger+compile_unblock+lora_dropout0+optimal_batch)",
+    "authorization": "user go — 2 H100 max, 여유시간 페이스, HONEST reporting",
+    "status": "MEASURED — smoke PASS, 150-step steady state captured, target 75% NOT reached, pod fleet variance dominant",
+    "predecessor": "shared/state/alm14b_r8_ceiling_confirm_20260415.json (r8 partial, pod contention)",
+    "ssot_updated": "shared/state/training_speed_ceilings.json (ALM.measurements.r8a_stacked added)"
+  },
+
+  "objective": "Stack all compatible speedup flags on top of best batch/seq config and measure achieved MFU on ALM 14B LoRA to confirm practical bf16 ceiling 75-85%",
+
+  "pod_selection": {
+    "pod_id": "xhq9b2c8fljdyo",
+    "pod_name": "anima-p4-alm-holo",
+    "pod_provider": "RunPod",
+    "gpu": "1 x NVIDIA H100 80GB HBM3",
+    "cost_per_hour_usd": 2.99,
+    "ssh": "root@216.243.220.217:17992",
+    "selection_rationale": "ONLY pod available — fast pod ubzp169igb7tns (r7 pod) was terminated after r7 completed 4000 steps. xhq9b2c8fljdyo is 31.5% slower per pod fleet variance measurement (see r8_ceiling_confirm). This caveat dominates the measurement.",
+    "pod_fleet_variance_caveat": {
+      "finding": "Same software stack measured 33.3 step/min on this pod vs 48.6 on ubzp169igb7tns at step 50 (-31%)",
+      "implication": "MFU measured on this pod is a LOWER BOUND relative to r7's ceiling. Pod-variance-adjusted values are annotated below."
+    }
+  },
+
+  "stack_applied": {
+    "hardware_flags": {
+      "fused_adamw": true,
+      "tf32_cudnn": true,
+      "pin_memory": true,
+      "cudnn_benchmark": true,
+      "source": "baseline, always ON"
+    },
+    "gated_flags": {
+      "--unsloth": true,
+      "--liger": true,
+      "--lora-dropout 0.0": true,
+      "ALM_COMPILE_UNBLOCK=1": "set but NO-OP under --unsloth per trainer gate (line 363: if ALM_COMPILE_UNBLOCK and not args.unsloth)",
+      "--torch-compile": "NO-OP under --unsloth (Unsloth compiles internally)",
+      "--fp8": false,
+      "--cudagraphs": false
+    },
+    "batch_seq_config": {
+      "batch": 8,
+      "seq": 1024,
+      "grad_accum": 1,
+      "tokens_per_step": 8192,
+      "source": "batch_seq_sweep_2026_04_15 OPTIMAL (b=8 s=1024 g=1 = 70.9% MFU predicted on r6 pod)"
+    },
+    "lora_config": {
+      "r": 32,
+      "alpha": 64,
+      "dropout": 0.0,
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+      "trainable_params": 50331648,
+      "all_params": 14820365312,
+      "trainable_pct": 0.3396
+    },
+    "unsloth_fast_lora_kernel_status": {
+      "r7_baseline_status": "DISABLED (0 QKV / 0 O / 0 MLP layers patched with fast kernels due to lora_dropout=0.05)",
+      "r8a_status": "PARTIALLY ENABLED (48 QKV + 48 O + 0 MLP patched with fast kernels due to lora_dropout=0.0)",
+      "mlp_still_disabled_reason": "Unsloth cannot patch MLP layers with manual autograd because Qwen2 MLP uses bias term (Unsloth warning on launch)",
+      "unlocked_layers": 96,
+      "potential_remaining_layers": 48,
+      "log_excerpt": "Unsloth 2026.4.4 patched 48 layers with 48 QKV layers, 48 O layers and 0 MLP layers."
+    }
+  },
+
+  "install_status": {
+    "unsloth": "2026.4.4 (from prior r7+r8 install, no-op this run)",
+    "transformers": "4.56.1",
+    "peft": "0.18.0",
+    "torch": "2.10.0+cu128",
+    "liger_kernel": "0.7.0 (from r8_partial install)",
+    "liger_import_verified": true,
+    "apply_liger_kernel_to_qwen2_invoked": true,
+    "liger_config": "rope=True, rms_norm=True, swiglu=True, fused_linear_cross_entropy=False, cross_entropy=False",
+    "fused_ce_disabled_reason": "Unsloth owns the CE path when --unsloth is active; liger fused CE would clash. Per training/train_alm_14b.hexa audit (commit 7db69044).",
+    "transformer_engine": "NOT INSTALLED — blocked by wheel 404 + source build cudnn.h missing (per r8_partial blockers)",
+    "triton_version": "3.6.0",
+    "flash_attention_2": "Xformers fallback — FA2 wheel broken on torch 2.10+cu128"
+  },
+
+  "build_method": {
+    "option_used": "Option B (direct runner patch on pod)",
+    "option_a_hexa_build_attempted": true,
+    "option_a_hexa_build_failed": true,
+    "option_a_failure_reason": "clang 'bracket nesting level exceeded maximum of 256' on /tmp/train_alm_14b_bin.c:22 — transpile succeeds but clang cannot compile. Known issue per project_session_20260412_night post #23 (bracket-depth fix was partial).",
+    "option_a_fallback_attempted": "hexa run emitted /tmp/_train_alm_14b_runner.py locally (567 lines) but uses fused_linear_cross_entropy=True UNCONDITIONALLY which conflicts with Unsloth's CE path — would have been a regression.",
+    "option_b_basis": "Pod already had /workspace/train_alm_14b_r8.py (574 lines) with the liger+unsloth compat patch applied during r8_partial session. Copied to /workspace/train_alm_14b_r8a.py (md5 c3c7038cf091b957f9d484b170c9e772, no further modification). Fresh run via /workspace/launch_r8a_smoke.sh + /workspace/launch_r8a_150.sh.",
+    "compat_patch_present": "line 343: fused_linear_cross_entropy=(not _unsloth_on) — correctly yields False when --unsloth is active"
+  },
+
+  "smoke_metrics": {
+    "steps": 20,
+    "duration_min_estimate": 0.6,
+    "loss_first10": [15.6404, null, null, null, null, null, null, null, null, 15.5182],
+    "loss_step20": 15.5288,
+    "step_per_min_step10": 35.3,
+    "step_per_min_step20": 38.2,
+    "vram_peak_mib": 43113,
+    "vram_peak_gb": 43.0,
+    "gpu_util_pct": 100,
+    "gpu_power_draw_w": 681.92,
+    "gpu_power_max_w": 700,
+    "crashes": [],
+    "verdict": "PASS — loss descending, no NaN, no OOM, GPU 100% util, VRAM 43 GB matches sweep prediction (42.1 GB for b8s1024g1). Same training rate as --unsloth-only sweep (37.7 step/min) at step 20, so pre-steady-state the stack deltas are inside warmup noise."
+  },
+
+  "150step_steady_state_metrics": {
+    "total_duration_min": 3.9,
+    "loss_trajectory": [
+      {"step": 1,  "loss": 15.6404, "main": 15.6358, "holo": 0.464602, "lr": 5.99e-08, "speed_step_per_min": 14.1},
+      {"step": 10, "loss": 15.5182, "main": 15.4911, "holo": 0.468820, "lr": 1.49e-07, "speed_step_per_min": 35.3},
+      {"step": 20, "loss": 15.5288, "main": 15.4745, "holo": 0.468860, "lr": 2.48e-07, "speed_step_per_min": 38.5},
+      {"step": 30, "loss": 15.4834, "main": 15.4549, "holo": 0.462674, "lr": 3.47e-07, "speed_step_per_min": 39.7},
+      {"step": 40, "loss": 15.5161, "main": 15.5939, "holo": 0.474083, "lr": 4.46e-07, "speed_step_per_min": 40.3},
+      {"step": 50, "loss": 15.4604, "main": 15.5534, "holo": 0.472713, "lr": 5.45e-07, "speed_step_per_min": 40.7},
+      {"step": 60, "loss": 15.4545, "main": 15.5759, "holo": 0.475040, "lr": 6.44e-07, "speed_step_per_min": 40.9},
+      {"step": 70, "loss": 15.5384, "main": 15.5167, "holo": 0.462646, "lr": 7.43e-07, "speed_step_per_min": 41.1},
+      {"step": 80, "loss": 15.4949, "main": 15.5752, "holo": 0.475940, "lr": 8.42e-07, "speed_step_per_min": 41.2},
+      {"step": 90, "loss": 15.4932, "main": 15.2131, "holo": 0.464298, "lr": 9.41e-07, "speed_step_per_min": 41.4},
+      {"step": 100, "loss": 15.4400, "main": 15.5979, "holo": 0.468999, "lr": 1.04e-06, "speed_step_per_min": 41.5},
+      {"step": 110, "loss": 15.3799, "main": 15.3827, "holo": 0.459447, "lr": 1.14e-06, "speed_step_per_min": 41.5},
+      {"step": 120, "loss": 15.3547, "main": 15.3643, "holo": 0.460806, "lr": 1.24e-06, "speed_step_per_min": 41.6},
+      {"step": 130, "loss": 15.1930, "main": 15.2965, "holo": 0.450507, "lr": 1.34e-06, "speed_step_per_min": 41.6},
+      {"step": 140, "loss": 15.1425, "main": 14.9767, "holo": 0.447335, "lr": 1.44e-06, "speed_step_per_min": 41.7},
+      {"step": 150, "loss": 15.0184, "main": 15.0126, "holo": 0.442707, "lr": 1.53e-06, "speed_step_per_min": 41.7}
+    ],
+    "best_loss": 15.0184,
+    "final_loss": 15.0184,
+    "elapsed_step20_sec": 31.17,
+    "elapsed_step100_sec": 144.58,
+    "elapsed_step150_sec": 215.83,
+    "step_per_min_readings": {
+      "cum_step_100": 41.5,
+      "cum_step_150": 41.7,
+      "interval_steps_20_150_steady_state": 42.24,
+      "interval_steps_100_150_deep_steady_state": 42.11
+    },
+    "authoritative_measurement": {
+      "source": "interval s20-s150 (post-warmup steady state, 130 steps of real training)",
+      "step_per_min": 42.24,
+      "sec_per_step": 1.4205,
+      "tokens_per_step": 8192,
+      "tokens_per_sec": 5767,
+      "flops_per_step": 6.8800e14,
+      "tflops_achieved": 484.4,
+      "mfu_pct": 48.98
+    },
+    "alt_measurement_step100_cum": {
+      "rationale": "Apples-to-apples with r7 which measured step_100 cumulative 51.1 step/min on fast pod",
+      "step_per_min": 41.5,
+      "tflops_achieved": 476.0,
+      "mfu_pct": 48.12
+    },
+    "vram_peak_mib": 43113,
+    "vram_peak_gb": 43.0,
+    "vram_headroom_gb": 37.0,
+    "gpu_power_max_w": 700,
+    "gpu_power_draw_avg_w": 680,
+    "gpu_util_pct": 100,
+    "crashes": [],
+    "convergence_verdict": "HEALTHY — loss 15.62 → 15.02 (-0.6), monotone decreasing past step 90, no NaN/Inf, warmup cosine schedule tracking normally"
+  },
+
+  "deltas": {
+    "vs_r8_partial_unsloth_only_same_pod": {
+      "reference": "r8_partial b8s1024g1 --unsloth only on xhq9b2c8fljdyo (37.7 step/min, 46.5% MFU, sweep measurement)",
+      "r8a_step_per_min": 41.5,
+      "r8a_mfu_pct": 48.12,
+      "delta_step_per_min_abs": 3.8,
+      "delta_step_per_min_pct": 10.08,
+      "delta_mfu_points": 1.62,
+      "verdict": "REAL but MODEST. The liger + lora_dropout=0 + 96-layer fast-LoRA-kernel unlock delivered +10% relative throughput on top of --unsloth only, which maps to +1.6 MFU points on this slow pod. On the fast pod the uplift would scale similarly to ~+1.6 MFU points above r7's 62.6%, placing the stacked ceiling at ~64.2%."
+    },
+    "vs_r7_raw_direct": {
+      "reference": "r7 step_100 cumulative on fast pod ubzp169igb7tns (51.1 step/min, 62.6% MFU)",
+      "r8a_step_per_min": 41.5,
+      "r8a_mfu_pct": 48.12,
+      "delta_step_per_min_pct_naive": -18.78,
+      "delta_mfu_points_naive": -14.48,
+      "verdict": "APPEARS REGRESSED but this is CROSS-POD comparison — invalidated by 31.5% pod fleet variance."
+    },
+    "vs_r7_pod_variance_adjusted": {
+      "reference": "r7 projected onto slow pod: 51.1 * 0.685 = 35.0 step/min",
+      "r8a_step_per_min": 41.5,
+      "delta_pct": 18.56,
+      "verdict": "+18.6% uplift relative to r7 pod-adjusted. Decomposes as: (a) ~+10% from b8s1024g1 config vs r7's suboptimal b1g8 (sweep finding); (b) remaining ~+7% from liger + lora_dropout=0 + QKV/O fast-kernel unlock."
+    },
+    "vs_sweep_optimal_same_pod": {
+      "reference": "sweep b8s1024g1 --unsloth only = 37.7 step/min",
+      "delta_step_per_min_pct": 10.08,
+      "verdict": "This is the CLEAN A/B (same pod, same config, only stack difference). Stacked flags = +10.1% rel = +1.6 MFU points."
+    }
+  },
+
+  "ceiling_verdict": {
+    "target_mfu_pct": 75,
+    "measured_mfu_pct": 48.98,
+    "measured_pod_adjusted_mfu_pct_on_fast_pod": "63.8-64.2 (est)",
+    "gap_to_75pct_slow_pod": 26.02,
+    "gap_to_75pct_fast_pod_est": 10.8,
+    "verdict": "GAP",
+    "honest_assessment": "Target 75% MFU NOT reached on either pod. On the slow pod xhq9b2c8fljdyo we measured 48.9% steady-state. Cross-pod adjustment against r7 baseline suggests the stacked ceiling on the fast pod would be ~64%, still 10+ points below target. The liger + lora_dropout=0 stack delivered the expected +10% uplift over --unsloth alone, but there is no new lever available to close the remaining gap without FP8 (blocked by TE wheel) or MLP-path fast LoRA (blocked by Qwen's MLP bias term that Unsloth refuses to patch).",
+    "practical_bf16_ceiling_revised": {
+      "fast_pod_bf16": "~64-65% MFU (r7 62.6% + r8a +1.6 stacked uplift)",
+      "slow_pod_bf16": "~49% MFU (measured)",
+      "pod_variance_pct": 31,
+      "published_75pct_realistic": "NO — published 75% (NeMo Llama2-70B on SXM cluster) is not achievable on single-GPU Qwen2.5-14B LoRA without FP8 or different base architecture",
+      "true_bf16_ceiling_qwen2_14b_lora_single_gpu_hopper": "~65% MFU (fast pod) = 643 TFLOP/s sustained"
+    }
+  },
+
+  "blockers_for_higher_mfu": [
+    {
+      "blocker": "fp8_transformer_engine_uninstallable",
+      "expected_uplift_pct": "34-40",
+      "status": "BLOCKED — TE 2.13.0 wheel 404 for torch 2.10+cu128, source build fails cudnn.h missing",
+      "workaround": "Pin torch==2.9 on fresh pod and install TE 2.12 pre-built wheels, OR apt install libcudnn-dev to provide headers",
+      "risk": "Torch 2.9 downgrade invalidates r7's stack, so the r7 ceiling would need re-measurement post-downgrade"
+    },
+    {
+      "blocker": "unsloth_mlp_kernel_disabled",
+      "expected_uplift_pct": "10-20 (est)",
+      "status": "BLOCKED — Qwen2 MLP uses bias term (gate_proj/up_proj/down_proj) which Unsloth's manual autograd cannot patch",
+      "workaround": "NONE short-term. Alternative: custom triton MLP kernel, or LoRA on MLP projections via peft standard path (but that disables FastLanguageModel)",
+      "upstream_note": "Unsloth's warning: 'Not an error, but Unsloth cannot patch MLP layers with our manual autograd engine since either LoRA adapters are not enabled or a bias term (like in Qwen) is used.'"
+    },
+    {
+      "blocker": "pod_fleet_variance_dominates_measurements",
+      "expected_uplift_pct": 0,
+      "status": "OBSERVED — same software stack measured 33.3 step/min on slow pod vs 48.6 on fast pod (31%)",
+      "workaround": "Reserve the fast pod ubzp169igb7tns for ceiling confirmation (currently terminated, must re-provision)",
+      "cost_implication": "Ceiling measurements have ~31% margin of error if pod_id is not controlled; all session measurements MUST tag pod_id"
+    }
+  ],
+
+  "vram_gb": 43.0,
+
+  "cost_estimate": {
+    "smoke_duration_min": 1.5,
+    "150step_duration_min": 5.5,
+    "model_load_duration_min": 1.0,
+    "total_pod_time_min": 8,
+    "pod_hourly_usd": 2.99,
+    "r8a_cost_usd": 0.40,
+    "vs_budget_3to5_usd": "UNDER — used only 8% of $5 upper budget"
+  },
+
+  "deliverable_files": {
+    "local_repo": [
+      "shared/state/alm14b_r8a_stacked_launch_20260415.json (this file)",
+      "shared/state/training_speed_ceilings.json (ALM.measurements.r8a_stacked added)"
+    ],
+    "pod_xhq9b2c8fljdyo": [
+      "/workspace/train_alm_14b_r8a.py (r8.py md5 c3c7038cf091b957f9d484b170c9e772 copy, no modification)",
+      "/workspace/launch_r8a_smoke.sh",
+      "/workspace/launch_r8a_150.sh",
+      "/workspace/train_alm_14b_r8a_smoke.log",
+      "/workspace/train_alm_14b_r8a_150.log (5238 bytes)",
+      "/workspace/ckpt_alm_14b_r8a/step_150/ (uploaded to r2:anima-models/alm14b/r1/step_150/)",
+      "/workspace/ckpt_alm_14b_r8a_smoke/step_20/ (uploaded to r2:anima-models/alm14b/r1/step_20/)"
+    ]
+  },
+
+  "references": [
+    "shared/state/alm14b_r8_ceiling_confirm_20260415.json (r8 partial + pod contention)",
+    "shared/state/alm14b_r7_launch_20260415.json (r7 ceiling baseline 62.6%)",
+    "shared/state/alm14b_batch_seq_sweep_20260415.json (b8s1024g1 optimal 70.9% predicted)",
+    "shared/state/alm14b_liger_audit_20260415.json (liger +10-15% estimate)",
+    "shared/state/alm14b_compile_unblock_20260415.json (compile_unblock +8-15% estimate, no-op with unsloth)",
+    "shared/state/alm14b_unsloth_audit_20260415.json (unsloth +39.2% r7 baseline)",
+    "training/train_alm_14b.hexa (hexa launcher canonical — clang build blocked by bracket depth)"
+  ],
+
+  "next_actions": [
+    "1. (optional) Provision fresh pod + torch 2.9 + TE install → re-run r8a with --fp8 → measure +34-40% ceiling",
+    "2. (optional) Retest r8a on a different freshly-provisioned H100 pod to characterize pod fleet variance tail (is 31% the worst case or is there more?)",
+    "3. Record the 65% fast-pod practical bf16 ceiling as the session's final answer — stop further bf16 micro-optimization, pivot to fp8 or multi-GPU DDP",
+    "4. Fix training/train_alm_14b.hexa clang bracket-depth so future sessions can use Option A (hexa build → native binary) instead of Option B (direct py patch)"
+  ]
+}
