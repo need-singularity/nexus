@@ -5,9 +5,9 @@
     "ssot": true,
     "canonical_path": "shared/state/training_speed_ceilings.json",
     "anima_ref": "training/CLAUDE.md → ceilings",
-    "last_updated": "2026-04-15",
-    "session": "2026-04-15 training speed push",
-    "status": "in_progress — #24 r8 ceiling partial (r8a/r8c measured, r8c FAILED), #26 batch/seq sweep DONE, #27 nn_core Tensor port pending, #29 r8c FP8 FAIL-closed"
+    "last_updated": "2026-04-16",
+    "session": "2026-04-15/16 training speed push",
+    "status": "in_progress — #24 r8 ceiling partial (r8a/r8c measured, r8c FAILED), #26 batch/seq sweep DONE, #27 nn_core Tensor port DONE (1479x tiny), #29 r8c FP8 FAIL-closed, #30 real-shape sweep 2026-04-16 DONE (18 shapes, best 1.65% MFU at d=768 seq=16, verdict GAP)"
   },
 
   "ALM": {
@@ -289,6 +289,32 @@
         "train_clm_hexa_integration": "deferred — 2170 LOC train_clm.hexa self-test cannot terminate on stage0 interpreter; needs P5a native interpreter rebuild",
         "mfu_pct": "not yet computed at this shape — FFI-bound regime, MFU unstable"
       },
+      "real_shape_sweep_2026_04_16": {
+        "date": "2026-04-16",
+        "agent": "agent-a71719d2",
+        "source": "training/bench_train_step_tensor_sweep.hexa",
+        "state_file": "shared/state/clm_real_shape_bench_20260416.json",
+        "grid": {"d": [16, 32, 64, 128, 256, 512, 768], "seq": [8, 16, 32], "layers": [2, 4, 8], "vocab": 256, "rank": 4, "batch": 1},
+        "total_shapes_tested": 18,
+        "oom_shapes": 0,
+        "best_mfu_pct": 1.65054,
+        "best_gflops_achieved": 2.58639,
+        "best_shape": {"d": 768, "ff": 3072, "nl": 2, "seq": 16, "params": 14359552, "ms_step": 532.988},
+        "crossover_shape": null,
+        "crossover_note": "NO shape crossed the 30 GF/s BLAS-bound threshold. Peak 2.59 GF/s at d=768 seq=16 — 60.6x below Mac M3 156.7 GF/s ceiling, 48.5x below the 80% practical ceiling target.",
+        "ceiling_verdict": "GAP",
+        "gap_to_80pct_mfu_x": 48.469,
+        "gap_to_ceiling_gflops_x": 60.6,
+        "diagnosis": "The Tensor port successfully calls cblas_sgemm for matmul/matmul_transB/matmul_transA, but the surrounding scalar loops (rms_norm row-loop, softmax row-loop, swiglu element-loop, attention O(S²D) element-loop, cross-entropy row-loop, sgd element-loop, embed scatter loop) dominate total step time. `sample` on the live binary showed ~60% of CPU in layer_bwd_t → attn_bwd_t → hexa_mul/hexa_add boxed int arithmetic. Result: matmul share of total ms is tiny, so BLAS cannot become the bottleneck.",
+        "scaling_pattern": "GF/s grows sub-linearly with D (0.54 @ d=16 → 2.59 @ d=768, ~4.8x over 48x D increase). With seq it saturates above 16 due to O(S²) attention scalar loop. Depth (nl) is neutral — extra layers scale ms linearly.",
+        "top_3_blockers": [
+          "attn_fwd/attn_bwd inner loops O(S²D) scalar — should be 4 t_matmul calls",
+          "hexa codegen emits boxed int ops for index arithmetic in while bodies",
+          "rms_norm/softmax/swiglu not vectorised (no vDSP/NEON primitives)"
+        ],
+        "next_action": "Rewrite attn_fwd/attn_bwd using t_matmul for Q@K^T, probs@V, dctx@V^T — expected 10-50x at seq>=32; then emit native-int index arithmetic for additional 5-20x",
+        "honest_verdict": "CLM nn_core Tensor port UNBLOCKS BLAS calls but does NOT yet engage BLAS-bound regime. The 1479x vs list-backed was real but occurred in FFI/alloc-overhead regime. Real BLAS throughput wins await attention rewrite + scalar-loop vectorisation. Best MFU 1.65% is 30x short of CLOSE (20%), 48x short of REACHED (80%)."
+      },
       "clm_full_loop_native_deployed_POST_HEXA_V2": {
         "interpreted_local_ms": 307.043,
         "native_local_ms": 1.2228,
@@ -322,14 +348,33 @@
         "source": "project_clm_hexa_gpu_plan memory (2026-04-12)"
       }
     },
-    "diagnosis": "BEFORE nn_core port: CLM was 3-4 orders of magnitude below physical ceiling on every path. AFTER nn_core Tensor port (#27 1479x) + hexa_v2 full-loop deploy (#18 251x): CLM real-step at 0.681 ms mean on 2-layer tiny shape — FFI-bound regime, MFU not yet meaningfully computable. Next frontier: real 14B CLM shapes (seq=512 d=4096) where BLAS throughput becomes the bottleneck.",
+    "diagnosis": "BEFORE nn_core port: CLM was 3-4 orders of magnitude below physical ceiling on every path. AFTER nn_core Tensor port (#27 1479x) + hexa_v2 full-loop deploy (#18 251x): tiny shape 0.681 ms. AFTER real-shape sweep 2026-04-16 (18 shapes d=16..768 seq=8..32 nl=2..8): best MFU 1.65% at d=768 seq=16 — NO crossover to BLAS-bound regime. Scalar inner loops (rms_norm, softmax, swiglu, attention O(S²D), cross-entropy) dominate total step time, denying BLAS the bottleneck. Verdict: GAP (48x short of CLOSE, 60x short of ceiling). Next frontier: rewrite attn_fwd/attn_bwd using t_matmul for Q@K^T + probs@V, then vectorise rmsnorm/softmax/swiglu, then emit native-int index arithmetic in hexa codegen.",
     "remaining_levers": [
       {
         "name": "Wire Tensor primitive into nn_core.hexa (matmul, linear, attention)",
         "expected_uplift": "~3,000x on matmul-dominated steps (Mac CPU)",
         "cost": "medium (hexa file edits, semantic-equiv verification)",
-        "status": "in_progress — #27 agent running",
-        "priority": "CRITICAL — unlocks the 156.7 GF/s Mac ceiling in real training loop"
+        "status": "DONE #27 → 1479x tiny shape, but sweep #30 2026-04-16 showed real-shape peak 1.65% MFU (d=768 seq=16). Matmul is BLAS but surrounding scalar loops dominate total ms.",
+        "priority": "NEXT LEVER = scalar-loop vectorisation + attention matmul rewrite"
+      },
+      {
+        "name": "Rewrite attn_fwd/attn_bwd to use t_matmul for Q@K^T + probs@V + gradients",
+        "expected_uplift": "10-50x at seq>=32 (attention share becomes BLAS-dominated)",
+        "status": "not yet attempted — identified as #1 blocker in real_shape_sweep_2026_04_16",
+        "priority": "CRITICAL — makes BLAS the bottleneck at d>=256 seq>=32"
+      },
+      {
+        "name": "Vectorise rms_norm / softmax / swiglu via vDSP (Accelerate) or cblas_sscal + cblas_snrm2",
+        "expected_uplift": "5-20x on element-wise loops (currently 60-80% of ms at d>=128)",
+        "status": "not yet attempted",
+        "priority": "HIGH — enables BLAS to dominate total ms"
+      },
+      {
+        "name": "Emit native int arithmetic for index expressions in hexa codegen",
+        "expected_uplift": "5-20x on inner scalar loops (boxed HexaVal unboxing)",
+        "evidence": "macOS sample on sweep #30 showed 60%+ CPU in hexa_mul/hexa_add runtime paths from attn_bwd_t index ops",
+        "status": "not yet attempted",
+        "priority": "HIGH — compounding multiplier on every inner loop"
       },
       {
         "name": "H100 BATCH 1→32 at D=512 L=12",
@@ -378,9 +423,9 @@
       "Hexa Tensor primitive + accelerate_blas shim fully wired and productionized"
     ],
     "alm_status": "62.6% MFU measured on r7 pod; partial 46.5% on slower r6 pod. Ceiling pod-dependent ±31%. FP8 blocked by TE install on torch 2.10. Next: r8a (--liger+optimal batch), r8b (lora_dropout=0), r8c (torch 2.9+TE+fp8 on fresh pod)",
-    "clm_status": "REAL training step 0.681 ms/step (2-layer tiny shape), 1479x vs 1000ms baseline. FFI-call-bound at this shape. Next frontier: real 14B shapes (seq=512 d=4096) unlock BLAS throughput",
+    "clm_status": "REAL training step 0.681 ms/step (2-layer tiny shape), 1479x vs 1000ms baseline. Real-shape sweep #30 2026-04-16: 18 shapes d=16..768 seq=8..32 nl=2..8, best 1.65% MFU at d=768 seq=16, NO BLAS-bound crossover (peak 2.59 GF/s vs 156.7 ceiling). Verdict GAP. Next: attention matmul rewrite + scalar-loop vectorisation.",
     "pending_confirmations": ["#26 ALM batch/seq sweep (in progress on r6 pod)"],
-    "completed_this_session": ["#18", "#19", "#20", "#21", "#22", "#23", "#24 partial", "#25", "#27"]
+    "completed_this_session": ["#18", "#19", "#20", "#21", "#22", "#23", "#24 partial", "#25", "#27", "#30 real-shape sweep"]
   },
 
   "update_protocol": {
