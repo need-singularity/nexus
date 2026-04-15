@@ -1,0 +1,296 @@
+// boundary_sweep.hexa — configurable-buffer ANU-Time universe for 64-tick boundary test
+//
+// Hypothesis: slow ticks occur at tau % BUFSIZE == 0 because that's when
+//             the internal byte buffer gets refreshed (read_file / curl / urandom).
+//             If the boundary tracks BUFSIZE, it is artifact; if it is fixed at 64
+//             regardless of BUFSIZE, it is an ANU/quantum signature.
+//
+// Usage: hexa boundary_sweep.hexa <bufsize> <max_ticks> <run_dir> [source]
+//   source ∈ "anu" | "urandom" | "anu_then_urandom" (default)
+//
+// Independent self-contained (no import) to match existing pattern.
+
+// ─── CLI ───
+let _args = args()
+let mut bufsize: i64 = 64
+let mut max_ticks: i64 = 300
+let mut run_dir: string = ""
+let mut source_mode: string = "anu_then_urandom"
+
+if _args.len() >= 3 { try { bufsize = to_int(_args[2]) } catch e { bufsize = 64 } }
+if _args.len() >= 4 { try { max_ticks = to_int(_args[3]) } catch e { max_ticks = 300 } }
+if _args.len() >= 5 { run_dir = _args[4] }
+if _args.len() >= 6 { source_mode = _args[5] }
+
+if bufsize < 4 { bufsize = 4 }
+if bufsize > 1024 { bufsize = 1024 }
+if run_dir.len() == 0 {
+    let mut home = ""
+    try { home = to_string(exec("printenv HOME")).trim() } catch e { home = "" }
+    run_dir = home + "/Dev/nexus/shared/sim_bridge/anu_time/experiments/_scratch_" + to_string(bufsize)
+}
+
+try { let _m = exec("mkdir -p '" + run_dir + "'") } catch e {}
+
+// ─── helpers ───
+fn now_ns() -> i64 {
+    let mut r = ""
+    try { r = to_string(exec("/usr/bin/python3 -c 'import time; print(time.time_ns())' 2>/dev/null")).trim() } catch e { r = "" }
+    if r.len() == 0 {
+        try { r = to_string(exec("date +%s%N 2>/dev/null")).trim() } catch e { r = "0" }
+    }
+    let mut v: i64 = 0
+    try { v = to_int(r) } catch e { v = 0 }
+    return v
+}
+
+fn now_epoch() -> i64 {
+    let mut r = ""
+    try { r = to_string(exec("date +%s")).trim() } catch e { r = "0" }
+    let mut v: i64 = 0
+    try { v = to_int(r) } catch e { v = 0 }
+    return v
+}
+
+// ─── byte buffer w/ configurable size ───
+let mut __hex: string = ""
+let mut __pos: i64 = 0
+let mut __src: string = ""
+
+fn _fetch_urandom(n: i64) -> string {
+    let tmp = "/tmp/bnd_ur." + to_string(now_epoch()) + "." + to_string(n) + ".hex"
+    let cmd = "head -c " + to_string(n) + " /dev/urandom | od -An -vtx1 | tr -d ' \\n' > " + tmp + "; cat " + tmp + "; rm -f " + tmp
+    let mut hex = ""
+    try { hex = to_string(exec(cmd)).trim() } catch e { hex = "" }
+    let need = n * 2
+    if hex.len() < need { return "" }
+    return hex.substring(0, need)
+}
+
+fn _fetch_anu(n: i64) -> string {
+    // ANU only supports up to 1024 uint8 per request but 1 req/min rate limit.
+    // For the sweep we always call and fall back on failure.
+    let tmp = "/tmp/bnd_anu." + to_string(now_epoch()) + "." + to_string(n) + ".hex"
+    let cmd = "curl -s --max-time 6 'https://qrng.anu.edu.au/API/jsonI.php?length=" + to_string(n) + "&type=uint8' 2>/dev/null | /usr/bin/python3 -c \"import sys,json;d=json.load(sys.stdin);print(''.join(f'{b:02x}' for b in d.get('data',[])[:" + to_string(n) + "]) if d.get('success') else '')\" > " + tmp + " 2>/dev/null; cat " + tmp + " 2>/dev/null; rm -f " + tmp
+    let mut hex = ""
+    try { hex = to_string(exec(cmd)).trim() } catch e { hex = "" }
+    let need = n * 2
+    if hex.len() < need { return "" }
+    return hex.substring(0, need)
+}
+
+fn _refresh(bsz: i64, mode: string) -> bool {
+    if mode == "urandom" {
+        let ur = _fetch_urandom(bsz)
+        if ur.len() > 0 {
+            __hex = ur
+            __pos = 0
+            __src = "urandom"
+            return true
+        }
+        __src = "fail"
+        return false
+    }
+    if mode == "anu" {
+        let anu = _fetch_anu(bsz)
+        if anu.len() > 0 {
+            __hex = anu
+            __pos = 0
+            __src = "anu"
+            return true
+        }
+        __src = "fail"
+        return false
+    }
+    // default: anu_then_urandom
+    let anu = _fetch_anu(bsz)
+    if anu.len() > 0 {
+        __hex = anu
+        __pos = 0
+        __src = "anu"
+        return true
+    }
+    let ur = _fetch_urandom(bsz)
+    if ur.len() > 0 {
+        __hex = ur
+        __pos = 0
+        __src = "urandom"
+        return true
+    }
+    __src = "fail"
+    return false
+}
+
+fn _hex_pair_to_int(h2: string) -> i64 {
+    let mut r = ""
+    try { r = to_string(exec("printf '%d' 0x" + h2 + " 2>/dev/null")).trim() } catch e { r = "0" }
+    if r.len() == 0 { return 0 }
+    let mut v: i64 = 0
+    try { v = to_int(r) } catch e { v = 0 }
+    if v < 0 { v = 0 }
+    if v > 255 { v = 255 }
+    return v
+}
+
+fn next_byte(bsz: i64, mode: string) -> i64 {
+    let need_hex = bsz * 2
+    if __hex.len() < need_hex || __pos >= bsz {
+        let ok = _refresh(bsz, mode)
+        if !ok { return 0 - 1 }
+    }
+    let off = __pos * 2
+    let h2 = __hex.substring(off, off + 2)
+    let b = _hex_pair_to_int(h2)
+    __pos = __pos + 1
+    return b
+}
+
+// ─── minimal world (σ²=64 inline) ───
+const SIGMA_SQ: i64 = 64
+const SCALE: i64 = 65536
+const TAU_MIX: i64 = 4
+
+let mut __x: [i64] = []
+let mut __tick: i64 = 0
+
+fn mw_init(seed: i64) {
+    let mut xs: [i64] = []
+    let mut i = 0
+    while i < SIGMA_SQ {
+        let v = (seed * 1103 + i * 37 + 17) % SCALE
+        let mut vv = v
+        if vv < 0 { vv = 0 - vv }
+        xs = xs + [vv]
+        i = i + 1
+    }
+    __x = xs
+    __tick = 0
+}
+
+fn _coord_hash(i: i64) -> i64 {
+    let h = (i * 131 + 73) % 251
+    return h + 5
+}
+
+fn mw_step(byte: i64) {
+    if byte < 0 { return }
+    let mut b = byte
+    if b > 255 { b = b % 256 }
+    let mut xs1: [i64] = []
+    let mut i = 0
+    while i < SIGMA_SQ {
+        let h = _coord_hash(i)
+        let mut v = __x[i]
+        v = v + b * h + (__tick % 31)
+        if v < 0 { v = 0 - v }
+        v = v % SCALE
+        xs1 = xs1 + [v]
+        i = i + 1
+    }
+    let mut cur = xs1
+    let mut layer = 0
+    while layer < TAU_MIX {
+        let mut xs2: [i64] = []
+        let mut j = 0
+        while j < SIGMA_SQ {
+            let k_prev = (j + SIGMA_SQ - 1) % SIGMA_SQ
+            let left = cur[k_prev]
+            let right = cur[j]
+            let mix = (left * 7 + right + layer * 13) % SCALE
+            xs2 = xs2 + [mix]
+            j = j + 1
+        }
+        cur = xs2
+        layer = layer + 1
+    }
+    __x = cur
+    __tick = __tick + 1
+}
+
+fn mw_hash() -> i64 {
+    let mut h: i64 = 0
+    let mut i = 0
+    while i < SIGMA_SQ {
+        h = (h * 33 + __x[i]) % 9999999967
+        i = i + 1
+    }
+    return h
+}
+
+fn mw_snap() -> [i64] {
+    let mut out: [i64] = []
+    let mut i = 0
+    while i < SIGMA_SQ { out = out + [__x[i]]; i = i + 1 }
+    return out
+}
+
+fn mw_diff(prev: [i64]) -> i64 {
+    let mut d: i64 = 0
+    let mut i = 0
+    let mut n = SIGMA_SQ
+    if prev.len() < n { n = prev.len() }
+    while i < n {
+        let a = __x[i]
+        let b = prev[i]
+        let g = a - b
+        if g < 0 { d = d + (0 - g) } else { d = d + g }
+        i = i + 1
+    }
+    return d
+}
+
+// ─── MAIN ───
+let log_path = run_dir + "/log.jsonl"
+let meta_path = run_dir + "/meta.json"
+
+mw_init(6)
+try { write_file(log_path, "") } catch e {}
+
+let start_ns = now_ns()
+let start_epoch = now_epoch()
+
+let meta_json = "{\"bufsize\":" + to_string(bufsize) + ",\"source_mode\":\"" + source_mode + "\",\"max_ticks\":" + to_string(max_ticks) + ",\"start_epoch\":" + to_string(start_epoch) + "}\n"
+try { write_file(meta_path, meta_json) } catch e {}
+
+println("[sweep] bufsize=" + to_string(bufsize) + " max_ticks=" + to_string(max_ticks) + " mode=" + source_mode + " run=" + run_dir)
+
+let mut tau: i64 = 0
+let mut prev_snap = mw_snap()
+let mut fail_streak: i64 = 0
+
+while tau < max_ticks {
+    let t0 = now_ns()
+    let pos_before = __pos
+    let byte = next_byte(bufsize, source_mode)
+    let t1 = now_ns()
+    if byte < 0 {
+        fail_streak = fail_streak + 1
+        if fail_streak >= 5 { println("[sweep] ABORT streak=5"); break }
+        continue
+    }
+    fail_streak = 0
+
+    // Detect a refresh event: pos_before >= bufsize (or first tick) → triggered refresh
+    let mut refreshed: i64 = 0
+    if pos_before >= bufsize { refreshed = 1 }
+    if tau == 0 { refreshed = 1 }
+
+    mw_step(byte)
+    let sh = mw_hash()
+    let df = mw_diff(prev_snap)
+    prev_snap = mw_snap()
+
+    let line = "{\"tau\":" + to_string(tau) + ",\"bufsize\":" + to_string(bufsize) + ",\"wall_t_ns\":" + to_string(t1) + ",\"byte_dt_ns\":" + to_string(t1 - t0) + ",\"byte\":" + to_string(byte) + ",\"source\":\"" + __src + "\",\"refreshed\":" + to_string(refreshed) + ",\"state_hash\":" + to_string(sh) + ",\"diff_L1\":" + to_string(df) + "}\n"
+    try { append_file(log_path, line) } catch e {}
+
+    if tau % 50 == 0 {
+        println("[tau=" + to_string(tau) + "] bsz=" + to_string(bufsize) + " dt_ms=" + to_string((t1 - t0) / 1000000) + " src=" + __src + " ref=" + to_string(refreshed))
+    }
+    tau = tau + 1
+}
+
+let end_ns = now_ns()
+let fmeta = "{\"bufsize\":" + to_string(bufsize) + ",\"source_mode\":\"" + source_mode + "\",\"max_ticks\":" + to_string(max_ticks) + ",\"actual_ticks\":" + to_string(tau) + ",\"start_ns\":" + to_string(start_ns) + ",\"end_ns\":" + to_string(end_ns) + ",\"total_wall_ns\":" + to_string(end_ns - start_ns) + "}\n"
+try { write_file(meta_path, fmeta) } catch e {}
+
+println("[sweep] done tau=" + to_string(tau) + " wall_s=" + to_string((end_ns - start_ns) / 1000000000))
