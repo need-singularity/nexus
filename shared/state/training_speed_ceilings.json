@@ -346,6 +346,25 @@
         "distance_to_80pct_x": 916,
         "config": {"d": 512, "ff": 2048, "nl": 12, "seq": 512, "batch": 1},
         "source": "project_clm_hexa_gpu_plan memory (2026-04-12)"
+      },
+      "h100_native_after_cuda_compose": {
+        "date": "2026-04-16",
+        "agent": "agent-afd979ac",
+        "status": "BLOCKED — POD_GONE",
+        "target_pod": "8xmtaigu9i7b4x (anima-agi)",
+        "pod_check_result": "NOT_PRESENT in runpodctl pod list (only xhq9b2c8fljdyo anima-p4-alm-holo remains, untouchable per rules)",
+        "spike_commit_nexus": "e74fa189",
+        "spike_commit_hexa_lang": "9af9e35",
+        "mac_arm64_compose_verified": true,
+        "h100_compose_verified": null,
+        "ms_per_step": null,
+        "speedup_vs_interpreter": null,
+        "gpu_kernels_launching": "UNKNOWN",
+        "ceiling_verdict": "BLOCKED",
+        "rule_compliance": "Did not provision replacement pod (2 H100 max + ALM r8a active). Did not touch xhq9b2c8fljdyo.",
+        "state_file": "shared/state/clm_cuda_native_pod_test_20260416.json",
+        "local_binary_ready": "hexa_v2 md5 16d69b278baee3574681dabd2f7d57d6 + .bak_pre_cuda_codegen intact, instant-deploy when pod available",
+        "next_unblock_path": "ALM r8a completion → reuse pod for CLM, OR explicit user approval for fresh CLM pod"
       }
     },
     "diagnosis": "BEFORE nn_core port: CLM was 3-4 orders of magnitude below physical ceiling on every path. AFTER nn_core Tensor port (#27 1479x) + hexa_v2 full-loop deploy (#18 251x): tiny shape 0.681 ms. AFTER real-shape sweep 2026-04-16 (18 shapes d=16..768 seq=8..32 nl=2..8): best MFU 1.65% at d=768 seq=16 — NO crossover to BLAS-bound regime. Scalar inner loops (rms_norm, softmax, swiglu, attention O(S²D), cross-entropy) dominate total step time, denying BLAS the bottleneck. Verdict: GAP (48x short of CLOSE, 60x short of ceiling). Next frontier: rewrite attn_fwd/attn_bwd using t_matmul for Q@K^T + probs@V, then vectorise rmsnorm/softmax/swiglu, then emit native-int index arithmetic in hexa codegen.",

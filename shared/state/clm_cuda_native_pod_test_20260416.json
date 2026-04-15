@@ -1,0 +1,64 @@
+{
+  "name": "CLM hexa-native CUDA compose H100 pod test",
+  "date": "2026-04-16",
+  "agent": "agent-afd979ac",
+  "task": "Test CLM hexa-native CUDA composition on H100 pod 8xmtaigu9i7b4x (anima-agi). Spike #34 (commit nexus e74fa189 + hexa-lang 9af9e35) verified codegen patch composes hexa native compile with cuda_rtc.hexa lane END-TO-END on Mac arm64. Goal: confirm GPU acceleration on real H100.",
+  "status": "BLOCKED",
+  "blocker": "POD_GONE",
+  "verdict": "BLOCKED — H100 CLM target pod 8xmtaigu9i7b4x (anima-agi) is no longer in runpodctl pod list. Memory project_clm_hexa_gpu_plan is 4 days old (2026-04-12) and the pod has been terminated since. Per task rules, do NOT provision a replacement (cost concern + 2 H100 max budget) and do NOT touch ALM r8a pod xhq9b2c8fljdyo.",
+  "pod_existence_check": {
+    "command": "runpodctl pod list",
+    "result": [
+      {
+        "id": "xhq9b2c8fljdyo",
+        "name": "anima-p4-alm-holo",
+        "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+        "gpu_count": 1,
+        "cost_per_hr": 2.99,
+        "desired_status": "RUNNING",
+        "do_not_touch": true,
+        "purpose": "ALM r8a stacked"
+      }
+    ],
+    "target_pod_8xmtaigu9i7b4x": "NOT_PRESENT",
+    "target_pod_anima_agi": "TERMINATED_OR_RECYCLED"
+  },
+  "files_on_pod_check": "N/A — pod gone, cannot SSH",
+  "transpile_status": "N/A — pod gone",
+  "build_status": "N/A — pod gone",
+  "smoke_first_10_step_sec": null,
+  "native_step_sec_median": null,
+  "interpreter_baseline_sec": {
+    "h100_d64_fast": 0.820,
+    "h100_d512_l12_best": 0.180,
+    "source": "shared/state/training_speed_ceilings.json CLM.measurements (from project_clm_hexa_gpu_plan memory 2026-04-12)"
+  },
+  "speedup_factor": null,
+  "gpu_util_pct": null,
+  "gpu_memory_used_gb": null,
+  "kernels_actually_launching": "UNKNOWN — cannot test without H100 pod",
+  "ceiling_verdict": "BLOCKED",
+  "local_state_intact": {
+    "live_binary": "/Users/ghost/Dev/hexa-lang/self/native/hexa_v2",
+    "live_md5": "16d69b278baee3574681dabd2f7d57d6",
+    "live_size_bytes": 990072,
+    "backup_binary": "/Users/ghost/Dev/hexa-lang/self/native/hexa_v2.bak_pre_cuda_codegen",
+    "backup_md5": "410abceaf6536cb603822c307c214b55",
+    "backup_size_bytes": 989944,
+    "patched_source": "/Users/ghost/Dev/hexa-lang/self/codegen_c2.hexa",
+    "spike_commit_nexus": "e74fa189",
+    "spike_commit_hexa_lang": "9af9e35",
+    "spike_proof": "Mac arm64 END-TO-END compose verified (codegen patch lets train_clm_kr.hexa transpile through cuda_rtc.hexa lane)"
+  },
+  "blockers": [
+    "Pod 8xmtaigu9i7b4x (anima-agi) terminated since 2026-04-12 — 4-day memory window expired",
+    "Cannot provision replacement: 2 H100 max budget rule + ALM r8a active on xhq9b2c8fljdyo",
+    "Cannot reuse ALM pod: rules forbid touching xhq9b2c8fljdyo until r8a complete"
+  ],
+  "next_actions_when_unblocked": [
+    "Wait for ALM r8a (xhq9b2c8fljdyo) to complete and slot freed",
+    "OR: user explicit approval to provision fresh CLM pod (separate from r8a), then rsync hexa_v2 + codegen_c2.hexa + recompile cuda_rtc/cuda_kernels/gpu_train/train_clm_kr stack from anima/training/ + hexa-lang/self/ml/",
+    "OR: defer CLM H100 native CUDA verification until ALM track lands, reuse same pod for CLM after ALM completes"
+  ],
+  "honest_note": "Mac arm64 spike already proves the codegen+cuda_rtc compose works END-TO-END at the source level. The H100 verification was strictly to measure native-vs-interpreter sec/step + GPU kernel-launch confirmation. Without a live H100 CLM pod we cannot collect GPU util / memory / step time numbers. The local hexa_v2 binary + backup are intact and ready for instant deploy when a pod becomes available."
+}
