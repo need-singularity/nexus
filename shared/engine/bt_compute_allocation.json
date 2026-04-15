@@ -1,0 +1,166 @@
+{
+  "_meta": {
+    "task": "REM-P8-1",
+    "track": "A14_REMOTE_COMPUTE",
+    "phase": "P8",
+    "description": "BT-541..547 전용 compute slot 예약 + host 매핑 + 예산 cap. REM-P7-1 월간 리포트($290.48/mo) 기반으로 BT 공격 7종이 일반 작업과 분리된 dedicated compute 에서 돌도록 정책화.",
+    "canonical_path": "shared/engine/bt_compute_allocation.json",
+    "engine_path": "shared/harness/bt_compute_scheduler.hexa",
+    "updated": "2026-04-16",
+    "schema_version": "1.0",
+    "refs": {
+      "infrastructure": "shared/config/infrastructure.json",
+      "monthly_report": "shared/reports/remote_monthly_202604.json",
+      "bt_engine_forge": "shared/harness/bt_engine_forge.hexa",
+      "metacog_dir": "shared/bt/metacog_BT-*.json",
+      "roadmap": "shared/roadmaps/nexus.json#tracks.A14_REMOTE_COMPUTE.REM-P8-1"
+    }
+  },
+
+  "principle": "BT 7종은 dedicated slot 4개(runpod 1 + hetzner 2 + ubu 1)에 bt_to_host 정책으로 매핑. 일반 작업은 잔여 capacity 사용. slot 1개는 동시 1 BT 만 claim — race 금지.",
+
+  "reserved_slots": {
+    "runpod": [
+      {
+        "slot_id": "runpod-bt-0",
+        "role": "GPU-heavy numeric (H100/A100)",
+        "cost_per_hour_usd": 2.99,
+        "suitable_for": ["analytic_number_theory", "particle_qcd"],
+        "notes": "H100 80GB on-demand. BT-541(zeta), BT-543(QCD lattice) 타겟. GPU-hour 과금이라 사용 직후 release 필수."
+      }
+    ],
+    "hetzner": [
+      {
+        "slot_id": "hetzner-bt-0",
+        "role": "CPU combinatorial heavy (16 threads)",
+        "cost_per_hour_usd": 0.278,
+        "suitable_for": ["complexity_theory", "number_theory"],
+        "notes": "AX102 32T 의 절반 (일반 작업용 절반 유지). flat-rate 이라 실비 0 이지만 opportunity cost 로 $0.278/hr 추정 ($200/mo / 720h)."
+      },
+      {
+        "slot_id": "hetzner-bt-1",
+        "role": "CPU symbolic/algebraic (8 threads)",
+        "cost_per_hour_usd": 0.139,
+        "suitable_for": ["algebraic_geometry", "topology"],
+        "notes": "AX102 32T 의 1/4. Hodge/BSD/Poincaré CPU 대수 계산 전용."
+      }
+    ],
+    "ubu": [
+      {
+        "slot_id": "ubu-bt-0",
+        "role": "GPU real-time (RTX 5070 12GB)",
+        "cost_per_hour_usd": 0.014,
+        "suitable_for": ["fluid_dynamics", "topology"],
+        "notes": "self-hosted. BT-544(PDE real-time), BT-547(Ricci flow viz) 타겟. 전기료 $10/mo / 720h ≈ $0.014/hr."
+      }
+    ]
+  },
+
+  "bt_to_host": {
+    "BT-541": {
+      "name": "Riemann Hypothesis — zeta n=6 quintuple convergence",
+      "domain": "math:analytic_number_theory",
+      "primary_slot": "runpod-bt-0",
+      "fallback_slot": "hetzner-bt-0",
+      "rationale": "zeta 함수 고정밀 수치 계산 — GPU 병렬 평가 유리. fallback=CPU 단일스레드.",
+      "expected_hours_month": 8.0
+    },
+    "BT-542": {
+      "name": "P vs NP — complexity hierarchy n=6 skeleton",
+      "domain": "cs:complexity_theory",
+      "primary_slot": "hetzner-bt-0",
+      "fallback_slot": "hetzner-bt-1",
+      "rationale": "3-SAT enumeration / natural-proofs 반례 탐색 — CPU 병렬 유리. GPU 부적합.",
+      "expected_hours_month": 120.0
+    },
+    "BT-543": {
+      "name": "Yang-Mills mass gap — QCD gauge n=6 full parametrization",
+      "domain": "physics:particle_qcd",
+      "primary_slot": "runpod-bt-0",
+      "fallback_slot": "hetzner-bt-0",
+      "rationale": "lattice QCD Wilson action — GPU tensor contractions. fallback CPU 느리지만 가능.",
+      "expected_hours_month": 10.0
+    },
+    "BT-544": {
+      "name": "Navier-Stokes — fluid n=6 tensor + triple resonance",
+      "domain": "physics:fluid_dynamics",
+      "primary_slot": "ubu-bt-0",
+      "fallback_slot": "runpod-bt-0",
+      "rationale": "PDE real-time 시뮬레이션 — RTX 5070 12GB 충분. runpod 는 scale-up 시만.",
+      "expected_hours_month": 60.0
+    },
+    "BT-545": {
+      "name": "Hodge Conjecture — algebraic geometry cohomology n=6",
+      "domain": "math:algebraic_geometry",
+      "primary_slot": "hetzner-bt-1",
+      "fallback_slot": "hetzner-bt-0",
+      "rationale": "K3/CalabiYau 코호몰로지 대수 계산 — SAGE/Macaulay2 CPU 전담.",
+      "expected_hours_month": 80.0
+    },
+    "BT-546": {
+      "name": "BSD Conjecture — elliptic L-function n=6 modular skeleton",
+      "domain": "math:number_theory",
+      "primary_slot": "hetzner-bt-0",
+      "fallback_slot": "hetzner-bt-1",
+      "rationale": "Cremona table + Selmer group 계산 — CPU 캐시 친화. GPU 불필요.",
+      "expected_hours_month": 100.0
+    },
+    "BT-547": {
+      "name": "Poincaré Conjecture — 3-manifolds n/phi=3 topological classification",
+      "domain": "math:topology",
+      "primary_slot": "ubu-bt-0",
+      "fallback_slot": "hetzner-bt-1",
+      "rationale": "Ricci flow 시각화 실시간 — GPU 유리. 대수 부분은 hetzner.",
+      "expected_hours_month": 40.0
+    }
+  },
+
+  "budget_cap_per_bt": {
+    "BT-541": 30.0,
+    "BT-542": 35.0,
+    "BT-543": 35.0,
+    "BT-544": 15.0,
+    "BT-545": 12.0,
+    "BT-546": 30.0,
+    "BT-547": 10.0,
+    "_unit": "USD per month",
+    "_total": 167.0,
+    "_cap_note": "monthly $290.48 중 ~$167 BT 전용. 일반 작업 $123 잔여. runpod 고정 $80 한도 내 BT-541/543 공유."
+  },
+
+  "scheduling": {
+    "policy": "ROI-based with round-robin fallback",
+    "roi_formula": "score_latest / (cost_per_hour_usd * expected_hours_month)",
+    "roi_source": "shared/harness/engines_usage.jsonl kind=bench 최신 score",
+    "tie_break": "expected_hours_month 작은 BT 우선 (빠른 해소)",
+    "rr_fallback": "ROI 데이터 없을 때 BT id 정렬 순서 (BT-541 → BT-547)",
+    "concurrency": {
+      "max_slot_claim": 4,
+      "max_per_bt": 1,
+      "notes": "slot 하나당 동시 1 BT. BT 하나는 동시에 여러 slot 못 잡음 (1:1)."
+    },
+    "claim_timeout_hours": 24,
+    "_timeout_note": "claim 후 24h 내 release 없으면 자동 만료 — 좀비 방지."
+  },
+
+  "state_file": {
+    "path": "shared/state/bt_compute_slots.jsonl",
+    "format": "JSONL append-only",
+    "line_schema": {
+      "ts": "int (unix epoch)",
+      "action": "enum claim|release|expire",
+      "slot_id": "string",
+      "bt_id": "string",
+      "budget_spent_usd": "float (누적)",
+      "notes": "string optional"
+    }
+  },
+
+  "invariants": {
+    "real_remote_exec": "금지 — 이 spec 은 할당 정책 + dry-run only. 실제 SSH/API call X.",
+    "anima_ref": "금지 — nexus 독립",
+    "version_suffix": "금지 — _v2/_new/_copy/.bak 금지. git 이 유일 버전관리.",
+    "language": "hexa-lang only",
+    "bt_double_claim": "금지 — 한 BT 가 여러 slot 동시 hold 불가"
+  }
+}
