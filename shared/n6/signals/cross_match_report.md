@@ -1,0 +1,33 @@
+# atlas.signals.n6 Cross-Match 리포트
+
+> 생성: 2026-04-15T20:17:24Z
+> 비교 윈도우: 150 signals (전체 267)
+> 최소 스코어: 2
+
+## Cross-repo 후보 쌍 (22)
+
+- score=2  SIG-SR-001 ↔ SIG-CROSS-001 [NX↔CROSS,NX,AN]
+- score=2  SIG-SR-001 ↔ SIG-7B-204 [NX↔]
+- score=2  SIG-OURO-001 ↔ SIG-7R-208 [NX↔]
+- score=2  SIG-OURO-001 ↔ SIG-PHYS-205 [NX↔PHYS,NEURAL]
+- score=2  SIG-NEURAL-001 ↔ SIG-CROSS-001 [AN,CROSS↔CROSS,NX,AN]
+- score=2  SIG-NEURAL-001 ↔ SIG-HEXA-102 [AN,CROSS↔NX]
+- score=2  SIG-NEURAL-001 ↔ SIG-HEXA-103 [AN,CROSS↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-SR-101 [CROSS,NX,AN↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-QRNG-101 [CROSS,NX,AN↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-ATLAS-105 [CROSS,NX,AN↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-HEXA-102 [CROSS,NX,AN↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-HEXA-103 [CROSS,NX,AN↔NX]
+- score=2  SIG-CROSS-001 ↔ SIG-7B-204 [CROSS,NX,AN↔]
+- score=2  SIG-SR-101 ↔ SIG-7B-204 [NX↔]
+- score=2  SIG-QRNG-101 ↔ SIG-7B-204 [NX↔]
+- score=2  SIG-ATLAS-105 ↔ SIG-7B-204 [NX↔]
+- score=2  SIG-ATLAS-114 ↔ SIG-7R-208 [NX↔]
+- score=2  SIG-ATLAS-114 ↔ SIG-PHYS-205 [NX↔PHYS,NEURAL]
+- score=2  SIG-META-111 ↔ SIG-7R-208 [NX↔]
+- score=2  SIG-META-111 ↔ SIG-PHYS-205 [NX↔PHYS,NEURAL]
+- score=2  SIG-META-114 ↔ SIG-7R-208 [NX↔]
+- score=2  SIG-META-114 ↔ SIG-PHYS-205 [NX↔PHYS,NEURAL]
+
+---
+*signal_cross_match.hexa*

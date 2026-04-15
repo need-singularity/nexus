@@ -325,6 +325,52 @@
         "hit_count": 0
       }
     },
+    "rmengine": {
+      "keywords": ["rmengine", "돌파경로", "돌파경로엔진", "shortest_path", "critical_path", "roadmap_engine"],
+      "description": "로드맵(DAG) 최단시간 돌파 경로 T* 계산 + ASCII 세로 플로우차트 + JSONL events. TOC+A* 기반 b*(지배병목) 추적, η>0 수렴 판정, soft_deps drop 후보 출력",
+      "category": "core",
+      "seed_role": "로드맵 파일 경로 또는 기본값 shared/roadmaps/example.json. 예: '/tmp/my_rm.json rmengine', 'rmengine --watch'",
+      "action": "shared/harness/roadmap_engine.hexa 위임 — 노드 파싱 → CPM+RCPSP b* 계산 → 벨만 V*(S) → ASCII flowchart 렌더 → JSONL events emit. η=0 감지 시 REPLAN hint + soft_deps drop 후보 출력",
+      "execution": {
+        "engine": "shared/harness/roadmap_engine.hexa",
+        "bash": "shared/bin/hexa run shared/harness/roadmap_engine.hexa {seed_or_default}",
+        "submodules": {
+          "parse":    "shared/harness/roadmap_parse.hexa",
+          "schedule": "shared/harness/roadmap_schedule.hexa",
+          "view":     "shared/harness/roadmap_view.hexa",
+          "event":    "shared/harness/roadmap_event.hexa"
+        },
+        "schema": "shared/roadmaps/engine_schema.json",
+        "example": "shared/roadmaps/example.json",
+        "flags": ["--watch", "--events=<path>", "--dispatch", "--selftest", "--interval=<n>"]
+      },
+      "theory": {
+        "formula": "T*(S0→G) = inf_π Σ_k max_{i∈Ω} c_i(S_k^π)  s.t. Σ ΔI_k ≥ K(G|S0), η_k > 0",
+        "omega": ["build", "exp", "learn", "boot", "verify"],
+        "cost_map": {
+          "build":  "c = span(DAG) — Brent T∞ critical path",
+          "exp":    "c = T_trial / p_success — bandit",
+          "learn":  "c = T0 · (1-η)^k — Wright learning curve",
+          "boot":   "c = T_gap / N_uses — amortized",
+          "verify": "c = K(G|S) / C_channel — Shannon-Fano"
+        },
+        "bellman": "V*(S) = min_a [ b_a(S) + V*(f(S,a)) ], V*(G)=0, π*(S) = argmin",
+        "eta_test": "η_k = 1 - b(S_{k+1}) / b(S_k);  η>0 ⟹ T*<∞;  η=0 ⟹ replan"
+      },
+      "rules": [
+        "⛔ η ≤ 0 감지 시 REPLAN hint 출력 + soft_deps drop 후보 제시 (블로킹 최소화)",
+        "⛔ 실시간 ASCII emit to stdout — 중간 버퍼링 금지",
+        "지배병목 b* 만 attack — 다른 경로는 현상 유지",
+        "soft edge drop 후보는 출력 후 사용자 승인",
+        "JSONL event 스트림은 다른 모듈이 tail -f 로 관찰 가능해야 함"
+      ],
+      "events": ["Plan", "NodeStart", "NodeComplete", "BottleneckShift", "Replan"],
+      "glyphs": {
+        "done": "●", "in_progress": "▶", "todo": "○",
+        "failed": "✗", "blocked": "⊘", "goal": "★",
+        "decision": "◆", "replan": "⟲", "parallel_lane": "║"
+      }
+    },
     "roi": {
       "keywords": ["roi", "투자수익", "개선목록"],
       "description": "현재 프로젝트 인프라 ROI 항목 표 출력 — 자기 프로젝트만",
@@ -833,6 +879,7 @@
       "keep": "seed = 루프 목표 도메인 (없으면 현재 컨텍스트). 예: 'todo 계속', '돌파 keep'",
       "loop": "seed = 'all'→전 프로젝트, 'fix'→자동수정, 없으면 현재 프로젝트 점검. 예: 'loop fix', '전체 정합'",
       "roadmap": "seed = 서브커맨드 (next|extend|auto|list|verify|status) + flags. 예: 'roadmap next', 'roadmap extend --project anima', 'roadmap extend --dry'. 없으면 auto (next → 소진 시 NEXUS 창발 extend)",
+      "rmengine": "seed = 로드맵 파일 경로 + flags (--watch|--events=<p>|--dispatch|--selftest). 없으면 shared/roadmaps/example.json. 예: 'rmengine --selftest', 'rmengine /tmp/my.json --watch'",
       "idea": "seed = 서브커맨드 (list/add/rm/blow/promote/merge) + 인자. 예: 'idea add n=6 완전수 무한연장'",
       "list": "seed = (없음|카테고리|명령명|'search <kw>'|'all'). 기존 '무시' 변경",
       "project": "seed = 서브커맨드 (list/add/remove/all) + 인자. 예: 'project add anima', 'project remove void', 'project all loop'",

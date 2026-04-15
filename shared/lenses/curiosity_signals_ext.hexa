@@ -1,0 +1,114 @@
+// curiosity_signals_ext.hexa — D4 확장
+// 기존 curiosity 의 hub↔leaf 질문 생성 대신, atlas.signals.n6 의
+// 같은 도메인 내 서로 다른 리포 signal 쌍을 뽑아 "CROSS 의심" 질문 생성
+// 실행: hexa run $NEXUS/shared/lenses/curiosity_signals_ext.hexa [count=3]
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
+let LOG = NEXUS + "/shared/harness/curiosity_signals_log.jsonl"
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn now_ts() -> string {
+    let r = exec("date -u +%Y-%m-%dT%H:%M:%SZ")
+    return _str(r).trim()
+}
+
+fn shell_quote(s: string) -> string {
+    let escaped = s.replace("'", "'\\''")
+    return "'" + escaped + "'"
+}
+
+fn append_line(path: string, line: string) {
+    let cmd = "printf '%s\\n' " + shell_quote(line) + " >> '" + path + "' 2>/dev/null"
+    exec(cmd)
+}
+
+// 도메인 내 signal id 목록 (해당 리포 태그 포함된)
+fn load_by_repo_in_domain(domain_pat: string, repo_pat: string) -> [string] {
+    let cmd = "grep -E '^@S .*\\[" + repo_pat + ".*\\[" + domain_pat +
+              "' '" + SIGNALS + "' | awk '{print $2}' | head -50"
+    let r = exec(cmd)
+    let text = _str(r)
+    let lines = text.split("\n")
+    let mut out: [string] = []
+    for line in lines {
+        let s = _str(line).trim()
+        if s != "" { out = out + [s] }
+    }
+    return out
+}
+
+fn get_statement(sig_id: string) -> string {
+    let cmd = "grep -F '@S " + sig_id + " =' '" + SIGNALS + "' | head -1 | " +
+              "awk -F'= |:: signal' '{print $2}' | sed 's/ *$//'"
+    let r = exec(cmd)
+    let s = _str(r).trim()
+    if s == "" { return "(문장 없음)" }
+    return s
+}
+
+// ─── 메인 ───
+let a = args()
+let mut count: i64 = 3
+if a.len() >= 3 {
+    try { count = to_int(a[2]) } catch e { count = 3 }
+}
+
+println("curiosity_signals_ext: count=" + to_string(count) + " ts=" + now_ts())
+
+// 도메인 후보
+let domains = ["7R", "7B", "SR", "QRNG", "CONS", "HEXA", "OURO", "BELL"]
+
+// 질문 생성: 각 도메인에서 NX + (N6|AN) 쌍
+let mut questions: i64 = 0
+let mut i = 0
+while i < domains.len() && questions < count {
+    let d = domains[i]
+    let nx_sigs = load_by_repo_in_domain(d, "NX")
+    let n6_sigs = load_by_repo_in_domain(d, "N6")
+    let an_sigs = load_by_repo_in_domain(d, "AN")
+
+    if nx_sigs.len() > 0 && n6_sigs.len() > 0 {
+        let a_sig = nx_sigs[0]
+        let b_sig = n6_sigs[0]
+        let a_st = get_statement(a_sig)
+        let b_st = get_statement(b_sig)
+        println("")
+        println("CROSS 의심 [" + d + "] NX ↔ N6")
+        println("  A (NX): " + a_sig + " — " + a_st)
+        println("  B (N6): " + b_sig + " — " + b_st)
+        println("  Q: [" + d + "] 도메인에서 " + a_sig + " 와 " + b_sig + " 이 같은 family?")
+
+        let row = "{\"ts\":\"" + now_ts() + "\",\"domain\":\"" + d +
+                  "\",\"a\":\"" + a_sig + "\",\"b\":\"" + b_sig +
+                  "\",\"kind\":\"cross_suspect\"}"
+        append_line(LOG, row)
+        questions = questions + 1
+    } else if nx_sigs.len() > 0 && an_sigs.len() > 0 && questions < count {
+        let a_sig = nx_sigs[0]
+        let b_sig = an_sigs[0]
+        let a_st = get_statement(a_sig)
+        let b_st = get_statement(b_sig)
+        println("")
+        println("CROSS 의심 [" + d + "] NX ↔ AN")
+        println("  A (NX): " + a_sig + " — " + a_st)
+        println("  B (AN): " + b_sig + " — " + b_st)
+        println("  Q: [" + d + "] 도메인에서 " + a_sig + " 와 " + b_sig + " 이 같은 family?")
+
+        let row = "{\"ts\":\"" + now_ts() + "\",\"domain\":\"" + d +
+                  "\",\"a\":\"" + a_sig + "\",\"b\":\"" + b_sig +
+                  "\",\"kind\":\"cross_suspect\"}"
+        append_line(LOG, row)
+        questions = questions + 1
+    }
+    i = i + 1
+}
+
+println("")
+println("  emitted=" + to_string(questions) + " log=" + LOG)

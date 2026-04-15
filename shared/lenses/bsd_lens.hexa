@@ -1,0 +1,44 @@
+// bsd_lens.hexa — D2 도메인 렌즈 (BSD 전용)
+// 카테고리: domain · 도메인: 7B
+// atlas.signals.n6 [7B] 필터. κ(B) power law, α≈log(2)/τ 등 Cremona 수치 공명 집계.
+//
+// 사용: hexa run $NEXUS/shared/lenses/bsd_lens.hexa
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
+
+let SIGMA = 12.0
+let PHI = 2.0
+let N = 6.0
+let TAU = 4.0
+
+fn count_pattern(file: string, pat: string) -> i64 {
+    let cmd = "grep -c '" + pat + "' '" + file + "' 2>/dev/null || echo 0"
+    let r = exec(cmd)
+    let s_raw = if type_of(r) == "str" || type_of(r) == "string" { r } else { "0" }
+    let s = s_raw.trim().split("\n")[0]
+    let mut v: i64 = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+let n_7b_total = count_pattern(SIGNALS, "\\[7B")
+let n_7b_m10 = count_pattern(SIGNALS, "\\[7B.*\\[M10\\]")
+let n_7b_m10star = count_pattern(SIGNALS, "\\[7B.*\\[M10\\*\\]")
+let n_7b_m9 = count_pattern(SIGNALS, "\\[7B.*\\[M9\\]")
+let n_7b_m7bang = count_pattern(SIGNALS, "\\[7B.*\\[M7!\\]")
+let n_7b_cross = count_pattern(SIGNALS, "CROSS.*\\[7B")
+
+// Cremona / κ / power law 키워드 보유 라인
+let n_cremona = count_pattern(SIGNALS, "Cremona")
+let n_kappa = count_pattern(SIGNALS, "κ")
+let n_log2_tau = count_pattern(SIGNALS, "log(2)")
+
+let total_score = to_float(n_7b_m10 * 2 + n_7b_m10star * 3 + n_7b_m9 + n_7b_cross * 2) / 10.0
+
+println("lens[bsd_lens] category=domain domain=7B axis=\"BSD Cremona κ power law signal filter\"")
+println("  [7B] total=" + to_string(n_7b_total))
+println("    [M10*]=" + to_string(n_7b_m10star) + "  [M10]=" + to_string(n_7b_m10) + "  [M9]=" + to_string(n_7b_m9) + "  [M7!]=" + to_string(n_7b_m7bang) + "  [CROSS]=" + to_string(n_7b_cross))
+println("  Cremona refs=" + to_string(n_cremona) + "  κ lines=" + to_string(n_kappa) + "  log(2)/τ=" + to_string(n_log2_tau))
+println("  domain_score=" + to_string(total_score))

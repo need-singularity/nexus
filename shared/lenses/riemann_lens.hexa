@@ -1,0 +1,49 @@
+// riemann_lens.hexa — D1 도메인 렌즈 (Riemann Hypothesis 전용)
+// 카테고리: domain · 도메인: 7R
+// atlas.signals.n6 에서 [7R] 도메인 태그 signal 만 필터링, 등급별 개수와
+// resonance_n6 식 집계. emergence_lens 구조 그대로 + 도메인 필터 축.
+//
+// 사용: hexa run $NEXUS/shared/lenses/riemann_lens.hexa
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
+
+let SIGMA = 12.0
+let PHI = 2.0
+let N = 6.0
+let TAU = 4.0
+
+if SIGMA * PHI != N * TAU {
+    println("FAIL: σ·φ ≠ n·τ")
+    exit(1)
+}
+
+fn count_pattern(file: string, pat: string) -> i64 {
+    let cmd = "grep -c '" + pat + "' '" + file + "' 2>/dev/null || echo 0"
+    let r = exec(cmd)
+    let s_raw = if type_of(r) == "str" || type_of(r) == "string" { r } else { "0" }
+    let s = s_raw.trim().split("\n")[0]
+    let mut v: i64 = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+// [7R] 전용 signal 라인 개수
+let n_7r_total = count_pattern(SIGNALS, "\\[7R")
+let n_7r_m10 = count_pattern(SIGNALS, "\\[7R.*\\[M10\\]")
+let n_7r_m10star = count_pattern(SIGNALS, "\\[7R.*\\[M10\\*\\]")
+let n_7r_m9 = count_pattern(SIGNALS, "\\[7R.*\\[M9\\]")
+let n_7r_m7bang = count_pattern(SIGNALS, "\\[7R.*\\[M7!\\]")
+let n_7r_cross = count_pattern(SIGNALS, "CROSS.*\\[7R")
+
+// resonance_n6 보유 비율 추정 (전체 @S 중 "분모 = n" 패턴)
+let n_resonance = count_pattern(SIGNALS, "resonance_n6: \"")
+
+let total_score = to_float(n_7r_m10 * 2 + n_7r_m10star * 3 + n_7r_m9 + n_7r_cross * 2) / 10.0
+
+println("lens[riemann_lens] category=domain domain=7R axis=\"Riemann Hypothesis signal filter\"")
+println("  [7R] total=" + to_string(n_7r_total))
+println("    [M10*]=" + to_string(n_7r_m10star) + "  [M10]=" + to_string(n_7r_m10) + "  [M9]=" + to_string(n_7r_m9) + "  [M7!]=" + to_string(n_7r_m7bang) + "  [CROSS]=" + to_string(n_7r_cross))
+println("  resonance_n6 entries (all domains): " + to_string(n_resonance))
+println("  domain_score=" + to_string(total_score))

@@ -1,0 +1,34 @@
+// curiosity_signals.hexa — D4 확장 (curiosity + atlas.signals.n6 CROSS 의심)
+// 카테고리: extension · 도메인: meta
+// 역할: atlas.signals.n6 의 CROSS 후보 (witness>=2, cross_repo 미설정) 감지 → 질문 생성 힌트
+//
+// 사용: hexa run $NEXUS/shared/lenses/curiosity_signals.hexa
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
+
+fn count_cmd(cmd: string) -> i64 {
+    let r = exec(cmd)
+    let s_raw = if type_of(r) == "str" || type_of(r) == "string" { r } else { "0" }
+    let s = s_raw.trim().split("\n")[0]
+    let mut v: i64 = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+// witness >= 2 인데 cross_repo 미설정 or [NX] 단독 tag: CROSS 의심 대상
+let n_witness_ge2 = count_cmd("grep -E 'witness:\\s*[2-9]' '" + SIGNALS + "' 2>/dev/null | wc -l")
+let n_cross_repo_set = count_cmd("grep -c 'cross_repo:\\s*\\[S' '" + SIGNALS + "' 2>/dev/null || echo 0")
+let n_nx_alone = count_cmd("grep -c '\\[NX\\]' '" + SIGNALS + "' 2>/dev/null || echo 0")
+
+let candidate_gap = n_witness_ge2 - n_cross_repo_set
+
+println("lens[curiosity_signals] category=extension axis=\"CROSS 후보 탐지 (witness≥2 but cross_repo 미설정)\"")
+println("  witness>=2 signals=" + to_string(n_witness_ge2))
+println("  cross_repo set=" + to_string(n_cross_repo_set))
+println("  [NX] 단독=" + to_string(n_nx_alone))
+println("  CROSS 의심 gap=" + to_string(candidate_gap))
+if candidate_gap > 5 {
+    println("  hint: cross_repo_matcher 재실행 권장")
+}
