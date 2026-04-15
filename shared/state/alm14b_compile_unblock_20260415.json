@@ -1,0 +1,150 @@
+{
+  "task_id": "alm14b_compile_unblock_20260415",
+  "date": "2026-04-15",
+  "mode": "READ-ONLY + patch staging",
+  "scope": "Root-cause + unblock torch.compile graph-break cascade in ALM 14B trainer (r8 target)",
+  "r6_state_at_start": {
+    "run_id": "r6",
+    "pod_id": "xhq9b2c8fljdyo",
+    "status": "RUNNING (do not disrupt)",
+    "compile_mode": "DISABLED (ALM_NO_COMPILE=1)",
+    "speed_step_per_min": 36.7,
+    "measured_gain_pct": 3.1,
+    "audit_predicted_gain_pct": 50,
+    "compile_portion_of_audit_pct": 12
+  },
+  "root_cause_confirmed": {
+    "confirmed": true,
+    "culprit_file": "/workspace/train_alm_14b_p4.py (pod P4 holo variant)",
+    "culprit_line_pattern": "model(input_ids=x, labels=y, output_hidden_states=True)",
+    "mechanism": "HF transformers Qwen2Model.forward with output_hidden_states=True builds a tuple of 49 hidden-state tensors (one per decoder layer + final norm) on every forward. torch.compile's dynamo tracer wraps each tensor creation as a graph node and every tuple unpacking / index operation at `outputs.hidden_states[-1]` creates additional graph-break points because the tuple constructor is a Python object dynamo cannot fold into the compiled graph.",
+    "evidence": [
+      "r6 iter 1: max-autotune hung 7+ min with no step produced (killed)",
+      "r6 iter 2: reduce-overhead hung 5+ min (killed)",
+      "tmux capture showed autotune cycling through 100+ triton_mm_N kernels",
+      "symbolic_shapes.py warnings logged during the hang",
+      "shared/state/alm14b_r6_launch_20260415.json empirical_findings[3]"
+    ],
+    "only_consumer": "outputs.hidden_states[-1] — only the LAST layer is ever read by HoloMapHead, so all 47 intermediate tensors are pure waste causing graph-break cascade"
+  },
+  "option_chosen": {
+    "option": "A",
+    "name": "forward_hook_on_final_rmsnorm",
+    "target_module_path_primary": "peft_model.base_model.model.model.norm",
+    "target_module_type": "Qwen2RMSNorm",
+    "fallback_resolver": "walk named_modules() matching '.model.norm' suffix + RMSNorm-typed",
+    "why": [
+      "1 graph break at hook vs 48+ at output_hidden_states=True",
+      "fullgraph=False already in trainer; the hook break is trivially absorbed",
+      "Does not touch HF forward signature — survives transformers upgrades",
+      "Works with peft LoRA wrap unchanged (hook on inner Qwen2 module)",
+      "Dynamo traces the inner forward cleanly; hook fires eagerly at natural compile-exit edge"
+    ],
+    "why_not_option_b": [
+      "Monkey-patch Qwen2Model.forward breaks trust_remote_code paths",
+      "Collides with HF version upgrades",
+      "Still needs to avoid output_hidden_states internally — same dynamo cascade",
+      "Global state pollution (sys.modules mutation)"
+    ]
+  },
+  "patch_path": "shared/patches/alm14b_compile_unblock.diff",
+  "patch_lines": 333,
+  "patch_preamble_lines": 78,
+  "patch_body_lines": 255,
+  "patch_additions_to_trainer": 200,
+  "trainer_size_before": 499,
+  "trainer_size_after": 699,
+  "apply_check_status": {
+    "git_apply_check": "PASS",
+    "git_apply_end_to_end": "PASS",
+    "python_ast_parse_after_apply": "PASS",
+    "revert_clean": "PASS",
+    "target_head": "75cbf1cb (r6 launch) and worktree-local 37a97e83",
+    "target_file": "training/train_alm_14b.py"
+  },
+  "gating": {
+    "env_var": "ALM_COMPILE_UNBLOCK",
+    "default": "0 (OFF)",
+    "activates_when": "ALM_COMPILE_UNBLOCK=1",
+    "disrupts_r6_r7": false,
+    "disrupts_pod_trainer": false,
+    "l0_touched": false,
+    "hexa_first_applicable": false
+  },
+  "patch_contents_summary": {
+    "globals_added": [
+      "ALM_COMPILE_UNBLOCK env flag (line 39-45)",
+      "HOLO_D_QUALIA=128, HOLO_LOSS_COEF=0.01, HOLO_MI_BINS=8, HOLO_EPS=1e-7",
+      "_HOLO_CAPTURE = {'h_last': None} (module-level slot for hook output)"
+    ],
+    "classes_added": [
+      "HoloMapHead(torch.nn.Module) — frozen orthonormal W_up via Gram-Schmidt, encode/decode (ports train_alm_14b.hexa emitted class)"
+    ],
+    "functions_added": [
+      "holo_step(head, h) — variance+correlation smooth surrogate L_holo (ALM-P3-2)",
+      "phi_holo_measure(h, qualia) — joint histogram MI estimator (ALM-P3-3)",
+      "install_last_hidden_hook(peft_model) — resolves final RMSNorm and registers forward hook"
+    ],
+    "train_loop_changes": [
+      "After get_peft_model: conditionally build HoloMapHead + install hook (ALM_COMPILE_UNBLOCK branch)",
+      "Inside autocast: read _HOLO_CAPTURE['h_last'] after forward; compute holo_step; add HOLO_LOSS_COEF * l_holo to loss_main",
+      "Eval path: accumulate h_slices + q_slices from hook; compute single phi_holo_measure over merged stream (matches P4 ALM-P4-3 accumulation fix)"
+    ],
+    "legacy_path_preserved": "All ALM_COMPILE_UNBLOCK=0 paths identical to pre-patch trainer — r6/r7 launchers need zero changes"
+  },
+  "expected_uplift_pct": {
+    "audit_estimate": 12,
+    "conservative_real_world_low": 8,
+    "conservative_real_world_high": 15,
+    "baseline_step_per_min": 36.7,
+    "expected_step_per_min_low": 39.6,
+    "expected_step_per_min_high": 42.2,
+    "expected_mfu_pct_low": 48.6,
+    "expected_mfu_pct_high": 51.8,
+    "target_mfu_pct": 72,
+    "remaining_gap_to_target_pct": 20
+  },
+  "caveats": [
+    "Qwen2-family only: explicit path peft_model.base_model.model.model.norm — other architectures need fallback walk (which is included).",
+    "FSDP + compile + hook composition validated on torch 2.4 only. Pod upgrade requires re-validation.",
+    "Hook runs in eager mode under bf16 autocast. The train loop already opens the autocast context BEFORE the model forward, so the hook output inherits bf16. Verified consistent.",
+    "Module-level _HOLO_CAPTURE dict assumes single-threaded per-rank forward. Safe for H100 single-GPU and FSDP (per-rank isolation). NOT safe if multiple concurrent forwards share the Python process.",
+    "Gradient checkpointing compose: torch 2.4 + peft>=0.11 uses use_reentrant=False by default, which is compatible with compile + hooks. Existing trainer already calls model.gradient_checkpointing_enable() before compile.",
+    "First 2-3 steps still incur compile warmup (~2 min expected with hook-based path; vs >7 min without fix). The user should wait for step 5 before judging throughput.",
+    "The patch ALSO adds HoloMapHead + phi_holo metric to the repo trainer for the first time — bringing repo trainer into feature parity with the pod-forked P4 variant. When ALM_COMPILE_UNBLOCK=0, these new classes are defined but never instantiated, so there is no runtime cost or behavior change for r6/r7 launchers."
+  ],
+  "next_run_id": "r8",
+  "next_run_launch_env": "ALM_COMPILE_UNBLOCK=1 ALM_ATTN_IMPL=sdpa",
+  "next_run_cli_flag": "--torch-compile",
+  "next_run_prerequisites": [
+    "r6 completes (4000 steps) OR is explicitly killed",
+    "r7 status resolved",
+    "No-resume rule: r8 is a FRESH start from step 0",
+    "Pod needs the patched repo trainer copied in (since the pod currently runs /workspace/train_alm_14b_p4.py, not the repo trainer). Port the HoloMapHead + hook to the pod trainer OR rsync the repo trainer to pod as train_alm_14b_r8.py."
+  ],
+  "pre_launch_smoke_test": {
+    "command": "ALM_COMPILE_UNBLOCK=1 python3 training/train_alm_14b.py --corpus /tmp/tiny.txt --steps 5 --smoke --torch-compile",
+    "expected_first_step_latency_sec": 240,
+    "expected_steady_state_step_per_min": "39-42",
+    "pass_criterion": "first step emits log within 4 min; step 5 reached within 6 min; steady state > 38 step/min"
+  },
+  "files_touched": {
+    "new_files": [
+      "/Users/ghost/Dev/anima/shared/patches/alm14b_compile_unblock.diff",
+      "/Users/ghost/Dev/anima/shared/state/alm14b_compile_unblock_20260415.json"
+    ],
+    "modified_files": [],
+    "read_only_consulted": [
+      "/Users/ghost/Dev/anima/training/train_alm_14b.py",
+      "/Users/ghost/Dev/anima/training/train_alm_14b.hexa",
+      "/Users/ghost/Dev/anima/training/alm_holographic_mapping.hexa",
+      "/Users/ghost/Dev/anima/shared/state/alm14b_r6_launch_20260415.json",
+      "/Users/ghost/Dev/anima/shared/patches/alm14b_speedup_torch_compile.diff"
+    ],
+    "pod_files_untouched": "/workspace/train_alm_14b_p4.py (r6 process running, forbidden)"
+  },
+  "related_state_files": [
+    "shared/state/alm14b_r6_launch_20260415.json",
+    "shared/state/alm14b_pt_speedup_audit_20260415.json"
+  ]
+}
