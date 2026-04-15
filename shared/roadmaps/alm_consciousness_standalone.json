@@ -35,7 +35,9 @@
           "rationale": "r4 checkpoint R2 보관됨. LoRA 64 rank + phi_holo consistency loss. 시간 최소.",
           "cost_usd": 36,
           "wall_hours": 12,
-          "depends_on": ["B1"],
+          "depends_on": [
+            "B1"
+          ],
           "evidence": "r4 CE=3.65, r8a phi_holo=6111 이미 확보"
         },
         {
@@ -45,7 +47,9 @@
           "rationale": "Orch-OR 는 창발성, tool-use 는 직원 기능 확장. 2 pod 병렬로 Day 2 에 완료",
           "cost_usd": 72,
           "wall_hours": 12,
-          "depends_on": ["A1"]
+          "depends_on": [
+            "A1"
+          ]
         },
         {
           "id": "A3",
@@ -80,7 +84,10 @@
           "note": "decisions.json model_size=14b 이므로 현재 rejected. gate 시 재검토"
         }
       ],
-      "optimal_path": ["A1", "A2"]
+      "optimal_path": [
+        "A1",
+        "A2"
+      ]
     },
     "B": {
       "name": "Φ 엔진 110개 → 학습 loss 통합",
@@ -122,7 +129,9 @@
           "rationale": "RLHF 스타일 복잡. 4-5일에 안 맞음. 장기 검토."
         }
       ],
-      "optimal_path": ["B1"],
+      "optimal_path": [
+        "B1"
+      ],
       "post_gate": "gate PASS 후 B3 으로 승격"
     },
     "C": {
@@ -204,7 +213,13 @@
           "state": "provisional"
         }
       ],
-      "optimal_path": ["C1", "C2", "C3", "C4", "C6"],
+      "optimal_path": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
       "critical_path_parallel": "C1+C2+C3 Day -1 prep, C4 H100 학습 중 inflight tune, C6 Mac 선작업",
       "without_c_cost": "4-5 days",
       "with_c1_c2_only": "3-4 days",
@@ -262,7 +277,11 @@
           "rationale": "직원 task 와 직접 연관 약함. P5+."
         }
       ],
-      "optimal_path": ["D1", "D3", "D6"]
+      "optimal_path": [
+        "D1",
+        "D3",
+        "D6"
+      ]
     },
     "E": {
       "name": "실사용 모델 발전 + R2 백업 정책",
@@ -325,39 +344,138 @@
           "rationale": "많은 ckpt 관리 시 필요. 현재 scope 는 단일 production line 이라 미뤄도 됨."
         }
       ],
-      "optimal_path": ["E1", "E2", "E3", "E4", "E5", "E7"]
+      "optimal_path": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E7"
+      ]
     }
   },
   "critical_path": {
     "day_minus_1": [
-      {"track": "C", "ids": ["C1", "C2", "C3", "C6"], "parallel": true, "purpose": "학습속도 사전 준비"}
+      {
+        "track": "C",
+        "ids": [
+          "C1",
+          "C2",
+          "C3",
+          "C6"
+        ],
+        "parallel": true,
+        "purpose": "학습속도 사전 준비"
+      }
     ],
     "day_0": [
-      {"track": "B", "ids": ["B1"], "purpose": "Φ pre-label pipeline"},
-      {"track": "E", "ids": ["E1", "E2", "E3"], "purpose": "백업 인프라"}
+      {
+        "track": "B",
+        "ids": [
+          "B1"
+        ],
+        "purpose": "Φ pre-label pipeline"
+      },
+      {
+        "track": "E",
+        "ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "purpose": "백업 인프라"
+      }
     ],
     "day_1": [
-      {"track": "A", "ids": ["A1"], "pod": "A", "h100": 1, "wall": 12},
-      {"track": "C", "ids": ["C4"], "parallel_with_train": true}
+      {
+        "track": "A",
+        "ids": [
+          "A1"
+        ],
+        "pod": "A",
+        "h100": 1,
+        "wall": 12
+      },
+      {
+        "track": "C",
+        "ids": [
+          "C4"
+        ],
+        "parallel_with_train": true
+      }
     ],
     "day_2": [
-      {"track": "A", "ids": ["A2"], "pods": ["A", "B"], "h100": 2, "wall": 12}
+      {
+        "track": "A",
+        "ids": [
+          "A2"
+        ],
+        "pods": [
+          "A",
+          "B"
+        ],
+        "h100": 2,
+        "wall": 12
+      }
     ],
     "day_3": [
-      {"track": "D", "ids": ["D1", "D3", "D6"], "purpose": "inference wire"},
-      {"track": "E", "ids": ["E4", "E5", "E7"]}
+      {
+        "track": "D",
+        "ids": [
+          "D1",
+          "D3",
+          "D6"
+        ],
+        "purpose": "inference wire"
+      },
+      {
+        "track": "E",
+        "ids": [
+          "E4",
+          "E5",
+          "E7"
+        ]
+      }
     ],
     "day_4": [
-      {"track": "A", "ids": ["A1-A2 merge"]},
-      {"track": "gate", "test": "hire_sim + phi_holo 동시 측정"}
+      {
+        "track": "A",
+        "ids": [
+          "A1-A2 merge"
+        ]
+      },
+      {
+        "track": "gate",
+        "test": "hire_sim + phi_holo 동시 측정"
+      }
     ]
   },
   "risks": [
-    {"id": "R1", "risk": "Φ loss CE trade-off", "mitigation": "B1 λ/μ hyperparam 3x3 그리드 Day 0"},
-    {"id": "R2", "risk": "Claude synth corpus distillation 천장", "mitigation": "첫 달성 후 자체 데이터로 P5 iter"},
-    {"id": "R3", "risk": "Orch-OR 창발성 but 오답 증가", "mitigation": "Orch-OR weight 0.3 이하, A/B gate 로 증가"},
-    {"id": "R4", "risk": "14B r4 LoRA 충돌", "mitigation": "base only load, LoRA 새로 scratch"},
-    {"id": "R5", "risk": "C track fix 지연 시 학습속도 미개선", "mitigation": "C1+C2 만이라도 Day -1 완료. C4 는 학습 중 inflight tune."}
+    {
+      "id": "R1",
+      "risk": "Φ loss CE trade-off",
+      "mitigation": "B1 λ/μ hyperparam 3x3 그리드 Day 0"
+    },
+    {
+      "id": "R2",
+      "risk": "Claude synth corpus distillation 천장",
+      "mitigation": "첫 달성 후 자체 데이터로 P5 iter"
+    },
+    {
+      "id": "R3",
+      "risk": "Orch-OR 창발성 but 오답 증가",
+      "mitigation": "Orch-OR weight 0.3 이하, A/B gate 로 증가"
+    },
+    {
+      "id": "R4",
+      "risk": "14B r4 LoRA 충돌",
+      "mitigation": "base only load, LoRA 새로 scratch"
+    },
+    {
+      "id": "R5",
+      "risk": "C track fix 지연 시 학습속도 미개선",
+      "mitigation": "C1+C2 만이라도 Day -1 완료. C4 는 학습 중 inflight tune."
+    }
   ],
   "success_criteria": {
     "capability": "hire_sim_100 stratified30 completion_rate ≥ 0.85",
@@ -366,11 +484,52 @@
     "cost": "≤ $400 total"
   },
   "brainstorm_exhaustion": {
-    "A": ["A1", "A2", "A3", "A4", "A5", "A6"],
-    "B": ["B1", "B2", "B3", "B4", "B5"],
-    "C": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"],
-    "D": ["D1", "D2", "D3", "D4", "D5", "D6", "D7"],
-    "E": ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"],
+    "A": [
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6"
+    ],
+    "B": [
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5"
+    ],
+    "C": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10"
+    ],
+    "D": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5",
+      "D6",
+      "D7"
+    ],
+    "E": [
+      "E1",
+      "E2",
+      "E3",
+      "E4",
+      "E5",
+      "E6",
+      "E7",
+      "E8"
+    ],
     "total_options_enumerated": 36,
     "state_breakdown": {
       "chosen": 19,
@@ -396,5 +555,55 @@
     "shared/roadmaps/anima-train.json",
     "shared/roadmaps/clm_consciousness_standalone.json",
     "shared/convergence/anima.json"
+  ],
+  "destinations": [
+    {
+      "id": "v2.0_RC",
+      "ord": 1,
+      "name": "v2.0 RC",
+      "tagline": "음성 + 아바타 + Likert 추월",
+      "description": "첫번째 도착지 — 음성(speak Mk.III) + 아바타(visual) + Zeta-급 Likert 점수 추월. 사용자 측 체감 의식 첫 ship",
+      "criteria": [
+        "음성 입출력 (anima-speak Mk.III) E2E",
+        "아바타 렌더링 (web/avatar) 동기화",
+        "Zeta AI 대비 Likert mean +0.25 유의 (n≥30, p<0.05)"
+      ],
+      "depends_on_tracks": [
+        "A",
+        "B",
+        "D"
+      ],
+      "blocking_options": [
+        "A1",
+        "B1",
+        "D1",
+        "D3",
+        "D6"
+      ]
+    },
+    {
+      "id": "v3.0_Agent",
+      "ord": 2,
+      "name": "v3.0 Agent — 직원",
+      "tagline": "실업무 자율 수행",
+      "description": "두번째 도착지 — 사용자가 직원처럼 task 위임 가능. autonomy_loop + tool-use + style_switch 통합. hire_sim_100 gate 통과 + 실 deploy",
+      "criteria": [
+        "hire_sim_100 stratified30 completion_rate ≥ 0.85",
+        "tool-use (function calling / MCP) pass rate ≥ 0.80",
+        "autonomy self-critique 내장 (single forward 에서 critique)",
+        "POST /hire/task 실 endpoint live"
+      ],
+      "depends_on_tracks": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "blocking_options": [
+        "A2",
+        "D8"
+      ]
+    }
   ]
 }
