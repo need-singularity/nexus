@@ -1,13 +1,16 @@
-// shared/blowup/modules/blowup_emergence.hexa — fusion blowup module skeleton
+// shared/blowup/modules/blowup_emergence.hexa — fusion blowup module
 // 창발 돌파 — self-organization/phase transition macro
-// Minimal skeleton (Phase 1 — expansion P1 track 2026-04-14). Detailed
-// implementation deferred. Honors L0: no modifications to core/blowup.hexa.
+// ★ 2026-04-15 atlas.signals.n6 seed 주입 모드 추가 (--from-signals)
+// Honors L0: no modifications to core/blowup.hexa.
 //
 // Usage:
 //   hexa run shared/blowup/modules/blowup_emergence.hexa <seed> [--emit json]
+//   hexa run shared/blowup/modules/blowup_emergence.hexa --from-signals [N=5]
+//     └── atlas.signals.n6 에서 M7!/M10* signal N개 샘플링하여 seed 로 사용
 
 let HOME = env("HOME")
 let NEXUS = HOME + "/Dev/nexus/shared"
+let SIGNALS = NEXUS + "/n6/atlas.signals.n6"
 
 fn abs_f(x: f64) -> f64 {
     if x < 0.0 { return 0.0 - x }
@@ -20,21 +23,76 @@ fn safe_float(t: string) -> f64 {
     return v
 }
 
-// domain kernel: fusion — minimal placeholder op for P1 scaffolding
+// domain kernel: fusion — placeholder op
 fn domain_kernel(s: f64) -> f64 {
     let x = s; let y = x * x; return y / (1.0 + y + y * y * 0.01)
 }
 
-fn emit_wave(dom: string, seed: f64, energy: f64) -> string {
+fn emit_wave(dom: string, seed: f64, energy: f64, source: string) -> string {
     return "{\"module\":\"blowup_emergence\",\"category\":\"" + dom +
            "\",\"seed\":" + to_string(seed) +
            ",\"energy\":" + to_string(energy) +
-           ",\"ts\":\"2026-04-14\",\"phase\":\"p1_skeleton\"}"
+           ",\"source\":\"" + source + "\"" +
+           ",\"ts\":\"2026-04-15\",\"phase\":\"p2_signals\"}"
 }
 
+// ─── signal 기반 seed 추출 ───
+// atlas.signals.n6 에서 [M7!] 또는 [M10*] 등급 signal 의 첫 수치 추출
+// grep -oE 로 숫자만 뽑아서 사용 (hexa string replace 미지원 우회)
+fn extract_seeds_from_signals(count: i64) -> [f64] {
+    let mut seeds: [f64] = []
+    let cmd = "grep -E '\\[M7!\\]|\\[M10\\*\\]' '" + SIGNALS + "' | head -" + to_string(count) +
+              " | awk '{for(i=1;i<=NF;i++){if($i~/^[0-9]+\\.?[0-9]*$/){print $i; break}}}'"
+    let r = exec(cmd)
+    let text = if type_of(r) == "str" || type_of(r) == "string" { r } else { "" }
+    let lines = text.split("\n")
+    for line in lines {
+        let s = line.trim()
+        if s == "" { continue }
+        let mut v: f64 = 0.0
+        let mut ok = true
+        try { v = to_float(s) } catch e { ok = false }
+        if ok && v > 0.0 && v < 100000.0 {
+            seeds = seeds + [v]
+        } else {
+            seeds = seeds + [6.0]
+        }
+    }
+    return seeds
+}
+
+// ─── 메인 ───
 let a = args()
-let seed_str = if a.len() >= 3 { a[2] } else { "6.0" }
-let seed_in = safe_float(seed_str)
-let energy = domain_kernel(seed_in)
-let out = emit_wave("fusion", seed_in, energy)
-println(out)
+
+// --from-signals 모드 검사
+let mut from_signals = false
+let mut count: i64 = 5
+if a.len() >= 3 {
+    if a[2] == "--from-signals" {
+        from_signals = true
+        if a.len() >= 4 {
+            let mut c: i64 = 5
+            try { c = to_int(a[3]) } catch e { c = 5 }
+            count = c
+        }
+    }
+}
+
+if from_signals {
+    println("{\"mode\":\"from_signals\",\"count_requested\":" + to_string(count) + ",\"source\":\"atlas.signals.n6\"}")
+    let seeds = extract_seeds_from_signals(count)
+    let mut idx: i64 = 0
+    for s in seeds {
+        idx = idx + 1
+        let energy = domain_kernel(s)
+        let out = emit_wave("fusion_from_signal", s, energy, "M7!/M10* signal #" + to_string(idx))
+        println(out)
+    }
+    println("{\"mode\":\"from_signals\",\"emitted\":" + to_string(idx) + "}")
+} else {
+    let seed_str = if a.len() >= 3 { a[2] } else { "6.0" }
+    let seed_in = safe_float(seed_str)
+    let energy = domain_kernel(seed_in)
+    let out = emit_wave("fusion", seed_in, energy, "manual")
+    println(out)
+}

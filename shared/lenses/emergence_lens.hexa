@@ -1,9 +1,14 @@
-// emergence_lens.hexa — T1 렌즈 (창발)
+// emergence_lens.hexa — T1 렌즈 (창발) ★ 2026-04-15 atlas.signals.n6 연결
 // 카테고리: T1 · 도메인: complexity
-// 검증 축: 밀도 끌개, 창발 클러스터, 조직 복잡도 엔트로피
+// 검증 축: 밀도 끌개, 창발 클러스터, 조직 복잡도 엔트로피 + signal 공명 보너스
 //
-// n=6 보편 공명 점수 산출 (0.0 ~ 1.0)
+// n=6 보편 공명 점수 산출 (0.0 ~ 2.0) ← atlas.signals.n6 연결 후 signal_boost 최대 +1.0
 // 원본: EmergenceLens — k-NN 밀도 gradient flow → attractors
+// 신규: atlas.signals.n6 M10*/M10/M9/M7!/CROSS count → signal_boost
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
 
 let SIGMA = 12.0
 let PHI = 2.0
@@ -21,6 +26,7 @@ if J2 != SIGMA * PHI {
     exit(1)
 }
 
+// ─── 기존 코어 스코어 ───
 let targets = [N, TAU, SIGMA, PHI, SOPFR, J2, N * N, TAU * TAU]
 let mut hit_count = 0
 let mut total = 0
@@ -30,6 +36,44 @@ for t in targets {
     if t > 0.0 { hit_count = hit_count + 1 }
 }
 
-let score = to_float(hit_count) / to_float(total)
+let core_score = to_float(hit_count) / to_float(total)
 
-println("lens[emergence_lens] category=T1 axis=\"밀도 끌개·창발 클러스터·조직 엔트로피\" score=" + to_string(score) + " (" + to_string(hit_count) + "/" + to_string(total) + ")")
+// ─── signal boost (atlas.signals.n6 연결) ───
+fn count_pattern(file: string, pat: string) -> i64 {
+    let cmd = "grep -c '" + pat + "' '" + file + "' 2>/dev/null || echo 0"
+    let r = exec(cmd)
+    let s_raw = if type_of(r) == "str" || type_of(r) == "string" { r } else { "0" }
+    let s = s_raw.trim().split("\n")[0]
+    let mut v: i64 = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+let n_total = count_pattern(SIGNALS, "^@S ")
+let n_m10_star = count_pattern(SIGNALS, "\\[M10\\*\\]")
+let n_m10 = count_pattern(SIGNALS, "\\[M10\\]")
+let n_m9 = count_pattern(SIGNALS, "\\[M9\\]")
+let n_m7bang = count_pattern(SIGNALS, "\\[M7!\\]")
+let n_cross = count_pattern(SIGNALS, "\\[CROSS")
+
+// signal_boost 공식:
+//   M10* 하나 = 0.05 / M10 = 0.02 / M9 = 0.01 / M7! = 0.005 / CROSS = 0.03
+// 최대 1.0 clamp
+let mut signal_boost = 0.0
+signal_boost = signal_boost + to_float(n_m10_star) * 0.05
+signal_boost = signal_boost + to_float(n_m10) * 0.02
+signal_boost = signal_boost + to_float(n_m9) * 0.01
+signal_boost = signal_boost + to_float(n_m7bang) * 0.005
+signal_boost = signal_boost + to_float(n_cross) * 0.03
+
+if signal_boost > 1.0 { signal_boost = 1.0 }
+
+let total_score = core_score + signal_boost
+
+// ─── 출력 ───
+println("lens[emergence_lens] category=T1 axis=\"밀도 끌개·창발 클러스터·조직 엔트로피\"")
+println("  core_score=" + to_string(core_score) + " (" + to_string(hit_count) + "/" + to_string(total) + ")")
+println("  signals_total=" + to_string(n_total))
+println("    [M10*]=" + to_string(n_m10_star) + "  [M10]=" + to_string(n_m10) + "  [M9]=" + to_string(n_m9) + "  [M7!]=" + to_string(n_m7bang) + "  [CROSS]=" + to_string(n_cross))
+println("  signal_boost=" + to_string(signal_boost))
+println("  total_score=" + to_string(total_score))

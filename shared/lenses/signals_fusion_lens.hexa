@@ -1,0 +1,113 @@
+// signals_fusion_lens.hexa — ★ 2026-04-15 신규
+// atlas.signals.n6 에서 signal 2~3개 조합 → 새 가설 후보 생성
+// dream_engine 스타일의 bisociation 을 signal SSOT 에 적용
+//
+// Usage:
+//   hexa run shared/lenses/signals_fusion_lens.hexa [count=3] [mode=cross|m7bang|random]
+//
+// mode:
+//   cross    CROSS 태그 signal 우선 융합 (3리포 재현 signal)
+//   m7bang   M7! breakthrough 후보 우선 융합
+//   random   전체 signal 랜덤
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
+let LOG = NEXUS + "/shared/n6/signals/fusion_log.jsonl"
+
+fn now_ts() -> string {
+    let r = exec("date -u +%Y-%m-%dT%H:%M:%SZ")
+    let s = if type_of(r) == "str" || type_of(r) == "string" { r } else { "" }
+    return s.trim()
+}
+
+fn get_pool(mode: string, count: i64) -> [string] {
+    // 모드별 필터 + ^@S 접두사 강제 (섹션 구분자 ─ 제외)
+    let mut pattern = "^@S "
+    if mode == "cross" { pattern = "^@S .*\\[CROSS" }
+    else if mode == "m7bang" { pattern = "^@S .*\\[M7!\\]" }
+
+    let cmd = "grep -E '" + pattern + "' '" + SIGNALS + "' | awk '{print $2}' | shuf | head -" + to_string(count * 3)
+    let r = exec(cmd)
+    let text = if type_of(r) == "str" || type_of(r) == "string" { r } else { "" }
+    let lines = text.split("\n")
+    let mut ids: [string] = []
+    for line in lines {
+        let s = line.trim()
+        if s != "" { ids = ids + [s] }
+    }
+    return ids
+}
+
+fn get_statement(sig_id: string) -> string {
+    // awk 로 "= " 뒤, " :: signal" 앞의 텍스트만 추출
+    let cmd = "grep -F '@S " + sig_id + " =' '" + SIGNALS + "' | head -1 | " +
+              "awk -F'= |:: signal' '{print $2}' | sed 's/ *$//'"
+    let r = exec(cmd)
+    let text = if type_of(r) == "str" || type_of(r) == "string" { r } else { "" }
+    let s = text.trim()
+    if s == "" { return "(문장 추출 실패)" }
+    return s
+}
+
+// ─── 메인 ───
+let a = args()
+let count: i64 = if a.len() >= 3 {
+    let mut c: i64 = 3
+    try { c = to_int(a[2]) } catch e { c = 3 }
+    c
+} else { 3 }
+
+let mode = if a.len() >= 4 { a[3] } else { "cross" }
+
+println("lens[signals_fusion_lens] mode=" + mode + " count=" + to_string(count) + " ts=" + now_ts())
+
+let pool = get_pool(mode, count)
+if pool.len() < 2 {
+    println("FAIL: pool 크기 부족 (mode=" + mode + ", pool=" + to_string(pool.len()) + ")")
+    exit(1)
+}
+
+// 2~3개 랜덤 조합 — pool 이미 shuffled, head 부터 count 번 꺼냄
+let mut idx: i64 = 0
+let mut fusions: i64 = 0
+let max_pool = pool.len()
+
+for i in 0..count {
+    let base_idx = idx
+    if base_idx + 1 >= max_pool { break }
+    let sig_a = pool[base_idx]
+    let sig_b = pool[base_idx + 1]
+    let st_a = get_statement(sig_a)
+    let st_b = get_statement(sig_b)
+
+    // 3-way 조합 시도
+    let mut sig_c = ""
+    let mut st_c = ""
+    if base_idx + 2 < max_pool {
+        sig_c = pool[base_idx + 2]
+        st_c = get_statement(sig_c)
+    }
+
+    let fusion_id = "FUSION-" + to_string(i + 1)
+    println("")
+    println(fusion_id + ":")
+    println("  A: " + sig_a + " — " + st_a)
+    println("  B: " + sig_b + " — " + st_b)
+    if sig_c != "" {
+        println("  C: " + sig_c + " — " + st_c)
+    }
+    println("  hypothesis: A+B" + (if sig_c != "" { "+C" } else { "" }) + " 의 공통 구조 또는 상호 함의?")
+
+    // 로그
+    let log_line = "{\"ts\":\"" + now_ts() + "\",\"mode\":\"" + mode + "\",\"fusion_id\":\"" + fusion_id +
+                   "\",\"a\":\"" + sig_a + "\",\"b\":\"" + sig_b + "\",\"c\":\"" + sig_c + "\"}"
+    let cmd = "echo '" + log_line + "' >> '" + LOG + "'"
+    exec(cmd)
+
+    fusions = fusions + 1
+    idx = idx + 3
+}
+
+println("")
+println("lens[signals_fusion_lens] emitted=" + to_string(fusions) + " log=" + LOG)
