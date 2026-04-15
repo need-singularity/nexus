@@ -1,10 +1,53 @@
 {
   "_meta": {
     "name": "RunPod H100 운영 SSOT (골화)",
-    "updated": "2026-04-11",
+    "updated": "2026-04-16",
     "description": "RunPod H100 pod 임대/셋업/실행 경로 단일진실. anima/hexa-lang 학습 발사 표준 절차.",
     "ossified_by": "needsingularity",
-    "rule": "이 파일이 변경되면 training/Dockerfile.h100, training/anima-entrypoint.sh 도 동기 검증할 것"
+    "rule": "이 파일이 변경되면 training/Dockerfile.h100, training/anima-entrypoint.sh 도 동기 검증할 것",
+    "related_ssot": "shared/state/training_speed_ceilings.json — ALM/CLM MFU 측정 천장 + 헤드룸 + 레버 (매 런 갱신)"
+  },
+
+  "convergence_findings_2026_04_16": {
+    "pod_fleet_variance": {
+      "finding": "동일 software stack에서 H100 SXM 80GB 풀팟 사이 31.5% step/min 차이 측정",
+      "evidence": [
+        "ubzp169igb7tns (anima-p4-alm-r7): 51.1 step/min, 62.6% MFU @ b=1 s=1024 g=8 --unsloth (r7 step 100)",
+        "xhq9b2c8fljdyo (anima-p4-alm-holo): 33.3 step/min, 42.9% MFU @ same config",
+        "동일 step 50 측정: 48.6 vs 33.3 = -31.5%"
+      ],
+      "implication": "MFU 측정값은 pod_id 태그 필수. cross-pod 비교 시 variance 보정 필요. r7 측정 일부는 fast pod 운에서 옴.",
+      "rule": "신규 측정 모두 pod_id + 동일 pod a/b 권장",
+      "source_state_files": [
+        "shared/state/alm14b_r8_ceiling_confirm_20260415.json",
+        "shared/state/alm14b_r8a_stacked_launch_20260415.json"
+      ]
+    },
+    "alm_stack_learnings": {
+      "audit_miscalibration_lesson": "r6 7-패치 audit 추정치(+50%)는 실측 +3.1%로 무너짐. 원인: Qwen2 이미 SDPA 사용 (FA2 noop), grad_ckpt 애초에 비활성, dataloader workers 회귀, torch.compile output_hidden_states 행동 hang.",
+      "real_winners": [
+        "Unsloth 2026.4.4 (+39% r7 측정, 단 stack drift transformers/peft/torch bump 혼합)",
+        "b=8 s=1024 g=1 sweep optimal (+8.3 MFU points 무료, micro-batch >> grad_accum)",
+        "Liger fused kernels (+10-15% rope/rms_norm/swiglu 단독 효과)",
+        "lora_dropout=0 (Unsloth fast-LoRA QKV+O 96 layers 활성)"
+      ],
+      "stuck_points": [
+        "Qwen2 MLP bias term → Unsloth fast-LoRA MLP 48 layers 비활성 (구조적 한계)",
+        "torch 2.10+cu128 → transformer_engine 설치 차단 (FP8 차단)",
+        "torch.compile + LoRA + HoloMapHead → dynamo 48+ graph break cascade"
+      ],
+      "next_breakthrough_lever": "FP8 via transformer_engine on torch 2.9 dedicated pod (r8c track) — 989 → 1979 TFLOP/s 천장 2x"
+    },
+    "clm_native_compile_breakthroughs": {
+      "tracks_landed_this_session": [
+        "Track B contrastive cache: 27.5 s → 45.94 ms phi eval (598x interpreted)",
+        "phi_cache_loader native C: 45.94 → 0.111 ms (394x interpreter→native)",
+        "Tensor primitive raw f32: 4,757x vs list-backed @ 128² matmul (isolated)",
+        "nn_core Tensor port: 1000 ms → 0.681 ms real training step (1479x, FFI-bound regime)",
+        "hexa_v2.bt74 deploy: full train_clm.hexa native binary runs end-to-end (251x vs interpreter)"
+      ],
+      "remaining_frontier": "Real 14B CLM shapes (seq=512 d=4096) where BLAS throughput becomes binding (현재 작은 shape에서 FFI-bound). #30 sweep 진행 중."
+    }
   },
   "provider": "runpod.io",
   "cli": {
@@ -66,6 +109,22 @@
       "env_fix": "pip install peft==0.13.2 transformers==4.45.2 (pod had peft 0.19 + torch 2.4.1 incompatibility — AttributeError: module 'torch' has no attribute 'float8_e8m0fnu')"
     },
     {
+      "id": "dn6eixsgzrjlnz",
+      "name": "anima-p4-alm-r8c-fp8",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "gpu_count": 1,
+      "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+      "cost_per_hr_usd": 2.99,
+      "tmux_session": "alm-r8c-fp8 (pending install)",
+      "purpose": "ALM-P4-r8c FP8 dedicated track — torch 2.9 pin + transformer_engine + --fp8 autocast",
+      "started_at": "2026-04-15T~23:30Z",
+      "dedicated_to": "FP8 only — torch downgrade breaks Unsloth, no rotation to r8a/b",
+      "status": "PROVISIONED, install pending (#29 agent died API 500 before install, #31 agent resuming)",
+      "target": "≥75% bf16-eq MFU 또는 ≥40% fp8-peak MFU = bf16 989 TFLOP/s 천장 돌파",
+      "fp8_peak_tflops": 1979,
+      "state_file": "shared/state/alm14b_r8c_fp8_launch_20260415.json"
+    },
+    {
       "id": "tubq10zkct0t8f",
       "name": "anima-p4-4-32b-2gpu",
       "gpu": "NVIDIA H100 80GB HBM3",
@@ -102,6 +161,39 @@
     }
   ],
   "completed_runs": [
+    {
+      "id": "ubzp169igb7tns",
+      "name": "anima-p4-alm-r7",
+      "round": "r7",
+      "purpose": "ALM 14B LoRA — Unsloth integration measurement",
+      "created_at": "2026-04-15T~21:00Z",
+      "torn_down_at": "2026-04-15T~22:30Z (after 4000 steps)",
+      "duration_min": "~90",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "gpu_count": 1,
+      "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+      "price_usd_hr": 2.99,
+      "estimated_cost_usd": 4.50,
+      "stack": "Unsloth 2026.4.4 + transformers 4.56.1 + peft 0.18.0 + torch 2.10.0+cu128 + liger-kernel 0.7.0 (installed late)",
+      "config": {"batch": 1, "grad_accum": 8, "seq": 1024},
+      "measurement_step100": {
+        "step_per_min": 51.1,
+        "tflops_achieved": 619,
+        "mfu_pct_bf16": 62.6,
+        "vram_gb": 41.6
+      },
+      "delta_vs_r6": "+39.2% step/min",
+      "caveats": [
+        "Stack drift mixed: transformers 4.45→4.56, peft 0.13→0.18, torch 2.4→2.10+cu128",
+        "Unsloth fast-LoRA kernels actually DISABLED at this run (lora_dropout=0.05, 0 QKV/O/MLP patched)",
+        "FA2 wheel broken on torch 2.10 → xformers fallback"
+      ],
+      "loss_at_step270": 5.80,
+      "phi_holo_at_step200": 7372.31,
+      "ckpt_dir": "/workspace/ckpt_alm_14b_r7 (uploaded to R2 r2:anima-models/alm14b/r7/)",
+      "fast_pod_reference_for_variance": "이 pod이 fast pod baseline. xhq9b2c8fljdyo는 -31.5% 느림",
+      "commit": "4ad64051 nexus"
+    },
     {
       "id": "uu8ebnawzg1qwp",
       "name": "anima-r3-validated",
@@ -286,13 +378,40 @@
     }
   },
   "current_session": {
-    "pod_id": null,
-    "phase": "completed_and_torn_down",
+    "date": "2026-04-15 → 2026-04-16",
+    "active_pods_count": 3,
+    "active": ["xhq9b2c8fljdyo (anima-p4-alm-holo, slow pod)", "tubq10zkct0t8f (anima-p4-4-32b-2gpu, ALM-32B)", "dn6eixsgzrjlnz (anima-p4-alm-r8c-fp8, install pending)"],
+    "_warn_pod_count": "active_pods=3 exceeds memory rule '2 H100 max' — but two are short-lived measurement pods (r8a/r8c), 32B is the long-running production. Acceptable temporarily, reduce to 2 ASAP.",
+    "phase": "ceiling_confirmation_iteration",
+    "ceiling_status": {
+      "ALM_bf16_practical_75pct": "NOT REACHED — best ~68-69% projected (r8a slow-pod-adjusted)",
+      "ALM_fp8_breakthrough": "PENDING — #31 r8c install resuming on dn6eixsgzrjlnz",
+      "CLM_real_shape_mfu": "PENDING — #32 sweep relaunching on Mac local"
+    },
     "next_actions": [
-      "hexa-lang main에 cuda_ffi.hexa 패치 PR (G_HANDLE_BUF / G_STREAM_BUF 우회법)",
-      "hexa interpreter 본 버그 수정: 크로스-모듈 mut global 공유 (self/interpreter.hexa)",
-      "train_gpu.hexa 모듈 로딩 지연 원인 분석 (5개 use chain → 150초+)",
-      "GPU 학습 본격 측정은 위 두 이슈 해결 후"
+      "#31 r8c FP8 install (torch 2.9 + TE 2.13) → smoke 20 → measure 50 → MFU report",
+      "#32 CLM real-shape Tensor sweep (d/seq/layers grid) → find FFI→BLAS crossover → best MFU",
+      "Pod fleet variance handling: r8a measurements re-run on identical pod when fast-pod available",
+      "MLP fast-LoRA blocker: Unsloth + Qwen2 MLP bias term → custom kernel needed for last 48 layers"
+    ],
+    "session_state_files": [
+      "shared/state/training_speed_ceilings.json (SSOT)",
+      "shared/state/alm14b_r8a_stacked_launch_20260415.json",
+      "shared/state/alm14b_r8c_fp8_launch_20260415.json (in-progress)",
+      "shared/state/alm14b_r8_ceiling_confirm_20260415.json",
+      "shared/state/alm14b_batch_seq_sweep_20260415.json",
+      "shared/state/alm14b_unsloth_audit_20260415.json",
+      "shared/state/alm14b_liger_audit_20260415.json",
+      "shared/state/alm14b_fp8_cudagraphs_audit_20260415.json",
+      "shared/state/alm14b_compile_unblock_20260415.json",
+      "shared/state/clm_track_b_speedup_20260415.json",
+      "shared/state/clm_native_full_compile_20260415.json",
+      "shared/state/hexa_native_compile_spike_20260415.json",
+      "shared/state/hexa_tensor_primitive_20260415.json",
+      "shared/state/hexa_native_accelerate_spike_20260415.json",
+      "shared/state/clm_nn_core_tensor_port_20260415.json",
+      "shared/state/clm_native_full_loop_deployed_20260415.json",
+      "shared/state/clm_physical_ceiling_analysis_20260415.json"
     ]
   },
   "rules_applied": {
