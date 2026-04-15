@@ -23,6 +23,8 @@ let HOME = env("HOME")
 let NEXUS = HOME + "/Dev/nexus"
 let LOG_PATH = NEXUS + "/shared/harness/roadmap_sync.jsonl"
 let LOCK = "/tmp/roadmap_sync_gate.lock"
+let FRESH = "/tmp/roadmap_sync_gate.fresh"
+let FRESH_TTL_SEC = 30
 
 fn _s(x) -> string {
     let t = type_of(x)
@@ -42,6 +44,24 @@ fn log_event(repo: string, result: string, detail: string) {
     let d = detail.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
     let j = "{\"ts\":\"" + now_iso() + "\",\"rule\":\"R-ROADMAP-SYNC-L0\",\"repo\":\"" + repo + "\",\"result\":\"" + result + "\",\"detail\":\"" + d + "\"}"
     try { append_file(LOG_PATH, j + "\n") } catch e {}
+}
+
+// ─── freshness cache: 30s clean-state skip ─────────────────────────
+// 최근 gate 가 clean 으로 종료 후 TTL 내라면 repo 검사 전원 skip.
+// 쓰는 측: mark_fresh() — 모든 repo 가 clean 확인된 직후 호출.
+// 읽는 측: is_fresh() — gate() 진입 직후 check. 3-repo × 6-fork = 18+ fork 절감.
+// 무효화: N6/anima/nexus 중 어느 하나라도 roadmap dirty 발생 시 mark_fresh 미호출로 자연 만료.
+
+fn is_fresh() -> bool {
+    let age = sh("[ -f " + FRESH + " ] && echo $(( $(date +%s) - $(stat -f%m " + FRESH + " 2>/dev/null || echo 0) )) || echo -1")
+    if age == "-1" { return false }
+    let age_i = str_to_i64(age)
+    if age_i < FRESH_TTL_SEC { return true }
+    return false
+}
+
+fn mark_fresh() {
+    let _ = exec("touch " + FRESH)
 }
 
 // ─── lock: 재진입 방지 (stale lock = 60s) ──────────────────────────
@@ -87,6 +107,7 @@ fn sync_repo(repo_path: string, roadmap_rel: string) {
     // ── Step 1: dirty check (uncommitted roadmap changes) ──
     let dirty = sh("cd " + repo_path + " && git status --porcelain -- " + roadmap_rel + " 2>/dev/null")
     if dirty != "" {
+        let _ = exec("touch /tmp/roadmap_sync_gate.dirty")
         // commit
         let _ = exec("cd " + repo_path + " && git add " + roadmap_rel)
         let staged = sh("cd " + repo_path + " && git diff --cached --name-only -- " + roadmap_rel + " 2>/dev/null")
@@ -104,6 +125,7 @@ fn sync_repo(repo_path: string, roadmap_rel: string) {
     // ── Step 2: unpushed check ──
     let ahead = sh("cd " + repo_path + " && git rev-list --count @{u}..HEAD 2>/dev/null")
     if ahead != "0" && ahead != "" {
+        let _ = exec("touch /tmp/roadmap_sync_gate.dirty")
         let push_out = sh("cd " + repo_path + " && git push origin " + branch + " 2>&1")
         // verify
         let still_ahead = sh("cd " + repo_path + " && git rev-list --count @{u}..HEAD 2>/dev/null")
@@ -120,13 +142,24 @@ fn sync_repo(repo_path: string, roadmap_rel: string) {
 // ─── gate 본체 ─────────────────────────────────────────────────────
 
 fn gate() {
+    // fast-path: 최근 clean gate 실행 후 TTL 내면 전체 skip.
+    // 18+ fork 절감 (3 repo × 6 git cmd). 무효화는 edit/commit 시 수행.
+    if is_fresh() { return }
+
     if acquire_lock() == false { return }  // 이미 실행 중 → skip (재귀 방지)
+
+    // dirty 플래그 초기화 — 어느 repo 라도 dirty 면 sync_repo 가 touch.
+    let _ = exec("rm -f /tmp/roadmap_sync_gate.dirty")
 
     sync_repo(HOME + "/Dev/nexus",           "shared/roadmaps/")
     sync_repo(HOME + "/Dev/n6-architecture", "shared/roadmaps/")
     // anima/shared → nexus 심링크이므로 nexus sync가 커버.
     // 하지만 anima 자체 커밋이 있을 수 있으므로 독립 체크.
     sync_repo(HOME + "/Dev/anima",           "shared/roadmaps/")
+
+    // 모든 repo clean 이었으면 fresh 마킹 → 다음 호출들은 TTL 동안 skip.
+    let was_dirty = sh("[ -f /tmp/roadmap_sync_gate.dirty ] && echo 1 || echo 0")
+    if was_dirty == "0" { mark_fresh() }
 
     release_lock()
 }
