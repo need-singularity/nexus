@@ -1,0 +1,314 @@
+{
+  "_meta": {
+    "id": "rmengine_v2_backlog",
+    "description": "rmengine v2+ 확장 축 backlog. v1 = core TOC+A* (c06f7bf4). v2 첫 wave = #1+#11+#12 (in-flight). 나머지는 차후 검토용 아이디어 축적.",
+    "updated": "2026-04-16",
+    "owner": "rmengine",
+    "status_legend": "planned | in_flight | done | deferred | creative",
+    "reference_docs": [
+      "shared/papers/v2_v3_full_throttle_path_20260416.md",
+      "shared/roadmaps/anima-train.json",
+      "shared/roadmaps/zeta-surpass.json",
+      "shared/roadmaps/nexus.json",
+      "shared/roadmaps/hive.json",
+      "shared/roadmaps/engine_schema.json"
+    ],
+    "theory_refs": {
+      "T_star": "T*(S₀→G) = inf_π Σ_k max_{i∈Ω} c_i(S_k^π)",
+      "omega": ["build", "exp", "learn", "boot", "verify"],
+      "invariants": [
+        "|R(t)| ≥ 1  (Kahn ready-set — blocking 0)",
+        "Σ_k ΔI_k ≥ K(G|S₀)  (정보 충족)",
+        "η_k > 0  (병목 이동)"
+      ],
+      "physical_bounds": {
+        "quantum": "πℏ/(2E)·K(G|S₀)      Margolus-Levitin",
+        "thermal": "K·kT·ln2/P             Landauer",
+        "span":    "span(DAG)              Brent/Graham",
+        "info":    "K(G)/C_channel         Shannon-Fano"
+      }
+    }
+  },
+  "first_wave_in_flight": {
+    "description": "v1 commit c06f7bf4 직후 발사된 3 background agents (2026-04-16 06:00)",
+    "agents": [
+      {
+        "axis": 1,
+        "name": "signal_coupling",
+        "agent_id": "a34c91d9c02af03f0",
+        "target_files": [
+          "shared/harness/roadmap_observe.hexa",
+          "shared/harness/roadmap_cost.hexa"
+        ]
+      },
+      {
+        "axis": 11,
+        "name": "agent_auto_dispatch",
+        "agent_id": "a733d3a24c8123d68",
+        "target_files": [
+          "shared/harness/roadmap_dispatch.hexa"
+        ]
+      },
+      {
+        "axis": 12,
+        "name": "blocking_minimization",
+        "agent_id": "aa3236d03d6110770",
+        "target_files": [
+          "shared/harness/roadmap_ready.hexa",
+          "shared/roadmaps/example.json (hard/soft deps)"
+        ]
+      }
+    ]
+  },
+  "backlog": {
+    "2": {
+      "name": "go_command_integration",
+      "status": "planned",
+      "impact": "high",
+      "difficulty": "medium",
+      "summary": "기존 loop engine (shared/harness/loop) 을 rmengine 로 흡수. anima 5-track fan-out + AN9 preflight 포팅 필요.",
+      "strategy_options": [
+        "A: 흡수 (loop → rmengine wrapper)",
+        "B: 병립 (go --toc / go --legacy)",
+        "C: shadow (병행 실행 후 결과 비교, 신뢰 쌓이면 cut-over)"
+      ],
+      "recommendation": "C (shadow) — 4주 관찰 후 A"
+    },
+    "3": {
+      "name": "hive_chat_roadmappane",
+      "status": "planned",
+      "impact": "high_ux",
+      "difficulty": "medium",
+      "summary": "hive-chat 우측 pane 에 live vertical ASCII flowchart. rmengine event JSONL 구독 → Solid reactive store → OpenTUI renderable.",
+      "components": [
+        "<RoadmapPane><Header/><Timeline/><ReplanHint/><Footer/></RoadmapPane>",
+        "createResource(eventFile) — chokidar/fs.watch",
+        "ScrollBox 로 N+ 노드 virtualize",
+        "접힘 UX: 완료>10 한줄 요약, 미래>horizon 숨김"
+      ]
+    },
+    "4": {
+      "name": "interactive_cli",
+      "status": "planned",
+      "impact": "medium",
+      "difficulty": "low",
+      "summary": "rmengine list|status|abort|replan|explain|diff|simulate|bottleneck|repl 서브커맨드",
+      "commands": [
+        "rmengine list",
+        "rmengine status [--json]",
+        "rmengine abort <node_id>",
+        "rmengine replan [--reason=X]",
+        "rmengine explain <node_id>",
+        "rmengine diff <graph_a> <graph_b>",
+        "rmengine simulate <roadmap.json>",
+        "rmengine bottleneck --timeline",
+        "rmengine repl (interactive)"
+      ]
+    },
+    "5": {
+      "name": "multi_project_portfolio",
+      "status": "planned",
+      "impact": "very_high",
+      "difficulty": "high",
+      "summary": "7 project (nexus/anima/n6-arch/hexa-lang/void/papers/airgenome) 동시 scheduling. 공유자원: GPU, Agent context, user attention, storage.",
+      "model": "T_portfolio*(all) = min_π Σ_p T_p* + coupling_loss(π)",
+      "allocation": "Kelly-like: budget_p ∝ ∂BT/∂budget_p (marginal breakthrough value)",
+      "meta_roadmap": "shared/roadmaps/meta.json — cross-project deps (예: anima-train needs hexa cuda_ffi)"
+    },
+    "6": {
+      "name": "eta_b_learning",
+      "status": "planned",
+      "impact": "medium",
+      "difficulty": "medium",
+      "summary": "실행 로그에서 c_i 추정 업데이트. Kalman-like + feature-based regression.",
+      "data_source": "shared/harness/roadmap_history.jsonl",
+      "update_rule": "μ̂[cat] = (1-α)·μ_prev + α·actual, α 적응적",
+      "features": ["size", "deps_count", "type", "project", "time_of_day", "worker"]
+    },
+    "7": {
+      "name": "bellman_value_iteration",
+      "status": "planned",
+      "impact": "medium",
+      "difficulty": "high",
+      "summary": "small graph (n<100) 한정 진짜 V*(S) DP. backward induction via reverse topo sort.",
+      "formula": "V*(S) = min_a [b_a(S) + V*(f(S,a))]",
+      "complexity": "O(|V|·|A|·b_cost_eval), 100 nodes · 5 actions · 1ms = 0.5s",
+      "limitation": "state space 폭발시 heuristic 만"
+    },
+    "8": {
+      "name": "counterfactual_explainer",
+      "status": "planned",
+      "impact": "medium",
+      "difficulty": "low",
+      "summary": "edge drop / node add / node remove 가상실험.",
+      "queries": [
+        "edge drop impact(e) = T* - T*'",
+        "node add → cascading T* change",
+        "node skip → downstream T* + risk"
+      ],
+      "ui": "rmengine counterfactual edge <a>→<b>"
+    },
+    "9": {
+      "name": "checkpoint_rollback",
+      "status": "deferred",
+      "impact": "low",
+      "difficulty": "low",
+      "summary": "snapshot_<ts>.json + manual rollback. git commit 과 기능 중복 — 체감 필요시만."
+    },
+    "10": {
+      "name": "soft_hard_edge_auto",
+      "status": "planned",
+      "impact": "high",
+      "difficulty": "medium",
+      "summary": "information inequality 로 spurious edge 자동 판정. hard: I(B;seed|A) > I(B;seed). history 에서 실측.",
+      "auto_drop": "매 replan 시 soft 후보 top-3, slack > threshold 면 drop 제안"
+    }
+  },
+  "creative_extensions": {
+    "description": "첫 번째 brainstorm 에서 창발한 축. 우선순위 낮지만 아이디어 보존.",
+    "13": {
+      "name": "adversarial_replan",
+      "summary": "Monte Carlo random failure 시뮬 — 'P7 50% 실패 시 T*?' robust schedule"
+    },
+    "14": {
+      "name": "deadline_aware",
+      "summary": "node.deadline 필드 + miss risk 계산 + overcommit 방지"
+    },
+    "15": {
+      "name": "energy_thermal_budget",
+      "summary": "c_build 에 energy cost + Pareto (T*, $$) + night-batch 자동 이동"
+    },
+    "16": {
+      "name": "collaborative_scheduling",
+      "summary": "다른 개발자 동시 작업 ownership lock + git branch 기반 concurrent subgraph"
+    },
+    "17": {
+      "name": "personalized_user_modeled",
+      "summary": "사용자 attention budget 모델 + notification throttling + deep work 모드"
+    },
+    "18": {
+      "name": "causal_inference",
+      "summary": "edge X drop 후 실제 measure → 가정 검증. do-calculus (Pearl) 적용"
+    },
+    "19": {
+      "name": "semantic_node_similarity",
+      "summary": "과거 node ~ 현재 node embedding distance → 추정치 improve"
+    },
+    "20": {
+      "name": "meta_learning_speed",
+      "summary": "η 자체가 학습됨 η' = dη/dk — 가속의 가속 (Kurzweil)"
+    },
+    "21": {
+      "name": "explainability_via_counterfactual",
+      "summary": "#8 과 합쳐짐 — 왜 경로 X? 각 대안 T* 표시"
+    },
+    "22": {
+      "name": "temporal_dag",
+      "summary": "time-varying edges — 아침/저녁 생산성 곡선에 edge weight 의존"
+    },
+    "23": {
+      "name": "hierarchical_composition",
+      "summary": "큰 node = sub-roadmap, recursive rmengine 호출, zoom in/out UI"
+    },
+    "24": {
+      "name": "versioned_roadmap",
+      "summary": "git history 로 roadmap 변천 replay, learning signal 로 사용"
+    },
+    "25": {
+      "name": "cross_project_learning",
+      "summary": "anima 에서 배운 η 를 nexus 로 transfer (domain shift 주의)"
+    },
+    "26": {
+      "name": "gamification",
+      "summary": "node 완료 XP + streak + achievement (serious 용 불필요)"
+    },
+    "27": {
+      "name": "anomaly_detection",
+      "summary": "predicted 크게 벗어나면 alarm — 'build 평소 5m 인데 30m → 이상'"
+    },
+    "28": {
+      "name": "social_roadmap",
+      "summary": "public roadmap template 공유 (CI/CD 템플릿 같은) + 비슷한 문제 검색"
+    },
+    "29": {
+      "name": "nl_to_roadmap",
+      "summary": "'다음 주까지 A 완성' → LLM 이 roadmap.json 생성. decomp + deps 추론"
+    },
+    "30": {
+      "name": "voice_speech",
+      "summary": "'P5 완료' 음성 → state update + 'P7 시작 가능' TTS 알림 hands-free"
+    },
+    "31": {
+      "name": "roadmap_diff_merge",
+      "summary": "CRDT / OT semantic merge — 두 저자 동시 편집"
+    },
+    "32": {
+      "name": "roadmap_linting",
+      "summary": "cycle detection + orphan + unreachable + goal 없음 경고"
+    },
+    "33": {
+      "name": "mock_replay_training",
+      "summary": "과거 실행 빠른 replay tutorial mode — 'β 결정 왜 틀렸나?'"
+    },
+    "34": {
+      "name": "risk_adjusted_replanning",
+      "summary": "p_success 낮으면 backup plan 준비, 이중경로 동시 실행 (hedging)"
+    },
+    "35": {
+      "name": "context_aware_scheduling",
+      "summary": "calendar 연동 — deep work 모드시 critical path 집중"
+    },
+    "36": {
+      "name": "formal_verification",
+      "summary": "roadmap invariant (I_k ≥ K(G)/N) Lean/Coq proof — 수학적 보장"
+    },
+    "37": {
+      "name": "roadmap_market",
+      "summary": "여러 roadmap 이 자원 경매 — auction-based allocation, micro-economics"
+    },
+    "38": {
+      "name": "simulation_before_action",
+      "summary": "큰 결정 전 1000 trial MC 예측 분포 — '90% 확률로 T*∈[40,55]'"
+    },
+    "39": {
+      "name": "api_native_roadmap",
+      "summary": "roadmap.json → GraphQL/REST 노출, Linear/GitHub Projects 양방향 sync"
+    },
+    "40": {
+      "name": "visual_roadmap_editor",
+      "summary": "3D graph editor drag-drop (Linear/Miro 스타일) — rmengine backend"
+    }
+  },
+  "synergy_pairs": {
+    "description": "축 간 교집합 효과 — 2개 동시 구현시 단독보다 큰 이득",
+    "pairs": [
+      {"a": 1, "b": 6, "effect": "signal → η 학습 가속 (data→model loop)"},
+      {"a": 1, "b": 10, "effect": "signal → hard/soft edge 자동 판정 data"},
+      {"a": 3, "b": 11, "effect": "우측 pane 이 agent dispatch play/pause/abort"},
+      {"a": 4, "b": 8, "effect": "CLI explain → counterfactual 실시간 질의"},
+      {"a": 5, "b": 1, "effect": "portfolio 가 cross-project signal 집계"},
+      {"a": 7, "b": 14, "effect": "Bellman V* 가 deadline constraint 고려"},
+      {"a": 11, "b": 12, "effect": "dispatch + ready-drain = 전체 자동 zero-block"},
+      {"a": 12, "b": 18, "effect": "ready drain 결정이 causal inference 로 safety 판단"},
+      {"a": 2, "b": 25, "effect": "loop 흡수시 축적 데이터로 transfer learning"},
+      {"a": 8, "b": 10, "effect": "counterfactual 결과가 soft edge drop 증거"}
+    ]
+  },
+  "anti_patterns": [
+    "over-engineering: 12축 모두 구현시 엔진이 스스로 공격 대상 (boot cost ↑↑)",
+    "plugin leak: 확장 포인트 너무 많으면 'plugin 시스템' 되돌림 — user rejected",
+    "기존 loop 파괴: rmengine 안정화 전 legacy 제거 = 재앙",
+    "자동 dispatch 통제 상실: 잘못된 agent 10개 발사 → context/예산 폭발",
+    "학습 overfit: 과거 완료시간만 학습 → 실패 로그 없음, survivorship bias",
+    "visualization 과잉: 우측 pane 정보량 너무 많으면 인지부하",
+    "premature optimization: Bellman V* 코딩 전 heuristic 정확도 평가 먼저"
+  ],
+  "minimum_viable_v2": {
+    "description": "첫 wave 3축 + 둘째 wave 2축 = v2 core. 나머지는 v3+",
+    "cut_1_mandatory": [1, 11, 12],
+    "cut_2_strong_rec": [3, 10],
+    "cut_3_followup": [2, 5],
+    "defer": [4, 6, 7, 8, 9],
+    "creative_hold": [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+  }
+}
