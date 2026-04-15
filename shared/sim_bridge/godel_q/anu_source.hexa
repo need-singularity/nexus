@@ -1,0 +1,79 @@
+// anu_source.hexa — RNG source for bootstrap. Tries ANU QRNG via curl; falls
+// back to /dev/urandom. Emits a 128-char hex blob (64 bytes) on stdout.
+//
+// Separate from shared/discovery/rng_lab/fetch_anu.hexa because that module
+// segfaults on current hexa_stage0 (observed 2026-04-16). Self-contained
+// minimal re-implementation to keep MVP honest.
+
+fn try_anu_curl() -> string {
+    let url = "https://qrng.anu.edu.au/API/jsonI.php?length=64&type=uint8"
+    let mut body = ""
+    try {
+        body = to_string(exec("curl -s --max-time 4 '" + url + "' 2>/dev/null"))
+    } catch e { body = "" }
+    if body.len() == 0 { return "" }
+    if !body.contains("\"success\":true") {
+        if !body.contains("\"success\": true") { return "" }
+    }
+    // pipe body through python one-liner to convert [u8,u8,...] → hex
+    let tmp_body = "/tmp/.godelq_anu.json"
+    try { write_file(tmp_body, body) } catch e { return "" }
+    let mut hex = ""
+    try {
+        hex = to_string(exec("/usr/bin/python3 -c \"import json,sys; d=json.load(open('" + tmp_body + "')); print(''.join('%02x'%b for b in d['data']))\" 2>/dev/null")).trim()
+    } catch e { hex = "" }
+    if hex.len() < 128 { return "" }
+    return hex
+}
+
+fn urandom_hex() -> string {
+    let mut r = ""
+    try { r = to_string(exec("head -c 64 /dev/urandom | od -An -vtx1 | tr -d ' \\n'")).trim() } catch e { r = "" }
+    return r
+}
+
+let _args = args()
+let mut mode = "hex"
+if _args.len() >= 3 { mode = _args[2] }
+
+let mut hex = ""
+let mut source = ""
+
+// cache (60s TTL)
+let cache = env_var("HOME") + "/Dev/nexus/shared/sim_bridge/godel_q/.anu_cache.bin"
+let mut cached = ""
+let mut cache_age = 9999
+try {
+    cache_age = to_int(to_string(exec("(expr $(date +%s) - $(stat -f '%m' '" + cache + "' 2>/dev/null || stat -c '%Y' '" + cache + "' 2>/dev/null)) 2>/dev/null || echo 9999")).trim())
+} catch e { cache_age = 9999 }
+if cache_age <= 60 {
+    try { cached = read_file(cache).trim() } catch e { cached = "" }
+    if cached.len() >= 128 {
+        hex = cached.substring(0, 128)
+        source = "cache"
+    }
+}
+
+if hex.len() < 128 {
+    hex = try_anu_curl()
+    if hex.len() >= 128 {
+        source = "anu"
+        try { write_file(cache, hex + "\n") } catch e {}
+    } else {
+        hex = urandom_hex()
+        if hex.len() >= 128 {
+            source = "urandom"
+        }
+    }
+}
+
+if hex.len() < 128 {
+    println("ERROR: no RNG source")
+    exit(1)
+}
+
+if mode == "info" {
+    println("source=" + source + " len=" + to_string(hex.len() / 2) + " hex=" + hex)
+} else {
+    println(hex)
+}
