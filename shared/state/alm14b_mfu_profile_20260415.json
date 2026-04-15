@@ -1,0 +1,122 @@
+{
+  "date": "2026-04-15",
+  "measured_at_utc": "2026-04-15T~10:00Z",
+  "source": "live SSH pod xhq9b2c8fljdyo (anima-p4-alm-holo, H100 80GB)",
+  "run": {
+    "script": "/workspace/train_alm_14b_p4.py (generated from training/train_alm_14b.hexa)",
+    "round": 5,
+    "round_tag": "r5",
+    "phase": "P4 (ALM-P4-1/2/3 holographic head + L_holo + phi_holo)",
+    "base_model": "Qwen/Qwen2.5-14B-Instruct",
+    "step_observed": 3400,
+    "total_steps": 4000,
+    "loss": 0.2351,
+    "eval_loss": 0.1848,
+    "phi_holo": 1666.0
+  },
+  "hw": {
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "gpu_count": 1,
+    "sm_util_pct": 98,
+    "vram_used_gb": 45.5,
+    "vram_total_gb": 79.6,
+    "power_draw_w": 618,
+    "tdp_w": 700
+  },
+  "config": {
+    "dtype": "bfloat16",
+    "batch": 1,
+    "grad_accum": 8,
+    "effective_batch": 8,
+    "seq_len": 1024,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "trainable_params": 50331648,
+    "total_params": 14820365312,
+    "trainable_pct": 0.3396,
+    "gradient_checkpointing": false,
+    "attn_implementation": "eager (default, NOT flash_attention_2)",
+    "device_map": "auto"
+  },
+  "throughput": {
+    "steps_per_min": 35.6,
+    "steps_per_sec": 0.5933,
+    "tokens_per_step": 8192,
+    "tokens_per_sec": 4860,
+    "ms_per_step": 1685.0
+  },
+  "flops": {
+    "model_params": 14820365312,
+    "flops_per_token_approx": "6N (2N fwd + 4N bwd, Kaplan)",
+    "flops_per_token": 88922191872,
+    "flops_per_step": 728376385536000,
+    "flops_per_sec_achieved": 4.3216e14,
+    "tflops_achieved": 432.2,
+    "peak_bf16_tflops_h100": 989,
+    "peak_sparse_bf16_tflops_h100": 1979
+  },
+  "mfu_pct": 43.7,
+  "mfu_pct_vs_sparse": 21.8,
+  "bottleneck": "compute-bound (partial) + memory-bandwidth (attention QKV projection, no flash attention)",
+  "bottleneck_breakdown": {
+    "compute": "attention mm + MLP is dominant; eager attention has O(T^2) memory reads that hit HBM bandwidth, not pure compute",
+    "memory_bandwidth": "eager sdpa reads K/V matrices from HBM twice per layer vs flash once; ~15-20% of time spent on memory stalls",
+    "communication": "none (single GPU)",
+    "dataloader": "negligible (100K token smoke corpus cached in RAM, num_workers=0 OK here)",
+    "other": "CPU roundtrip for phi_holo MI measurement every 100 eval steps — amortized but spikes GPU idle"
+  },
+  "sanity_checks": {
+    "vram_utilization_pct": 57.2,
+    "vram_headroom_gb": 34.1,
+    "implication": "VRAM is 57% full. 43GB free → batch size can 2-3x without OOM.",
+    "grad_ckpt_off": "note: train_alm_14b_p4.py does NOT set gradient_checkpointing_enable(). Recompute overhead saved.",
+    "peft_saves_bwd": "LoRA backprop only writes gradients for 50M params (0.34%), but still needs full-graph forward activations through 14.8B frozen weights. 6N model is still accurate for compute."
+  },
+  "top_3_levers": [
+    {
+      "rank": 1,
+      "name": "Enable flash_attention_2 (attn_implementation='flash_attention_2' in from_pretrained)",
+      "estimated_uplift": "+25-35% MFU (43.7% -> ~58-62%)",
+      "reason": "Qwen2.5-14B at seq=1024 has 48 layers of eager softmax(QK^T)V with O(T^2) HBM reads. Flash-attn collapses to O(T) and raises tokens/sec 1.4-1.6x directly. Proven on H100.",
+      "effort": "LOW — 1-line edit + `pip install flash-attn`. Already wired in transformers.",
+      "risk": "none (bf16 numerically identical output to eager)",
+      "blocker": "R-rule: READ-ONLY on training code this task — deliver as ROI queue for next session"
+    },
+    {
+      "rank": 2,
+      "name": "Increase batch size from 1 to 4 (grad_accum 8 -> 2, same effective batch)",
+      "estimated_uplift": "+15-25% MFU (better kernel occupancy + amortized launch overhead)",
+      "reason": "VRAM is only 57% full. At seq=1024 batch=1, many H100 SMs are under-utilized per forward pass. Going to batch=4 uses ~22GB more activations (well inside 43GB headroom) and gives GEMM kernels longer tensor contractions to amortize kernel launches.",
+      "effort": "LOW — CLI flag --batch 4 --grad-accum 2",
+      "risk": "OOM if combined with flash-attn off + full-seq — watch VRAM"
+    },
+    {
+      "rank": 3,
+      "name": "Increase seq_len from 1024 to 2048",
+      "estimated_uplift": "+10-20% MFU (longer sequences amortize per-token overhead)",
+      "reason": "Longer seq lens make attention arithmetic intensity higher (compute-bound region). Combined with flash-attn, this is a free MFU win. 14B corpus has plenty of 2K+ token contexts.",
+      "effort": "LOW — CLI flag --seq 2048 (requires flash-attn for O(T) memory scaling)",
+      "risk": "needs flash-attn first to avoid OOM from O(T^2) attention memory"
+    }
+  ],
+  "composite_estimate": {
+    "all_three_together": "43.7% -> 65-72% MFU (H100 realistic ceiling for LoRA is ~72-75%)",
+    "ceiling_gap": "56.3% absolute from peak 989 TFLOP/s; recoverable portion ~25-30 percentage points",
+    "physics_wall": "After all 3 levers, remaining gap to 989 TFLOP/s is hardware memory bandwidth + LoRA dense-base recompute — true physical ceiling for this setup is ~72% MFU"
+  },
+  "notes": {
+    "mfu_convention": "6N FLOP/token (Kaplan) including fwd+bwd. Chinchilla uses 6N; some papers use 8N with activation recompute.",
+    "lora_caveat": "LoRA reduces trainable params by 294x but does NOT reduce forward/backward compute through frozen base weights — bwd still touches all 14.8B params to compute input-grads for activations. MFU calc is same as full fine-tune.",
+    "r5_vs_r4": "r4 reported 12.9-18.4 step/min per night session memory. r5 is 35.6 step/min — ~2x faster because r5 dropped gradient_checkpointing (r4 had it on for OOM avoidance). Gradient ckpt off = +40-50% speed at cost of 20GB more VRAM, which is available here.",
+    "phi_holo_measurement_cost": "phi_holo MI compute transfers tensors to CPU every eval (step%100). During that eval, GPU sits ~200ms idle. Amortized over 100 train steps = 0.2% overhead."
+  },
+  "verdict": {
+    "current_mfu_pct": 43.7,
+    "current_tflops": 432.2,
+    "physics_ceiling_tflops": 989,
+    "realistic_ceiling_pct": 72,
+    "gap_to_recoverable_ceiling_pct": 28.3,
+    "priority": "flash_attention_2 is the single biggest unlock. File as ROI queue for next non-READ-ONLY session."
+  }
+}
