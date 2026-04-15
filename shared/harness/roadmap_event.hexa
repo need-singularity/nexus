@@ -1,0 +1,78 @@
+// roadmap_event.hexa — JSONL event emission (thin wrapper + standalone events)
+// @no-lock-needed
+// @allow-bare-exec
+// @no-sandbox
+//
+// 역할: schedule 1회 실행 → JSONL events append. stdout 도 허용 (empty path).
+//       본 파일은 roadmap_engine 에 --events=<out> 로 위임.
+//
+// CLI
+//   hexa run roadmap_event.hexa <roadmap.json> <out.jsonl>
+//   hexa run roadmap_event.hexa <roadmap.json> -        # stdout 직접
+//   hexa run roadmap_event.hexa mock                    # Plan/NodeStart/NodeComplete/BottleneckShift/Replan 데모
+//
+// exit: 0 OK / 1 engine error / 2 usage
+
+let HOME = env("HOME")
+let ENGINE = HOME + "/Dev/nexus/shared/harness/roadmap_engine.hexa"
+let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn _ts() -> string {
+    return _str(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()  // @allow-bare-exec
+}
+
+fn emit_mock() {
+    let t = _ts()
+    let rm = "mock"
+    println("{\"ts\":\"" + t + "\",\"roadmap\":\"" + rm + "\",\"kind\":\"Plan\",\"T_star\":84.0,\"bottleneck_node\":\"rollup\",\"bottleneck_category\":\"build\",\"bottleneck_cost\":35.0,\"eta\":0.23,\"progress\":0.55,\"replan_needed\":false}")
+    println("{\"ts\":\"" + t + "\",\"roadmap\":\"" + rm + "\",\"kind\":\"NodeStart\",\"node\":\"P7\",\"type\":\"build\",\"progress\":0.73}")
+    println("{\"ts\":\"" + t + "\",\"roadmap\":\"" + rm + "\",\"kind\":\"NodeComplete\",\"node\":\"P6\",\"type\":\"build\"}")
+    println("{\"ts\":\"" + t + "\",\"roadmap\":\"" + rm + "\",\"kind\":\"BottleneckShift\",\"node\":\"rollup\",\"category\":\"build\",\"cost\":35.0}")
+    println("{\"ts\":\"" + t + "\",\"roadmap\":\"" + rm + "\",\"kind\":\"Replan\",\"eta\":-0.04,\"soft_drop_candidates\":[\"lint_pass\"]}")
+}
+
+fn main() {
+    let argv = args()
+    let mut a: [string] = []
+    let mut ai: i64 = 2
+    while ai < argv.len() { a = a.push(_str(argv[ai])); ai = ai + 1 }
+
+    if a.len() == 0 {
+        eprintln("usage: roadmap_event <roadmap.json> <out.jsonl|-> | mock")
+        exit(2)
+    }
+    let first = _str(a[0])
+    if first == "mock" { emit_mock(); exit(0) }
+
+    if a.len() < 2 {
+        eprintln("usage: roadmap_event <roadmap.json> <out.jsonl|->")
+        exit(2)
+    }
+    let path = first
+    let out = _str(a[1])
+
+    if out == "-" {
+        // stdout: --dispatch shows plan JSON, we re-derive events via engine with /tmp file
+        let tmp = "/tmp/roadmap_event_stdout_" + _str(exec("date +%s%N")).trim() + ".jsonl"  // @allow-bare-exec
+        let cmd = HEXA + " run " + ENGINE + " " + path + " --dispatch --events=" + tmp + " 2>&1 >/dev/null"
+        let _ = exec(cmd)  // @allow-bare-exec
+        let raw = _str(exec("cat " + tmp + " 2>/dev/null"))  // @allow-bare-exec
+        print(raw)
+        let _ = exec("rm -f " + tmp)  // @allow-bare-exec
+        exit(0)
+    }
+
+    let cmd = HEXA + " run " + ENGINE + " " + path + " --dispatch --events=" + out + " 2>&1 >/dev/null"
+    let _ = exec(cmd)  // @allow-bare-exec
+    let cnt = _str(exec("wc -l < " + out + " 2>/dev/null")).trim()  // @allow-bare-exec
+    println("[roadmap_event] events appended to: " + out + "  (lines=" + cnt + ")")
+    exit(0)
+}
+
+main()

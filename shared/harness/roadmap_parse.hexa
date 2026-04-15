@@ -1,0 +1,55 @@
+// roadmap_parse.hexa — parse roadmap JSON → summary (thin wrapper)
+// @no-lock-needed
+// @allow-bare-exec
+// @no-sandbox
+//
+// 역할: roadmap_engine 의 parse 단계만 단독 실행. 로드맵 파일을 읽어
+//       노드 개수/상태 분포만 요약 출력 (schedule 비용 계산 없음).
+//
+// CLI
+//   hexa run roadmap_parse.hexa <roadmap.json>
+//
+// 본체 로직은 roadmap_engine.hexa --dispatch 로 위임 (ready/inp 집계).
+// 본 파일은 빠른 shell grep 집계로 parse-only 체크.
+//
+// exit: 0 OK / 2 usage / 3 file missing
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn main() {
+    let argv = args()
+    let mut a: [string] = []
+    let mut ai: i64 = 2
+    while ai < argv.len() { a = a.push(_str(argv[ai])); ai = ai + 1 }
+
+    if a.len() == 0 {
+        eprintln("usage: roadmap_parse <roadmap.json>")
+        exit(2)
+    }
+    let path = _str(a[0])
+    if file_exists(path) == false {
+        eprintln("REJECT: not found: " + path)
+        exit(3)
+    }
+
+    let body = _str(read_file(path))
+    // count "id": — 노드 포함하지만 _meta.id 도 1 → 후처리 -1
+    let id_cnt = _str(exec("grep -o '\"id\"[[:space:]]*:' " + path + " 2>/dev/null | wc -l")).trim()  // @allow-bare-exec
+    let done_cnt = _str(exec("grep -o '\"status\"[[:space:]]*:[[:space:]]*\"done\"' " + path + " 2>/dev/null | wc -l")).trim()  // @allow-bare-exec
+    let inp_cnt = _str(exec("grep -o '\"status\"[[:space:]]*:[[:space:]]*\"in_progress\"' " + path + " 2>/dev/null | wc -l")).trim()  // @allow-bare-exec
+    let todo_cnt = _str(exec("grep -o '\"status\"[[:space:]]*:[[:space:]]*\"todo\"' " + path + " 2>/dev/null | wc -l")).trim()  // @allow-bare-exec
+
+    println("[roadmap_parse] " + path)
+    println("  nodes (approx):    " + id_cnt + " (incl. _meta.id)")
+    println("  status done:       " + done_cnt)
+    println("  status in_progress:" + inp_cnt)
+    println("  status todo:       " + todo_cnt)
+    println("  delegate schedule: hexa run roadmap_engine.hexa " + path + " --dispatch")
+    exit(0)
+}
+
+main()

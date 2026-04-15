@@ -1,0 +1,51 @@
+// roadmap_schedule.hexa — CPM + RCPSP + b* (thin wrapper)
+// @no-lock-needed
+// @allow-bare-exec
+// @no-sandbox
+//
+// 역할: roadmap_engine 의 schedule 단계만 JSON dispatch plan 으로 출력.
+//       b* (dominant bottleneck) + T* + η + ready set + replan flag.
+//
+// CLI
+//   hexa run roadmap_schedule.hexa <roadmap.json> [--events=<out>]
+//
+// 구현: roadmap_engine.hexa --dispatch 에 위임 (동일 로직, 재구현 회피).
+//
+// exit: 0 OK / 1 engine error / 2 usage
+
+let HOME = env("HOME")
+let ENGINE = HOME + "/Dev/nexus/shared/harness/roadmap_engine.hexa"
+let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn main() {
+    let argv = args()
+    let mut a: [string] = []
+    let mut ai: i64 = 2
+    while ai < argv.len() { a = a.push(_str(argv[ai])); ai = ai + 1 }
+
+    if a.len() == 0 {
+        eprintln("usage: roadmap_schedule <roadmap.json> [--events=<out>]")
+        exit(2)
+    }
+    let path = _str(a[0])
+    let mut extra = ""
+    let mut k: i64 = 1
+    while k < a.len() {
+        extra = extra + " " + _str(a[k])
+        k = k + 1
+    }
+
+    let cmd = HEXA + " run " + ENGINE + " " + path + " --dispatch" + extra + " 2>&1"
+    let out = _str(exec(cmd))  // @allow-bare-exec
+    print(out)
+    if out.contains("REJECT") { exit(1) }
+    exit(0)
+}
+
+main()

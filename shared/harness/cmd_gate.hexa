@@ -25,6 +25,31 @@ fn run_option_gate(prompt: str) -> str {
     return out
 }
 
+// ─── H-DECISION-ROUTER 헬퍼 ────────────────────────────────────────
+// shared/config/decisions.json 강제 — anima go/keep/loop 진입 시 fail-closed.
+fn anima_cwd() -> bool {
+    let cwd = exec("pwd -P 2>/dev/null").trim().to_lower()  // @allow-bare-exec
+    return cwd.contains("/dev/anima")
+}
+
+fn decision_router_validate() -> bool {
+    let dr = env("HOME") + "/Dev/nexus/shared/harness/decision_router.hexa"
+    let hx = env("HOME") + "/Dev/nexus/shared/bin/hexa"
+    let cmd = "HEXA_LOCAL=1 " + hx + " run " + dr + " validate 2>&1"
+    let out = exec(cmd).trim()  // @allow-bare-exec
+    return out.contains("VALID")
+}
+
+fn emit_decisions_block() {
+    let dr = env("HOME") + "/Dev/nexus/shared/harness/decision_router.hexa"
+    let hx = env("HOME") + "/Dev/nexus/shared/bin/hexa"
+    let cmd = "HEXA_LOCAL=1 " + hx + " run " + dr + " emit 2>&1"
+    let out = exec(cmd).trim()  // @allow-bare-exec
+    println("===DECISIONS_BEGIN===")
+    println(out)
+    println("===DECISIONS_END===")
+}
+
 fn main() {
     // args(): [0]=binary [1]=script [2..]=user args
     let argv = args()
@@ -54,6 +79,18 @@ fn main() {
     } else if cmd == "free" || cmd == "free_dfs" || cmd == "dfs" {
         check_free(seed, context_hint)
     } else if cmd == "todo" || cmd == "go" || cmd == "keep" || cmd == "loop" || cmd == "list" || cmd == "roi" || cmd == "lm" || cmd == "roadmap" || cmd == "로드맵" {
+        // H-DECISION-ROUTER (anima) — go/keep/loop 진입 시 decision_router validate + emit 강제
+        if cmd == "go" || cmd == "keep" || cmd == "loop" {
+            if anima_cwd() && env("NEXUS_DECISION_OK") != "1" {
+                if !decision_router_validate() {
+                    eprintln("REJECT: anima " + cmd + " — decision_router validate FAIL. shared/config/decisions.json 검증 후 재실행. 우회: NEXUS_DECISION_OK=1")
+                    exit(2)
+                }
+                // 통과 시 DECISIONS 블록을 stdout 으로 emit (Claude 가 ===DECISIONS_BEGIN/END=== 발견 시 다음 dispatch 에 inject)
+                emit_decisions_block()
+            }
+        }
+
         // seed 검증 불필요 — 엔진 자체가 컨텍스트 활용
         // roadmap: seed = 서브커맨드 (next|extend|auto|list|verify|status|all) + flags, 엔진 내부에서 파싱
         println("OK:" + cmd + ":" + seed)

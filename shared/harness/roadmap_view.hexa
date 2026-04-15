@@ -1,0 +1,49 @@
+// roadmap_view.hexa — vertical ASCII flowchart (thin wrapper)
+// @no-lock-needed
+// @allow-bare-exec
+// @no-sandbox
+//
+// 역할: roadmap_engine.hexa 의 render_flowchart 단계만 호출. watch 모드 포함.
+//
+// CLI
+//   hexa run roadmap_view.hexa <roadmap.json>              # one-shot
+//   hexa run roadmap_view.hexa <roadmap.json> --watch      # 5s 주기 5회
+//   hexa run roadmap_view.hexa <roadmap.json> --events=<p> # JSONL emit
+//
+// exit: 0 OK / 2 usage
+
+let HOME = env("HOME")
+let ENGINE = HOME + "/Dev/nexus/shared/harness/roadmap_engine.hexa"
+let HEXA = HOME + "/Dev/nexus/shared/bin/hexa"
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn main() {
+    let argv = args()
+    let mut a: [string] = []
+    let mut ai: i64 = 2
+    while ai < argv.len() { a = a.push(_str(argv[ai])); ai = ai + 1 }
+
+    if a.len() == 0 {
+        eprintln("usage: roadmap_view <roadmap.json> [--watch] [--events=<out>]")
+        exit(2)
+    }
+    let path = _str(a[0])
+    let mut extra = ""
+    let mut k: i64 = 1
+    while k < a.len() {
+        extra = extra + " " + _str(a[k])
+        k = k + 1
+    }
+
+    let cmd = HEXA + " run " + ENGINE + " " + path + extra + " 2>&1"
+    let out = _str(exec(cmd))  // @allow-bare-exec
+    print(out)
+    exit(0)
+}
+
+main()
