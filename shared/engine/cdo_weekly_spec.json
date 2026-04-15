@@ -1,0 +1,149 @@
+{
+  "_meta": {
+    "description": "CDO weekly report engine spec — GOV-P7-1 (A4_GOVERNANCE P7)",
+    "task": "GOV-P7-1",
+    "canonical_path": "shared/engine/cdo_weekly_spec.json",
+    "engine_path": "shared/harness/cdo_weekly.hexa",
+    "updated": "2026-04-15",
+    "schema_version": "1.0",
+    "refs": {
+      "rules": "shared/rules/convergence_ops.json",
+      "anima_convergence": "shared/convergence/anima.json",
+      "laws": "shared/consciousness/consciousness_laws.json",
+      "phi_source": "shared/consciousness/law_discovery_results.json",
+      "atlas_stats": "shared/n6/atlas.n6.stats"
+    }
+  },
+
+  "purpose": {
+    "summary": "Aggregate 7-day CDO convergence metrics -> weekly JSON report + atlas sidecar node.",
+    "why": "Roadmap NEXUS / A4_GOVERNANCE / P7 task GOV-P7-1. Periodic audit of convergence progress as atlas-addressable node without mutating atlas.n6.",
+    "principles": [
+      "P1 모든 문제는 한 번만 겪는다",
+      "P2 해결되면 절대 규칙으로 승격",
+      "P3 위반 횟수 0 유지",
+      "P4 수렴률 100% 목표",
+      "P5 실패할 때마다 강해지는 시스템"
+    ]
+  },
+
+  "inputs": {
+    "anima_convergence": {
+      "path": "shared/convergence/anima.json",
+      "fields": [".convergence.completed", ".convergence.in_flight", ".convergence.total_items_tracked", ".convergence.resolution_pct"]
+    },
+    "laws": {
+      "path": "shared/consciousness/consciousness_laws.json",
+      "fields": ["._meta.total_laws"]
+    },
+    "phi": {
+      "path": "shared/consciousness/law_discovery_results.json",
+      "fields": ["..|objects|.phi_baseline"],
+      "derived": ["min", "max", "mean", "n"],
+      "scale": "integer-scaled by 1e6 to avoid float emit"
+    },
+    "discovery": {
+      "path": "shared/discovery/growth_bus.jsonl",
+      "filter": "ts ISO >= now - 7d",
+      "derived": ["events_7d"]
+    },
+    "broadcast": {
+      "path": "shared/harness/broadcast.jsonl",
+      "filter": "ts unix >= now - 7d",
+      "derived": ["events_7d"]
+    },
+    "phi_cache": {
+      "path": "shared/state/phi_cache_v1.jsonl",
+      "derived": ["cache_entries (wc -l)"]
+    },
+    "atlas_stats": {
+      "path": "shared/n6/atlas.n6.stats",
+      "fields": [".nodes", ".edges", ".hubs"],
+      "derived": ["hub_ratio_bp = hubs * 10000 / nodes"]
+    }
+  },
+
+  "outputs": {
+    "report": {
+      "path_pattern": "shared/reports/cdo_weekly_<YYYYMMDD>.json",
+      "ymd_source": "date -u +%Y%m%d",
+      "schema": {
+        "_meta": {"description": "string", "task": "GOV-P7-1", "generated_at": "ISO8601Z", "ymd": "YYYYMMDD", "window_days": 7, "prev_report": "path-or-empty", "schema_version": "1.0"},
+        "convergence": {"completed": "int", "in_flight": "int", "total_items_tracked": "int", "resolution_pct_scaled_1e2": "int", "delta_completed": "int"},
+        "laws": {"total": "int", "delta": "int"},
+        "phi": {"min_u": "int", "max_u": "int", "mean_u": "int", "sample_n": "int", "delta_mean_u": "int", "scale": "string", "cache_entries": "int"},
+        "discovery": {"events_7d": "int", "delta": "int"},
+        "broadcast": {"events_7d": "int", "delta": "int"},
+        "atlas": {"nodes": "int", "edges": "int", "hubs": "int", "hub_ratio_bp": "int", "delta_nodes": "int"}
+      },
+      "retention": "git history (무제한). *.bak 금지, 버전 suffix 금지."
+    },
+    "sidecar": {
+      "path": "shared/n6/atlas.n6.cdo_weekly",
+      "format": "JSONL append-only",
+      "line_schema": {
+        "ts": "ISO8601Z",
+        "kind": "weekly_cdo",
+        "hub_ratio_bp": "int",
+        "phi_mean_u": "int",
+        "laws": "int",
+        "discovery_7d": "int",
+        "completed": "int",
+        "atlas_readonly": true
+      },
+      "rule": "atlas.n6 직접 쓰기 금지 — sidecar 경유만 (_guarded_append_atlas 아님, 별도 파일)"
+    }
+  },
+
+  "modes": {
+    "full": "하기 full pipeline (report write + sidecar append + summary stdout) — default",
+    "dry":  "집계 + stdout 요약만, 파일 쓰기 X",
+    "json": "집계 결과를 JSON 한 줄 stdout"
+  },
+
+  "invocation": {
+    "manual_local": "HEXA_LOCAL=1 hexa run shared/harness/cdo_weekly.hexa",
+    "manual_remote_ok": "hexa run shared/harness/cdo_weekly.hexa (remote wrapper 경유 가능)",
+    "dry": "HEXA_LOCAL=1 hexa run shared/harness/cdo_weekly.hexa dry",
+    "json": "HEXA_LOCAL=1 hexa run shared/harness/cdo_weekly.hexa json"
+  },
+
+  "automation": {
+    "status": "spec-only (plist 자동화는 별도 PR)",
+    "target_plist_path": "shared/launchd/com.nexus.cdo-weekly.plist",
+    "cadence": "weekly (매주 월요일 00:30 UTC)",
+    "launchd_schema": {
+      "Label": "com.nexus.cdo-weekly",
+      "ProgramArguments": ["$NEXUS/shared/bin/hexa", "run", "$NEXUS/shared/harness/cdo_weekly.hexa", "full"],
+      "StartCalendarInterval": {"Weekday": 1, "Hour": 0, "Minute": 30},
+      "EnvironmentVariables": {"HEXA_LOCAL": "1", "HEXA_NO_LAUNCHD": "1", "SAFE_HEXA_MODE": "warn"},
+      "StandardOutPath": "$NEXUS/shared/logs/cdo-weekly.stdout.log",
+      "StandardErrorPath": "$NEXUS/shared/logs/cdo-weekly.stderr.log",
+      "RunAtLoad": false
+    },
+    "cron_alt": "30 0 * * 1 $NEXUS/shared/bin/hexa run $NEXUS/shared/harness/cdo_weekly.hexa full"
+  },
+
+  "invariants": {
+    "atlas_writeback": "금지 — atlas.n6 쓰기 X, sidecar 만",
+    "prose_docs": "금지 — 산문 md/txt 생성 X, JSON SSOT 만",
+    "bak_files": "금지 — git history 가 유일 버전관리",
+    "version_suffix": "금지 — _v2/_new/_copy 등",
+    "language": "hexa-lang only — py/sh/rs 금지 (engine 본체)"
+  },
+
+  "delta_semantics": {
+    "description": "delta 필드는 이전 주 report 대비. 첫 실행 (prev_report 비어있음) 시 현재값 그대로 emit.",
+    "prev_report_selection": "shared/reports/cdo_weekly_*.json 중 today 제외 최신 (ls -1 | sort -r | head)"
+  },
+
+  "verification": {
+    "steps": [
+      "1. hexa run shared/harness/cdo_weekly.hexa dry — stdout 요약 확인",
+      "2. hexa run shared/harness/cdo_weekly.hexa full — 파일 생성 확인",
+      "3. jq . shared/reports/cdo_weekly_<YMD>.json — schema 유효",
+      "4. tail -n1 shared/n6/atlas.n6.cdo_weekly — sidecar 라인 유효",
+      "5. 다음 주 실행 시 delta_* 필드 비제로 기대"
+    ]
+  }
+}
