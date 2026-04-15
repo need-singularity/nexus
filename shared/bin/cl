@@ -93,17 +93,20 @@ bar_to() {
     printf -v "$__var" '%s%s' "${hashes:0:filled}" "${dots:0:$((20-filled))}"
 }
 
-# usage-cache 에서 가용량(=100 - max(wk, ss)) 최대 계정 선택.
+# usage-cache 에서 가용량(=100 - max(wk, ss)) 기준 후보군 뽑고 random 픽.
 # 병목 모델: wk / ss 중 큰 값이 병목 → 100-병목이 실가용량.
 #   예) wk 22% / ss 98% → 병목 98%, 가용 2% → 추천 제외.
-#       wk 39% / ss 8%  → 병목 39%, 가용 61% → 1순위.
-# 동률: -avail desc → wk asc → ss asc (둘 다 작은 쪽 우선).
-# 컷오프: 가용 > 5% (= 병목 < 95%). 미달이면 empty.
+#       wk 39% / ss 8%  → 병목 39%, 가용 61% → 후보군.
+# 후보군: avail >= top_avail - SPREAD (기본 10%). 동시 세션 분산 목적.
+# 컷오프: 가용 > 5% (= 병목 < 95%). 후보군 없으면 empty.
 # 정직성 게이트: wk_resets / session_resets 과거면 해당 pct 0 으로 override (stale cache 방어).
+# CL_PICK_SPREAD: 후보군 폭(%) 조정 (기본 10). 0 이면 기존 동작(top 1 고정).
 auto_pick() {
     [ -f "$USAGE" ] || { echo "" ; return; }
-    local now; now=$(date -u +%s)
-    jq -r --argjson now "$now" '
+    local now spread cands n idx
+    now=$(date -u +%s)
+    spread="${CL_PICK_SPREAD:-10}"
+    cands=$(jq -r --argjson now "$now" --argjson spread "$spread" '
         def parse_ts:
           if . == null or . == "" then null
           else
@@ -124,8 +127,22 @@ auto_pick() {
             | {name:.key, avail:$avail, wk:$wk, ss:$ss}
             | select(.avail > 5)]
         | sort_by(-.avail, .wk, .ss)
-        | .[0].name // empty
-    ' "$USAGE" 2>/dev/null
+        | if length == 0 then empty
+          else
+            (.[0].avail - $spread) as $cutoff
+            | [.[] | select(.avail >= $cutoff)]
+            | .[].name
+          end
+    ' "$USAGE" 2>/dev/null)
+    [ -z "$cands" ] && return
+    n=$(printf '%s\n' "$cands" | wc -l | tr -d ' ')
+    if [ "$n" -le 1 ]; then
+        printf '%s' "$cands"
+    else
+        # $RANDOM: 0~32767. 동시 세션마다 PID 다르므로 자연 분산.
+        idx=$(( RANDOM % n + 1 ))
+        printf '%s\n' "$cands" | sed -n "${idx}p"
+    fi
 }
 
 # 글로벌 데이터 캐시. 인터랙티브 루프 전 1회 로드 → 프레임 빌드 시 jq 호출 0.
