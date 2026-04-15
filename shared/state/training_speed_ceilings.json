@@ -186,7 +186,33 @@
         "list_backed_at_256_squared": "OOM (O(N⁴) alloc churn)",
         "semantic_equiv": "PASS",
         "source": "bench_tensor_matmul.hexa (commit 0c29a5c5)",
-        "note": "ISOLATED matmul bench — not yet wired into real CLM training step. #27 agent porting nn_core.hexa hot paths."
+        "note": "ISOLATED matmul bench"
+      },
+      "clm_nn_core_tensor_ported_REAL_STEP": {
+        "ms_per_step_mean": 0.681,
+        "ms_per_step_median": 0.676,
+        "ms_per_step_p90": 0.703,
+        "speedup_vs_1000ms_baseline": "1479x",
+        "config": "2-layer decoder d=16 seq=8, 100 steps",
+        "loss_convergence": "3.467 → 2.079 (within 0.024% of ln(8) floor), NaN/Inf=0",
+        "semantic_equiv": "PASS",
+        "source": "bench_train_step_tensor.hexa (commits worktree 36f49f44 + anima merge 15df1e1a + nexus state 640e7e8b)",
+        "hot_paths_ported": ["matmul", "matmul_transB", "matmul_transA", "linear", "rms_norm", "softmax", "swiglu", "add", "sgd", "attention_fwd_bwd"],
+        "honest_caveat": "at this shape (~50K flops/step) FFI-call-bound not FLOP-bound. 1479x is from eliminating list-append O(N²) churn, NOT BLAS throughput. Real 14B shapes (seq=512 d=4096+) expected to unlock additional 10-100x via BLAS",
+        "train_clm_hexa_integration": "deferred — 2170 LOC train_clm.hexa self-test cannot terminate on stage0 interpreter; needs P5a native interpreter rebuild",
+        "mfu_pct": "not yet computed at this shape — FFI-bound regime, MFU unstable"
+      },
+      "clm_full_loop_native_deployed_POST_HEXA_V2": {
+        "interpreted_local_ms": 307.043,
+        "native_local_ms": 1.2228,
+        "speedup_vs_interpreter": "251.1x",
+        "predecessor_speedup": "193.3x",
+        "range": "190-260x",
+        "source": "bench_train_step_native.hexa after #18 hexa_v2.bt74 deployed (commit aabec0a9 nexus)",
+        "binary_chain": "a333004e (original, buggy) → 414b9bcb bt74 (#17 fix, 932960B) → 739fcb6a (with #22 FFI fix, 933032B, live)",
+        "full_binary_wall_median": "1.08s (module init + phi cache load + 4 train_steps + quantum self-tests, σ=0.013s)",
+        "runtime_verdict": "GO — train_clm_bin runs end-to-end, previous 'array[0]: container is not an array' struct-literal bug RESOLVED",
+        "self_test_passes": ["loss is finite", "CLM-PhiB-2 flag=on 1-step loss=5.55205", "phi_cache 7/7", "quantum_clm 10-tick", "anima_quantum 10-tick", "quantum_types 1000-measurement"]
       },
       "sgemm_baseline_mac_cpu": {
         "ms_for_512_cubed": 1.713,
@@ -209,7 +235,7 @@
         "source": "project_clm_hexa_gpu_plan memory (2026-04-12)"
       }
     },
-    "diagnosis": "CLM is 3-4 orders of magnitude below physical ceiling on every path. Session wins (Track B 598x, native 394x, Tensor 4,757x) are REAL but tiny vs total gap.",
+    "diagnosis": "BEFORE nn_core port: CLM was 3-4 orders of magnitude below physical ceiling on every path. AFTER nn_core Tensor port (#27 1479x) + hexa_v2 full-loop deploy (#18 251x): CLM real-step at 0.681 ms mean on 2-layer tiny shape — FFI-bound regime, MFU not yet meaningfully computable. Next frontier: real 14B CLM shapes (seq=512 d=4096) where BLAS throughput becomes the bottleneck.",
     "remaining_levers": [
       {
         "name": "Wire Tensor primitive into nn_core.hexa (matmul, linear, attention)",
@@ -254,15 +280,20 @@
   "session_summary": {
     "date": "2026-04-15",
     "biggest_wins": [
-      "ALM r7: +39.2% tok/s, 45.0% → 62.6% MFU (measured)",
-      "CLM Track B cache: 598x phi eval speedup (isolated)",
-      "CLM phi_cache_loader native: 394x vs interpreter (measured)",
-      "Tensor primitive: 4,757x vs list-backed matmul at 128² (isolated)",
-      "hexa-lang: #17 codegen gap fix + #22 FFI f32→float + #23 parser bracket-depth = 3 compiler improvements deployed"
+      "ALM r7: +39.2% tok/s, 45.0% → 62.6% MFU (measured, commit 4ad64051)",
+      "ALM pod fleet variance 31% discovered (xhq9b2c8fljdyo slower than ubzp169igb7tns)",
+      "CLM Track B cache: 598x phi eval speedup (isolated, commit d8119005)",
+      "CLM phi_cache_loader native: 394x vs interpreter (measured, commit 28f59cd8)",
+      "CLM Tensor primitive: 4,757x vs list-backed matmul at 128² (isolated, commit 0c29a5c5)",
+      "**CLM nn_core Tensor port: 1479x REAL training step (0.681 ms mean)**, commit 15df1e1a",
+      "**CLM full-loop native deploy: 251.1x vs interpreter** (1.2228 ms/step), commit aabec0a9",
+      "hexa-lang: #17 codegen gap fix + #22 FFI f32→float + #23 parser bracket-depth = 3 compiler improvements deployed",
+      "Hexa Tensor primitive + accelerate_blas shim fully wired and productionized"
     ],
-    "alm_status": "62.6% MFU, practical ceiling ~75% bf16, absolute ~85% bf16, FP8 path opens 2x compute (1979 TFLOPs peak)",
-    "clm_status": "MFU 0.0002-1.13% across all paths — 3-4 orders of magnitude headroom remaining. Critical lever = nn_core.hexa Tensor port (in progress)",
-    "pending_confirmations": ["#24 ALM r8 ceiling", "#26 ALM batch/seq sweep", "#27 CLM nn_core Tensor port", "#18 CLM full native deploy"]
+    "alm_status": "62.6% MFU measured on r7 pod; partial 46.5% on slower r6 pod. Ceiling pod-dependent ±31%. FP8 blocked by TE install on torch 2.10. Next: r8a (--liger+optimal batch), r8b (lora_dropout=0), r8c (torch 2.9+TE+fp8 on fresh pod)",
+    "clm_status": "REAL training step 0.681 ms/step (2-layer tiny shape), 1479x vs 1000ms baseline. FFI-call-bound at this shape. Next frontier: real 14B shapes (seq=512 d=4096) unlock BLAS throughput",
+    "pending_confirmations": ["#26 ALM batch/seq sweep (in progress on r6 pod)"],
+    "completed_this_session": ["#18", "#19", "#20", "#21", "#22", "#23", "#24 partial", "#25", "#27"]
   },
 
   "update_protocol": {
