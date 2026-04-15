@@ -1,0 +1,140 @@
+{
+  "_meta": {
+    "name": "anima algorithm convergence — SSOT",
+    "description": "모든 anima 알고리즘 작업(훈련/추론/속도/정확도/수치기법)의 단일 진실 레지스트리. 새 세션 진입 시 첫 참조. in_flight/completed/failed/ossified 라이프사이클 추적. 세부 측정치는 state/training_speed_ceilings.json 참조.",
+    "canonical_path": "shared/convergence/anima.json",
+    "scope": "algorithms only — UI/인프라/데이터 파이프는 제외",
+    "primary_entry_point": true,
+    "session_bootstrap": "새 세션 시작 시 이 파일부터 읽어 in_flight/next_levers 파악. 그 다음 training_speed_ceilings.json으로 상세 수치 확인.",
+    "schema_version": "1.0",
+    "updated": "2026-04-16",
+    "maintainers": "Claude Code + user",
+    "refs": {
+      "convergence_ops": "shared/config/convergence_ops.json",
+      "ceilings_detail": "shared/state/training_speed_ceilings.json",
+      "roadmap": "shared/roadmaps/anima.json",
+      "rules": "shared/rules/anima.json"
+    }
+  },
+
+  "principles": {
+    "P1": "모든 알고리즘 문제는 한 번만 겪는다 (재발=규칙화 누락)",
+    "P2": "해결된 알고리즘은 ossified 로 승격, 테스트 잠금",
+    "P3": "측정되지 않은 성능 주장 금지 — MFU/step_time/ms 수치 필수",
+    "P4": "물리 천장 기준 갭 % 명시 — 상대 speedup 단독 금지",
+    "P5": "실패(FAIL)도 등록 — 같은 실패 반복 방지"
+  },
+
+  "lifecycle_states": {
+    "in_flight": "현재 진행 — 에이전트 또는 사용자가 작업 중",
+    "completed": "측정·머지 완료, 재현 가능",
+    "failed": "시도 후 포기 — reason 필수",
+    "ossified": "규칙화 완료 (rules/*.json 에 R-코드로 승격)",
+    "blocked": "외부 의존 대기 (pod/upstream)"
+  },
+
+  "tracks": {
+    "ALM_14B_H100": {
+      "description": "Qwen2.5-14B LoRA fine-tune on H100 — bf16/FP8 MFU 천장 push",
+      "hardware_ceiling_mfu_pct": 85,
+      "hardware_tflops_peak_bf16": 989,
+      "items": {
+        "r5_baseline": {"state": "completed", "mfu_pct": 45.0, "spm": 36.7, "date": "2026-04-15", "pod": "slow"},
+        "r6_7patch": {"state": "completed", "mfu_pct": 46.3, "spm": 37.8, "delta_pp": 1.3, "date": "2026-04-15", "note": "audit miscal → 실질 r5 동등"},
+        "r7_unsloth": {"state": "completed", "mfu_pct": 62.6, "spm": 51.1, "date": "2026-04-15", "pod": "fast (ubzp169igb7tns)", "note": "현 best 측정치"},
+        "r8a_stacked_slow": {"state": "completed", "mfu_pct": 48.1, "spm": 41.5, "date": "2026-04-15", "pod": "slow", "config": "liger + lora_dropout=0 + compile_unblock", "fast_pod_est_mfu_pct_original": "68-69 (FALSIFIED — 아래 CL-05 참조)"},
+        "r8a_stacked_fast_measurement": {"state": "completed", "task_id": 2, "pod": "jmejpw0x7j6wbx (fast)", "date": "2026-04-16", "commit": "54d96b5b", "mfu_pct": 51.4, "spm": 41.9, "tokens_per_sec": 5720.7, "delta_vs_slow_pp": 3.3, "delta_vs_r7_pp": -11.2, "gpu_sm_util_pct": 95.5, "tdp_util_pct": 93.4, "verdict": "compute-bound confirmed — 51.4% IS physical ceiling of this silicon under r8a stack", "cost": "$1.20, ~24min"},
+        "r8b_dropout0": {"state": "completed", "note": "r8a에 흡수"},
+        "r8c_fp8": {"state": "failed", "date": "2026-04-16", "commit": "22aa6892", "mfu_bf16eq_pct": 33.8, "reason": "te.Linear global monkey-patch가 from_pretrained BEFORE 적용되어 모든 48 layers random init. HF+LoRA+TE FP8 근본 비호환.", "fix_path_if_attempted": "accelerate.Accelerator(fp8_recipe_handler=...) or NeMo/Megatron native rewrite — P4 스코프 외"}
+      },
+      "open_levers": [
+        "silicon binning 변이 >11pp — pod 선택이 MFU 단일 최대 레버. 미래 측정은 pod_id + 동시 r7 baseline 측정으로만 비교",
+        "r8a stack vs r7 stack 재비교 — r8a가 r7 대비 회귀한 경우 r7 config로 롤백 고려",
+        "Multi-GPU NVLink DDP (추가 스케일, 효율 보존 조건부)",
+        "Qwen2 MLP bias term custom kernel (48 layers) — speculative"
+      ]
+    },
+
+    "CLM_hexa_native": {
+      "description": "ConsciousLM hexa-native (Mac M3 CPU + H100 GPU native compile) — interpreter bypass",
+      "hardware_ceiling_mac_gf": 140,
+      "hardware_peak_mac_gf": 156.7,
+      "hardware_ceiling_h100_tflops_bf16": 989,
+      "items": {
+        "track_b_cache": {"state": "completed", "speedup": "598x", "mode": "interpreted", "date": "2026-04-15"},
+        "phi_loader_native": {"state": "completed", "speedup": "394x", "mode": "native", "date": "2026-04-15"},
+        "tensor_primitive": {"state": "completed", "speedup": "4757x", "scope": "isolated matmul 512³", "date": "2026-04-15", "ceiling_pct_of_peak": "정측 필요"},
+        "nn_core_tiny_port": {"state": "completed", "speedup": "1479x", "commit": "36f49f44", "shape": "d=16 seq=8", "regime": "FFI-bound", "ms_per_step": 0.681},
+        "real_shape_sweep": {"state": "completed", "commit": "5e8d922c", "shapes_tested": 18, "best_mfu_pct": 1.65, "best_shape": "d=768 ff=3072 nl=2 seq=16", "best_params_m": 14.4, "best_gf": 2.59, "verdict": "GAP — 어떤 shape도 BLAS-bound regime(30 GF/s) 미달", "gap_to_80pct_ceiling": "60.6x"},
+        "attn_fwd_bwd_full_tensor_port": {"state": "in_flight", "task_id": 3, "date_started": "2026-04-16", "target": "attn_fwd_t Q@K^T + probs@V, attn_bwd_t dV/dprobs/dQ/dK 모두 BLAS. dS scalar O(S²)만 잔류. 예상 uplift 10-50x @ seq≥32", "file": "training/bench_train_step_tensor_sweep.hexa"},
+        "vdsp_eltwise_vectorize": {"state": "pending", "target": "rms_norm/softmax/swiglu → vDSP/Accelerate vector intrinsics, 5-20x 예상"},
+        "hexa_codegen_native_int": {"state": "pending", "target": "hexa codegen에서 index 표현식을 boxed int → native int64로. 모든 inner loop 누적"},
+        "stage0_oom_pbv_fix": {"state": "pending", "target": "pass-by-value 복제로 인한 OOM, 긴 학습 런 언블록"},
+        "cuda_codegen_compose_spike": {"state": "completed", "commit": "e74fa189+9af9e35", "date": "2026-04-16", "verdict": "PASS", "artifacts": ["~/Dev/hexa-lang/self/native/hexa_v2 (990072b, md5 16d69b27...)", "cuda_ffi/cuda_rtc/cuda_kernels/gpu_train 4307 LOC"], "patch": "codegen_c2.hexa:1668 tensor_from_f32_ptr 2-arg form 7-line if-guard"},
+        "h100_cuda_native_deploy": {"state": "completed_gap", "task_id": 1, "pod": "xhq9b2c8fljdyo", "date": "2026-04-16", "commit": "24784fcd", "verdict": "PARTIAL — 80% 파이프라인 작동, cuLaunchKernelEx INVALID_VALUE=1 on all 112 launches", "artifacts": ["training/deploy/h100_clm_native_result.md", "training/deploy/h100_clm_native_run.log", "training/deploy/h100_clm_native_dmon.log"], "pipeline_stages_passed": ["hexa_v2_linux rebuild from C", "train_clm_native binary (817KB)", "cuda_init", "cuBLAS handle", "NVRTC PTX compile (49KB, 20 kernels)", "rtc_get_function (20 entry points)", "init_gpu_weights alloc (3GB)"], "blocker": "cuda_rtc.hexa:448 rtc_launch_shmem — args_array[i] ptr_addr extraction OR CUlaunchConfig byte layout mismatch vs CUDA 12.4 cuda.h", "codegen_side_fixes_required": ["main early returns: return hexa_void() → return 1", "trailing-expression return: expr; return hexa_void() → return expr"], "next_step": "cuda_rtc.hexa:448 디버그 — arg marshaling bytes 정밀 검사. pod 보존됨 (/workspace/cuda_native/)", "cost_spent": "$1.25, ~25min", "briefing_error": "Mac Mach-O hexa_v2 (md5 bdf61837) cannot run on Linux — pod 에서 C sources 로 rebuild 필요했음"}
+      },
+      "open_levers": [
+        "attn 완전 BLAS 포팅 (60x 갭 main blocker, in_flight #3)",
+        "vDSP eltwise (rms/softmax/swiglu)",
+        "hexa native int codegen (inner loop)",
+        "CUDA native deploy (in_flight #1, 1-2 order 단축 기대)"
+      ]
+    },
+
+    "Hexa_codegen": {
+      "description": "hexa-lang 자체 호스팅 컴파일러/런타임 — CPU/CUDA 양 경로",
+      "items": {
+        "cuda_rtc_compose": {"state": "completed", "part_of": "CLM_hexa_native.cuda_codegen_compose_spike", "date": "2026-04-16"},
+        "tensor_raw_f32_primitive": {"state": "completed", "commit": "0c29a5c5", "isolated_speedup": "4757x"},
+        "blas_sgemm_wrapper": {"state": "completed", "artifact": "training/hxblas_wrapper.c + libhxblas.dylib"},
+        "native_int_arith": {"state": "pending", "xref": "CLM_hexa_native.hexa_codegen_native_int", "note": "boxed int 탈출이 hot loop 공통 이득"}
+      }
+    }
+  },
+
+  "physical_ceilings_confirmed": {
+    "ALM_H100_bf16_hardware": {"mfu_pct": 85, "tflops": 841, "basis": "Roofline (~10-15pp irreducible) + NVIDIA NeMo SOTA", "status": "verified theoretical"},
+    "ALM_H100_bf16_realized_per_silicon": {"best_measured_mfu_pct": 62.6, "best_pod": "ubzp169igb7tns (TERMINATED, r7 stack)", "current_fast_pod_mfu_pct": 51.4, "current_fast_pod_id": "jmejpw0x7j6wbx (r8a stack)", "silicon_variance_pp": 11.2, "note": "silicon binning + thermal 변이로 동일 H100 SXM 80GB 간 MFU 최대 11pp. pod_id 태깅 없이는 비교 불가."},
+    "ALM_H100_fp8": {"tflops_theoretical": 1682, "status": "unreachable via HF path, NeMo rewrite 필요"},
+    "CLM_Mac_M3_cpu": {"gflops": 140, "pct_of_measured_peak": 89, "measured_peak_gf": 156.7, "basis": "Accelerate sgemm 512³ + irreducible 5-10pp", "status": "verified, 도달은 attn 완전 포팅 후"},
+    "CLM_H100_native": {"tflops": 841, "basis": "ALM H100 bf16 동일", "status": "pending cuda native 측정"}
+  },
+
+  "breakthrough_triggers": {
+    "description": "🎆🎇🧨 조건 — 달성 시 해당 트랙 ossified",
+    "ALM_bf16": "MFU >= 80% on confirmed fast pod",
+    "CLM_Mac_CPU": "GF/s >= 125 (= 80% × 156.7) on any shape",
+    "CLM_H100_native": "MFU >= 50% (interpreter bypass + cuda kernel launching)"
+  },
+
+  "cross_refs": {
+    "measurements_detail": "shared/state/training_speed_ceilings.json",
+    "clm_gpu_roadmap": "shared/config/roadmaps/clm_hexa_gpu.json",
+    "training_entry": "training/CLAUDE.md",
+    "pod_registry": "runpodctl pod list (2 active: jmejpw0x7j6wbx fast, xhq9b2c8fljdyo holo)",
+    "hexa_compiler": "~/Dev/hexa-lang/self/",
+    "recent_commits": ["8337d091 CLM real-shape sweep merge", "5e8d922c sweep data", "15df1e1a nn_core Tensor port merge", "36f49f44 nn_core port", "0c29a5c5 Tensor primitive"]
+  },
+
+  "troubleshooting_log": [
+    {"id": "AL-01", "date": "2026-04-16", "severity": "high", "title": "HF + LoRA + TE FP8 비호환", "symptom": "r8c FP8 run loss=15.25 (random init), MFU 16.9% < 40% target", "fix": "te.Linear monkey-patch 방식 포기. NeMo/Megatron native rewrite 또는 accelerate.Accelerator(fp8_recipe_handler) 필요. P4 스코프 외로 파킹.", "rule": "ALM track FP8 FAIL-closed"},
+    {"id": "CL-01", "date": "2026-04-16", "severity": "high", "title": "Tensor port 부분적 — attn inner 스칼라 잔존", "symptom": "#27 보고 'attention fwd+bwd ported' 이지만 outer matmul만 t_matmul, inner softmax/mask/eltwise는 hexa boxed-int. 실제 sweep 결과 1.65% MFU ceiling", "fix": "attn_fwd_t/attn_bwd_t의 Q@K^T/probs@V/dprobs/dV/dQ/dK 모두 BLAS로 교체 (in_flight #3)", "rule": "P3 — 측정 없는 성능 주장 금지"},
+    {"id": "CL-02", "date": "2026-04-16", "severity": "high", "title": "CUDA native deploy briefing error — Mac hexa_v2 바이너리 cross-platform 불가", "symptom": "deploy 초기 pod에서 Mac Mach-O arm64 hexa_v2 실행 불가, 추가 시간 소요", "fix": "pod 에 hexa-lang C sources 동기화 후 linux 빌드 필수. 다음 deploy briefing 부터 platform mismatch 검사 선행", "rule": "deploy 사전 조건에 platform 매칭 체크 추가"},
+    {"id": "CL-03", "date": "2026-04-16", "severity": "high", "title": "cuLaunchKernelEx INVALID_VALUE — 커널 arg marshaling 실패", "symptom": "20 NVRTC 커널 로드 성공, rtc_launch_shmem 에서 112/112 launch 실패 (CUDA_ERROR_INVALID_VALUE=1)", "fix": "cuda_rtc.hexa:448 rtc_launch_shmem 의 args_array[i] ptr_addr 추출 방식 또는 CUlaunchConfig struct byte layout 을 CUDA 12.4 cuda.h 기준으로 재검증 필요. pod 보존됨.", "rule": "pending — 해결 후 P2 승격 예정"},
+    {"id": "CL-04", "date": "2026-04-16", "severity": "medium", "title": "hexa codegen main early-return + trailing-expression quirks", "symptom": "emitted C: (1) main early returns wrote `return hexa_void()` 대신 `return 1` 필요, (2) 함수 본문 마지막 식이 `expr; return hexa_void();` 로 emit (정상은 `return expr;`)", "fix": "runtime sed/regex 패치로 우회. 근본 수정은 codegen_c2.hexa 에서 main/return 처리 로직 점검", "rule": "pending — codegen 다음 사이클에 fix"},
+    {"id": "CL-05", "date": "2026-04-16", "severity": "high", "title": "ALM r8a 'fast pod 68-69% 추정' 가정 falsified", "symptom": "r8a slow 48.1% × (r7 fast 62.6% / r5 slow 45%) = ~66% 추정이었으나 실측 51.4%. 기존 anima.json 'fast_pod_est_mfu_pct 68-69' 허위.", "fix": "physical_ceilings_confirmed 를 silicon-per-pod 단위로 재구성. 앞으로 MFU 측정은 pod_id + stack_config 동시 태깅 필수. 추정 대신 실측.", "rule": "P3 강화 — 같은 SKU H100 pod 간도 silicon binning 으로 MFU 최대 11pp 변이. extrapolation 금지."}
+  ],
+
+  "convergence": {
+    "total_items_tracked": 20,
+    "completed": 10,
+    "completed_gap": 1,
+    "in_flight": 2,
+    "pending": 4,
+    "failed": 1,
+    "blocked": 0,
+    "ossified": 0,
+    "resolution_pct": 55.0,
+    "note": "ossified 승격 기준은 breakthrough_trigger 달성 + 테스트 잠금. completed_gap 은 부분 성공 (파이프라인 작동 but 천장 도달 실패)."
+  }
+}
