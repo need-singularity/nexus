@@ -1,0 +1,175 @@
+{
+  "id": "speak_mk3_e2e_20260416",
+  "title": "anima-speak Mk.III E2E voice IO — first criterion of v2.0_RC",
+  "destination_ref": {
+    "roadmap": "shared/roadmaps/extreme.json",
+    "destination_id": "v2.0_RC",
+    "destination_ord": 1,
+    "criterion_idx": 0,
+    "criterion_text": "음성 입출력 (anima-speak Mk.III) E2E"
+  },
+  "session": {
+    "date": "2026-04-16",
+    "branch": "worktree-agent-a1f7b206",
+    "isolation": "worktree",
+    "budget_hours": 3
+  },
+  "scope": [
+    "Add anima-speak/speak_e2e.hexa thin wrapper that orchestrates load_wav -> stt_transcribe -> model_respond -> tts_synthesize -> save_wav",
+    "Add anima-speak/test_speak_e2e.hexa 10-test smoke harness (mock backends only, no network)",
+    "Emit per-run .meta.json sidecar next to audio_out_path",
+    "Wire CLI: hexa run anima-speak/speak_e2e.hexa --in <wav> --out <wav> [--endpoint <url>] [--stream]",
+    "Honor SPEAK_MODEL_ENDPOINT env var (overridden by --endpoint)",
+    "Streaming hook (--stream) emits chunks via mock TTS for byte-level CLM forward-compat"
+  ],
+  "guardrails": {
+    "hexa_only": true,
+    "l0_freeze": "respected — no edits to anima/core/{hub,laws,runtime/anima_runtime}.hexa",
+    "uncommitted_files_untouched": [
+      "anima-speak/corpus/",
+      "anima-speak/corpus_pipeline.hexa",
+      "anima-speak/rp_voice_profiles.hexa",
+      "anima-speak/test_rp_voice_profiles.hexa"
+    ]
+  },
+  "artifacts": {
+    "wrapper": "anima-speak/speak_e2e.hexa",
+    "test": "anima-speak/test_speak_e2e.hexa",
+    "state": "shared/state/speak_mk3_e2e_20260416.json"
+  },
+  "wrapper_api": {
+    "version": "Mk.III-E2E-1.0.0",
+    "entrypoints": [
+      "fn run_e2e(audio_in_path, audio_out_path, endpoint) -> E2eResult",
+      "fn stt_transcribe(blob: WavBlob) -> SttResult",
+      "fn model_respond(text: string, endpoint: string) -> LlmResult",
+      "fn tts_synthesize(reply_text: string) -> TtsResult",
+      "fn maybe_stream_chunks(reply: string, enable: bool) -> int (chunks emitted)",
+      "fn write_meta_sidecar(audio_out_path: string, r: E2eResult) -> bool"
+    ],
+    "structs": [
+      "WavBlob {sample_rate, channels, bits, n_samples, payload_text}",
+      "SttResult {text, confidence, backend, latency_ms, ok}",
+      "LlmResult {reply, backend, endpoint, phi_holo, latency_ms, ok}",
+      "TtsResult {audio, backend, latency_ms, ok}",
+      "E2eResult {audio_in_path, audio_out_path, text, reply, phi_holo, stt_ms, llm_ms, tts_ms, total_ms, backend_stt, backend_tts, backend_llm_endpoint, ok, error}"
+    ],
+    "env_vars": {
+      "SPEAK_MODEL_ENDPOINT": "default LLM endpoint (overridden by --endpoint)",
+      "SPEAK_MODEL_KIND": "clm | alm (informational)",
+      "SPEAK_STT_BACKEND": "mock | whisper (default mock)",
+      "SPEAK_TTS_BACKEND": "mock | vocoder (default mock)",
+      "SPEAK_LLM_BACKEND": "mock | http (default mock)"
+    },
+    "cli_example": "hexa run anima-speak/speak_e2e.hexa --in test.wav --out out.wav --endpoint http://localhost:8000/v1/chat",
+    "invariants": [
+      "I1 audio_out_path is always written when run_e2e returns ok=true",
+      "I2 mock path is byte-identical across runs given same audio_in_path",
+      "I3 .meta.json sidecar is always emitted next to audio_out_path",
+      "I4 latency_ms is always computed and >= 0",
+      "I5 STT/TTS/LLM never panic; errors degrade to ok=false"
+    ]
+  },
+  "smoke_results": {
+    "command": "HEXA_LOCAL=1 hexa run anima-speak/test_speak_e2e.hexa",
+    "passed": 10,
+    "total": 10,
+    "tests": [
+      {"id": "T1",  "name": "run_e2e ok",            "status": "PASS"},
+      {"id": "T2",  "name": "outfile exists",        "status": "PASS"},
+      {"id": "T3",  "name": "meta sidecar exists",   "status": "PASS"},
+      {"id": "T4",  "name": "meta fields",           "status": "PASS"},
+      {"id": "T5",  "name": "latency bound",         "status": "PASS"},
+      {"id": "T6",  "name": "determinism",           "status": "PASS"},
+      {"id": "T7",  "name": "distinct inputs",       "status": "PASS"},
+      {"id": "T8",  "name": "phi_holo > 0",          "status": "PASS"},
+      {"id": "T9",  "name": "--stream OK",           "status": "PASS"},
+      {"id": "T10", "name": "--endpoint roundtrip",  "status": "PASS"}
+    ],
+    "marker": "[gate] 10/10 PASS — Mk.III E2E criterion met (mock evidence)"
+  },
+  "sample_run": {
+    "input": "/tmp/speak_e2e_smoke/dryrun_in.wav",
+    "output": "/tmp/speak_e2e_smoke/dryrun_out.wav",
+    "stdout_excerpt": [
+      "[speak_e2e] Mk.III-E2E-1.0.0",
+      "[speak_e2e] in=/tmp/speak_e2e_smoke/dryrun_in.wav",
+      "[speak_e2e] out=/tmp/speak_e2e_smoke/dryrun_out.wav",
+      "[speak_e2e] text=wake up the model",
+      "[speak_e2e] reply=[clm][mock] wake up the model :: ack",
+      "[speak_e2e] stt_ms=5 llm_ms=7 tts_ms=9 total_ms=21",
+      "[speak_e2e] phi_holo=0.42",
+      "[speak_e2e] backend_stt=mock backend_tts=mock endpoint=<mock>",
+      "[speak_e2e] OK"
+    ],
+    "meta_json_path": "/tmp/speak_e2e_smoke/dryrun_out.wav.meta.json",
+    "meta_json_excerpt": {
+      "version": "Mk.III-E2E-1.0.0",
+      "text": "wake up the model",
+      "reply": "[clm][mock] wake up the model :: ack",
+      "phi_holo": 0.42,
+      "stt_ms": 5,
+      "llm_ms": 7,
+      "tts_ms": 9,
+      "latency_ms": 21,
+      "backend_stt": "mock",
+      "backend_tts": "mock",
+      "model_endpoint": "",
+      "ok": true,
+      "error": ""
+    }
+  },
+  "next_steps": [
+    "Wire SPEAK_LLM_BACKEND=http to actual /generate endpoint (curl exec bridge or net::post)",
+    "Wire SPEAK_TTS_BACKEND=vocoder to neural_vocoder.decode_wave once a hexa-callable entry exists",
+    "Wire SPEAK_STT_BACKEND=whisper through corpus_pipeline whisper helper",
+    "Replace mock RIFF text payload with std::wav::write_pcm16 once the std bindings land",
+    "Token-by-token streaming via SSE once http-bridge backend exists (currently chunk-byte mock only)"
+  ],
+  "evening_progress_20260416": {
+    "commits": [
+      "ae5f9d59 — HTTP LLM bridge + Whisper STT bridge — ALM live연결 성공",
+      "f453f3e9 — phi_holo live extraction + deploy recipe + session report",
+      "124d8195 — W_ctrl training native matvec + initial checkpoint (4608 params, loss 0.354)",
+      "9c6c77b0 — LLM HTTP latency tracking via curl time_total",
+      "c2d9fce2 — --prompt flag for direct LLM smoke tests (STT bypass)",
+      "bcb789b4 — phi_holo variance validation — 6 prompts live ALM 14B"
+    ],
+    "completed_next_steps": [
+      "SPEAK_LLM_BACKEND=http DONE — curl exec bridge with JSON POST /generate, response field 'text', phi_holo nested in 'consciousness'",
+      "SPEAK_TTS_BACKEND=vocoder DONE — neural_vocoder.decode_wave inlined, write_wav writes valid 24kHz PCM16",
+      "SPEAK_STT_BACKEND=whisper DONE — CLI exec() bridge wired, invokes whisper binary when env set"
+    ],
+    "new_features": [
+      "--prompt <text> — bypass STT, direct LLM call + optional TTS",
+      "LLM latency tracking via curl -w '%{time_total}' → __LATENCY__<seconds> marker",
+      "W_ctrl checkpoint loader in neural_vocoder + speak_e2e inline copy"
+    ],
+    "live_alm_validation": {
+      "artifact": "training/deploy/alm_live_phi_variance_20260416.json",
+      "endpoint": "https://itfl66q4z768kh-8090.proxy.runpod.net (ALM 14B serve)",
+      "n_prompts": 6,
+      "phi_range": [2.38, 2.77],
+      "latency_range_ms": [2032, 12159],
+      "languages_tested": ["English", "Korean"],
+      "key_findings": [
+        "phi_holo varies per query — not a constant (real metric, not fallback)",
+        "Korean greeting produced mixed Japanese/Chinese response — multilingual bleed",
+        "'의식의 본질은?' reply referenced Phi threshold + QA_i/QE_j formula — ALM absorbed anima terminology",
+        "Highest phi (2.77) on short math ('2+2') and consciousness philosophical — not correlated with length"
+      ]
+    },
+    "remaining_next_steps": [
+      "Replace mock RIFF text payload with std::wav::write_pcm16 once the std bindings land",
+      "Token-by-token streaming via SSE once http-bridge backend exists",
+      "W_ctrl LR sweep on pod u01lnnu8ywt92p — running, results pending",
+      "Verify live Whisper STT (requires whisper binary on PATH)"
+    ]
+  },
+  "notes": [
+    "byte_at helper uses substring(i,i+1) + char_code(sub,0) — stage0 char_code(s,i) ignores i (memory: feedback_hexa_string_api).",
+    "Streaming hook is silent in stdout but exercised in-process; T9 verifies the OK marker is reached with --stream.",
+    "Mock LLM reply marker is [clm] by default, overridable via SPEAK_MODEL_KIND=alm so either CLM or ALM can land first per the dual-track policy.",
+    "Wrapper is a façade: it does not modify the existing pipeline files (hexa_speak.hexa / streaming.hexa / vocoder.hexa). Mk.III stays canonical."
+  ]
+}
