@@ -21,6 +21,9 @@ let MISTAKES_LOG = NEXUS_HARNESS + "/mistakes.jsonl"
 // 로드맵 이력: P6 200 → P7 100 → P8 50
 let LINT_MARKER_BUDGET: i64 = 50
 
+// stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
+fn _is_digit_cc(ch: string) -> bool { let c = char_code(ch, 0); return c >= 48 && c <= 57 }
+
 fn now_ts() {
     return exec("date +%s").trim()
 }
@@ -2135,10 +2138,10 @@ fn check_vp_m10(path: string) -> string {
             let bn_len = len(before)
             if bn_len > 0 {
                 let bc = before.substring(bn_len - 1, bn_len)
-                if bc >= "0" && bc <= "9" {
+                if _is_digit_cc(bc) {  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                     if len(after) > 0 {
                         let ac = after.substring(0, 1)
-                        if ac >= "0" && ac <= "9" { found = true }
+                        if _is_digit_cc(ac) { found = true }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                     }
                 }
             }
@@ -3047,7 +3050,7 @@ fn _grab_json_int(content: string, key: string) -> i64 {
     let mut end = pos
     while end < len(rest) {
         let ch = rest.substring(end, end + 1)
-        if ch == "-" || (ch >= "0" && ch <= "9") { end = end + 1 }
+        if ch == "-" || _is_digit_cc(ch) { end = end + 1 }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
         else { break }
     }
     if end == pos { return -1 }

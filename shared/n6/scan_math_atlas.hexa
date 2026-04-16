@@ -18,6 +18,9 @@ let GRADE_EMOJIS = ["⭐", "🟩", "🟧", "🟦", "🟨", "🟥", "🟪", "⚪"
 let REPO_NAMES = ["TECS-L", "SEDI", "anima", "golden-moe", "conscious-lm", "energy-efficiency"]
 let REPO_COLORS = ["#4A90D9", "#E67E22", "#2ECC71", "#F1C40F", "#9B59B6", "#1ABC9C"]
 
+// stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
+fn _is_upper_cc(ch: string) -> bool { let c = char_code(ch, 0); return c >= 65 && c <= 90 }
+
 // ═══ void-safe / helper ═══
 fn _str(x) -> string {
     let t = type_of(x)
@@ -248,7 +251,7 @@ fn extract_refs(text: string) -> [string] {
             // letters
             while j < n {
                 let c = text.substring(j, j + 1)
-                if c >= "A" && c <= "Z" { j = j + 1 }
+                if _is_upper_cc(c) { j = j + 1 }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                 else { j = 999999; }
             }
             if j >= 999999 {
@@ -256,7 +259,7 @@ fn extract_refs(text: string) -> [string] {
                 j = i + 2
                 while j < n {
                     let c = text.substring(j, j + 1)
-                    if c >= "A" && c <= "Z" { j = j + 1 }
+                    if _is_upper_cc(c) { j = j + 1 }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                     else { j = j; break }
                 }
             }
@@ -264,7 +267,7 @@ fn extract_refs(text: string) -> [string] {
                 let mut k = j + 1
                 while k < n {
                     let c = text.substring(k, k + 1)
-                    if c >= "0" && c <= "9" { k = k + 1 }
+                    if _is_digit(c) { k = k + 1 }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                     else { k = k; break }
                 }
                 if k > j + 1 {
@@ -307,8 +310,10 @@ fn extract_domain(hid: string) -> string {
     return rest.substring(0, dash)
 }
 
+// stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
 fn _is_digit(c: string) -> bool {
-    return c >= "0" && c <= "9"
+    let cc = char_code(c, 0)
+    return cc >= 48 && cc <= 57
 }
 
 // Best-effort H-XX-NNN extract from a title line (e.g. "# H-CX-042: ...")
@@ -320,7 +325,7 @@ fn find_h_code(line: string) -> string {
             let mut j = i + 2
             while j < n {
                 let c = line.substring(j, j + 1)
-                if (c >= "A" && c <= "Z") { j = j + 1 }
+                if _is_upper_cc(c) { j = j + 1 }  // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
                 else { j = j; break }
             }
             if j > i + 2 && j < n && line.substring(j, j + 1) == "-" {
