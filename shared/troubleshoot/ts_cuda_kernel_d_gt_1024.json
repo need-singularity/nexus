@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "id": "TS-20260416-CUDA-D-GT-1024",
+    "created": "2026-04-16",
+    "status": "FIX_IN_PROGRESS",
+    "severity": "CRITICAL",
+    "component": "cuda_kernels.hexa NVRTC kernels",
+    "summary": "CUDA kernels assume blockDim.x == D; D>1024 exceeds max threads/block"
+  },
+  "symptom": "cuLaunchKernelEx error 1 (CUDA_ERROR_INVALID_VALUE) with shmem=8192 at D=2048. All rms_norm, softmax, fused, ce_loss kernels fail. Training crashes at step 1.",
+  "root_cause": "Kernel source assumes 1 thread per element (threadIdx.x == element index). Launch wrappers pass D as blockDim.x. At D=2048, blockDim.x=2048 > CUDA max 1024 threads/block.",
+  "affected_kernels": [
+    "rms_norm_fwd (D as blockDim)",
+    "rms_norm_bwd (D as blockDim)",
+    "softmax_rows_fwd (C as blockDim, C=VOCAB=256 OK but C=D fails)",
+    "softmax_rows_bwd (C as blockDim)",
+    "ce_loss_grad (C as blockDim)",
+    "fused_pre_attn_fwd/bwd (D as blockDim)",
+    "fused_mid_ffn_fwd/bwd (D as blockDim)",
+    "fused_attn_post_fwd/bwd (C as blockDim)"
+  ],
+  "fix": {
+    "launch_wrappers": "Cap blockDim at min(D, 1024): (D.i>1024?hexa_int(1024):D)",
+    "kernel_source": "Replace threadIdx.x direct indexing with stride loop: for(int i=tid; i<D; i+=blockDim.x)",
+    "shared_memory": "shmem = blockDim.x * sizeof(float), NOT D * sizeof(float) — blockDim.x suffices for reduction"
+  },
+  "fix_commits": ["79f5c33b (rms_norm_fwd + softmax_fwd + 11 launch caps)"],
+  "remaining": "rms_norm_bwd, softmax_bwd, ce_loss_grad, 6 fused kernels — agent fixing",
+  "verified_at_d512": "20-step PASS (0.21 s/step, loss 5.54→5.54)",
+  "d2048_status": "launch error fixed, kernel correctness TBD after stride loop complete"
+}
