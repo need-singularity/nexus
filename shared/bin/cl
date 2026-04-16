@@ -338,7 +338,7 @@ read_key() {
     CL_KEY="$key"
 }
 
-# @convergence state=ossified id=MULTI_ACCOUNT_LAUNCH value="cl → 픽커 → exec claude --effort max" threshold="계정 10개+ 지원, 자연 정렬 (claude1..claude10)" ossified_at=2026-04-13 ref_commit=bbb35a10
+# @convergence state=ossified id=MULTI_ACCOUNT_LAUNCH value="cl → 픽커 → exec claude" threshold="계정 10개+ 지원, 자연 정렬 (claude1..claude10)" ossified_at=2026-04-13 ref_commit=bbb35a10
 # @convergence state=ossified id=ACTIVE_FIRST_CURSOR value="active 가 <95% + error 없으면 커서/폴백 키 모두 거기, 아니면 auto_pick(=*)" threshold="캐시 stale 시 활성 계정 유지로 오인 전환 방지 — 커서 배치 + '그 외 키' fallback 동시 적용" ossified_at=2026-04-13 ref_commit=f852b076 rationale="claude10 사고 — 캐시 week_all_pct=0 이나 실제 5h 세션 한도 hit. 스페이스 등 '그 외 키' 에서도 auto 로 빠지던 잔여 경로 차단"
 # @convergence state=stable id=FOOTER_HINT value="moved=0 && _placed=0 && auto 다를 때만 '그 외 → auto 추천', 그 외엔 커서 확정 문구만" note="active 우선 시 추천 힌트 감춤 — 커서=active 인데 auto 가 다른 계정이면 오해 유발"
 # @convergence state=stable id=KEY_MAP value="arrows 이동, Enter 선택, 1-9/0 점프, q/ESC 취소, 그 외 → active 여유 시 커서 유지 / 아니면 auto" note="화살표 ESC[A/B/C/D + ESC O A/B/C/D 양식 모두 지원. 스페이스도 '그 외' 로 처리됨"
@@ -430,10 +430,9 @@ cmd_interactive() {
     local dir; dir=$(config_dir_for "$selected")
     printf '\n→ %s (%s)\n' "$selected" "$dir"
     export CLAUDE_CONFIG_DIR="$dir"
-    # @convergence state=ossified id=EFFORT_MAX_LAUNCH value="claude --effort max 로 exec" threshold="cl 경유 런칭은 항상 최대 effort" ossified_at=2026-04-13 ref_commit=a45b8507
     # @convergence state=evolving id=LIMIT_MARK_INTERACTIVE value="interactive exec 경로에서도 rate-limit 감지 — 현재는 exec 하므로 post-exec 감시 불가. 래퍼 스크립트 or claude 자체 hook 필요" priority=med note="passthrough 경로는 2026-04-13 1e3724ab 에서 해소. 남은 건 대화형 exec 후 실패 케이스"
     if command -v claude >/dev/null 2>&1; then
-        exec claude --effort max
+        exec claude
     else
         echo "WARN(cl): claude 바이너리 없음. env만 갱신" >&2
     fi
@@ -509,7 +508,7 @@ cmd_passthrough() {
     # one-shot passthrough — stderr 를 임시 파일로 캡처 후 사용자에게 그대로 전달
     local tmp_err rc
     tmp_err=$(mktemp -t cl-err.XXXXXX)
-    if claude --effort max "$@" 2>"$tmp_err"; then
+    if claude "$@" 2>"$tmp_err"; then
         rc=0
     else
         rc=$?
@@ -526,7 +525,7 @@ cmd_passthrough() {
             local next_dir; next_dir=$(config_dir_for "$next")
             set_active "$next"
             export CLAUDE_CONFIG_DIR="$next_dir"
-            exec claude --effort max "$@"
+            exec claude "$@"
         fi
     fi
     rm -f "$tmp_err"
