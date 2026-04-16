@@ -19,6 +19,7 @@
 //   check_no_hook_file            .git/hooks .claude/hooks 차단       (H-NOHOOK)
 //   check_lockdown_tier           L0/L1/L2 lockdown_gate watch 위임   (L0)
 //   check_session_lock            area 기반 advisory lock             (H-SESSION-LOCK)
+//   check_annot_rules             annot_rules.json 토큰 차단          (H-ANNOT-RULES)
 // ═══════════════════════════════════════════════════════════
 
 // R1 HEXA-FIRST: .py/.rs/.sh 신규 파일 차단
@@ -318,4 +319,107 @@ fn check_session_lock(tool: str, file_path: str) -> str {
         eprintln("[H-SESSION-LOCK WARN] " + out)
     }
     return ""
+}
+
+// ═══════════════════════════════════════════════════════════
+// [ANNOT-RULES] — annot_rules.json 소비 (H-ANNOT-RULES, 2026-04-16)
+// SSOT: shared/config/annot_rules.json (kind=name forbid[], kind=enforce pattern)
+// 우회: NEXUS_ANNOT_OK=1 (사용자 수동 override)
+// 본 함수는 기존 가드 로직을 건드리지 않는 add-on — 매치 시 REJECT 반환.
+// stdin JSON 분기 (check_annot_rules_stdin) 은 dispatcher/main 전용으로 본 inc 에서 제외.
+// ═══════════════════════════════════════════════════════════
+
+// annot_rules.json → 토큰 리스트 (탭 구분).
+// name 룰 forbid[] 은 @* 패턴 하에 있으므로 '@' prefix 붙여 `@train` 형태로 확장.
+// enforce 룰 pattern 은 'a|b' 형태 그대로 (split 은 scan 단계).
+// jq 우선, grep fallback. 실패 시 빈 문자열.
+fn _annot_load_forbids() -> str {
+    let h = env("HOME")
+    let rules = h + "/Dev/nexus/shared/config/annot_rules.json"
+    let exists = to_string(exec("test -f '" + rules + "' && echo y || echo n")).trim()  // @allow-bare-exec
+    if exists != "y" { return "" }
+
+    // jq 있으면: (1) name 룰 forbid — pattern이 @* 이면 '@' prefix 붙이고, 한국어는 그대로.
+    //           (2) enforce 룰 pattern — 원본 ('@train*|훈련' 형태).
+    let jq_ok = to_string(exec("command -v jq >/dev/null 2>&1 && echo y || echo n")).trim()  // @allow-bare-exec
+    if jq_ok == "y" {
+        let cmd = "jq -r '" +
+                  "[ .rules[] | select(.kind==\"name\") | .pattern as $pat | .forbid[]? | " +
+                  "   if ($pat == \"@*\" and (test(\"^[A-Za-z_]\") )) then (\"@\" + .) else . end ] + " +
+                  "[ .rules[] | select(.kind==\"enforce\") | .pattern ] | unique | @tsv" +
+                  "' '" + rules + "' 2>/dev/null"
+        let out = to_string(exec(cmd)).trim()  // @allow-bare-exec
+        if out.len() > 0 { return out }
+    }
+
+    // fallback: grep 로 대략 추출 — @ prefix 복원 불가능하므로 bare 토큰만.
+    // (jq 없을 때는 enforce pattern '@train*' 와 bare forbid '훈련'/'cargo' 에만 의존)
+    let gcmd = "grep -oE '\"(forbid|pattern)\":[[:space:]]*\\[?[^\\]]*' '" + rules + "' 2>/dev/null | " +
+               "grep -oE '\"[^\"]+\"' | sed 's/^\"//;s/\"$//' | " +
+               "grep -v -E '^(forbid|pattern)$' | sort -u | tr '\\n' '\\t'"
+    let out2 = to_string(exec(gcmd)).trim()  // @allow-bare-exec
+    return out2
+}
+
+// content 에서 annot_rules 금지 토큰 매치 스캔. 매치 시 "H-XXX — <token>" 반환, 없으면 ""
+fn _annot_scan_content(content: str) -> str {
+    if content.len() == 0 { return "" }
+    let forbids_tsv = _annot_load_forbids()
+    if forbids_tsv.len() == 0 { return "" }
+
+    let toks = forbids_tsv.split("\t")
+    for t_raw in toks {
+        let t = to_string(t_raw).trim()
+        if t.len() == 0 { continue }
+
+        // enforce pattern 은 "a|b|c" 형태 — | 로 split. bare 토큰도 배열에 섞여 있으므로 동일 loop.
+        let parts = t.split("|")
+        for p_raw in parts {
+            let p_star = to_string(p_raw).trim()
+            if p_star.len() == 0 { continue }
+
+            // "@train*" → "@train" prefix 매치
+            let mut needle = p_star
+            let is_glob = needle.ends_with("*")
+            if is_glob { needle = needle.substring(0, needle.len() - 1) }
+            if needle.len() == 0 { continue }
+
+            // 금지 토큰 매치 — needle 에 '@' 포함(annotation) 또는 한국어('훈련') 만 검사.
+            // bare ASCII 단어 (train/rust/cargo/trainer/training/rust_ext) 는 코멘트 오탐 회피를 위해 skip.
+            // jq branch 에서 '@' prefix 자동으로 붙기 때문에, 여기 bare ASCII 는 보통 enforce pattern 의 |-split 결과.
+            let has_at = needle.starts_with("@")
+            let has_non_ascii = (needle == "훈련")
+            if has_at == false && has_non_ascii == false { continue }
+
+            if content.contains(needle) {
+                // id 추정 — @train*/훈련 → H-NO-TRAIN, @rust*/@cargo → H-NO-RUST, 그 외 → annot
+                let mut id = "annot"
+                if needle.contains("train") || needle == "훈련" { id = "H-NO-TRAIN" }
+                else if needle.contains("rust") || needle.contains("cargo") { id = "H-NO-RUST" }
+                return id + " — " + needle
+            }
+        }
+    }
+    return ""
+}
+
+// Write/Edit 시 파일 content annot_rules 검사 (SSOT shared/config/annot_rules.json)
+// file_path 가 존재하면 디스크 content 를 읽고, 없으면 skip (stdin JSON mode 에서 content 주입).
+fn check_annot_rules(tool: str, file_path: str) -> str {
+    if tool != "Write" && tool != "Edit" { return "" }
+    if env("NEXUS_ANNOT_OK") == "1" { return "" }
+    if file_path.len() == 0 { return "" }
+    if file_path.contains("@allow-annot") { return "" }
+    // 자기참조 — annot_rules.json 자체 및 본 guard 는 제외
+    if file_path.contains("/shared/config/annot_rules.json") { return "" }
+    if file_path.contains("/shared/harness/pre_tool_guard.hexa") { return "" }
+    if file_path.contains("/shared/harness/lint_annot.hexa") { return "" }
+    if file_path.contains("/shared/archive/") { return "" }
+
+    let exists = to_string(exec("test -f '" + file_path + "' && echo y || echo n")).trim()  // @allow-bare-exec
+    if exists != "y" { return "" }
+    let content = to_string(exec("cat '" + file_path + "' 2>/dev/null"))  // @allow-bare-exec
+    let hit = _annot_scan_content(content)
+    if hit.len() == 0 { return "" }
+    return "REJECT: " + file_path + " — annot_rule: " + hit + " (H-ANNOT-RULES, shared/config/annot_rules.json). 우회: NEXUS_ANNOT_OK=1 prefix 또는 경로에 @allow-annot 토큰"
 }
