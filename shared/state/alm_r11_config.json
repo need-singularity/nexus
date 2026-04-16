@@ -1,0 +1,161 @@
+{
+  "_meta": {
+    "name": "ALM 14B r11 LoRA — fresh-from-base over-fit recovery (2026-04-16)",
+    "schema_version": "1.0",
+    "updated_utc": "2026-04-16T23:50:00Z",
+    "spec_ref": "training/deploy/alm_r11_plan.json (CORRECTED — fresh-from-base, NOT r9 stack)",
+    "session": "session_20260416_alm_r11_config",
+    "rationale": "ALM r10 over-fit (final_loss 7.82 vs base ~2.0). Root cause: 300-record template corpus + LoRA-on-LoRA stack (r9 adapter base). r11 starts FRESH from Qwen2.5-14B base — no prior adapter stack — with 80% Korean dialogue + reasoning corpus and aggressive lr/rank reductions. Per feedback_no_resume_data_change: data and params change → step 0 with fresh ckpt dir. NEVER --resume.",
+    "memory_refs": [
+      "feedback_no_resume_data_change",
+      "feedback_no_version_in_filename",
+      "feedback_one_shot_best",
+      "feedback_h100_authorized",
+      "feedback_no_quantization",
+      "feedback_r2_checkpoint",
+      "feedback_py_ban_total",
+      "project_session_20260416_speak_rc"
+    ],
+    "supersedes": {
+      "training/deploy/alm_r11_plan.json": "Earlier r11 plan listed base_lora=/runpod/ckpt_r9 (LoRA stack). User correction 2026-04-16: r11 must start fresh-from-base per feedback_no_resume_data_change. lr lowered 5e-7→5e-7 (kept), lora_r 8 (kept), corpus revised to 80% Korean blend rebuilding email/doc/research from scratch."
+    }
+  },
+
+  "no_resume": true,
+  "no_resume_rationale": "Per feedback_no_resume_data_change: r11 changes data (synthetic 300-record → 80% Korean blend) AND params (lora_r 16→8, lora_alpha 32→16, base_lora_stack→none) → fresh start mandatory. Prior r10 weights are POISONED (template-memorized, see alm_r10_regression_diagnosis.json). Step 0 from base Qwen2.5-14B, fresh ckpt directory.",
+
+  "run_id_template": "alm14b-r11-{date}",
+  "round": 11,
+  "model_tag": "alm14b",
+  "ckpt_label": "production",
+  "ckpt_dir_template": "/workspace/ckpt_alm14b_r11_{date}",
+  "r2_prefix_template": "r2:anima-models/alm14b/r11/step_{step}/",
+
+  "base": {
+    "name": "Qwen/Qwen2.5-14B-Instruct",
+    "dtype": "bf16",
+    "adapter_source": null,
+    "adapter_source_rationale": "EXPLICITLY null — no prior adapter (no r9, no r10). r11 trains a brand-new LoRA adapter directly on the unmodified Qwen2.5-14B-Instruct base. r10 over-fit was directly attributable to LoRA-on-LoRA stacking compounding drift (alm_r10_regression_diagnosis.hypothesis_tertiary)."
+  },
+
+  "lora": {
+    "r": 8,
+    "alpha": 16,
+    "alpha_to_r_ratio": 2.0,
+    "dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "rationale": "lora_r=8 / alpha=16 — half of r10 (r=16/alpha=32). Smaller rank + dropout 0.05 jointly constrain adapter capacity to prevent template memorization. 4-module attn-only target keeps trainable params ~7.9M (vs r9 ~15.7M with q/k/v/o×8 layers, vs r10 was wider). Industry-default for instruct fine-tuning."
+  },
+
+  "training": {
+    "steps": 500,
+    "batch": 4,
+    "grad_accum": 1,
+    "effective_batch": 4,
+    "seq": 1024,
+    "lr": 5e-7,
+    "lr_rationale": "5e-7 — 4× lower than r10's 2e-6. r10 EMA stayed at 7.84 throughout (mild divergence). 5e-7 with no LoRA stack should yield monotone descent.",
+    "warmup": 50,
+    "save_every": 100,
+    "eval_every": 100,
+    "patience": 5,
+    "optimizer": "adamw",
+    "beta1": 0.9,
+    "dtype": "bf16"
+  },
+
+  "corpus": {
+    "blend": {
+      "korean_dialogue_and_reasoning": 0.80,
+      "hire_sim_tasks_subset": 0.20
+    },
+    "korean_sources": [
+      "anima-agent/training/corpora/korean_dialogue.txt (preferred — if absent, build from public KO datasets)",
+      "KMMLU instruct subset",
+      "NSMC + Korean dialogue from huggingface (filtered, dedup)"
+    ],
+    "korean_target_chars": "5000 samples × ~800 chars avg = 4M chars",
+    "hire_sim_subset": "hire_sim_100.hexa first 20 tasks ONLY — prevents the r10 over-rep failure mode (300-record template memorization).",
+    "preprocessing": [
+      "Dedup by SHA256 hash",
+      "Length filter: 50-2000 chars per sample",
+      "Drop boilerplate templates (any line appearing >3 times)",
+      "Per-domain rebuild: email/doc/research curated FROM SCRATCH (do NOT reuse hire_sim_synthetic_r10_*.jsonl)",
+      "Preserve code/schedule patterns from r9 corpus (those domains did not regress in r10)"
+    ],
+    "path": "/workspace/anima/training/corpus_alm_r11.jsonl",
+    "path_rationale": "Distinct from corpus_large.txt (r4-r9) and hire_sim_r10_corpus.txt (r10 poison). Fresh corpus file forces operator to verify path exists before launch.",
+    "min_size_bytes": 3000000,
+    "max_size_bytes": 50000000
+  },
+
+  "expected_metrics": {
+    "final_loss_target": "≤ 3.0 (vs base ~2.0, vs r10 7.82)",
+    "loss_step100_check": "≤ 5.0 — if higher, abort (lr too high)",
+    "loss_step200_abort": "> 6.0 → abort (divergence detected)",
+    "hire_sim_lenient": "≥ 0.85 (match r9, no regression)",
+    "likert_mean": "≥ 5.0 on 30-prompt dev set (vs r9 baseline)",
+    "korean_quality_check": "≥ 25/30 prompts stay in Korean (vs ALM r10 5/30 language switching observed in Likert eval)"
+  },
+
+  "abort_criteria": [
+    "loss > 5.0 at step 100 → warn (lr near upper limit)",
+    "loss > 6.0 at step 200 → kill (lr too high)",
+    "loss decreasing but eval_loss diverging → kill (overfitting recurrence)",
+    "hire_sim < 0.7 at step 300 mid-eval → kill (regression starting)",
+    "Korean stays-in-language ratio < 0.7 at step 300 → kill (language drift)"
+  ],
+
+  "post_training_eval": [
+    "hire_sim lenient (30 stratified, Z-path judge) — must hit ≥ 0.85",
+    "likert_eval (30 conversational prompts) — manual rating ≥ 5.0",
+    "language consistency: 30 Korean prompts → no KO→ZH/JA switches",
+    "smoke test: 20 free-form Korean prompts, qualitative check"
+  ],
+
+  "wall": {
+    "hours": 4,
+    "cost_usd": 12,
+    "cost_per_hr_usd": 2.99,
+    "rationale": "500 steps × batch 4 × seq 1024 × bf16 × H100 → ~4h. Cheap retry budget enables r12 if r11 misses targets."
+  },
+
+  "trainer": {
+    "path": "training/train_alm_lora.hexa",
+    "abi_required": "hxqwen14b Day-2 ABI (forward_with_lora, backward_lora_only, apply_lora_delta)",
+    "fallback": "If Day-2 ABI absent → trainer reports BLOCKED_FFI cleanly (per train_alm_lora.hexa header). Do not silently downgrade.",
+    "cli_template": "hexa run training/train_alm_lora.hexa --base Qwen/Qwen2.5-14B-Instruct --corpus {corpus_path} --out {ckpt_dir} --steps 500 --lr 5e-7 --lora_r 8 --lora_alpha 16 --batch 4 --seq 1024 --warmup 50 --save_every 100 --eval_every 100"
+  },
+
+  "env": {
+    "HF_HUB_CACHE": "/workspace/hf_cache",
+    "HF_HOME": "/workspace/hf_cache",
+    "TRANSFORMERS_CACHE": "/workspace/hf_cache",
+    "ANIMA_ROOT": "/workspace/anima",
+    "HEXA_CKPT_HOOK": "/workspace/anima/scripts/ckpt_backup_hook.hexa"
+  },
+
+  "pod": {
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "vram_gb": 80,
+    "compute_cap_min": 80,
+    "blocked_by": "Free H100 GPU (currently itfl66q4z768kh-serve + 0ws0tlmo9e04v7-clm-r4 in use). Per H100-2-pod policy, must wait for clm-r4 to finish (~41h ETA from 2026-04-16) OR get user approval for 3rd pod."
+  },
+
+  "blocks": {
+    "forbidden_markers": [
+      "/workspace/READY_FOR_32B",
+      "/workspace/READY_FOR_R5_KBASE"
+    ],
+    "forbidden_resume_paths": [
+      "/runpod/ckpt_r9",
+      "/runpod/ckpt_r10",
+      "r2:anima-models/alm14b/r9/",
+      "r2:anima-models/alm14b/r10/"
+    ],
+    "forbidden_resume_rationale": "r9 and r10 adapters MUST NOT be loaded as base. r11 is fresh-from-base only (feedback_no_resume_data_change)."
+  },
+
+  "ready_for_launch": false,
+  "ready_for_launch_rationale": "Config landed. Launch is GATED on: (1) free H100 pod, (2) hxqwen14b Day-2 LoRA FFI entries (forward_with_lora / backward_lora_only / apply_lora_delta), (3) corpus file at /workspace/anima/training/corpus_alm_r11.jsonl assembled by operator."
+}
