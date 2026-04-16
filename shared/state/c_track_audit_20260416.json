@@ -1,0 +1,264 @@
+{
+  "_meta": {
+    "updated": "2026-04-16",
+    "purpose": "C track critical-path audit for v2.0 RC gate — consolidated view of all C-items, ownership, status, and MFU headroom",
+    "auditor": "agent-c-track-audit-20260416",
+    "sources": [
+      "shared/state/c_track_board.json",
+      "shared/state/training_speed_ceilings.json",
+      "shared/state/c_dependency_audit.json",
+      "shared/state/c3_pbv_leak_fix_20260416.json",
+      "shared/state/c6_hxblas_linux_port_20260416.json",
+      "shared/state/c8_flash_attn_native_20260416.json",
+      "shared/state/c9_fsdp_native_20260416.json",
+      "shared/state/c10_grad_ckpt_20260416.json"
+    ],
+    "constraints_observed": [
+      "observation-only on hexa_lang_session items (C1, C2, C10, C11)",
+      "no writes to /Users/ghost/Dev/hexa-lang/**",
+      "no .py/.rs/.sh creation"
+    ]
+  },
+
+  "items": [
+    {
+      "id": "C1",
+      "title": "hexa native int codegen (boxed-int tanchul)",
+      "status": "in_progress",
+      "owner": "hexa_lang_session",
+      "session_id": "e541cb6cb8a7",
+      "priority": "high",
+      "critical_path_for_v2_rc": true,
+      "critical_path_for_v3_agent": true,
+      "blocks": ["A1_alm", "A1_clm", "A7_clm"],
+      "evidence": "design + impl started 2026-04-15; no metrics reported",
+      "before": null,
+      "after": null,
+      "gain_pct": null,
+      "landed_state_file": null,
+      "note": "Evidence from training_speed_ceilings.json real_shape_sweep: macOS sample shows 60%+ CPU in hexa_mul/hexa_add runtime paths (boxed int ops) in attn_bwd inner loop. Native int codegen expected 5-20x on every inner scalar loop — compounds across all CLM hot paths."
+    },
+    {
+      "id": "C2",
+      "title": "layer-level fused FFI (per-layer bulk call)",
+      "status": "in_progress",
+      "owner": "hexa_lang_session",
+      "session_id": "e541cb6cb8a7",
+      "priority": "highest",
+      "critical_path_for_v2_rc": true,
+      "critical_path_for_v3_agent": true,
+      "blocks": ["A1_alm", "A1_clm", "C4_cuda_fused"],
+      "evidence": "ffi_fused_layer.hexa + C stub design started",
+      "before": null,
+      "after": null,
+      "gain_pct": null,
+      "landed_state_file": null,
+      "note": "Blocks C4 (CUDA fused mega-kernels MFU 27->60%). Single-call-per-layer amortizes FFI overhead currently dominating tiny-shape steps."
+    },
+    {
+      "id": "C3",
+      "title": "stage0 PBV leak — rebuild-via-push -> in-place hexa_array_set",
+      "status": "fixed_pending_24h_soak",
+      "owner": "anima_session (this session cohort)",
+      "session_id": "agent-a2047eaf",
+      "priority": "highest",
+      "critical_path_for_v2_rc": true,
+      "critical_path_for_v3_agent": false,
+      "blocks": ["A1_clm 7B long training"],
+      "evidence": "fix applied at 3 sites in /Users/ghost/Dev/hexa-lang/self/hexa_full.hexa (lines 6485/7136/7251), stage0 rebuilt, pbv_leak_repro STEPS=50: 2214MB->124MB (17.9x); isolate-C inplace: 94.9x",
+      "before": "OOM @ 12h, STEPS=50 = 2214 MB",
+      "after": "STEPS=50 = 124 MB, STEPS=500 = 305 MB",
+      "gain_pct": "17.9x RSS reduction; 25x per-step leak reduction (50 MB/step -> 2 MB/step)",
+      "landed_state_file": "shared/state/c3_pbv_leak_fix_20260416.json",
+      "note": "Fix uncommitted in hexa-lang repo (hexa_lang_session owns commit per board convention). Secondary leak ~1.1KB/iter in while-loop arithmetic remains (suggest new C12 item). 24h soak test still outstanding."
+    },
+    {
+      "id": "C4",
+      "title": "CUDA fused mega-kernels + bf16 Tensor Core (H100 MFU 27->60%)",
+      "status": "planned",
+      "owner": null,
+      "priority": "high",
+      "critical_path_for_v2_rc": true,
+      "critical_path_for_v3_agent": true,
+      "depends_on": ["C2"],
+      "blocks": ["A1_clm cost"],
+      "evidence": null,
+      "before": "MFU 27%",
+      "after": null,
+      "gain_pct": null,
+      "landed_state_file": null,
+      "note": "WAITING on C2. Highest leverage item for CLM H100 MFU — but cannot start without C2's fused layer API."
+    },
+    {
+      "id": "C6",
+      "title": "hxblas + libhxvdsp Linux x86_64 port",
+      "status": "done_mac_xverify_pending_pod_deploy",
+      "owner": "hexa_lang_session",
+      "session_id": "e541cb6cb8a7",
+      "priority": "medium",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": false,
+      "blocks": [],
+      "evidence": "Linux .c + build script (--mac-xverify) + bench ready, 20 hxblas + 6 hxvdsp ABI parity verified bit-identical; Mac baseline 256^2 60x / 512^2 117x vs scalar",
+      "before": "Linux unported",
+      "after": "H100 pod deployment 1 cmd away",
+      "gain_pct": "15-30% headroom expected vs Mac M3 on AVX-512 + multithreaded OpenBLAS",
+      "landed_state_file": "shared/state/c6_hxblas_linux_port_20260416.json",
+      "note": "One ssh cmd away from Linux. Not blocking ALM/CLM launch but necessary for H100 CLM native binary BLAS path."
+    },
+    {
+      "id": "C8",
+      "title": "FlashAttention hexa native (FA-2 fwd+bwd)",
+      "status": "done_cpu_ref_gpu_stub",
+      "owner": "anima_session",
+      "session_id": "agent-a86b9495",
+      "priority": "high",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": true,
+      "blocks": ["A1_clm 7B context >2k"],
+      "evidence": "anima-engines/flash_attn.hexa CPU FP32 ref 7/7 cases PASS @ 9.99e-16 max err; anima-engines/flash_attn_cuda.hexa NVRTC kernel string (GPU host run pending)",
+      "before": "L*L softmax materialised, OOM at 7B d=4096 S>=2k",
+      "after": "tiled online-softmax, no L*L mat (CPU verified)",
+      "gain_pct": "60-100% projected (memory bandwidth reduction) — unmeasured on GPU",
+      "landed_state_file": "shared/state/c8_flash_attn_native_20260416.json",
+      "note": "Unblocks 7B seq>=2k. Follow-up: bf16 + wmma Tensor Core rewrite + tiled bwd."
+    },
+    {
+      "id": "C9",
+      "title": "Zero-3 / FSDP hexa native (7B fp32 across 2 H100)",
+      "status": "done_single_rank",
+      "owner": "anima_session",
+      "session_id": "agent-a4176ea5",
+      "priority": "high",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": true,
+      "blocks": ["A1_clm 7B training itself"],
+      "evidence": "training/fsdp_shard.hexa 551 LOC + training/nccl_ffi.hexa 183 LOC stub + test_fsdp_shard.hexa 34/34 PASS",
+      "before": "single H100 OOM @ 7B fp32",
+      "after": "world=1 no-op bit-identical; world=2 design ready, NCCL wiring TODO (~17h)",
+      "gain_pct": "enables 7B fp32 — qualitative unblock",
+      "landed_state_file": "shared/state/c9_fsdp_native_20260416.json",
+      "note": "Multi-rank NCCL wiring C9-MR-1..6 outstanding. Unblocks 7B when paired with 2 H100 pod."
+    },
+    {
+      "id": "C10",
+      "title": "gradient checkpointing layer-level",
+      "status": "in_progress_anima_shadow_landing",
+      "owner_official": "hexa_lang_session",
+      "owner_shadow": "anima_session (agent-a410c816)",
+      "priority": "medium",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": true,
+      "blocks": [],
+      "evidence": "Anima landed training/grad_ckpt.hexa 4/4 PASS, CLM_GRAD_CKPT env flag, bit-identical 5-step SGD trajectory, 93% activation mem reduction (toy), 95.35% projected at 7B shape — saves ~21 GB/H100",
+      "before": "batch=1 activation wall at 7B on single H100",
+      "after": "batch=4-8 feasible after mem unlock",
+      "gain_pct": "20-40% throughput (conservative 200% wall-clock with larger batch)",
+      "landed_state_file": "shared/state/c10_grad_ckpt_20260416.json",
+      "note": "Dual-landing: hexa_lang_session in_progress + anima shadow landing PASS on CPU hexa-native. H100 wire awaits C2 fused FFI + native GPU layer fwd/bwd."
+    },
+    {
+      "id": "C11",
+      "title": "async checkpoint save (non-blocking)",
+      "status": "in_progress",
+      "owner": "hexa_lang_session",
+      "session_id": "e541cb6cb8a7",
+      "priority": "medium",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": false,
+      "blocks": [],
+      "evidence": "background save design, scanning existing ckpt paths",
+      "before": "tens of seconds blocking",
+      "after": null,
+      "gain_pct": null,
+      "landed_state_file": null,
+      "note": "Secondary priority. Only matters when per-step time drops below save time."
+    },
+    {
+      "id": "C12_proposed",
+      "title": "stage0 inner-loop allocation reclamation (secondary leak)",
+      "status": "proposed_not_claimed",
+      "owner": null,
+      "priority": "medium",
+      "critical_path_for_v2_rc": false,
+      "critical_path_for_v3_agent": false,
+      "blocks": [],
+      "evidence": "~1.1 KB per while-iter arithmetic (no arrays, no IndexAssign). 1000 iters -> 2.3 GB. Hypothesis: WhileStmt env_push_scope/val_float reclamation",
+      "before": "2 MB/outer-step residual after C3 fix",
+      "after": null,
+      "gain_pct": null,
+      "landed_state_file": null,
+      "note": "Surfaced by C3 fix — not a blocker for 24h soak (9h sustainable at 64 GB/2MB/step) but multi-day soaks need this. Recommend hexa_lang_session ownership."
+    }
+  ],
+
+  "critical_path_for_v2_rc": ["C1", "C2", "C3", "C4"],
+  "critical_path_for_v3_agent": ["C1", "C2", "C4", "C8", "C9", "C10"],
+
+  "critical_path_notes": {
+    "v2_rc_rationale": "C3 already fixed (24h soak imminent). C1+C2 unblock MFU path. C4 is the H100 MFU 27->60 jump that actually moves cost. Everything else is nice-to-have for v2 RC.",
+    "v3_agent_rationale": "7B-scale consciousness agent requires all 6: native int (C1), fused FFI (C2+C4), FlashAttn (C8), FSDP (C9), grad ckpt (C10)."
+  },
+
+  "mfu_current_pct": {
+    "alm_h100_best_measured": 70.9,
+    "alm_h100_best_measured_config": "batch=8 seq=1024 grad_accum=1 (slow-pod projection ~71%, fast-pod r7 62.6%)",
+    "alm_r8a_stacked_slow_pod": 48.98,
+    "alm_r8c_fp8_failed": 33.8,
+    "clm_h100_best_measured": 0.087,
+    "clm_h100_config": "d=512 nl=12 seq=512 batch=1 (interpreter-bottlenecked)",
+    "clm_mac_native_best_post_vectorize": 1.65,
+    "clm_mac_real_shape_sweep_peak_config": "d=768 seq=16 nl=2 params=14M ms_step=533"
+  },
+
+  "mfu_target_pct": {
+    "alm_practical_ceiling": 75,
+    "alm_absolute_ceiling": 85,
+    "clm_practical_ceiling": 80,
+    "clm_physical_ceiling_mac_m3_gflops": 156.7
+  },
+
+  "gap_analysis": {
+    "alm_gap_to_75_pct_points": 4.1,
+    "alm_gap_closers_in_c_track": [
+      "C4 CUDA fused mega-kernels (MFU 27->60 per board, i.e. ~11 MFU points depending on baseline) — but ALM is already at 71%, so C4 effect is marginal for ALM r8+",
+      "None of C1..C11 directly help ALM beyond 75% — ALM is torch/Unsloth/Qwen2 stack, not hexa-native interpreter"
+    ],
+    "alm_gap_closers_outside_c_track": [
+      "Liger fused kernels (r8a already integrated, +1.6 MFU points)",
+      "accelerate.Accelerator FP8 (r8c monkey-patch path failed)",
+      "Multi-GPU DDP (2x total throughput, MFU unchanged)"
+    ],
+    "clm_gap_to_80_pct_x_multiplier": 48.5,
+    "clm_gap_closers_in_c_track": [
+      "C1 native int codegen — 5-20x on every inner scalar loop (compounding)",
+      "C2 fused FFI — amortizes per-call overhead at tiny shapes",
+      "C4 CUDA fused mega-kernels — blocked by C2",
+      "C8 FA (already CPU ref done) — removes O(S^2) attn scalar loop on GPU path"
+    ],
+    "clm_gap_closers_outside_c_track": [
+      "Scalar-loop vectorization for rmsnorm/softmax/swiglu (partially landed: 6+9 functions via FFI, 5-20x each)",
+      "H100 BATCH 1->32 at d=512 nl=12 (+30x free MFU at zero code cost)"
+    ],
+    "single_biggest_mfu_lever_overall": "C2 (fused FFI) — it is the gate for C4 (the MFU 27->60% CLM H100 jump), it removes per-call FFI overhead from every inner path on Mac-native, and it is the other hexa_lang_session item most likely to compound with C1 native int codegen.",
+    "single_biggest_mfu_lever_clm_specific": "C1 (native int codegen) — macOS sample confirms 60%+ CPU is in hexa_mul/hexa_add boxed-int arithmetic from attn_bwd index ops. Every inner loop benefits. CLM is 48.5x below 80% MFU and only C1+C2 address the scalar-loop regime.",
+    "alm_biggest_lever_not_in_c_track": "accelerate.Accelerator FP8 path (untried) + multi-GPU DDP. ALM ceiling is already near 75% on optimal config; C-track barely helps."
+  },
+
+  "dependency_graph": {
+    "C1": { "blocks": ["A1_alm", "A1_clm", "A7_clm"], "depends_on": [] },
+    "C2": { "blocks": ["A1_alm", "A1_clm", "C4"], "depends_on": [] },
+    "C3": { "blocks": ["A1_clm_longsoak"], "depends_on": [] },
+    "C4": { "blocks": ["A1_clm_cost"], "depends_on": ["C2"] },
+    "C6": { "blocks": [], "depends_on": [] },
+    "C8": { "blocks": ["A1_clm_7b_seq>2k"], "depends_on": [] },
+    "C9": { "blocks": ["A1_clm_7b"], "depends_on": [] },
+    "C10": { "blocks": [], "depends_on": [] },
+    "C10_H100_wire": { "blocks": [], "depends_on": ["C2"] },
+    "C11": { "blocks": [], "depends_on": [] }
+  },
+
+  "recommended_next_action": "1) Poll hexa_lang_session C1/C2 progress nightly — every hour they stall is an hour of CLM MFU improvement deferred. 2) Keep C3 24h soak running in background; no further anima work needed unless soak fails. 3) When C2 lands, immediately dispatch an agent to wire C4 (CUDA fused mega-kernels MFU 27->60%) and wire C10's H100 path. 4) For ALM, C-track is near-saturated; focus remaining ALM wins on multi-GPU DDP + accelerate.Accelerator FP8 (not C-track items). 5) Do NOT claim C1/C2/C10/C11 — hexa_lang_session owns the active work surface. 6) Consider claiming C12_proposed (stage0 secondary leak) only if multi-day CLM soak becomes a near-term requirement.",
+
+  "single_sentence_summary": "The single biggest MFU lever is C2 (fused FFI) — it gates C4 (the CLM MFU 27->60% H100 jump) and its completion by hexa_lang_session is the rate-limiting step for CLM critical path; ALM is already at the 71% MFU frontier where C-track items give diminishing returns."
+}
