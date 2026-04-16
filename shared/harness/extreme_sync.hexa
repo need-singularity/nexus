@@ -61,9 +61,15 @@ fn file_exists(p: string) -> bool {
 
 // Count options by state using jq — robust, no hexa JSON parser needed.
 // returns 0 on jq failure.
+// "chosen" also counts state=="done" (ossified options).
 fn count_state(path: string, state: string) -> i64 {
     if !file_exists(path) { return 0 }
-    let cmd = "jq -r '[.tracks[].options[]? | select(.state==\"" + state + "\")] | length' " + path + " 2>/dev/null"
+    let mut cmd = ""
+    if state == "chosen" {
+        cmd = "jq -r '[.tracks[].options[]? | select(.state==\"chosen\" or .state==\"done\")] | length' " + path + " 2>/dev/null"
+    } else {
+        cmd = "jq -r '[.tracks[].options[]? | select(.state==\"" + state + "\")] | length' " + path + " 2>/dev/null"
+    }
     let out = exec(cmd).trim()
     if out == "" || out == "null" { return 0 }
     return to_int(out)
@@ -299,6 +305,17 @@ fn hexa_c_remaining_v2() -> i64 {
     return full
 }
 
+// ── Projected date computation (macOS date -v / Linux date -d) ──────────
+fn add_days_to_date(base_date: string, days: i64) -> string {
+    let mac_cmd = "date -v+" + to_string(days) + "d -jf '%Y-%m-%d' '" + base_date + "' '+%Y-%m-%d' 2>/dev/null"
+    let result = exec(mac_cmd).trim()
+    if result != "" { return result }
+    let linux_cmd = "date -d '" + base_date + " + " + to_string(days) + " days' '+%Y-%m-%d' 2>/dev/null"
+    let result2 = exec(linux_cmd).trim()
+    if result2 != "" { return result2 }
+    return base_date
+}
+
 fn update_destinations(ts: string, hs_evidence: string, dry: bool) -> bool {
     if !file_exists(PATH_XT) { return false }
     let alm_d1 = parse_alm_remaining(hs_evidence)
@@ -306,20 +323,79 @@ fn update_destinations(ts: string, hs_evidence: string, dry: bool) -> bool {
     let clm_d1 = clm_phase_remaining_v2()
     let clm_d2 = clm_phase_remaining()
 
+    let today = exec("date '+%Y-%m-%d' 2>/dev/null").trim()
+    let proj_alm_d1 = add_days_to_date(today, alm_d1)
+    let proj_clm_d1 = add_days_to_date(today, clm_d1)
+    let proj_alm_d2 = add_days_to_date(today, alm_d2)
+    let proj_clm_d2 = add_days_to_date(today, clm_d2)
+
     let jq_expr = "(.destinations[0].remaining) = "
         + "{\"alm_days\":" + to_string(alm_d1)
         + ",\"clm_days\":" + to_string(clm_d1)
+        + ",\"computed_at\":\"" + ts + "\"}"
+        + " | (.destinations[0].projected) = "
+        + "{\"alm_date\":\"" + proj_alm_d1 + "\""
+        + ",\"clm_date\":\"" + proj_clm_d1 + "\""
         + ",\"computed_at\":\"" + ts + "\"}"
         + " | (.destinations[1].remaining) = "
         + "{\"alm_days\":" + to_string(alm_d2)
         + ",\"clm_days\":" + to_string(clm_d2)
         + ",\"computed_at\":\"" + ts + "\"}"
+        + " | (.destinations[1].projected) = "
+        + "{\"alm_date\":\"" + proj_alm_d2 + "\""
+        + ",\"clm_date\":\"" + proj_clm_d2 + "\""
+        + ",\"computed_at\":\"" + ts + "\"}"
     if dry {
         println("  dest[0] remaining: alm=" + to_string(alm_d1) + " clm=" + to_string(clm_d1))
+        println("  dest[0] projected: alm=" + proj_alm_d1 + " clm=" + proj_clm_d1)
         println("  dest[1] remaining: alm=" + to_string(alm_d2) + " clm=" + to_string(clm_d2))
+        println("  dest[1] projected: alm=" + proj_alm_d2 + " clm=" + proj_clm_d2)
         return true
     }
     let tmp = "/tmp/extreme_dest_" + ts + ".json"
+    let cmd = "jq '" + jq_expr + "' " + PATH_XT + " > " + tmp + " && mv " + tmp + " " + PATH_XT
+    let rc = exec(cmd + " && echo OK || echo FAIL").trim()
+    return rc == "OK"
+}
+
+// ── Phase status sync — phases[].status 자동 갱신 ──────────────────────
+fn update_phase_statuses(ts: string, hs_evidence: string, dry: bool) -> bool {
+    if !file_exists(PATH_XT) { return false }
+    let alm_training = hs_evidence != "no_log"
+    let alm_gate = hs_evidence.index_of("completion_rate") >= 0 || hs_evidence.index_of("avg_score") >= 0
+
+    let prep_s = "done"
+    let launch_s = "done"
+    let mut alm_train_s = "planned"
+    if alm_training { alm_train_s = "in_progress" }
+    if alm_gate { alm_train_s = "done" }
+    let mut clm_curr_s = "planned"
+    let clm_rem = clm_phase_remaining()
+    if clm_rem < 28 { clm_curr_s = "in_progress" }
+    if clm_rem <= 3 { clm_curr_s = "done" }
+    let mut alm_con_s = "planned"
+    if alm_train_s == "done" { alm_con_s = "in_progress" }
+    let mut alm_rc_s = "planned"
+    if alm_gate { alm_con_s = "done"; alm_rc_s = "in_progress" }
+    let mut clm_7b_s = "planned"
+    if clm_curr_s == "done" { clm_7b_s = "in_progress" }
+
+    let jq_expr = "(.phases[0].status) = \"" + prep_s + "\""
+        + " | (.phases[1].status) = \"" + launch_s + "\""
+        + " | (.phases[2].status) = \"" + alm_train_s + "\""
+        + " | (.phases[3].status) = \"" + clm_curr_s + "\""
+        + " | (.phases[4].status) = \"" + alm_con_s + "\""
+        + " | (.phases[5].status) = \"" + alm_rc_s + "\""
+        + " | (.phases[6].status) = \"" + clm_7b_s + "\""
+
+    if dry {
+        println("  phases: PREP=" + prep_s + " LAUNCH=" + launch_s
+            + " ALM-TRAIN=" + alm_train_s + " CLM-CURR=" + clm_curr_s
+            + " ALM-CON=" + alm_con_s + " ALM-RC=" + alm_rc_s
+            + " CLM-7B=" + clm_7b_s)
+        return true
+    }
+    let tmp = "/tmp/extreme_phase_" + ts + ".json"
     let cmd = "jq '" + jq_expr + "' " + PATH_XT + " > " + tmp + " && mv " + tmp + " " + PATH_XT
     let rc = exec(cmd + " && echo OK || echo FAIL").trim()
     return rc == "OK"
@@ -401,8 +477,10 @@ fn cmd_sync(dry: bool) -> i64 {
         println("  evidence: hire_sim=" + hs + "  pbv_exp=" + to_string(pbv) + "  stage0=" + to_string(st0))
         let ok = update_extreme_json(counts, progress, status, ts, true)
         if !ok { return 1 }
-        // destination remaining_days (dry)
+        // destination remaining_days + projected dates (dry)
         update_destinations(ts, hs, true)
+        // phase status sync (dry)
+        update_phase_statuses(ts, hs, true)
         return 0
     }
     let ok1 = update_extreme_json(counts, progress, status, ts, false)
@@ -410,11 +488,17 @@ fn cmd_sync(dry: bool) -> i64 {
         eprintln("extreme_sync: failed to update extreme.json (jq)")
         return 1
     }
-    // destination remaining_days — 하네스 자동 계산
+    // destination remaining_days + projected dates — 하네스 자동 계산
     let ok_dest = update_destinations(ts, hs, false)
     if !ok_dest {
         eprintln("extreme_sync: failed to update destinations (jq)")
         // non-fatal — aggregate still updated
+    }
+    // phase status sync — phases[].status 자동 갱신
+    let ok_ph = update_phase_statuses(ts, hs, false)
+    if !ok_ph {
+        eprintln("extreme_sync: failed to update phase statuses (jq)")
+        // non-fatal
     }
     let delta = "chosen=" + to_string(counts.chosen) + "/" + to_string(counts.total)
         + " progress=" + to_string(progress) + "% status=" + status

@@ -54,6 +54,7 @@
 # @convergence state=ossified id=RUNPOD_GRAPHQL_SCHEMA_DRIFT value="ports 필드가 pod level=String, runtime level=Object — 쿼리 검증 에러" rationale="2026-04-16 API 호출 시 Field validation failed" ossified_at=2026-04-16 fix="runtime{ports{ip isIpPublic privatePort publicPort type}} 사용"
 # @convergence state=ossified id=RUNPOD_H100_GLOBAL_STOCKOUT value="H100 SXM + A100 80GB 전체 품절 — pod provisioning 무한 대기" rationale="2026-04-16 evening KST, secure+community 모두 불가" ossified_at=2026-04-16 fix="큐 대기 + Lambda/Vast.ai fallback 검토"
 # @convergence state=ossified id=RUNPOD_3090_NVML_CONTAINER_STALE value="nvidia-smi NVML 999, cuInit 100 — GPU 디바이스 존재하나 드라이버 stale" rationale="2026-04-16 hexa-c4 장시간 uptime 후 GPU state 오염" ossified_at=2026-04-16 fix="pod stop+resume via GraphQL API — 컨테이너 내부 수정 불가"
+# @convergence state=ossified id=CLM_D2048_3090_OOM value="D=2048 B=8 + AdamW optimizer = 25.6GB > 3090 24GB — alloc_grad_buffers OOM → null ptr → error 700 cascade" rationale="2026-04-16 compute-sanitizer 확인" ossified_at=2026-04-16 lesson="error 700 원인이 항상 커널 버그는 아님 — OOM cascade 먼저 확인"
 -->
 
 commands: shared/config/commands.json — autonomous 블록으로 Claude Code가 작업 중 smash/free/todo/go/keep 자율 판단·실행
