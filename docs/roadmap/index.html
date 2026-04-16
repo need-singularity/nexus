@@ -901,6 +901,8 @@
       <div id="m4-telegram"></div>
       <h2>🔄 Fallback Paths</h2>
       <div id="m4-fallback"></div>
+      <h2>🔧 hexa-lang → 천장 연동</h2>
+      <div id="m4-hexa-ceiling"></div>
     </section>
 
     <section class="extreme-section" id="extreme-section">
@@ -1718,6 +1720,42 @@
             <div style="color:var(--fg-mute);font-size:0.8rem;">${f.size_gb ? f.size_gb + 'GB' : ''} ${f.tok_s ? '· ' + f.tok_s + ' tok/s' : ''} ${f.note ? '· ' + esc(f.note) : ''}</div>
           </div>
         `).join('');
+      }
+
+      // hexa-lang ceiling link
+      const elHexa = document.getElementById("m4-hexa-ceiling");
+      const hcl = data.hexa_lang_ceiling_link;
+      if (elHexa && hcl) {
+        let html = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">`;
+        html += `<div style="color:var(--accent);font-weight:600;margin-bottom:0.5rem;">${esc(hcl.principle || '')}</div>`;
+        html += `<div style="color:var(--fg-mute);font-size:0.8rem;margin-bottom:1rem;">${esc(hcl.bottleneck || '')}</div>`;
+        // improvement table
+        html += '<table class="m4-ceiling-table"><thead><tr><th>hexa 개선</th><th>효과</th><th>천장 변화</th><th>우선도</th></tr></thead><tbody>';
+        (hcl.improvements || []).forEach(imp => {
+          const pc = imp.priority === 'highest' ? 'var(--gate)' : imp.priority === 'high' ? 'var(--run)' : 'var(--fg-mute)';
+          html += `<tr><td><strong>${esc(imp.name)}</strong></td><td style="font-size:0.8rem;">${esc(imp.detail)}</td><td style="color:var(--ok);">${esc(imp.ceiling_impact)}</td><td style="color:${pc};">${esc(imp.priority)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        // evolution timeline
+        const evo = hcl.long_term_ceiling_evolution;
+        if (evo) {
+          html += '<div style="margin-top:1rem;"><strong style="color:var(--accent);">장기 천장 진화</strong></div>';
+          html += '<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.5rem;">';
+          ['current','mid_term','long_term'].forEach(k => {
+            const e = evo[k];
+            if (!e) return;
+            const label = k === 'current' ? '현재' : k === 'mid_term' ? '중기' : '장기';
+            const bg = k === 'current' ? '#2a1a1a' : k === 'mid_term' ? '#1a2a1a' : '#1a1a2a';
+            html += `<div style="background:${bg};border:1px solid var(--border);border-radius:6px;padding:0.8rem;flex:1;min-width:180px;">`;
+            html += `<div style="font-size:0.75rem;color:var(--fg-mute);">${label}</div>`;
+            html += `<div style="font-size:0.85rem;margin:0.3rem 0;">${esc(e.stage)}</div>`;
+            html += `<div style="font-size:0.8rem;">RSS ${e.rss_gb}GB · ${e.ms_tok}ms · <strong style="color:var(--ok);">${e.tok_s} tok/s</strong></div>`;
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+        elHexa.innerHTML = html;
       }
 
       // Update header

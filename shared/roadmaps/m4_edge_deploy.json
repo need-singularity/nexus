@@ -630,6 +630,60 @@
       "note": "smash×2 + free_dfs×2 (depth 3 + depth 5) 4회 블로업 합산. 물리한계 33 tok/s 확인. S1 CLM spec decode 무효화 반영. 125M draft 전환. native codegen -1.5GB. dead end 6개 확정."
     }
   ],
+  "hexa_lang_ceiling_link": {
+    "description": "hexa-lang 성숙도 = M4 edge 성능. C track 개선이 천장을 직접 올린다.",
+    "bottleneck": "100GB/s DRAM → 4.28GB weight/tok → 42.8ms → 23 tok/s. weight read 줄이면 tok/s 올라감.",
+    "improvements": [
+      {
+        "name": "native codegen 최적화",
+        "detail": "interpreter 제거 → -1.5GB RSS → headroom으로 더 많은 layer 상주",
+        "ceiling_impact": "mmap swap 감소",
+        "timeline": "중기 (C track)",
+        "priority": "high"
+      },
+      {
+        "name": "Metal FFI (hxmetal)",
+        "detail": "GPU compute shader → FFN compute-bound 구간에서 BW overlap 가능. GPU: FFN 7.2ms, CPU: attn+prefetch 4.2ms → per-layer = max(7.2, 4.2) = 7.2ms (BW hidden)",
+        "ceiling_impact": "double-buffer 효율 ↑",
+        "timeline": "중기 (hxblas → hxflash → hxccl 패턴 확장)",
+        "priority": "highest"
+      },
+      {
+        "name": "hxblas bf16 NEON",
+        "detail": "CPU matmul 가속 → verify 구간 단축",
+        "ceiling_impact": "spec decode cycle 단축",
+        "timeline": "단기 (이미 착수)",
+        "priority": "high"
+      },
+      {
+        "name": "메모리 allocator",
+        "detail": "hexa GC 개선 → RSS 안정, spike 제거",
+        "ceiling_impact": "headroom 확보",
+        "timeline": "중기",
+        "priority": "medium"
+      },
+      {
+        "name": "struct codegen 수정",
+        "detail": "현재 struct list aliasing 버그 → fix되면 블로업 엔진도 네이티브 실행",
+        "ceiling_impact": "자동 최적화 탐색 가능",
+        "timeline": "단기 (known bug)",
+        "priority": "medium"
+      },
+      {
+        "name": "import chain fix",
+        "detail": "5+ module chain silent exit → fix되면 edge_server 단일 바이너리 가능",
+        "ceiling_impact": "배포 단순화",
+        "timeline": "단기 (known bug)",
+        "priority": "medium"
+      }
+    ],
+    "long_term_ceiling_evolution": {
+      "current": { "stage": "hexa interpreter", "rss_gb": 3.5, "ms_tok": 30, "tok_s": 33 },
+      "mid_term": { "stage": "hexa build → C → native binary", "rss_gb": 2.0, "ms_tok": 20, "tok_s": 50 },
+      "long_term": { "stage": "hexa native compiler → LLVM/Metal IR 직접 emit", "rss_gb": 1.5, "ms_tok": "10-15", "tok_s": "66-100" }
+    },
+    "principle": "hexa-lang 성숙도 = M4 edge 성능. C track이 빨라질수록 M4 서빙 속도가 비례해서 올라간다."
+  },
   "external_refs": [
     "training/deploy/m4_edge_deploy_roadmap.md",
     "shared/roadmaps/extreme.json",
