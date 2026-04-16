@@ -164,6 +164,10 @@ struct AggCounts {
     provisional: i64
 }
 
+// options_chosen can legitimately DECREASE when items are re-classified provisional.
+// Observed 4× in extreme_sync.jsonl 2026-04-15..16 (48→46→40→41). This is honesty,
+// not regression — harness must NOT treat chosen-decrease as error.
+@convergence(state="ossified", id="RUNPOD_OPTIONS_PROGRESS_DEMOTION", value="options_chosen count may DROP tick-over-tick (48→46→40→41 observed 2026-04-15..16) when items re-classified provisional. Legitimate honest movement — never flag as regression", ossified_at="2026-04-16")
 fn sum_counts(paths: list) -> AggCounts {
     let mut total: i64 = 0
     let mut chosen: i64 = 0
@@ -316,6 +320,10 @@ fn add_days_to_date(base_date: string, days: i64) -> string {
     return base_date
 }
 
+// Recompute destinations.projected every tick from `remaining` + today.
+// Stored `projected` dates can drift positive (past today) while `remaining`>0.
+// Harness MUST recompute, never trust stored projection values.
+@convergence(state="ossified", id="RUNPOD_DESTINATION_DATE_PROJECTION_DRIFT", value="extreme.json#destinations[*].projected drifts positive vs today when stored stale. Every tick: recompute from today + remaining days (velocity-derived). Never merge-preserve projected.", ossified_at="2026-04-16")
 fn update_destinations(ts: string, hs_evidence: string, dry: bool) -> bool {
     if !file_exists(PATH_XT) { return false }
     let alm_d1 = parse_alm_remaining(hs_evidence)
@@ -402,6 +410,10 @@ fn update_phase_statuses(ts: string, hs_evidence: string, dry: bool) -> bool {
 }
 
 // ── JSON mutation via jq ─────────────────────────────────────────────────
+// OVERWRITE semantics — wall_progress_pct is REASSIGNED from `progress` every tick,
+// never merge-preserved. Observed incident 2026-04-16: stored 92% vs recomputed 50%,
+// -42pp manual inflation (shared/state/extreme_100pct_gate_audit_20260416.json).
+@convergence(state="ossified", id="RUNPOD_ROADMAP_MANUAL_INFLATION", value="aggregate_state.wall_progress_pct must be OVERWRITTEN by machine-recomputed value every sync tick. Never merge-preserve. Evidence: 2026-04-16 audit found stored=92% vs recomputed=50% (-42pp inflation)", ossified_at="2026-04-16")
 fn update_extreme_json(counts: AggCounts, progress: i64, status: string, ts: string, dry: bool) -> bool {
     if !file_exists(PATH_XT) { return false }
     let tmp = "/tmp/extreme_sync_" + ts + ".json"

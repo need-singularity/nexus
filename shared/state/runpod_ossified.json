@@ -495,6 +495,71 @@
       "applied_to_fn": "training/launch_alm_a1.hexa::main (emits runner with all pod-side re-checks); training/alm_a1_preflight.hexa::main (returns all_ok + issues list distinguishing LOCAL SKIP from POD FAIL)",
       "incident_date": "2026-04-16",
       "ossified_at": "2026-04-16"
+    },
+    "RUNPOD_ROADMAP_MANUAL_INFLATION": {
+      "id": "RUNPOD_ROADMAP_MANUAL_INFLATION",
+      "symptom": "aggregate_state.wall_progress_pct manually bumped to inflated value (92%) while machine-derived recompute yields much lower value (50%). Dashboard displays the inflated number, creating false confidence about roadmap progress.",
+      "cause": "extreme_sync.hexa update_extreme_json could leave stored wall_progress_pct as written by external tool/human between ticks. Harness must OVERWRITE the field every tick from the recomputed `progress` value, never merge-preserve.",
+      "evidence": "shared/state/extreme_100pct_gate_audit_20260416.json (commit 039cea64) — recomputed 50% vs stored 92%, -42pp inflation at 2026-04-16 extreme gate audit.",
+      "fix": "update_extreme_json jq-sets `.aggregate_state.wall_progress_pct = <progress>` every sync tick (OVERWRITE, not merge). @convergence attr binds this fn: any future refactor must preserve OVERWRITE semantics. Never allow merge-preserve on machine-computable progress fields. Related to sibling RUNPOD_SUPERSEDED_POD_INFLATES_ROADMAP (upstream cause: pod-gated tasks staying in_progress when pod gone).",
+      "affected": "extreme.json wall_progress_pct; dashboard; roadmap gate audits.",
+      "severity": "HIGH — inflated roadmap progress silently misguides prioritization.",
+      "applied_to_fn": "shared/harness/extreme_sync.hexa::update_extreme_json",
+      "related": ["RUNPOD_SUPERSEDED_POD_INFLATES_ROADMAP", "RUNPOD_DESTINATION_DATE_PROJECTION_DRIFT"],
+      "incident_date": "2026-04-16",
+      "ossified_at": "2026-04-16"
+    },
+    "RUNPOD_POD_LIST_FRESHNESS_GATE": {
+      "id": "RUNPOD_POD_LIST_FRESHNESS_GATE",
+      "symptom": "State files (anima_train.json, c_track_board.json, roadmap destinations) claim a pod is 'running'/'active'/'in_progress' for a pod absent from `runpodctl pod list` for ≥12 hours. Progress trackers believe work is happening on a pod that is actually gone.",
+      "cause": "State files written once at launch, never cross-checked against live runpodctl/GraphQL output. Pod can be deleted, OOM-killed, or host-rescheduled and the state file stays stale indefinitely.",
+      "evidence": "2026-04-16 — anima_train.json marked ALM P4-4 'in_progress' citing pod tubq10zkct0t8f, which had been absent from `runpodctl pod list` for ≥12h. Discovered during extreme gate audit.",
+      "fix": "Any health/status hexa claiming a pod is running MUST invoke query_pods() (GraphQL myself{pods}) or `runpodctl pod list` within the same tick, with freshness ≤5min. If the claimed pod_id is not in the live result, state file is stale — mark status=stale and log alert. @convergence attr on query_pods binds this contract.",
+      "affected": "All state files referencing pod_id as justification for 'active' status.",
+      "severity": "MEDIUM — stale status corrupts roadmap trust and dispatch decisions.",
+      "applied_to_fn": "shared/harness/h100_idle_guard.hexa::query_pods",
+      "related": ["RUNPOD_IDLE_POD_BURN_UNDETECTED", "RUNPOD_SUPERSEDED_POD_INFLATES_ROADMAP", "ssh_port_rotation_mid_session"],
+      "incident_date": "2026-04-16",
+      "ossified_at": "2026-04-16"
+    },
+    "RUNPOD_DESTINATION_DATE_PROJECTION_DRIFT": {
+      "id": "RUNPOD_DESTINATION_DATE_PROJECTION_DRIFT",
+      "symptom": "extreme.json#destinations[*].projected dates drift into the past (earlier than today) while remaining_days > 0. Dashboard displays a 'projected completion' date that has already passed — projection is obviously stale/meaningless.",
+      "cause": "Projection computed once at spec time then preserved across sync ticks without recompute. Once `today` advanced past the stored projected date, the value became self-contradictory.",
+      "evidence": "Observed 2026-04-16 extreme gate audit — destinations[0].projected and destinations[1].projected had drifted to values before today while destinations[*].remaining.*_days > 0.",
+      "fix": "update_destinations recomputes projections every tick from today + remaining_days (velocity-derived from last 48h move rate when available, otherwise best-evidence estimate). Never merge-preserve projected dates. jq-sets both remaining{} and projected{} every tick, no exceptions. @convergence attr on update_destinations enforces this contract.",
+      "affected": "extreme.json#destinations[*].projected; roadmap dashboard.",
+      "severity": "MEDIUM — past-projected completion dates erode roadmap credibility.",
+      "applied_to_fn": "shared/harness/extreme_sync.hexa::update_destinations",
+      "related": ["RUNPOD_ROADMAP_MANUAL_INFLATION"],
+      "incident_date": "2026-04-16",
+      "ossified_at": "2026-04-16"
+    },
+    "RUNPOD_OPTIONS_PROGRESS_DEMOTION": {
+      "id": "RUNPOD_OPTIONS_PROGRESS_DEMOTION",
+      "symptom": "aggregate_state.options_chosen count decreases tick-over-tick (observed 48→46→40→41 in extreme_sync.jsonl 2026-04-15..16). Naive monitors would flag this as regression/data-loss.",
+      "cause": "When an option is re-classified from 'chosen' back to 'provisional' (honest re-evaluation after new evidence), the count legitimately drops. This is NOT a bug — it is the roadmap being truthful about what is actually converged.",
+      "evidence": "shared/harness/extreme_sync.jsonl 2026-04-15..16 — chosen counts moved 48→46→40→41 across 4 ticks as C-track and ALM options were demoted. All demotions were intentional (hire_sim_judge lenient rubric lift, ALM P4-4 superseded_by_14b, etc).",
+      "fix": "Harness MUST NOT treat chosen-count decrease as error. sum_counts() returns the truthful count; any downstream alerting/dashboard must accept that chosen can go down. @convergence attr on sum_counts preserves this contract: any future 'progress monotonicity' check must be rejected as incorrect.",
+      "affected": "Any future monitor/audit tempted to add monotonic-progress assertion.",
+      "severity": "LOW — informational; prevents future mistake of adding false monotonicity check.",
+      "applied_to_fn": "shared/harness/extreme_sync.hexa::sum_counts",
+      "related": [],
+      "incident_date": "2026-04-16",
+      "ossified_at": "2026-04-16"
+    },
+    "RUNPOD_IDLE_POD_BURN_UNDETECTED": {
+      "id": "RUNPOD_IDLE_POD_BURN_UNDETECTED",
+      "symptom": "Pod shows desiredStatus=RUNNING and healthy GraphQL response, yet the training process inside is dead/idle (crashed, killed, or never restarted after container restart). Billing continues at full rate ($3.07/hr H100 NVL, $2.99/hr H100 SXM) while no training happens — silent burn.",
+      "cause": "desiredStatus=RUNNING only means the pod container is up, not that the intended workload is running inside. After any container restart, the training process inside /workspace is gone unless a supervisor/systemd restarts it. Absent GPU-util cross-check, the orchestrator assumes the pod is training.",
+      "evidence": "2026-04-16 — CLM pod u744u0lbts5v1w (anima-clm1b-r4-nvl) silently idled after container restart until Agent 1 health check discovered gpu_util_pct=0 with desiredStatus=RUNNING. Cross-linked with volumeless_ephemeral_wipe (workspace wiped) and silent_cpu_fallback (similar detection-gap pattern).",
+      "fix": "h100_idle_guard.hexa::enforce_gpu_idle queries GPU util every tick via GraphQL gpuUtilPerc + SSH nvidia-smi fallback (threshold <5% → warn; 2× consecutive → HARD KILL runpodctl pod stop). Must run ≤10min interval via shared/config/loop/anima.json every_cycle[]. @convergence attr on enforce_gpu_idle binds this fn as the idle detector — every monitoring refactor must preserve GPU-util + process-health cross-check.",
+      "affected": "All active H100/A100 training pods.",
+      "severity": "CRITICAL — undetected idle pod burns ~$74/day per H100.",
+      "applied_to_fn": "shared/harness/h100_idle_guard.hexa::enforce_gpu_idle",
+      "related": ["volumeless_ephemeral_wipe", "silent_cpu_fallback", "RUNPOD_H100_IDLE_ZERO_TOLERANCE"],
+      "incident_date": "2026-04-16",
+      "ossified_at": "2026-04-16"
     }
   },
 
