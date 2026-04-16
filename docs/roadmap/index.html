@@ -901,8 +901,10 @@
       <div id="m4-telegram"></div>
       <h2>🔄 Fallback Paths</h2>
       <div id="m4-fallback"></div>
-      <h2>🔧 hexa-lang → 천장 연동</h2>
+      <h2>🔧 hexa-lang → 추론 천장 연동</h2>
       <div id="m4-hexa-ceiling"></div>
+      <h2>🚀 hexa-lang → 학습속도 천장 연동</h2>
+      <div id="m4-train-ceiling"></div>
     </section>
 
     <section class="extreme-section" id="extreme-section">
@@ -1756,6 +1758,56 @@
         }
         html += '</div>';
         elHexa.innerHTML = html;
+      }
+
+      // Training speed ceiling
+      const elTrain = document.getElementById("m4-train-ceiling");
+      const tcl = data.training_speed_ceiling_link;
+      if (elTrain && tcl) {
+        let html = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">`;
+        html += `<div style="color:var(--accent);font-weight:600;margin-bottom:0.5rem;">${esc(tcl.principle || '')}</div>`;
+        const bn = tcl.current_bottleneck || {};
+        if (bn.ALM) html += `<div style="color:var(--fg-mute);font-size:0.8rem;margin-bottom:0.3rem;"><strong style="color:var(--alm);">ALM:</strong> ${esc(bn.ALM)}</div>`;
+        if (bn.CLM) html += `<div style="color:var(--fg-mute);font-size:0.8rem;margin-bottom:1rem;"><strong style="color:var(--clm);">CLM:</strong> ${esc(bn.CLM)}</div>`;
+        // improvement table
+        html += '<table class="m4-ceiling-table"><thead><tr><th>hexa 개선</th><th>학습 효과</th><th>상태</th><th>우선도</th></tr></thead><tbody>';
+        (tcl.improvements || []).forEach(imp => {
+          const pc = imp.priority === 'highest' ? 'var(--gate)' : imp.priority === 'high' ? 'var(--run)' : 'var(--fg-mute)';
+          const sc = imp.status === 'done' ? 'var(--ok)' : imp.status.includes('verified') ? 'var(--run)' : 'var(--fg-dim)';
+          html += `<tr><td><strong>${esc(imp.name)}</strong><div style="font-size:0.7rem;color:var(--fg-dim);">${esc(imp.detail).substring(0,80)}...</div></td><td style="font-size:0.8rem;">${esc(imp.training_impact)}</td><td style="color:${sc};font-size:0.8rem;">${esc(imp.status)}</td><td style="color:${pc};">${esc(imp.priority)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        // evolution
+        const evo = tcl.long_term_training_evolution;
+        if (evo) {
+          html += '<div style="margin-top:1rem;"><strong style="color:var(--accent);">장기 학습속도 진화</strong></div>';
+          html += '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;">';
+          const pairs = [
+            ['current_alm','ALM 현재','var(--alm)','#1a1a2a'],
+            ['mid_term_alm','ALM 중기','var(--alm)','#1a2a3a'],
+            ['long_term_alm','ALM 장기','var(--alm)','#1a3a4a'],
+            ['current_clm','CLM 현재','var(--clm)','#1a2a1a'],
+            ['mid_term_clm','CLM 중기','var(--clm)','#1a3a2a'],
+            ['long_term_clm','CLM 장기','var(--clm)','#1a4a3a']
+          ];
+          pairs.forEach(([k, label, color, bg]) => {
+            const e = evo[k];
+            if (!e) return;
+            html += `<div style="background:${bg};border:1px solid var(--border);border-radius:6px;padding:0.6rem;flex:1;min-width:150px;">`;
+            html += `<div style="font-size:0.7rem;color:${color};">${label}</div>`;
+            html += `<div style="font-size:0.8rem;margin:0.2rem 0;">${esc(e.stage)}</div>`;
+            const metrics = [];
+            if (e.mfu_pct != null) metrics.push(`MFU ${e.mfu_pct}%`);
+            if (e.tok_s != null) metrics.push(`${e.tok_s} tok/s`);
+            if (e.ms_per_step != null) metrics.push(`${e.ms_per_step}ms/step`);
+            if (e.cost_per_1k_steps_usd != null) metrics.push(`$${e.cost_per_1k_steps_usd}/1k`);
+            html += `<div style="font-size:0.75rem;color:var(--ok);">${metrics.join(' · ')}</div>`;
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+        elTrain.innerHTML = html;
       }
 
       // Update header

@@ -684,6 +684,81 @@
     },
     "principle": "hexa-lang 성숙도 = M4 edge 성능. C track이 빨라질수록 M4 서빙 속도가 비례해서 올라간다."
   },
+  "training_speed_ceiling_link": {
+    "description": "hexa-lang 학습속도 천장. C track 개선이 학습 MFU를 직접 올린다. 학습이 빨라야 M4 배포할 모델이 빨리 나온다.",
+    "current_bottleneck": {
+      "ALM": "H100 989 TFLOPS bf16 중 MFU 70.9% 달성 (r8 sweep optimal b=8 s=1024). 남은 29% = hexa overhead + Python GIL + data pipeline",
+      "CLM": "hexa interpreter 1000ms/step → native 0.68ms/step (1479x). 그러나 real 7B shape에서는 BLAS-bound → hxblas/hxcuda 결정적"
+    },
+    "improvements": [
+      {
+        "name": "C4 CUDA fused mega-kernel",
+        "detail": "bf16 WMMA matmul + softmax + CE loss 단일 커널. hxcuda_fused.cu 480L 완성 (2026-04-16), H100 nvcc 빌드 대기 중",
+        "training_impact": "CLM forward+backward 10-50x 가속 (interpreter 대비). MFU 0.02% → 10%+ 가능",
+        "status": "code_done_build_pending",
+        "priority": "highest"
+      },
+      {
+        "name": "hxblas sgemm H100 최적화",
+        "detail": "512² 0.66ms (scalar 108.7ms = 165x). 4096² 97.9ms 1403 GFLOPS. CLM 7B shape의 matmul 레버.",
+        "training_impact": "CLM training step time 10x+ 단축 (BLAS-bound regime에서)",
+        "status": "linux_build_verified",
+        "priority": "highest"
+      },
+      {
+        "name": "hxflash FlashAttention (C8)",
+        "detail": "FA2 + GQA, hxflash_linux.c, Mac/Linux 빌드 완료. GPU tiling O(S²) → O(S) 메모리",
+        "training_impact": "longer seq 학습 가능 (seq 2048→4096 without OOM), attention 구간 2-4x",
+        "status": "build_verified_integration_pending",
+        "priority": "high"
+      },
+      {
+        "name": "hxccl NCCL shim (C9)",
+        "detail": "FSDP ready, 11 symbols Linux 빌드 완료. multi-GPU 학습 기반",
+        "training_impact": "2-GPU H100 → 2x throughput (DDP). CLM 7B FSDP = 32B+ 학습 가능",
+        "status": "build_verified_integration_pending",
+        "priority": "high"
+      },
+      {
+        "name": "C10 grad checkpointing",
+        "detail": "14/14 PASS, 69% mem savings (d=64). 대형 모델 학습 메모리 관문 제거",
+        "training_impact": "CLM 7B H100 80GB에서 batch 크게 → MFU ↑",
+        "status": "done",
+        "priority": "high"
+      },
+      {
+        "name": "C11 async checkpoint",
+        "detail": "3/3 PASS. state machine + cooperative amortised save",
+        "training_impact": "학습 중단 없이 ckpt 저장 → wall time 절감",
+        "status": "done",
+        "priority": "medium"
+      },
+      {
+        "name": "native codegen for training loop",
+        "detail": "hexa build → C → native binary. interpreter overhead 제거",
+        "training_impact": "CLM training 1479x (interpreter→native) 이미 증명. real shape에서 추가 10-100x via BLAS",
+        "status": "partial (small shapes done, 7B shape pending)",
+        "priority": "highest"
+      },
+      {
+        "name": "ALM Python 제거 (hexa-native launcher)",
+        "detail": "현재 ALM = hexa launcher + embedded Python. Python GIL이 data pipeline 병목",
+        "training_impact": "data loading 비동기화 → GPU 유휴 제거 → MFU 70%→80%+",
+        "status": "planned (P5+ 이후)",
+        "priority": "medium"
+      }
+    ],
+    "long_term_training_evolution": {
+      "current_alm": { "stage": "hexa launcher + Python backend", "mfu_pct": 70.9, "tok_s": 5147, "cost_per_1k_steps_usd": 6.2 },
+      "mid_term_alm": { "stage": "hexa-native + Liger + CUDA fused", "mfu_pct": 80, "tok_s": 5800, "cost_per_1k_steps_usd": 5.5 },
+      "long_term_alm": { "stage": "hexa-native + FP8 + multi-GPU", "mfu_pct": 90, "tok_s": 13000, "cost_per_1k_steps_usd": 2.4 },
+      "current_clm": { "stage": "hexa interpreter", "ms_per_step": 1000, "mfu_pct": 0.0002 },
+      "mid_term_clm": { "stage": "hexa native + hxblas + hxcuda", "ms_per_step": 5, "mfu_pct": 40 },
+      "long_term_clm": { "stage": "hexa native compiler + fused kernels + FSDP", "ms_per_step": 0.5, "mfu_pct": 75 }
+    },
+    "principle": "학습 속도 = 모델 완성 속도 = M4 배포 시점. C track이 빨라지면 → 학습 빨라지고 → 더 좋은 모델이 → M4에 더 빨리 올라간다.",
+    "cross_reference": "shared/state/training_speed_ceilings.json (SSOT)"
+  },
   "external_refs": [
     "training/deploy/m4_edge_deploy_roadmap.md",
     "shared/roadmaps/extreme.json",
