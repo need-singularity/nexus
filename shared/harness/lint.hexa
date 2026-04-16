@@ -252,6 +252,37 @@ fn check_json(path: string) -> string {
     return ""
 }
 
+// ─── Check H-HEXA-CANONICAL: .py를 canonical entry로 등록 금지 ───
+// 2026-04-16: CLM 1B r3f 학습 중 train_clm_1b.py가 canonical로 사용되어 hexa-first 규칙 위반.
+// core_rules.json, asset_registry.json 등 SSOT에 .py 파일이 등록되면 block.
+// .py 파일 자체는 transitional 허용. 문제는 SSOT/docs가 .py를 가리키는 것.
+fn check_hexa_canonical(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".json" && e != ".md" { return "" }
+    // 예외: archive/, deprecated_, backups/, .py 파일 자체 참조 OK인 docs (trainning/README.md 레거시 등)
+    if path.contains("/archive/") { return "" }
+    if path.contains("/deprecated_") { return "" }
+    if path.contains("/backups/") { return "" }
+    if path.contains("/legacy_") { return "" }
+    let full = REPO_ROOT + "/" + path
+    // JSON field patterns: "file", "script", "command", "entry", "canonical" with .py value
+    if e == ".json" {
+        let bad = _to_int0(_str(exec("grep -E '\"(file|script|command|entry|canonical|entrypoint|exec|run)\"\\s*:\\s*\"[^\"]*\\.py\"' '" + full + "' 2>/dev/null | wc -l")).trim())
+        if bad > 0 {
+            return "H-HEXA-CANONICAL|error|JSON에 .py를 canonical entry로 등록: " + to_string(bad) + "건. .hexa로 교체하고 .py는 transitional만 허용"
+        }
+    }
+    // MD patterns: "ssh ... python3 xxx.py" or "$ python3 train.py" as active command
+    if e == ".md" {
+        // exclude: code blocks quoting old logs, blockquotes for history
+        let bad = _to_int0(_str(exec("grep -E '^[^>]*\\s(python3?|torchrun)\\s+[^\\\"\\n]*train[a-zA-Z_]*\\.py' '" + full + "' 2>/dev/null | wc -l")).trim())
+        if bad > 0 {
+            return "H-HEXA-CANONICAL|warn|MD에 python3 train_*.py 활성 명령 " + to_string(bad) + "건 — $HEXA training/*.hexa로 교체"
+        }
+    }
+    return ""
+}
+
 // ─── Check R20: pkill/pgrep -f substring 금지 ───
 // -f substring 은 무고한 프로세스 silent kill 위험. -xf 정확매칭 또는 PID 파일 기반 사용.
 fn check_pkill_substring(path: string) -> string {
@@ -3802,6 +3833,12 @@ for f in files {
     if e == ".hexa" || e == ".sh" {
         let v12 = check_pkill_substring(path)
         if v12 != "" { violations = violations.push(path + "|" + v12) }
+    }
+
+    // check_hexa_canonical (H-HEXA-CANONICAL): .py를 canonical entry로 SSOT 등록 금지
+    if e == ".json" || e == ".md" {
+        let vhc = check_hexa_canonical(path)
+        if vhc != "" { violations = violations.push(path + "|" + vhc) }
     }
 
     // check_bare_interpreter (R22): .hexa/.sh 에서 bare python3/ruby/node 금지
