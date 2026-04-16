@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "id": "TS-20260416-CODEGEN-C2-RETURN",
+    "created": "2026-04-16",
+    "status": "WORKAROUND_DEPLOYED",
+    "severity": "CRITICAL",
+    "component": "hexa codegen_c2 compiler",
+    "summary": "codegen_c2 drops implicit return values — bare expressions emit hexa_void()"
+  },
+  "symptom": "Functions with bare expression as last statement return VOID. cuLaunchKernelEx gets gridDimX=0 → CUDA_ERROR_INVALID_VALUE(1). _arg_ptr/i32/f32 return VOID → garbage kernel params.",
+  "root_cause": "codegen_c2 emits `<expr>; return hexa_void();` for functions whose body ends with a bare expression statement, instead of `return <expr>;`",
+  "affected_files": [
+    "training/cuda_rtc.hexa: rtc_launch, rtc_launch_1d, rtc_launch_shmem, rtc_compile_ptx_size, rtc_load_module, rtc_get_function",
+    "training/cuda_kernels.hexa: _ceil_div, _arg_ptr, _arg_i32, _arg_i64, _arg_f32, _free_args"
+  ],
+  "workaround": "Add explicit `return` keyword before the last expression in every function that needs to return a value.",
+  "fix_commits": ["aaa69c1f", "1bc33911"],
+  "upstream_fix_needed": "codegen_c2: detect functions whose body's last statement is a bare expression and emit `return <expr>;` instead of `<expr>; return hexa_void();`",
+  "verified_on": "H100 SM90, CUDA 12.4, 20 training steps at 0.209 s/step after fix"
+}
