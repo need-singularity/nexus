@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "bt_id": "BT-541",
+  "round": 2,
+  "task_id": "BT-P7-1",
+  "track": "A11_BREAKTHROUGH",
+  "phase": "P7",
+  "date": "2026-04-16",
+  "title": "Riemann Hypothesis attack round 2 — numerical 4-part scan (orthogonal to R1 ladder)",
+  "attack_file": "shared/bt/attacks/bt541_riemann.hexa",
+  "results_file": "shared/bt/attacks/bt541_results.jsonl",
+  "raw_output": "shared/bt/attacks/bt541_riemann.out",
+
+  "honesty_charter": {
+    "no_proof_claim": true,
+    "no_breakthrough_claim": true,
+    "bt_resolution": "0/1 MISS",
+    "output_type": "numerical diagnostic only",
+    "label_scheme": ["VERIFIED", "DERIVED", "CONJECTURE", "PENDING"]
+  },
+
+  "angle_shift_from_r1": {
+    "r1_style": "analytical — Theorem B arithmetic -> Montgomery pair-correlation ladder -> conditional prime gap. result_lines=0 (zero numerics produced).",
+    "r2_style": "computational — probe 50 Odlyzko zeros via four independent RH-adjacent indicators. Produces 28 result_lines (14 unique signals x duplicate from double-main).",
+    "rationale": "R1's honest-MISS conclusion (CE-3: Montgomery conj. is itself conditional on RH) ruled out the analytical ladder as a proof chain. Round 2 instead asks 'do the numerical hallmarks of RH hold on a finite probe?' — an orthogonal question that can falsify RH numerically (if any probe failed) or add diagnostic signal (if all probes match)."
+  },
+
+  "data_source": {
+    "zeros": "Odlyzko first 50 imaginary parts gamma_k of non-trivial zeros of zeta(s)",
+    "ref": "Odlyzko zeta_tables, public domain, http://www.dtc.umn.edu/~odlyzko/zeta_tables/",
+    "precision_used": "f64 (~15 digit), embedded literal; no network fetch",
+    "assumption": "all rho_k = 1/2 + i gamma_k (RH); values from Odlyzko verified numerically to 10^-15"
+  },
+
+  "four_probes": {
+    "A_zero_density": {
+      "label": "DERIVED",
+      "probe": "Riemann-von Mangoldt N(T) ~ T/(2pi)*log(T/(2pi*e)) + 7/8",
+      "measurement": "diff_k = k - N(gamma_k) for k=1..50",
+      "result": {"max_abs_diff": 0.886414, "worst_k": 41, "bound": "< 1 for all k (expected from log-remainder)"},
+      "verdict": "no RH pathology — formula tracks zero count within bounded-O(1) window, matches Riemann-von Mangoldt theorem"
+    },
+    "B_explicit_formula": {
+      "label": "DERIVED",
+      "probe": "sum_{k<=50} 2*Re(6^rho_k / rho_k) under RH-assumption Re(rho)=1/2",
+      "measurement": "K-truncated partial sums converging to the zero-contribution term of psi(6) explicit formula",
+      "result": {
+        "partials_K_5": 0.170142,
+        "partials_K_10": 0.0227889,
+        "partials_K_25": 0.0479759,
+        "partials_K_50": 0.113798,
+        "target_asymptotic_from_r1_era": 0.0818
+      },
+      "verdict": "partials oscillate around target; no numerical violation. Truncation error O(1/gamma_K) prevents tighter match at K=50."
+    },
+    "C_gue_spacing": {
+      "label": "DERIVED",
+      "probe": "Wigner surmise GUE p(s) = (32/pi^2) s^2 exp(-4s^2/pi) vs Poisson p(s)=exp(-s)",
+      "measurement": "chi^2 of 10-bin histogram of normalized gaps sn = (gamma_{k+1}-gamma_k)*log(gamma_k/(2pi))/(2pi)",
+      "result": {
+        "chi2_GUE": 8.13641,
+        "chi2_Poisson": 56.4202,
+        "N_gaps": 49,
+        "ratio_GUE_better": 6.93
+      },
+      "verdict": "GUE ~6.9x better fit than Poisson; confirms Montgomery-Odlyzko universality hypothesis on this finite sample"
+    },
+    "D_li_criterion": {
+      "label": "DERIVED",
+      "probe": "lambda_n = sum_rho (1 - (1 - 1/rho)^n), Li (1997): lambda_n > 0 for all n <=> RH",
+      "measurement": "truncated lambda_n with K=50 zeros, n=1..10",
+      "result": {
+        "lambda_1": 0.0185419,
+        "lambda_2": 0.0741307,
+        "lambda_3": 0.166655,
+        "lambda_5": 0.461702,
+        "lambda_10": 1.82401,
+        "all_positive": true
+      },
+      "verdict": "partial positive for n=1..10 — consistent with RH but diagnostic-only (K=50 truncation inadequate for proof-grade test)"
+    }
+  },
+
+  "hexa_language_gaps": [
+    "No native complex type — simulated via float pairs inline (avoids project_hexa_struct_return_bug.md ≥3-float corruption)",
+    "f64 arithmetic only — no arbitrary precision, K=50 hard ceiling on practical probe size",
+    "No erf/zeta/complex-exp standard lib — implemented sin/cos/exp/ln/sqrt via Taylor/Newton series inline",
+    "With native complex + GMP bindings we could extend to K=10^4 zeros (Odlyzko's full published table) and reach Li n=30+. Currently blocked by language feature set."
+  ],
+
+  "result_summary": {
+    "result_lines": 28,
+    "jsonl_entries": "14 unique emit() calls x double-main duplication pattern (same as BT-543/BT-545)",
+    "verdict_lines": [
+      "no numerical RH violation detected on first 50 Odlyzko zeros",
+      "GUE spacing statistics confirmed (chi^2_GUE/chi^2_Poisson = 0.144)",
+      "Li criterion lambda_1..10 all positive as truncated sum",
+      "RvM formula matches zero count within O(log T)"
+    ],
+    "rh_verdict": "0/1 MISS — round 2 cannot prove RH, and no finite-K numerical attack can by design. RH requires info on all countable-infinity zeros."
+  },
+
+  "honest_verdict_on_hexa_progress": "hexa CAN produce diagnostic numerical probes of RH at modest K, matching known universality results. hexa CANNOT produce proof-grade output on any Clay-Millennium problem without (i) native complex arithmetic, (ii) arbitrary precision, (iii) integration with external zero-database. Even with all three, RH is infinite in nature; numerical work is always diagnostic, never proof. This is an intrinsic limitation of computational approaches, not of hexa specifically.",
+
+  "next_round_candidates": {
+    "round_3_options": [
+      {"id": "R3-A", "direction": "Hilbert-Polya candidate: search n=6 arithmetic for self-adjoint operator patterns", "effort": "XL", "risk": "HIGH — Hilbert-Polya unresolved since 1910s"},
+      {"id": "R3-B", "direction": "Li lambda_n extended via GMP FFI + Odlyzko full zero table", "effort": "M", "blocker": "hexa FFI maturity"},
+      {"id": "R3-C", "direction": "Random matrix theory deeper bridge — beyond Wigner to Tracy-Widom edge stats on scaled zero imaginary parts", "effort": "L"},
+      {"id": "R3-D", "direction": "Quantitative de Bruijn-Newman constant Λ (Tao-Rodgers 2020, Λ >= 0) combined with Theorem B n=6 anchor", "effort": "XL"}
+    ],
+    "recommended": "R3-C (deeper RMT) for next numerical round; R3-D if analytical appetite returns"
+  }
+}
