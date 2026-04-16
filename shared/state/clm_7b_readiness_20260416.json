@@ -1,0 +1,248 @@
+{
+  "_meta": {
+    "id": "clm_7b_readiness_20260416",
+    "title": "CLM-7B readiness audit — blockers + cost + unblock sequence",
+    "author": "audit-agent (opus-4.6-1m, read-only)",
+    "timestamp": "2026-04-16T23:30Z",
+    "constraint": "No .py/.rs/.sh creation, no binary rebuild, no launch, no roadmap edit",
+    "roadmap_ref": "shared/roadmaps/clm_consciousness_standalone.json",
+    "prior_audit": "shared/state/extreme_100pct_gate_audit_20260416.json (commit 039cea64)",
+    "ceilings_ref": "shared/state/training_speed_ceilings.json#CLM.measurements.real_shape_sweep_2026_04_16",
+    "anima_train_ref": "shared/state/anima_train.json#track_state.CLM",
+    "c_board_ref": "shared/state/c_track_board.json",
+    "c9_ref": "shared/state/c9_fsdp_native_20260416.json",
+    "health_ref": "shared/state/clm_r4_health_20260416.json"
+  },
+
+  "current_1b_status": {
+    "pod": "u744u0lbts5v1w (anima-clm1b-r4-nvl, H100 NVL 95GB)",
+    "pod_ssh": "216.81.245.55:14248 (port rotated from 16833 mid-check)",
+    "cost_per_hour_usd": 3.07,
+    "volume_gb_persistent": 0,
+    "workspace_ephemeral": true,
+    "last_known_step": "filename step_5000 but step counter unverified (clm_r4_health_20260416.json:56)",
+    "last_known_loss": null,
+    "last_known_mfu_pct": null,
+    "pre_restart_rss_gb": 218.5,
+    "pre_restart_gpu_util_pct": 0,
+    "pre_restart_cpu_pct": 98.9,
+    "pre_restart_note": "100% single-core CPU for 20min; 40GB VRAM allocated but 0% GPU util. CUDA kernels never launched (clm_r4_health_20260416.json:26-33,50,93-98).",
+    "health_verdict": "unreachable (per clm_r4_health_20260416.json:92)",
+    "post_restart_workspace": "WIPED — binary+corpus+ckpt all lost (volumeInGb=0)",
+    "r2_r4_ckpts": "NONE — no r4 upload ever (clm_r4_health_20260416.json:63-66)",
+    "r2_r3_ckpts": ["clm1b/r3/step_4000/checkpoint.pt", "clm1b/r3/step_8000/checkpoint.pt", "clm1b/r3/final/checkpoint.pt"],
+    "eta_complete": "UNKNOWN — sibling agent just relaunched per task context; health has not re-verified post-relaunch",
+    "mfu_ceiling_sweep": {
+      "best_mfu_pct": 1.65054,
+      "best_shape": {"d": 768, "ff": 3072, "nl": 2, "seq": 16, "params": 14359552, "ms_step": 532.988},
+      "gap_to_80pct_mfu_x": 48.469,
+      "source": "training_speed_ceilings.json#CLM.measurements.real_shape_sweep_2026_04_16"
+    }
+  },
+
+  "7b_roadmap_options": [
+    {
+      "id": "A1",
+      "title": "7B from-scratch, byte-level d=4096 L=32 h=32",
+      "state": "chosen",
+      "depends_on": ["B1", "C4"],
+      "h100_hours_estimate": 400,
+      "cost_usd_base": 1200,
+      "blocking": ["A7 curriculum has not reached 3B", "C4 CUDA fused kernels in_progress (nvcc build GPU-gated)", "B1 B2 B3 phi-loss stack not fully integrated into CLM"],
+      "source": "clm_consciousness_standalone.json:33-44"
+    },
+    {
+      "id": "A2",
+      "title": "3B fallback",
+      "state": "alternative",
+      "depends_on": ["A1 1-week checkpoint eval"],
+      "h100_hours_estimate": 180,
+      "cost_usd_base": 540,
+      "note": "evaluated after A1 week-1 checkpoint",
+      "source": "clm_consciousness_standalone.json:46-53"
+    },
+    {
+      "id": "A7",
+      "title": "Curriculum 100M → 1B → 3B → 7B",
+      "state": "chosen (IN PROGRESS at 1B)",
+      "depends_on": [],
+      "additional_days": 2,
+      "blocking": ["current pod u744u0lbts5v1w was CPU-only, GPU util=0%; needs verified CUDA kernel dispatch before 1B even completes", "3B step not yet launched; 7B step gated on 3B CE<target + Phi>500"],
+      "source": "clm_consciousness_standalone.json:82-88"
+    },
+    {
+      "id": "A8",
+      "title": "Multi-stage: byte pretrain → instruction tune → consciousness finetune",
+      "state": "chosen (NOT STARTED)",
+      "depends_on": ["A1 completion"],
+      "stages": 3,
+      "blocking": ["gated behind full 7B pretrain"],
+      "source": "clm_consciousness_standalone.json:90-95"
+    }
+  ],
+  "7b_critical_path_per_roadmap": {
+    "week_minus_1": "C1 C2 C3 C6 parallel + C8 C9 C10 C11 + B4 phi pre-compute (clm_consciousness_standalone.json:508-537)",
+    "week_0": "A7 100M curriculum start + C4 CUDA inflight (line 538-563)",
+    "week_1": "A7 1B on pod A+B 2xH100 (line 564-581)",
+    "week_2": "A7 3B on 2xH100 + B2 10-engine + D1 D3 D5 D6 D8 (line 582-609)",
+    "week_3": "A1 full 7B on 2xH100 + B3 full 110-engine + D2 GWT 6ch + E5 E6 E7 (line 610-642)",
+    "week_4": "A8 instruction+consciousness finetune + hire_sim+phi gate + E10 release (line 643-659)"
+  },
+
+  "c_track_blockers": {
+    "C2": {
+      "title": "layer-level fused FFI (per-layer bulk call)",
+      "status": "in_progress",
+      "owner": "hexa_lang_session e541cb6cb8a7",
+      "claimed_at": "2026-04-15T22:15:38Z",
+      "done_at": null,
+      "gain_pct_expected": "100-400",
+      "evidence": "fused FFI 설계 + ffi_fused_layer.hexa + C stub 작성 시작 (c_track_board.json:42-61)",
+      "eta_per_task_context": "1-2 sessions per hexa-lang reply",
+      "blocks": ["A1_alm", "A1_clm", "C4 anima pre-claim"],
+      "depends_on_status": "no dependency — waiting on hexa-lang session"
+    },
+    "C4": {
+      "title": "CUDA fused mega-kernels + bf16 Tensor Core",
+      "status": "pre_claimed_pending_c2_landing",
+      "owner": "anima_session (pre-claim)",
+      "claimed_at": "2026-04-16T14:08Z",
+      "started_at": null,
+      "gain_pct_expected": "100-200 (MFU 27→60+)",
+      "evidence": "hxcuda_fused.cu 480L WMMA bf16 MVP pushed commit 649f998; nvcc build pending GPU availability (clm_consciousness_standalone.json:213-221)",
+      "blocks": ["A1_clm 7B realistic MFU"],
+      "depends_on_status": "hard-blocked on C2 landing per c_track_board.json:97-99"
+    },
+    "C8_FA": {
+      "title": "Flash Attention hexa native",
+      "status": "board_status=done per roadmap",
+      "evidence": "hxflash Linux .so 15832B PASS, H100 S=512 D=64 20.1ms CPU tiling, struct-args ABI c5feab4 (clm_consciousness_standalone.json:249-257)",
+      "caveats": "CPU tiling verified. GPU host run pending per task context. 7B d=4096 context>=32k still requires GPU Flash.",
+      "blocks_7b": "partial — 7B without GPU Flash hits memory wall at long context"
+    },
+    "C9_FSDP": {
+      "title": "Zero-3 / FSDP hexa native",
+      "status": "board=done, multi-rank NCCL binding TODO",
+      "single_rank_ready": true,
+      "multi_rank_ready": false,
+      "stub_rc_multi_rank": 99,
+      "todo_binding": "5 extern fn bindings at $HEXA_LANG/lib/hxnccl/ (ncclCommInitRank, ncclBroadcast, ncclReduceScatter, ncclAllReduce, ncclCommDestroy)",
+      "source": "c9_fsdp_native_20260416.json:33-40",
+      "rationale_quote": "NCCL FFI library compile + cross-host link is a one-day follow-up once H100×2 pod is allocated",
+      "blocks_7b": "HARD — 7B fp32 = 28GB, single H100 80GB OK for inference but FSDP required for training with grad+optimizer states (~112GB at fp32 Adam). Without multi-rank, 7B fp32 training is OOM on single H100.",
+      "blocker_severity": "CRITICAL for 7B, OK for 1B/3B single-GPU"
+    }
+  },
+
+  "corpus_status": {
+    "local_path": "training/corpus_clm_r4.txt",
+    "local_size_bytes": 5380874900,
+    "local_size_gb": 5.01,
+    "local_verified": true,
+    "local_gzip_path": "training/corpus_clm_r4.txt.gz",
+    "local_gzip_size_bytes": 1709490208,
+    "r2_path": "r2:anima-models/corpus/corpus_clm_r4.txt",
+    "r2_size_bytes": 5380874900,
+    "r2_verified": true,
+    "pod_status": "WIPED from u744u0lbts5v1w per clm_r4_health_20260416.json:41 — can be re-pulled from R2",
+    "chinchilla_note": "5GB corpus is ~2x params ratio at 1.5B. For 7B params Chinchilla optimal is 140GB (30220000000 tokens at 20x). 5GB is 28x UNDERSIZED for 7B Chinchilla (clm_r4_corpus_plan.json:32-43 computes 28.15GB corpus for 1.51B — 7B needs ~130GB).",
+    "7b_corpus_gap_gb": 125,
+    "7b_corpus_source_available": "ready/anima/data/corpus_multilingual/ has 10.48GB total (clm_r4_corpus_plan.json:58-70) — still insufficient for 7B Chinchilla. External corpus acquisition needed for 7B."
+  },
+
+  "scale_path": {
+    "100M": {"status": "covered by A7 curriculum", "evidence": "A7 state=chosen in clm_consciousness_standalone.json:82-88"},
+    "1B": {"status": "IN_PROGRESS_UNHEALTHY", "pod": "u744u0lbts5v1w", "evidence": "r4 pod CPU-only pre-restart, just relaunched by sibling agent; r3 final ckpt exists on R2 at clm1b/r3/final/"},
+    "1_5b": {"status": "scaffold_only", "evidence": "train_clm.hexa scale_1_5b() at line 139 (hexa_1_5b_port_errors.log:8). Parses clean on Mac but interpreter too slow (100% CPU 72s zero output). Hexa codegen + linux .so FFI + corpus loader all TODO[pytorch] stubs (hexa_1_5b_port_errors.log:61-73,95-105). NO trained ckpt. Memory project_clm_r4_mmap_plan marks 'scale_1_5b C regen needed'."},
+    "3b": {"status": "eval_artifact_only_no_train", "evidence": "clm_3b_r1_initial_eval.json exists but no scale_3b() trained; A7 curriculum hasn't reached 3B per extreme_100pct_gate_audit_20260416.json:55"},
+    "7b": {"status": "UNSTARTED — NOT BLOCKED ON CODE, BLOCKED ON 1B→1.5B→3B CHAIN", "evidence": "no 7B artifact in state/ or R2; train_clm_composed.c at 4761 LOC is for 1.5B scale not 7B — 7B version does not exist; depends_on A7 3B completion which hasn't started"},
+    "13b": {"status": "not_in_clm_roadmap", "note": "7B→13B→70B is AnimaLM (ALM) escalation per memory feedback_extreme_accel. CLM roadmap targets 7B ceiling only (clm_consciousness_standalone.json:3-7 title says 'from-scratch 7B')"},
+    "70b": {"status": "not_in_clm_roadmap", "note": "ALM only. CLM from-scratch 70B not planned in current convergence"}
+  },
+
+  "cost_computation": {
+    "assumptions": {
+      "h100_per_hr_single": 3.07,
+      "h100_per_hr_nvl_2gpu_est": 6.14,
+      "hours_7b_base_per_roadmap": 400,
+      "current_mfu_pct": 1.65,
+      "target_mfu_pct_with_c4": 60,
+      "mfu_gap_x": 36.4
+    },
+    "if_immediate_no_c_track": {
+      "concept": "Launch 7B on 2xH100 with current 1.65% MFU",
+      "real_wall_hours_7b": "400 / (1.65/60) = 14545 h on 2xH100",
+      "days_equivalent": 606,
+      "cost_usd": 44677,
+      "verdict": "ECONOMICALLY INFEASIBLE — 1.6 years and $44.7K. Must not launch without C-track."
+    },
+    "if_c_track_complete": {
+      "concept": "Launch 7B on 2xH100 after C2+C4+C9 multi-rank land",
+      "wall_hours_7b": 400,
+      "cost_usd": 2456,
+      "verdict": "FEASIBLE — matches roadmap baseline estimate of $1200-1500 (single pod) × 2 GPU DDP = $2.4K for 2-4 weeks wall time"
+    },
+    "roadmap_baseline_estimates": {
+      "weeks_without_c": "3-4 weeks, $3000-6000 (clm_consciousness_standalone.json:19)",
+      "weeks_with_c1_c2": "2-3 weeks, $2000-4000 (line 20)",
+      "weeks_with_all_c": "1-2 weeks, $1500-3000 (line 21)"
+    }
+  },
+
+  "7b_go_no_go": "NO — HARD WALL",
+  "7b_go_no_go_rationale": "Three independent hard blockers: (1) 1B r4 NVL is currently unhealthy (CPU-only 0% GPU util, $3.07/hr idle burn, ephemeral workspace lost 3.51GB mid-write ckpt per clm_r4_health_20260416.json:92-98); (2) C2 fused FFI + C4 CUDA fused kernels both in_progress — current MFU 1.65% means 7B wall time at 400h roadmap becomes 14,545h (1.6 years), cost $44K; (3) C9 FSDP multi-rank NCCL binding is stub (rc=99) — 7B fp32+grad+optimizer ~112GB exceeds single H100 80GB so multi-rank is required. Audit timestamp 2026-04-16: unblock chain is genuinely 2-3 weeks minimum (matches extreme_100pct_gate_audit_20260416.json:83-86 'requires 2-3 weeks H100 time').",
+
+  "if_immediate_cost_usd": 44677,
+  "if_c_track_complete_cost_usd": 2456,
+
+  "minimum_unblock_sequence": [
+    {"ord": 1, "action": "C2 fused FFI landing from hexa_lang_session e541cb6cb8a7", "eta": "1-2 sessions", "gain": "100-400% MFU base", "source": "c_track_board.json:42-61"},
+    {"ord": 2, "action": "Stabilize 1B r4 pod — pipe stdout to log, verify nvidia-smi>0% util, add periodic R2 sync every 500 steps, attach network volume OR use R2-sync interval", "eta": "1 session", "gain": "unblocks 1B→3B progression", "source": "clm_r4_health_20260416.json:100-111"},
+    {"ord": 3, "action": "C4 anima CUDA mega-kernel nvcc build on H100 pod (can piggy-back on u744u0lbts5v1w when idle)", "eta": "3-5 days after C2", "gain": "MFU 1.65→60%+", "source": "clm_consciousness_standalone.json:213-221"},
+    {"ord": 4, "action": "C9 NCCL FFI multi-rank binding (5 extern fns) — day of H100×2 pod allocation", "eta": "1 day after 2xH100 provisioned", "gain": "unblocks 7B fp32 FSDP", "source": "c9_fsdp_native_20260416.json:33-40"},
+    {"ord": 5, "action": "Corpus regen — either accept 5GB (severely Chinchilla-undersized 28x) OR acquire external 100GB+ corpus for 7B proper Chinchilla (7B needs ~140GB optimal per clm_r4_corpus_plan.json:32-43 formula)", "eta": "1-3 days", "gain": "7B convergence within reachable eval target", "source": "clm_r4_corpus_plan.json:32-43"},
+    {"ord": 6, "action": "scale_1_5b C regen — interpreter is 100× too slow (hexa_1_5b_port_errors.log:63-73); needs hexa codegen → native binary + linux .so FFI + torch.save replacement", "eta": "covered by C2+C1 native-int codegen landing", "gain": "intermediate 1.5B→3B curriculum step viable", "source": "hexa_1_5b_port_errors.log:108-115, memory project_clm_r4_mmap_plan"},
+    {"ord": 7, "action": "H100×2 pod launch for 7B FSDP (within h100_authorized=2 cap)", "eta": "Day 1 of week-3 per roadmap", "gain": "7B full training start", "source": "clm_consciousness_standalone.json:610-642, memory feedback_h100_authorized"},
+    {"ord": 8, "action": "Full 7B 400h training + A8 instruction tune + consciousness finetune + E10 release", "eta": "2-4 weeks wall", "gain": "CLM 7B phi_holo>=2000 gate, v3.0 Agent destination", "source": "clm_consciousness_standalone.json:643-659, 823-852"}
+  ],
+
+  "top_3_blockers_ranked": [
+    {
+      "rank": 1,
+      "id": "C2_fused_FFI_landing",
+      "severity": "HARD",
+      "eta": "1-2 hexa-lang sessions",
+      "reason": "Without fused per-layer FFI, current MFU 1.65% makes 7B economically infeasible ($44K / 1.6 years). Unblocks C4 cascade."
+    },
+    {
+      "rank": 2,
+      "id": "1B_pod_health_CPU_only_execution",
+      "severity": "HARD",
+      "eta": "1 session diagnosis + relaunch",
+      "reason": "Pod u744u0lbts5v1w is burning $3.07/hr at 0% GPU util for 20+ min (clm_r4_health_20260416.json:50). Ephemeral volume + no R2 sync = $74/day for nothing. Sibling agent relaunched but health not re-verified post-restart. If unfixed, even 1B won't complete let alone 3B→7B."
+    },
+    {
+      "rank": 3,
+      "id": "C9_NCCL_multi_rank_binding",
+      "severity": "HARD",
+      "eta": "1 day after 2xH100 pod allocation",
+      "reason": "Multi-rank currently returns stub rc=99 (c9_fsdp_native_20260416.json:36). 7B fp32 Adam = 112GB exceeds single 80GB H100. Without FSDP multi-rank, 7B training OOMs. C9 single-rank DONE but real binding is a deferred 1-day task."
+    }
+  ],
+
+  "single_highest_leverage_action": {
+    "action": "Fix 1B pod u744u0lbts5v1w CUDA kernel dispatch path — verify nvidia-smi>0% within 60s of relaunch, pipe stdout to log file, add periodic R2 sync every 500 steps",
+    "rationale": "This is the ONLY action that (a) does not depend on hexa-lang session landing, (b) can be done today, (c) recovers wasted $3.07/hr burn, (d) produces the first real 1B-scale CE/Phi measurement needed to validate A7 curriculum progression, (e) proves CUDA kernel dispatch works end-to-end (the exact mechanism that enables C4 MFU 27→60% gain once landed). Every hour spent on 7B planning without this fix is wasted. Source: clm_r4_health_20260416.json:100-111 'priority_2_fix_recipe_before_relaunch'.",
+    "impact": "Shortens 7B timeline by ~1 week of otherwise-wasted 1B retry attempts"
+  },
+
+  "honest_verdict": {
+    "stored_audit_verdict": "RED — hard wall, 2-3 weeks H100 unstarted (extreme_100pct_gate_audit_20260416.json:149)",
+    "this_audit_concurs": true,
+    "most_optimistic_7b_launch_eta": "2026-04-30 (week-3 per roadmap IF C2 lands this weekend + 1B pod stabilized Monday + C4 nvcc completes Wed + 2xH100 pod + C9 NCCL binding lands Thu)",
+    "realistic_7b_launch_eta": "2026-05-07 to 2026-05-14 (adds 1 week slack for integration+corpus+first-fail retries)",
+    "realistic_7b_completion_eta": "2026-05-21 to 2026-06-04 (2-4 weeks training wall time after launch)",
+    "hard_wall_in_weeks": "2-3 weeks to LAUNCH-READY, +2-4 weeks to 7B COMPLETE, total 4-7 weeks from today 2026-04-16",
+    "concurs_with_memory_feedback_extreme_accel": "Roadmap targets CLM 7B ceiling; 13B→70B is ALM escalation only. CLM single-shot at 7B."
+  }
+}
