@@ -173,14 +173,14 @@ fn acos_(c: float) -> float {
         // f(x) = cos(x) - cc,  f'(x) = -sin(x) = -sqrt(1-cos(x)^2) with sign
         let cx = cos_(x)
         let s2 = 1.0 - cx * cx
-        if s2 <= 1e-20 {
+        if s2 <= 0.00000000000000000001 {
             return x
         }
         let sx = sqrt_(s2)
         // x in [0,pi] so sin(x) >= 0; derivative = -sin(x)
         let dx = (cx - cc) / sx
         x = x + dx
-        if fabs(dx) < 1e-12 { return x }
+        if fabs(dx) < 0.000000000001 { return x }
         i = i + 1
     }
     return x
@@ -345,7 +345,7 @@ fn cmd_scan() {
     let target = sum_K(K_round) / N6      // discrete average, = pi for octahedron
     let round_var = var_K(K_round)
     let round_dev = max_abs_K_dev(K_round, target)
-    let round_fixed = round_var < 1e-20
+    let round_fixed = round_var < 0.00000000000000000001
     println("  target K*_i = sumK/6 = " + fs(target) + "  (~ pi = " + fs(PI) + ")")
     println("  fixed point (var K = 0)? " + bs(round_fixed))
     println("")
@@ -385,7 +385,7 @@ fn cmd_scan() {
         u = flow_step(u, dt)
         let Kt = all_curvatures(u)
         let vt = var_K(Kt)
-        if vt > prev_var + 1e-10 { monotone = false }
+        if vt > prev_var + 0.0000000001 { monotone = false }
         var_traj.push(vt)
         prev_var = vt
         // snapshot at steps 5, 25, 100, 200
@@ -415,7 +415,7 @@ fn cmd_scan() {
 
     // Ratio v100/v25 — exponential decay means (v100/v25) should be small
     let ratio = 0.0
-    if v25 > 1e-20 {
+    if v25 > 0.00000000000000000001 {
         emit("ricci_p3_varK_ratio_100_over_25", "NUMERICAL",
              "var(K)@100 / var(K)@25 — exponential decay signal (expected << 1)",
              fs(v100 / v25))
@@ -447,10 +447,10 @@ fn cmd_scan() {
     let Kf = all_curvatures(u)
     let vf = var_K(Kf)
     let gbf = fabs(sum_K(Kf) - topo_target)
-    let verdict_gb = gbf < 1e-6
-    let verdict_unif = vf < 1e-20
+    let verdict_gb = gbf < 0.000001
+    let verdict_unif = vf < 0.00000000000000000001
     let verdict_mono = monotone
-    let verdict_spread = u_spread < 1e-10
+    let verdict_spread = u_spread < 0.0000000001
     println("")
     println("=== VERDICT ===")
     println("  P1 topo invariant preserved (|sumK-6pi| < 1e-6):   " + bs(verdict_gb))

@@ -1,0 +1,375 @@
+// bt542_sat_scaling.hexa — BT-542 P vs NP attack round 2
+// angle: empirical 3-SAT brute-force scaling — polynomial vs exponential fit
+// @no-lock-needed  @allow-bare-exec
+// honesty: NO proof claim. BT-542 is UNSOLVED. This is a narrow numerical probe
+//          of the small-n regime; it CANNOT decide P vs NP (asymptotics matter,
+//          small n is dominated by constants). Reported as diagnostic only.
+// labels: LITERATURE / DERIVED / OBSERVED / HONEST_MISS
+// usage: HEXA_LOCAL=1 hexa run bt542_sat_scaling.hexa
+// ref:
+//   Cook 1971 (3-SAT NP-complete), Karp 1972 (21 NP-complete problems),
+//   Impagliazzo-Paturi 2001 (ETH: 3-SAT requires 2^{Omega(n)} time),
+//   Selman-Mitchell-Levesque 1996 (phase transition at clause/var ~= 4.26),
+//   Baker-Gill-Solovay 1975 (relativization barrier),
+//   Razborov-Rudich 1997 (natural proofs barrier).
+// round-1 was strategic (metacomplexity/MCSP sketch, 0 numerics).
+// round-2 is orthogonal: direct brute-force measurement on random 3-SAT.
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/Dev/nexus"
+let RESULTS_PATH = NEXUS + "/shared/bt/attacks/bt542_results.jsonl"
+
+// ---- helpers ----
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn now_ts() -> string {
+    let mut ts = ""
+    try { ts = _str(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim() } catch e {}
+    return ts
+}
+
+fn json_esc(s: string) -> string {
+    let mut r = s
+    r = r.replace("\\", "\\\\")
+    r = r.replace("\"", "\\\"")
+    r = r.replace("\n", " ")
+    return r
+}
+
+fn append_result(line: string) {
+    let esc = line.replace("'", "'\\''")
+    try { exec("printf '%s\\n' '" + esc + "' >> '" + RESULTS_PATH + "'") } catch e {}
+}
+
+fn emit(kind: string, label: string, desc: string, value: string) {
+    let row = "{\"ts\":\"" + now_ts() + "\",\"bt_id\":\"BT-542\",\"round\":2,\"kind\":\"" +
+        json_esc(kind) + "\",\"label\":\"" + json_esc(label) +
+        "\",\"desc\":\"" + json_esc(desc) + "\",\"value\":\"" + json_esc(value) + "\"}"
+    append_result(row)
+    println("[" + label + "] " + desc + " = " + value)
+}
+
+fn fabs(x: float) -> float {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+// natural log via series + range reduction (ln(x) = 2*atanh((x-1)/(x+1)))
+fn fln(x: float) -> float {
+    if x <= 0.0 { return 0.0 - 999999999999.0 }
+    // range reduce to [1/2, 2] via repeated sqrt... we'll use a different trick:
+    // ln(x) via Newton on exp: inverse with seed using bit-length heuristic.
+    // Simpler: use series for y = (x-1)/(x+1), ln(x) = 2*(y + y^3/3 + y^5/5 + ...)
+    // converges for x > 0. Accelerate by pre-scaling: while x > 2, x/=e; while x < 0.5, x*=e.
+    let E = 2.718281828459045
+    let mut v = x
+    let mut add: float = 0.0
+    let mut g = 0
+    while v > 2.0 && g < 200 { v = v / E; add = add + 1.0; g = g + 1 }
+    while v < 0.5 && g < 400 { v = v * E; add = add - 1.0; g = g + 1 }
+    let y = (v - 1.0) / (v + 1.0)
+    let y2 = y * y
+    let mut term = y
+    let mut sum = y
+    let mut k = 1
+    while k < 60 {
+        term = term * y2
+        let denom = to_float(2 * k + 1)
+        sum = sum + term / denom
+        k = k + 1
+    }
+    return 2.0 * sum + add
+}
+
+// --- Deterministic PRNG (LCG, reproducible) ---
+// Numerical Recipes LCG (a=1664525, c=1013904223) with middle-bit extraction;
+// safer than MMIX constants under hexa i64 overflow semantics.
+let mut RNG_STATE: i64 = 123456789
+fn rand_u() -> i64 {
+    RNG_STATE = RNG_STATE * 1664525 + 1013904223
+    // take middle/high bits to avoid low-bit periodicity
+    let mut v = RNG_STATE / 65536
+    if v < 0 { v = 0 - v }
+    return v
+}
+fn rand_range(n: i64) -> i64 {
+    if n <= 0 { return 0 }
+    return rand_u() % n
+}
+fn rand_01() -> i64 { return rand_u() % 2 }
+
+// pow2(k) = 2^k via repeated doubling (small k only; n<=20 here)
+fn pow2(k: i64) -> i64 {
+    let mut r: i64 = 1
+    let mut i: i64 = 0
+    while i < k { r = r * 2; i = i + 1 }
+    return r
+}
+
+// bit i of x, via integer division + modulo (no shift op available)
+fn bit_i(x: i64, i: i64) -> i64 {
+    return (x / pow2(i)) % 2
+}
+
+// --- 3-SAT instance: list of clauses, each clause is 3 signed ints (1..n, neg = negation) ---
+// flat encoding: clauses as [c0l0, c0l1, c0l2, c1l0, ...] with sign
+fn gen_3sat(n: i64, m: i64) -> [i64] {
+    let mut out: [i64] = []
+    let mut ci: i64 = 0
+    while ci < m {
+        // sample 3 distinct vars
+        let mut v1 = rand_range(n) + 1
+        let mut v2 = rand_range(n) + 1
+        while v2 == v1 { v2 = rand_range(n) + 1 }
+        let mut v3 = rand_range(n) + 1
+        while v3 == v1 || v3 == v2 { v3 = rand_range(n) + 1 }
+        let s1 = rand_01()
+        let s2 = rand_01()
+        let s3 = rand_01()
+        let l1 = if s1 == 1 { v1 } else { 0 - v1 }
+        let l2 = if s2 == 1 { v2 } else { 0 - v2 }
+        let l3 = if s3 == 1 { v3 } else { 0 - v3 }
+        out = out.push(l1)
+        out = out.push(l2)
+        out = out.push(l3)
+        ci = ci + 1
+    }
+    return out
+}
+
+// evaluate assignment (bitmask) against clauses; returns true iff all clauses SAT
+fn eval_sat(clauses: [i64], m: i64, assign: i64) -> bool {
+    let mut ci: i64 = 0
+    while ci < m {
+        let l0 = clauses[3*ci + 0]
+        let l1 = clauses[3*ci + 1]
+        let l2 = clauses[3*ci + 2]
+        let mut ok = false
+        // l0
+        let v0: i64 = if l0 > 0 { l0 - 1 } else { (0 - l0) - 1 }
+        let bit0: i64 = bit_i(assign, v0)
+        let want0: i64 = if l0 > 0 { 1 } else { 0 }
+        if bit0 == want0 { ok = true }
+        if ok == false {
+            let v1: i64 = if l1 > 0 { l1 - 1 } else { (0 - l1) - 1 }
+            let bit1: i64 = bit_i(assign, v1)
+            let want1: i64 = if l1 > 0 { 1 } else { 0 }
+            if bit1 == want1 { ok = true }
+        }
+        if ok == false {
+            let v2: i64 = if l2 > 0 { l2 - 1 } else { (0 - l2) - 1 }
+            let bit2: i64 = bit_i(assign, v2)
+            let want2: i64 = if l2 > 0 { 1 } else { 0 }
+            if bit2 == want2 { ok = true }
+        }
+        if ok == false { return false }
+        ci = ci + 1
+    }
+    return true
+}
+
+// brute-force solver: enumerate all 2^n assignments, count work (# assignments checked)
+// returns pair [sat_flag, work] packed as [i64, i64]
+fn solve_brute(clauses: [i64], n: i64, m: i64) -> [i64] {
+    let total: i64 = pow2(n)
+    let mut a: i64 = 0
+    let mut work: i64 = 0
+    while a < total {
+        work = work + 1
+        if eval_sat(clauses, m, a) {
+            let mut r: [i64] = []
+            r = r.push(1)
+            r = r.push(work)
+            return r
+        }
+        a = a + 1
+    }
+    let mut r: [i64] = []
+    r = r.push(0)
+    r = r.push(work)
+    return r
+}
+
+// ---- main experiment ----
+fn main() {
+    println("=== BT-542 round 2: empirical 3-SAT brute-force scaling ===")
+    println("angle: measure work (assignments checked) vs n; fit poly vs exp")
+    println("")
+
+    emit("setup", "LITERATURE",
+         "3-SAT NP-complete (Cook 1971); ETH predicts 2^Omega(n) time",
+         "reference")
+
+    // critical-ratio instances: clauses/vars ~= 4.26 (hardest random 3-SAT region)
+    // Selman-Mitchell-Levesque 1996
+    let ratio: float = 4.26
+    let trials_per_n: i64 = 20
+
+    // collect (n, log2_avg_work)
+    let mut ns: [float] = []
+    let mut logWs: [float] = []
+    let mut avgWs: [float] = []
+
+    let mut n: i64 = 5
+    while n <= 14 {
+        let m = to_int(to_float(n) * ratio + 0.5)
+        if m < 1 { n = n + 1; continue }
+
+        let mut total_work: i64 = 0
+        let mut sat_cnt: i64 = 0
+        let mut t: i64 = 0
+        while t < trials_per_n {
+            // deterministic per (n, trial): reseed
+            RNG_STATE = 1000000 * n + 9973 * t + 17
+            let clauses = gen_3sat(n, m)
+            let res = solve_brute(clauses, n, m)
+            let sat = res[0]
+            let work = res[1]
+            total_work = total_work + work
+            if sat == 1 { sat_cnt = sat_cnt + 1 }
+            t = t + 1
+        }
+
+        let avg_w = to_float(total_work) / to_float(trials_per_n)
+        let sat_rate = to_float(sat_cnt) / to_float(trials_per_n)
+        let log2_w = fln(avg_w) / fln(2.0)
+
+        ns = ns.push(to_float(n))
+        logWs = logWs.push(log2_w)
+        avgWs = avgWs.push(avg_w)
+
+        let line = "n=" + to_string(n) + " m=" + to_string(m) +
+                   " avg_work=" + to_string(avg_w) +
+                   " log2_work=" + to_string(log2_w) +
+                   " sat_rate=" + to_string(sat_rate)
+        emit("scan", "OBSERVED", "3-SAT brute-force at critical ratio", line)
+
+        n = n + 1
+    }
+
+    // --- fit 1: linear regression on (n, log2_work) → exponential model work ~ c * 2^(a*n) ---
+    let kk = ns.len()
+    let mut sx: float = 0.0
+    let mut sy: float = 0.0
+    let mut sxx: float = 0.0
+    let mut sxy: float = 0.0
+    let mut i = 0
+    while i < kk {
+        let x = ns[i]
+        let y = logWs[i]
+        sx = sx + x
+        sy = sy + y
+        sxx = sxx + x * x
+        sxy = sxy + x * y
+        i = i + 1
+    }
+    let nn = to_float(kk)
+    let denom = nn * sxx - sx * sx
+    let slope_exp: float = if fabs(denom) > 0.0 { (nn * sxy - sx * sy) / denom } else { 0.0 }
+    let intercept_exp: float = (sy - slope_exp * sx) / nn
+
+    // residual sum of squares for exp fit
+    let mut rss_exp: float = 0.0
+    i = 0
+    while i < kk {
+        let pred = slope_exp * ns[i] + intercept_exp
+        let d = logWs[i] - pred
+        rss_exp = rss_exp + d * d
+        i = i + 1
+    }
+
+    emit("fit_exp", "DERIVED",
+         "log2(work) ~= a*n + b (exponential model)",
+         "a=" + to_string(slope_exp) + " b=" + to_string(intercept_exp) +
+         " RSS_log=" + to_string(rss_exp))
+
+    // --- fit 2: linear regression on (log2(n), log2_work) → polynomial model work ~ c * n^p ---
+    let mut lx: [float] = []
+    i = 0
+    while i < kk { lx = lx.push(fln(ns[i]) / fln(2.0)); i = i + 1 }
+
+    let mut sx2: float = 0.0
+    let mut sxx2: float = 0.0
+    let mut sxy2: float = 0.0
+    i = 0
+    while i < kk {
+        sx2 = sx2 + lx[i]
+        sxx2 = sxx2 + lx[i] * lx[i]
+        sxy2 = sxy2 + lx[i] * logWs[i]
+        i = i + 1
+    }
+    let denom2 = nn * sxx2 - sx2 * sx2
+    let slope_poly: float = if fabs(denom2) > 0.0 { (nn * sxy2 - sx2 * sy) / denom2 } else { 0.0 }
+    let intercept_poly: float = (sy - slope_poly * sx2) / nn
+
+    let mut rss_poly: float = 0.0
+    i = 0
+    while i < kk {
+        let pred = slope_poly * lx[i] + intercept_poly
+        let d = logWs[i] - pred
+        rss_poly = rss_poly + d * d
+        i = i + 1
+    }
+
+    emit("fit_poly", "DERIVED",
+         "log2(work) ~= p*log2(n) + q (polynomial model, p = exponent)",
+         "p=" + to_string(slope_poly) + " q=" + to_string(intercept_poly) +
+         " RSS_log=" + to_string(rss_poly))
+
+    // --- verdict: which model fits better? ---
+    // exp slope_exp should approach 1.0 for pure 2^n brute force
+    // lower RSS wins
+    let winner = if rss_exp < rss_poly { "exponential" } else { "polynomial" }
+    let ratio_rss: float = if rss_poly > 0.0 { rss_exp / rss_poly } else { 0.0 }
+
+    emit("verdict", "OBSERVED",
+         "empirical model comparison on n=5..14 (small-n regime)",
+         "winner=" + winner + " RSS_exp/RSS_poly=" + to_string(ratio_rss) +
+         " a_exp=" + to_string(slope_exp) + " p_poly=" + to_string(slope_poly))
+
+    // predicted work at n=20 under each model (extrapolation)
+    let pred20_exp: float = slope_exp * 20.0 + intercept_exp
+    let pred20_poly: float = slope_poly * (fln(20.0)/fln(2.0)) + intercept_poly
+    emit("extrapolate", "DERIVED",
+         "log2(work) predicted at n=20",
+         "exp_model=" + to_string(pred20_exp) +
+         " poly_model=" + to_string(pred20_poly) +
+         " gap_bits=" + to_string(pred20_exp - pred20_poly))
+
+    // --- anima n=6 structural check: is n=6 a crossover / anomaly? ---
+    // measure residual at n=6 under both models
+    let mut idx6 = -1
+    i = 0
+    while i < kk {
+        if ns[i] > 5.5 && ns[i] < 6.5 { idx6 = i }
+        i = i + 1
+    }
+    if idx6 >= 0 {
+        let pred6_exp = slope_exp * 6.0 + intercept_exp
+        let pred6_poly = slope_poly * (fln(6.0)/fln(2.0)) + intercept_poly
+        let obs6 = logWs[idx6]
+        emit("n6_probe", "OBSERVED",
+             "n=6 residuals vs both models (anima structural check)",
+             "obs=" + to_string(obs6) +
+             " res_exp=" + to_string(obs6 - pred6_exp) +
+             " res_poly=" + to_string(obs6 - pred6_poly))
+    }
+
+    // honesty conclusion
+    emit("honesty", "HONEST_MISS",
+         "finite n=5..14 cannot decide P vs NP; result is diagnostic only",
+         "BT-542 remains 0/1 unresolved; ETH (Impagliazzo-Paturi) assumes but " +
+         "does not prove 2^Omega(n) lower bound; brute-force work is trivially " +
+         "2^n by construction, so measured slope ~1.0 is tautological for this solver. " +
+         "A genuine attack would require a P-algorithm for 3-SAT or a superpoly " +
+         "lower bound on all circuits — neither is attempted here.")
+
+    println("")
+    println("=== done — results at " + RESULTS_PATH + " ===")
+}
+
+main()
