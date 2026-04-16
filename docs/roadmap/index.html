@@ -496,8 +496,14 @@
       background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 1rem 1.2rem 0.8rem;
+      padding: 1rem 0.5rem 0.8rem;
       margin-bottom: 1rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .xt-timeline svg {
+      min-width: 2400px;
+      display: block;
     }
     .xt-tl-title {
       font-size: 0.65rem; color: var(--fg-dim); text-transform: uppercase;
@@ -630,73 +636,17 @@
     .xt-col .gate-title { font-size: 0.72rem; margin-bottom: 0.2rem; }
     .xt-col .gate ul { font-size: 0.74rem; padding-left: 1rem; }
 
-    /* Phase Gantt timeline — visual horizontal bars */
-    .xt-gantt { margin-bottom: 1.5rem; overflow-x: auto; }
-    .xt-gantt-inner {
-      min-width: 600px; position: relative;
-      padding: 0.3rem 0;
+    /* SVG horizontal timeline — skynet-timer style */
+    .xt-timeline svg text {
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      letter-spacing: 0.06em;
     }
-    .xt-gantt-axis {
-      position: relative; height: 1.4rem; margin-bottom: 0.2rem;
-      border-bottom: 1px solid var(--border);
+    @keyframes dest-pulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 0.12; }
     }
-    .xt-gantt-axis .ax-tick {
-      position: absolute; transform: translateX(-50%);
-      font-family: var(--mono); font-size: 0.65rem; color: var(--fg-dim);
-      top: 0; white-space: nowrap;
-    }
-    .xt-gantt-axis .ax-tick::after {
-      content: ""; position: absolute; left: 50%; top: 1.1rem;
-      width: 1px; height: 0.3rem; background: var(--border);
-    }
-    .xt-gantt-lane {
-      position: relative; height: 2.2rem; margin-bottom: 0.15rem;
-      border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-    }
-    .xt-gantt-lane .lane-label {
-      position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-      font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
-      width: 3.5rem; text-align: right; padding-right: 0.4rem;
-    }
-    .xt-gantt-bar {
-      position: absolute; top: 0.2rem; height: 1.8rem;
-      border-radius: 5px; display: flex; align-items: center; gap: 0.25rem;
-      padding: 0 0.5rem; font-size: 0.72rem; font-weight: 600;
-      overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-      cursor: default; border: 1px solid transparent;
-      transition: opacity 0.15s;
-    }
-    .xt-gantt-bar:hover { opacity: 1 !important; filter: brightness(1.15); }
-    .xt-gantt-bar.done {
-      background: color-mix(in srgb, var(--done) 25%, var(--bg-elev));
-      border-color: var(--done); color: var(--done);
-    }
-    .xt-gantt-bar.in_progress {
-      background: color-mix(in srgb, var(--warn) 20%, var(--bg-elev));
-      border-color: var(--warn); color: var(--warn);
-      animation: pulse 2s infinite;
-    }
-    .xt-gantt-bar.planned {
-      background: var(--bg-elev); border-color: var(--border); color: var(--fg-dim);
-    }
-    .xt-gantt-bar .bar-id {
-      font-family: var(--mono); font-size: 0.68rem; font-weight: 800; opacity: 0.9;
-    }
-    .xt-gantt-bar .bar-name { font-size: 0.68rem; opacity: 0.75; }
-    .xt-gantt-bar .bar-tasks {
-      font-family: var(--mono); font-size: 0.6rem; opacity: 0.6;
-      margin-left: auto;
-    }
-    .xt-gantt-today {
-      position: absolute; top: 0; bottom: 0; width: 2px;
-      background: var(--accent); z-index: 2; opacity: 0.6;
-      pointer-events: none;
-    }
-    .xt-gantt-today::before {
-      content: "today"; position: absolute; top: -1.5rem; left: 50%;
-      transform: translateX(-50%); font-size: 0.6rem; color: var(--accent);
-      font-family: var(--mono); font-weight: 700;
-    }
+    .xt-timeline svg .dest-glow { animation: dest-pulse 2.5s ease-in-out infinite; }
+    .xt-timeline svg .now-pulse { animation: pulse 2s ease-in-out infinite; }
 
     /* Destinations — two milestone cards */
     .xt-dest-grid {
@@ -1562,80 +1512,170 @@
       `;
     }
 
-    // ──────── Extreme tab — Gantt phase timeline ────────
+    // ──────── Extreme tab — SVG horizontal timeline (skynet-timer style) ────────
     function renderExtremePhases(agg) {
-      const el = document.getElementById("xt-phases");
+      const el = document.getElementById("xt-timeline");
       if (!el) return;
       const phases = agg.phases || [];
+      const dests = agg.destinations || [];
       if (!phases.length) { el.innerHTML = '<div class="note" style="color:var(--fg-dim)">phases 데이터 없음</div>'; return; }
 
-      // Date helpers
       const parseD = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
       const fmtMD = d => `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      const allStarts = phases.map(p => parseD(p.date_start));
-      const allEnds = phases.map(p => parseD(p.date_end));
-      const minDate = new Date(Math.min(...allStarts));
-      const maxDate = new Date(Math.max(...allEnds));
-      const totalDays = Math.round((maxDate - minDate) / 86400000) + 1;
 
-      const L = 5, R = 97; // % margins (leave room for lane labels)
-      const dayPct = (R - L) / totalDays;
-      const barLeft = s => L + (Math.round((parseD(s) - minDate) / 86400000)) * dayPct;
-      const barWidth = (s, e) => Math.max((Math.round((parseD(e) - parseD(s)) / 86400000) + 1) * dayPct, dayPct);
+      // Date range from phases
+      const allDates = phases.flatMap(p => [parseD(p.date_start), parseD(p.date_end)]);
+      const minDate = new Date(Math.min(...allDates));
+      const maxDate = new Date(Math.max(...allDates));
+      const totalDays = Math.round((maxDate - minDate) / 86400000) || 1;
 
-      // Group by swim lane
-      const lanes = { both: [], alm: [], clm: [] };
-      phases.forEach(ph => (lanes[ph.scope] || lanes.both).push(ph));
+      // SVG layout — extra-wide horizontal (scroll)
+      const W = 2400, H = 170;
+      const ML = 60, MR = 50; // margins
+      const usable = W - ML - MR;
+      const dayX = d => ML + (Math.round((d - minDate) / 86400000) / totalDays) * usable;
+      const dateX = s => dayX(parseD(s));
 
-      // Axis ticks — weekly + start/end
-      const ticks = [];
-      const d = new Date(minDate);
-      while (d <= maxDate) {
-        ticks.push(new Date(d));
-        d.setDate(d.getDate() + 7);
+      const ALM_Y = 52, CLM_Y = 110; // rail Y positions
+      const COL_ALM = "#60a5fa", COL_CLM = "#34d399";
+      const COL_DONE = "#4ade80", COL_RUN = "#fbbf24", COL_PLAN = "#5a617a";
+      const COL_DEST1 = "#6ee7ff", COL_DEST2 = "#f472b6";
+
+      const statusColor = st => st === "done" ? COL_DONE : st === "in_progress" ? COL_RUN : COL_PLAN;
+      const statusR = st => st === "done" ? 6 : st === "in_progress" ? 7 : 5;
+
+      let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+      // background
+      svg += `<rect width="${W}" height="${H}" fill="#0a0e1a" rx="10"/>`;
+
+      // Rail labels
+      svg += `<text x="16" y="${ALM_Y+5}" fill="${COL_ALM}" font-size="13" font-weight="800">ALM</text>`;
+      svg += `<text x="16" y="${CLM_Y+5}" fill="${COL_CLM}" font-size="13" font-weight="800">CLM</text>`;
+
+      // Rail lines
+      svg += `<line x1="${ML}" y1="${ALM_Y}" x2="${W-MR}" y2="${ALM_Y}" stroke="#2a3358" stroke-width="2"/>`;
+      svg += `<line x1="${ML}" y1="${CLM_Y}" x2="${W-MR}" y2="${CLM_Y}" stroke="#2a3358" stroke-width="2"/>`;
+
+      // Progress fill lines (up to last done/in_progress phase end)
+      const almPhases = phases.filter(p => p.scope === "alm" || p.scope === "both");
+      const clmPhases = phases.filter(p => p.scope === "clm" || p.scope === "both");
+      const progressEnd = (arr) => {
+        let last = null;
+        arr.forEach(p => { if (p.status === "done" || p.status === "in_progress") last = parseD(p.date_end); });
+        return last;
+      };
+      const almProg = progressEnd(almPhases);
+      const clmProg = progressEnd(clmPhases);
+      if (almProg) svg += `<line x1="${ML}" y1="${ALM_Y}" x2="${dayX(almProg)}" y2="${ALM_Y}" stroke="${COL_ALM}" stroke-width="2" opacity="0.5"/>`;
+      if (clmProg) svg += `<line x1="${ML}" y1="${CLM_Y}" x2="${dayX(clmProg)}" y2="${CLM_Y}" stroke="${COL_CLM}" stroke-width="2" opacity="0.5"/>`;
+
+      // Collect all markers per track: phases + destinations, then anti-collide
+      const markers = { alm: [], clm: [] };
+      phases.forEach(ph => {
+        const sc = ph.scope || "both";
+        const x = dateX(ph.date_start);
+        const col = statusColor(ph.status);
+        const r = statusR(ph.status);
+        const fill = ph.status === "planned" ? "#0a0e1a" : col;
+        const pulseClass = ph.status === "in_progress" ? ' class="now-pulse"' : "";
+        const tip = `${ph.name} (${ph.date_start} ~ ${ph.date_end}) [${ph.status}]`;
+        const mk = { x, col, r, fill, stroke: col, pulseClass, label: ph.id, tip, type: "phase", date: ph.date_start };
+        if (sc === "both" || sc === "alm") markers.alm.push({ ...mk });
+        if (sc === "both" || sc === "clm") markers.clm.push({ ...mk });
+      });
+      dests.forEach((d, i) => {
+        const col = i === 0 ? COL_DEST1 : COL_DEST2;
+        const label = i === 0 ? "v2.0 RC" : "v3.0 Agent";
+        if (d.projected && d.projected.alm_date) {
+          markers.alm.push({ x: dateX(d.projected.alm_date), col, r: 10, fill: "#0a0e1a", stroke: col, pulseClass: "", label, tip: `${d.name}\n${d.tagline}`, type: "dest", date: d.projected.alm_date, glow: true });
+        }
+        if (d.projected && d.projected.clm_date) {
+          markers.clm.push({ x: dateX(d.projected.clm_date), col, r: 10, fill: "#0a0e1a", stroke: col, pulseClass: "", label, tip: `${d.name}\n${d.tagline}`, type: "dest", date: d.projected.clm_date, glow: true });
+        }
+      });
+
+      // Deduplicate by x (keep dest over phase if same pixel), sort, anti-collide labels
+      function dedup(arr) {
+        const map = new Map();
+        arr.forEach(m => {
+          const key = Math.round(m.x);
+          const prev = map.get(key);
+          if (!prev || m.type === "dest") map.set(key, m);
+          else if (prev.type !== "dest") map.set(key, m); // keep first
+        });
+        return [...map.values()].sort((a, b) => a.x - b.x);
       }
-      if (ticks.length && ticks[ticks.length-1].getTime() !== maxDate.getTime()) ticks.push(new Date(maxDate));
-      const axisHtml = ticks.map(t => {
-        const pct = L + (Math.round((t - minDate) / 86400000)) * dayPct;
-        return `<span class="ax-tick" style="left:${pct}%">${fmtMD(t)}</span>`;
-      }).join("");
+      markers.alm = dedup(markers.alm);
+      markers.clm = dedup(markers.clm);
+
+      // Render markers with staggered labels to avoid overlap
+      const MIN_GAP = 55; // min px between label centers
+      function renderTrack(arr, railY, isTop) {
+        let lastLabelX = -999;
+        let tier = 0; // 0, 1, 2 for stagger
+        arr.forEach(m => {
+          // Glow for destinations
+          if (m.glow) {
+            svg += `<circle cx="${m.x}" cy="${railY}" r="18" fill="${m.col}" opacity="0.10" class="dest-glow"/>`;
+          }
+          // Main circle
+          const sw = m.type === "dest" ? 2.5 : 2;
+          svg += `<circle cx="${m.x}" cy="${railY}" r="${m.r}" fill="${m.fill}" stroke="${m.stroke}" stroke-width="${sw}"${m.pulseClass}>`;
+          svg += `<title>${esc(m.tip)}</title></circle>`;
+          // Date below circle (small)
+          const dateStr = m.date.slice(5); // MM-DD
+          const dateY = isTop ? railY + 16 : railY - 12;
+          svg += `<text x="${m.x}" y="${dateY}" fill="#5a617a" font-size="7.5" text-anchor="middle">${esc(dateStr)}</text>`;
+          // Label — stagger if too close
+          if (m.x - lastLabelX < MIN_GAP) { tier = (tier + 1) % 3; } else { tier = 0; }
+          lastLabelX = m.x;
+          const offsets = isTop ? [-22, -34, -44] : [28, 38, 48];
+          const ly = railY + offsets[tier];
+          const fs = m.type === "dest" ? 11 : 9.5;
+          const fw = m.type === "dest" ? 800 : 700;
+          svg += `<text x="${m.x}" y="${ly}" fill="${m.col}" font-size="${fs}" text-anchor="middle" font-weight="${fw}">${esc(m.label)}</text>`;
+        });
+      }
+      renderTrack(markers.alm, ALM_Y, true);
+      renderTrack(markers.clm, CLM_Y, false);
 
       // Today marker
       const today = new Date(); today.setHours(0,0,0,0);
       const todayOfs = Math.round((today - minDate) / 86400000);
-      const todayIn = todayOfs >= 0 && todayOfs <= totalDays;
-      const todayPct = L + todayOfs * dayPct;
-
-      // Render a single lane
-      function renderLane(label, items, color) {
-        if (!items.length) return "";
-        const bars = items.map(ph => {
-          const x = barLeft(ph.date_start);
-          const w = barWidth(ph.date_start, ph.date_end);
-          const st = ph.status || "planned";
-          const tc = (ph.parallel || []).reduce((n, p) => n + (p.tasks||[]).length, 0);
-          const gateCrit = ph.gate_exit && ph.gate_exit.criteria ? ph.gate_exit.criteria.join("\n") : "";
-          const tip = [ph.name, `${ph.date_start} ~ ${ph.date_end}`, `${tc} tasks`, gateCrit].filter(Boolean).join("\n");
-          const nameVis = w > dayPct * 3;
-          return `<div class="xt-gantt-bar ${esc(st)}" style="left:${x}%;width:${w}%" title="${esc(tip)}">
-            <span class="bar-id">${esc(ph.id)}</span>
-            ${nameVis ? `<span class="bar-name">${esc(ph.name.replace(/^[^:]+: ?/, ""))}</span>` : ""}
-            ${tc && nameVis ? `<span class="bar-tasks">${tc}</span>` : ""}
-          </div>`;
-        }).join("");
-        return `<div class="xt-gantt-lane">
-          <span class="lane-label" style="color:${color}">${esc(label)}</span>
-          ${bars}
-        </div>`;
+      if (todayOfs >= 0 && todayOfs <= totalDays) {
+        const tx = dayX(today);
+        svg += `<line x1="${tx}" y1="18" x2="${tx}" y2="${H-10}" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.7"/>`;
+        svg += `<text x="${tx}" y="14" fill="#fbbf24" font-size="10" text-anchor="middle" font-weight="800" letter-spacing="0.12em">TODAY</text>`;
       }
 
-      el.innerHTML = `<div class="xt-gantt"><div class="xt-gantt-inner">
-        <div class="xt-gantt-axis">${axisHtml}</div>
-        ${renderLane("ALL", lanes.both, "var(--accent)")}
-        ${renderLane("ALM", lanes.alm, "var(--alm)")}
-        ${renderLane("CLM", lanes.clm, "var(--clm)")}
-        ${todayIn ? `<div class="xt-gantt-today" style="left:${todayPct}%"></div>` : ""}
-      </div></div>`;
+      // Date axis at bottom
+      const axisY = H - 8;
+      const tickDays = totalDays <= 14 ? 1 : totalDays <= 30 ? 7 : 14;
+      for (let i = 0; i <= totalDays; i += tickDays) {
+        const d = new Date(minDate); d.setDate(d.getDate() + i);
+        const x = dayX(d);
+        svg += `<line x1="${x}" y1="${axisY - 4}" x2="${x}" y2="${axisY}" stroke="#2a3358" stroke-width="1"/>`;
+        svg += `<text x="${x}" y="${axisY - 7}" fill="#5a617a" font-size="9" text-anchor="middle">${fmtMD(d)}</text>`;
+      }
+
+      svg += `</svg>`;
+      el.innerHTML = svg;
+
+      // Also render phase detail cards into xt-phases (simplified list)
+      const elPhases = document.getElementById("xt-phases");
+      if (elPhases) {
+        elPhases.innerHTML = phases.map(ph => {
+          const st = ph.status || "planned";
+          const tc = (ph.parallel || []).reduce((n, p) => n + (p.tasks||[]).length, 0);
+          const stCol = st === "done" ? "var(--ok)" : st === "in_progress" ? "var(--run)" : "var(--fg-dim)";
+          return `<div style="display:flex;gap:0.6rem;align-items:baseline;padding:0.3rem 0;border-bottom:1px solid var(--border)">
+            <span style="color:${stCol};font-weight:700;font-size:0.78rem;min-width:4.5rem">${esc(ph.id)}</span>
+            <span style="font-size:0.78rem;color:var(--fg)">${esc(ph.name)}</span>
+            <span style="margin-left:auto;font-size:0.7rem;color:var(--fg-dim)">${ph.date_start} ~ ${ph.date_end}</span>
+            <span style="font-size:0.7rem;color:${stCol}">${esc(st)}${tc ? ` · ${tc}t` : ""}</span>
+          </div>`;
+        }).join("");
+      }
     }
 
     // ──────── Extreme tab — 3-grid (ALM / CLM / hexa-lang) ────────
@@ -1676,9 +1716,7 @@
           </div>`;
       }
 
-      // Gantt phase timeline (replaces old 3-rail timeline)
-      const elOldTl = document.getElementById("xt-timeline");
-      if (elOldTl) elOldTl.innerHTML = "";
+      // SVG horizontal timeline (skynet-timer style)
       renderExtremePhases(agg);
 
       // Destinations (v2.0 RC + v3.0 Agent)

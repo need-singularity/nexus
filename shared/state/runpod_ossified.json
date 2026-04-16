@@ -379,6 +379,62 @@
       "fix": "Wait in queue (auto-allocates when available). Alternatives: Lambda Labs, Vast.ai, or use existing lower-tier pod for smoke tests.",
       "lesson": "Always have a fallback plan. Check GPU availability BEFORE stopping existing pods.",
       "severity": "HIGH — blocks training entirely"
+    },
+    "volumeless_ephemeral_wipe": {
+      "id": "RUNPOD_VOLUMELESS_EPHEMERAL_WIPE",
+      "symptom": "Container restart silently wipes /workspace — all in-progress artifacts (binary, corpus, checkpoints, logs) vanish with zero warning",
+      "cause": "Pod created with volumeInGb=0 (no persistent network volume). /workspace is container-local MooseFS scratch that is recreated on any container restart (OOM, host reschedule, manual restart).",
+      "evidence": "shared/state/clm_r4_health_20260416.json — pod u744u0lbts5v1w anima-clm1b-r4-nvl, SSH port rotated 16833→14248 at 13:50 UTC, post-restart /workspace EMPTY (no train_clm_native binary, no corpus_clm_r4.txt, no ckpt_clm1b_r4/). ckpt step_5000.hexackpt (3.51GB) was being written when restart hit and is unrecoverable.",
+      "fix": "Choose one: (a) attach persistent network volume (--volumeSize >=50, mount to /workspace); OR (b) mandate periodic rclone sync to R2 every save_every steps (NOT post-training only) so at worst one checkpoint-interval of work is lost. Default policy for CLM/ALM training going forward: R2 periodic sync mandatory when volumeInGb=0.",
+      "applied_to_fn": "training/deploy/clm_r4_launch.hexa::main (orchestrator)",
+      "related": ["runpod_ckpt_midwrite_corruption", "runpod_r2_deferred_upload"],
+      "incident_date": "2026-04-16",
+      "incident_cost_usd": "~1.0 (20 min @ $3.07/hr H100 NVL) plus 20 min training loss",
+      "severity": "CRITICAL — guaranteed total data loss on any container restart"
+    },
+    "silent_cpu_fallback": {
+      "id": "RUNPOD_SILENT_CPU_FALLBACK",
+      "symptom": "Training binary runs with 98.9% single-core CPU, 229GB RSS, 0% GPU utilization, 91W GPU power (idle draw) for 20+ minutes with no error despite GPU allocation",
+      "cause": "Native train_clm binary was built via CPU path (gcc -lm without -lcudart/-lcublas) OR CUDA kernel dispatch missing from hot loop. No runtime check for GPU kernel launches, so single-core CPU execution looks like 'training' to the orchestrator.",
+      "evidence": "shared/state/clm_r4_health_20260416.json — pre-restart snapshot shows pid 479 at 98.9% CPU, 218.5GB RSS, power_w=91 (H100 NVL idle draw), gpu_util_pct=0, vram_used_mb=40614 (leaked allocation, no kernel launches, not listed in nvidia-smi processes). Compare: GPU training binary must show >10% GPU util within 60s of launch.",
+      "fix": "Halt-and-report preflight: (1) ldd <binary> | grep -E 'libcudart|libcublas|libcudnn' — if absent, FAIL; (2) within 60s of launch, sample nvidia-smi dmon — if gpu_util_pct <5% AND power_w <150W, KILL process and raise 'CPU-only binary detected'. training/native/build.hexa has explicit CPU fallback path (build_cpu → gcc -lm only) that must not be silently selected for GPU training rounds.",
+      "applied_to_fn": "training/deploy/clm_r4_launch.hexa::main (launch orchestrator), training/native/build.hexa::main (build-time CPU fallback gate)",
+      "related_c_files": ["training/deploy/train_clm_composed.c (not .hexa — composed C source for train_clm_native; verify CUDA kernel dispatch present before linking)"],
+      "incident_date": "2026-04-16",
+      "severity": "CRITICAL — silent ~$74/day burn on idle GPU while appearing to train"
+    },
+    "stdout_head_null_route": {
+      "id": "RUNPOD_STDOUT_HEAD_NULL_ROUTE",
+      "symptom": "Training command piped to `| head -30` drops all output after line 30 with zero log file written. Debugging impossible post-mortem: no error message, no stack trace, no progress.",
+      "cause": "Pipe termination pattern `./binary 2>&1 | head -30` closes the read end after 30 lines. Binary either (a) receives SIGPIPE on next write and tolerates it silently, or (b) OS buffers subsequent writes into the void. Distinct from stdout_buffering (which is about line buffering/tee reception) — this is intentional-but-harmful pipe termination that looks like a log command but is a data-destroyer.",
+      "evidence": "shared/state/clm_r4_health_20260416.json — parent_cmd was `./train_clm_native 2>&1 | head -30`, parent_stdout_sink='head -30 — stdout after first 30 lines was silently dropped (SIGPIPE tolerated by binary)'. No log file existed anywhere; metrics entirely unrecoverable.",
+      "fix": "MANDATORY pattern: `<binary> 2>&1 | tee /workspace/<run>.log` (always tee to file). Forbidden patterns: `| head`, `| tail -f` without `tee` upstream, `>/dev/null`, `&> /dev/null`, any pipe that discards after N lines. If truncation needed for live viewing, use `tee log | head -30` not `tee /dev/null | head -30`.",
+      "applied_to_fn": "training/deploy/clm_r4_launch.hexa::main (runner emits tee pipeline — verify no downstream head/tail truncation)",
+      "related": ["runpod_python_stdout_buffering"],
+      "incident_date": "2026-04-16",
+      "severity": "HIGH — no log = no debug = re-burn training cost to reproduce"
+    },
+    "ssh_port_rotation_mid_session": {
+      "id": "RUNPOD_SSH_PORT_ROTATION_MID_SESSION",
+      "symptom": "SSH connection to active pod succeeds initially, then 'Connection refused' or 'No route to host' partway through a session despite pod desired_status=RUNNING",
+      "cause": "RunPod SSH port rotates whenever container restarts (OOM, host reschedule, manual restart). Existing SSH sessions survive the TCP connection but new connections to the old port fail. runpodctl pod list reflects the new port but the stale value cached in tmux/env does not.",
+      "evidence": "shared/state/clm_r4_health_20260416.json — pod u744u0lbts5v1w ssh_port_initial=16833 rotated to ssh_port_post_restart=14248 at ~13:50 UTC during an active health check session. IP remained 216.81.245.55.",
+      "fix": "After any suspected restart (pod_uptime reset, /workspace wiped, tmux session gone), ALWAYS re-fetch port via `runpodctl pod list | grep <id>` or `runpodctl ssh info <id>` before re-connecting. Do not rely on cached SSH port from session start. Detection heuristic: if `ssh` hangs or returns 'refused' on a pod that was working, first step is port re-fetch, not network diagnosis.",
+      "applied_to_fn": "No dedicated clm_health_check.hexa exists yet in training/deploy/ — health check was performed one-shot via direct SSH + runpodctl and results committed to shared/state/clm_r4_health_20260416.json. Inventory-only entry until a health-check .hexa is authored.",
+      "related": ["ssh.common_issues.no_route_to_host"],
+      "incident_date": "2026-04-16",
+      "severity": "MEDIUM — recoverable but causes 10-30 min of confused debugging"
+    },
+    "ckpt_midwrite_corruption": {
+      "id": "RUNPOD_CKPT_MIDWRITE_CORRUPTION",
+      "symptom": "Checkpoint file exists with plausible size but is truncated/corrupt because the writer was killed mid-write. Distinct from checkpoint_corruption_zero_byte (0-byte case) — here the file is non-zero and may even be 60-80% complete, making the corruption much harder to detect than a 0-byte tripwire.",
+      "cause": "Training process writes large checkpoint (multi-GB) directly to the final path. Restart/kill/OOM during write leaves the destination file partially populated. Without atomic rename (.tmp → fsync → rename), there is no torn-write protection.",
+      "evidence": "shared/state/clm_r4_health_20260416.json — /workspace/ckpt_clm1b_r4/step_5000.hexackpt grew from 3.32GB → 3.51GB over ~60s of health checks (clearly still being written), then container restart hit and the whole file was ephemerally wiped before any completion signal. Even absent the wipe, the 3.51GB file would have been a torn write.",
+      "fix": "Atomic save pattern (applies to .hexackpt/.pt/.safetensors/any large blob): (1) write to <path>.tmp, (2) fsync the .tmp file handle, (3) os.replace / rename <path>.tmp → <path> (atomic on same filesystem). On resume, sweep for *.tmp and delete. Never write directly to the final path name.",
+      "applied_to_fn": "training/deploy/clm_r4_launch.hexa::main (wraps python trainer — must verify trainer uses atomic save; enforce at orchestrator level with post-run scan for .tmp residue)",
+      "related": ["runpod_checkpoint_corruption_zero_byte", "runpod_volumeless_ephemeral_wipe"],
+      "incident_date": "2026-04-16",
+      "severity": "HIGH — silent data corruption is worse than visible failure"
     }
   },
 
