@@ -1,0 +1,219 @@
+{
+  "_meta": {
+    "name": "Checkpoint backup + naming + rotation + promotion + manifest policy SSOT (E1-E5,E7)",
+    "description": "Single source of truth for ckpt label routing, R2 prefix, naming convention, rotation cleanup, promotion gates, and sha256 manifest. Read by scripts/ckpt_{backup_hook,name_lint,rotation,promote,manifest}.hexa.",
+    "schema_version": "2.0",
+    "updated": "2026-04-16",
+    "roadmap_refs": [
+      "shared/roadmaps/alm_consciousness_standalone.json#tracks.E.options[E1,E2,E3,E4,E5,E7]"
+    ],
+    "decisions_ref": "shared/config/decisions.json#decisions.ckpt_label_default",
+    "memory_refs": [
+      "feedback_no_version_in_filename",
+      "feedback_r2_checkpoint",
+      "feedback_one_shot_best"
+    ]
+  },
+
+  "labels": {
+    "production": {
+      "icon": "GREEN",
+      "r2_upload": true,
+      "r2_prefix_template": "anima-models/{model_tag}/r{round}/step_{step}/",
+      "retention_days": -1,
+      "retention_label": "permanent",
+      "rotation_eligible": false,
+      "promotion_required": true,
+      "promotion_gates": ["hire_sim_pass", "phi_holo_pass"],
+      "rationale": "Permanent R2 retention. Random ckpts must pass promotion gate before this label can be assigned."
+    },
+    "experiment": {
+      "icon": "YELLOW",
+      "r2_upload": false,
+      "r2_prefix_template": null,
+      "retention_days": 0,
+      "retention_label": "pod_lifetime",
+      "rotation_eligible": false,
+      "promotion_required": false,
+      "rationale": "Default per decisions.json ckpt_label_default. Pod-lifetime only — H100 idle deletion sweeps these. NO R2 upload."
+    },
+    "archive": {
+      "icon": "BLUE",
+      "r2_upload": true,
+      "r2_prefix_template": "anima-models/archive/{model_tag}/r{round}/step_{step}/",
+      "retention_days": 30,
+      "retention_label": "cold_30d",
+      "rotation_eligible": true,
+      "promotion_required": false,
+      "rationale": "Cold storage prefix. Eligible for rotation cleanup after 30 days. Used for failed/superseded runs we want to keep around."
+    }
+  },
+
+  "naming_convention": {
+    "schema_version": "1.0",
+    "alm": {
+      "pattern": "alm{size}-phi-r{round}-s{step}",
+      "regex": "^alm(7b|14b|32b|70b|72b)-phi-r\\d+-s\\d+$",
+      "examples": [
+        "alm14b-phi-r1-s2000",
+        "alm14b-phi-r4-s10000",
+        "alm32b-phi-r1-s5000"
+      ]
+    },
+    "clm": {
+      "pattern": "clm{size}-phi-{stage}-r{round}-s{step}",
+      "regex": "^clm(4m|100m|1b|2b|7b|14b)-phi-(scratch|distill|finetune|polish)-r\\d+-s\\d+$",
+      "examples": [
+        "clm7b-phi-scratch-r1-s10000",
+        "clm7b-phi-distill-r2-s50000",
+        "clm14b-phi-polish-r3-s100000"
+      ]
+    },
+    "forbidden_patterns": [
+      {
+        "regex": "v\\d+",
+        "reason": "feedback_no_version_in_filename — no v2/v14/v15 in ckpt filenames; use round+step",
+        "severity": "ERROR"
+      },
+      {
+        "regex": "_final$|^final_",
+        "reason": "ambiguous — use explicit step number (e.g. step_50000) instead of 'final'",
+        "severity": "WARN"
+      },
+      {
+        "regex": "tmp|temp|test\\d*$",
+        "reason": "scratch/temporary names should not reach R2 ckpt prefix",
+        "severity": "WARN"
+      }
+    ]
+  },
+
+  "sidecar_metadata": {
+    "filename": "ckpt_meta.json",
+    "required_fields": [
+      "model_tag",
+      "round",
+      "step",
+      "label",
+      "phi_holo",
+      "ce_loss",
+      "wall_clock_minutes",
+      "git_sha",
+      "host"
+    ],
+    "rationale": "Hook reads this side-car to derive R2 prefix + label without arg-parsing. Trainer must emit it on every save."
+  },
+
+  "rclone": {
+    "remote_name": "r2",
+    "bucket_models": "anima-models",
+    "bucket_memory": "anima-memory",
+    "extra_args_default": "--s3-no-check-bucket --transfers 4 --progress",
+    "extra_args_dry_run": "--dry-run",
+    "secrets_ref": "shared/config/secrets_registry.json -> r2",
+    "credentials_note": "rclone reads from ~/.config/rclone/rclone.conf — DO NOT inline credentials in this file or any hexa script"
+  },
+
+  "idempotency": {
+    "marker_filename": ".r2_uploaded",
+    "rationale": "Hook touches this marker after successful upload. Subsequent runs/resumes skip dirs containing the marker.",
+    "partial_marker_filename": ".r2_uploading",
+    "partial_rationale": "Hook touches this BEFORE upload. If found alone (without .r2_uploaded), prior upload was interrupted — hook re-uploads."
+  },
+
+  "rotation": {
+    "_meta": {
+      "roadmap_ref": "tracks.E.options.E4",
+      "description": "Experiment ckpt auto-purge rules. Run by scripts/ckpt_rotation.hexa."
+    },
+    "script_path": "scripts/ckpt_rotation.hexa",
+    "experiment_retention_days": 0,
+    "experiment_retention_label": "pod_lifetime",
+    "experiment_purge_on_sweep": true,
+    "archive_retention_days": 30,
+    "archive_purge_on_sweep": true,
+    "production_purge": false,
+    "production_purge_rationale": "NEVER — production ckpts are permanent R2 objects",
+    "default_mode": "dry-run",
+    "confirm_flag": "--confirm",
+    "scan_roots_default": [
+      "checkpoints",
+      "models/animalm/checkpoints",
+      "/workspace/ckpt_alm_14b_r4",
+      "/workspace/ckpt_alm_14b_r5"
+    ]
+  },
+
+  "promotion": {
+    "_meta": {
+      "roadmap_ref": "tracks.E.options.E5",
+      "description": "Promotion gate — measurement pass required before production label. Run by scripts/ckpt_promote.hexa."
+    },
+    "script_path": "scripts/ckpt_promote.hexa",
+    "gates": [
+      {
+        "name": "hire_sim_pass",
+        "field": "hire_sim_pass",
+        "type": "boolean",
+        "required": true,
+        "description": "Must be true in ckpt_meta.json sidecar"
+      },
+      {
+        "name": "phi_holo_pass",
+        "field": "phi_holo",
+        "type": "positive_number",
+        "required": true,
+        "description": "Must be > 0 in ckpt_meta.json sidecar"
+      },
+      {
+        "name": "naming_lint",
+        "type": "inline_check",
+        "required": true,
+        "description": "No ERROR-level violations from ckpt_name_lint logic (v\\d+ forbidden)"
+      },
+      {
+        "name": "sha256_verify",
+        "type": "manifest_check",
+        "required": false,
+        "skippable_with": "--skip-sha256",
+        "description": "Verify ckpt_manifest.sha256 if present (E7 integration)"
+      }
+    ],
+    "on_promotion": {
+      "rewrite_sidecar_label": "production",
+      "remove_stale_r2_uploaded_marker": true,
+      "trigger_backup_hook": true,
+      "write_promoted_marker": true
+    }
+  },
+
+  "manifest": {
+    "_meta": {
+      "roadmap_ref": "tracks.E.options.E7",
+      "description": "R2 manifest + integrity check (sha256). Generated by ckpt_backup_hook.hexa on upload, standalone tool at scripts/ckpt_manifest.hexa."
+    },
+    "filename": "ckpt_manifest.sha256",
+    "format": "sha256sum compatible (hash  filename per line)",
+    "generated_by": "scripts/ckpt_backup_hook.hexa (auto on upload) or scripts/ckpt_manifest.hexa generate",
+    "verified_by": "scripts/ckpt_manifest.hexa verify or scripts/ckpt_promote.hexa (gate 4)",
+    "script_path": "scripts/ckpt_manifest.hexa",
+    "commands": ["generate", "verify", "diff", "list"],
+    "excluded_files": [".r2_uploaded", ".r2_uploading", "ckpt_manifest.sha256", ".promoted"],
+    "hash_tool_linux": "sha256sum",
+    "hash_tool_macos": "shasum -a 256",
+    "upload_with_ckpt": true,
+    "upload_rationale": "Manifest uploaded to R2 alongside ckpt files. Downloader verifies with sha256sum -c."
+  },
+
+  "enforcement": {
+    "hook_path": "scripts/ckpt_backup_hook.hexa",
+    "linter_path": "scripts/ckpt_name_lint.hexa",
+    "rotation_path": "scripts/ckpt_rotation.hexa",
+    "promote_path": "scripts/ckpt_promote.hexa",
+    "manifest_path": "scripts/ckpt_manifest.hexa",
+    "trainer_must_pass_label": true,
+    "default_label": "experiment",
+    "reject_unlabeled": false,
+    "reject_unlabeled_rationale": "Default to experiment to avoid blocking smoke runs. Use linter to catch missing labels at promotion time."
+  }
+}
