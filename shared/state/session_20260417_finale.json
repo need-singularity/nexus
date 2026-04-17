@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "schema": "session_finale/v1",
+    "session_utc": "2026-04-17T16:00Z - 2026-04-17T17:30Z",
+    "author": "opus-4-7-1m (anima cowd session)",
+    "purpose": "End-of-session state capture. Consolidates infrastructure delta, blockers, root-cause diagnosis, and unfinished pipeline gates for next session handoff.",
+    "related_state": [
+      "shared/state/alm_training_status_20260417.json",
+      "shared/state/alm_70b_launch_ready_20260417.json",
+      "shared/state/hire_sim_regression_20260417.json",
+      "shared/state/voice_corpus_source_plan_20260417.json"
+    ]
+  },
+
+  "infrastructure_delta_hexa_lang": {
+    "commits": [
+      {"hash": "40bec42", "subject": "streaming builtins: read_bytes_at / write_bytes_append / file_size"},
+      {"hash": "d3a083e", "subject": "HEXAW2 binary f32 format + autodetecting reader"},
+      {"hash": "2a0b273", "subject": "self/tools/safetensors_to_hexaw.hexa (632 LOC, sharded, streaming)"},
+      {"hash": "2231f78", "subject": "tests/t52_safetensors_to_hexaw.hexa (22/22 PASS)"},
+      {"hash": "f35022a", "subject": "self/tools/lora_to_hexaw.hexa (927 LOC, multi-adapter chain merge)"},
+      {"hash": "8baff0e", "subject": "tests/t54_lora_to_hexaw.hexa (18/18 PASS)"}
+    ],
+    "capability_unlocked": "HF safetensors → HEXAW2 binary + LoRA chain-merge pipeline, pure hexa, H100-ready",
+    "still_stubbed": [
+      "Qwen2.5 BPE tokenizer (bg agent a010... still running)",
+      "serve_alm.hexa weight load (stub calls, needs hexaw_load wiring)",
+      "HF vs LLaMA tensor naming bridge (serve_alm expects layers.N.attention.wq, converter emits model.layers.N.self_attn.q_proj)"
+    ]
+  },
+
+  "critical_diagnosis_a2_tool_mode_collapse": {
+    "symptom": "hire_sim_lenient avg_score 0.5722 vs 0.8111 baseline (-24%p)",
+    "evidence_eval_log": "/workspace/a2_tool_train.log eval@1300/1400/1500 produced identical output: Tool call: search_web, {\"query\":\"latest news about AI\"}<|im_end|>",
+    "evidence_corpus": {
+      "path": "training/corpus_tool/mixed_tool_corpus.jsonl",
+      "total_records": 3250,
+      "malformed_unknown_tool_name_pct": 0.923,
+      "valid_records_estimate": 250,
+      "search_web_count": 0,
+      "web_search_count": 15,
+      "top_valid_tools": ["execute_code:25", "generate_image:25", "translate_text:25", "math_compute:25", "web_search:15"]
+    },
+    "root_cause": "92% corpus malformed + only 250 valid tool-call records across 10+ tools = insufficient signal. Model confabulates 'search_web' from 'web_search'. Smooth loss curve (0.04-0.08) masked the mode collapse.",
+    "implication_for_70b": "D4 gate FAILED is not transient. A2-Tool LoRA fundamentally flawed. 70B build should NOT chain A2-Tool as-is — either rebuild corpus (parse malformed 3000 → clean) or drop tool LoRA from chain.",
+    "corrective_prescription": [
+      "Parse 3000 malformed records, extract tool name from nested schemas OR drop them",
+      "Target ≥10k balanced tool-call examples (current valid count ≤250)",
+      "Add eval gate: output entropy across eval batch > threshold (catches mode collapse before training completes)",
+      "Rebuild corpus BEFORE any 70B A2-Tool chain"
+    ]
+  },
+
+  "tasks_snapshot": {
+    "completed": [
+      "#1 streaming builtins + safetensors→hexaw converter",
+      "#3 A2-Tool serve live (sibling py path, not hexa)",
+      "#4 hire_sim eval (sibling ran, confirmed real regression)",
+      "#5 CLM r4 (pod exit — 70B slot freed)",
+      "#7 LoRA merge tool",
+      "#9 voice corpus source plan (10 webtoon personas)",
+      "#10 A2-Tool regression root cause diagnosed (mode collapse)"
+    ],
+    "in_progress": [
+      "#6 Qwen2.5 BPE tokenizer (bg agent a010... running)"
+    ],
+    "blocked": [
+      "#2 run 14B converter on H100 (disk: 29G free vs 56G needed for f32)",
+      "#8 wire serve_alm.hexa to hexaw_load (needs #6 + #11)",
+      "#11 HF↔LLaMA naming bridge (new gap)"
+    ]
+  },
+
+  "open_strategic_questions": [
+    {
+      "q": "Pivot 70B launch given D4 FAILURE is genuine?",
+      "options": [
+        "(a) Rebuild A2-Tool corpus (10k clean) + re-train A2-Tool → re-eval → proceed",
+        "(b) Drop A2-Tool from 70B chain, go A1+A2-Orch only",
+        "(c) Pivot to pathc (0.9444) as 70B base instead of A-chain"
+      ],
+      "owner": "user / sibling session — not decided this session"
+    },
+    {
+      "q": "Extend HEXAW2 to bf16 disk format to fit 28G in 29G free?",
+      "options": [
+        "(a) Add HEXAW2-BF16 variant (~50 LOC hexaw.hexa edit)",
+        "(b) Allocate fresh pod w/ 200G disk for conversion (~$5)",
+        "(c) Clean lnzliav2 disk (risky — touches A1/A2 ckpts)"
+      ],
+      "owner": "next session"
+    },
+    {
+      "q": "Voice corpus tier1 harvest — which archetype slots pilot first (id 10/12/15)?",
+      "owner": "user channel-review"
+    }
+  ],
+
+  "next_session_suggested_order": [
+    "1. Wait for Task #6 Qwen BPE bg agent completion",
+    "2. Decide 70B D4 pivot (user question above)",
+    "3. If proceeding hexa serve path: Task #11 naming bridge (~200 LOC) → Task #8 wire serve_alm → Task #2 disk solve → run converter → live eval",
+    "4. If voice priority: authorize tier1 harvest (id 10/12/15 pilot)",
+    "5. CLM track — currently dark (pod EXIT); decision to relaunch belongs to sibling session per 70B slot strategy"
+  ],
+
+  "constraints_honoured_this_session": [
+    "py ban enforced (no .py created/edited/run in anima)",
+    "hexa-lang runtime.c edits allowed per zeta_surpass MANDATE (runtime builtin additions)",
+    "No commits to sibling session's uncommitted anima files (training/serving in-flight)",
+    "No unilateral CLM r4 pod relaunch (would contradict 70B D8 strategy)",
+    "bg agents run in hexa-lang only; anima untouched by parallel agents"
+  ]
+}
