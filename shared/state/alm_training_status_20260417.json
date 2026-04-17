@@ -1,0 +1,53 @@
+{
+  "schema": "alm_training_status_snapshot/v1",
+  "ts_utc": "2026-04-17T10:55:00Z",
+  "pod": "8d6fc2938f56 (103.207.149.94:16053) — H100 80GB SXM",
+  "gpu_state": "IDLE (0% util, 0 MiB used)",
+  "completed": {
+    "A1_14B": {
+      "ckpt": "/workspace/ckpt_alm14b_phi_a1_20260416/step_3000",
+      "best_loss": 1.7287,
+      "phi_holo": 9051.72,
+      "steps": 3000,
+      "duration_min": 110.6
+    },
+    "A2_Orch_14B": {
+      "ckpt": "/workspace/ckpt_alm14b_phi_a2_orch_20260416/step_3000",
+      "marker": "READY_A2_ORCH_DONE"
+    },
+    "A2_Tool_14B": {
+      "ckpt": "/workspace/ckpt_alm14b_phi_a2_tool_20260417/step_1500",
+      "loss": 0.0668,
+      "duration_min": 46.5,
+      "marker": "READY_A2_TOOL_DONE",
+      "caveat": "50-example seed corpus — loss likely overfit"
+    }
+  },
+  "blocked": {
+    "serve": {
+      "expected": "/workspace/serve_a2_tool_eval.py (chain-merge A1+Orch+Tool)",
+      "state": "NOT_RUNNING",
+      "last_activity_log": "/workspace/serve_a2t.log shows successful /generate calls but process exited",
+      "impact": "hire_sim endpoint :8182 (tunneled :18282) refused — causes hire_sim_lenient_20260417 regression (0.5667 vs baseline 0.8111)",
+      "ban_note": "Total .py ban (feedback_py_ban_total.md) — cannot run serve_a2_tool_eval.py directly; needs serving/serve_alm_native.hexa path or hexa-native FFI not yet built"
+    }
+  },
+  "next_wave": {
+    "13B_conditional": {
+      "state": "PREP_COMPLETE_AWAITING_A2_EVAL",
+      "trigger_condition": "A2 eval korean_quality borderline 0.85-0.93",
+      "blocker": "A2 eval needs live serve endpoint",
+      "config_on_pod": "MISSING (training/alm_13b_config.json exists locally, not rsynced)"
+    },
+    "70B": {
+      "state": "PREP_BLOCKED_UPSTREAM",
+      "blockers": "8 hard blockers + 4-pod budget auth"
+    }
+  },
+  "actions_deferred_to_other_session": [
+    "decide serve restart path (.hexa native vs .py ban exemption)",
+    "run A2 eval once serve live",
+    "fire 13B if eval borderline",
+    "70B budget authorization"
+  ]
+}
