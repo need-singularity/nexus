@@ -1,0 +1,208 @@
+{
+  "_meta": {
+    "schema": "voice_corpus_source_plan/v1",
+    "created_utc": "2026-04-17T16:00Z",
+    "purpose": "Source-hunt plan for 10 webtoon persona slots (id 10-19) in voice_corpus_registry.json. Each persona needs ~30min Korean voice at ≥16kHz with transcript. py ban enforced — ingestion path is curl/yt-dlp/rclone only, no Python libs.",
+    "ssot_refs": [
+      "shared/state/voice_corpus_registry.json (target registry)",
+      "anima-speak/rp_voice_profiles.hexa (profile→vocoder conditioning)",
+      "feedback_py_ban_total.md"
+    ],
+    "status": "SOURCES_PROPOSED — collection pending user review"
+  },
+
+  "ingestion_pipeline": {
+    "per_clip_steps": [
+      "yt-dlp -x --audio-format wav --audio-quality 0 -o '{name}/wav_raw/%(id)s.wav' <url>",
+      "ffmpeg -i wav_raw/<id>.wav -ar 16000 -ac 1 wav16k/<ts>_<id>.wav",
+      "[transcript] faster-whisper ... (py ban — use https://www.youtube.com/watch?v=<id>'s auto-captions via yt-dlp --write-auto-subs --skip-download; konvert .vtt → .txt with awk/sed)",
+      "rclone copy wav16k/ r2:anima-corpus/voice/<name>/wav16k/",
+      "update voice_corpus_registry profiles[i].sources[] with url/duration_s/local_path/r2_path/transcript_path"
+    ],
+    "constraints": [
+      "All tools pre-installed on Mac or available via brew — NO pip/python scripts",
+      "Transcript extraction: prefer yt-dlp auto-subs over whisper (py dep) — if auto-subs missing, defer that clip",
+      "License check: only use videos marked Creative Commons or fair-use educational excerpts ≤3min per source; prefer official channel re-uploads"
+    ]
+  },
+
+  "slot_plans": [
+    {
+      "id": 10,
+      "name": "ice_queen",
+      "archetype": "얼짱 일진 — 차갑고 날카로운 여학생",
+      "voice_target": {"pitch_hz": [180, 240], "style": "cold-sharp-monotone", "emotion": "dismissive / contemptuous", "tempo": "slow-measured"},
+      "search_queries_ko": [
+        "드라마 일진 여학생 명대사 모음",
+        "웹툰 드라마CD 얼음공주 여학생",
+        "학원물 까칠한 여학생 ASMR 연기"
+      ],
+      "candidate_channels": ["드라마CD 전문 채널 (검색: 드라마CD 여성)", "공식 드라마 채널 클립 (tvN/JTBC 학원물)"],
+      "fallback_tts": "Naver Clova Voice 'ara' (cold female) — requires API key",
+      "notes": "avoid screaming/crying clips — need neutral-cold baseline; 15x 2min clips preferred over 1x 30min"
+    },
+    {
+      "id": 11,
+      "name": "chaebol_heir",
+      "archetype": "재벌 후계자 — 오만한 남주",
+      "voice_target": {"pitch_hz": [100, 160], "style": "low-commanding-smug", "emotion": "arrogant-confident", "tempo": "unhurried-emphatic"},
+      "search_queries_ko": [
+        "드라마 재벌2세 남주 명대사",
+        "웹툰 드라마CD 재벌 까칠남",
+        "로맨스 드라마 남주 시니컬 모놀로그"
+      ],
+      "candidate_channels": ["공식 드라마 채널 (tvN 상속자들/더 킹 류)", "성우 유튜브 (양정화/엄상현/김명준급)"],
+      "fallback_tts": "Naver Clova 'jinho' or 'shinji' (mature male)",
+      "notes": "voice actor performances ideal — fewer environmental artifacts than drama clips"
+    },
+    {
+      "id": 12,
+      "name": "pure_heroine",
+      "archetype": "순정 여주 — 착하고 순수",
+      "voice_target": {"pitch_hz": [220, 280], "style": "bright-breathy-warm", "emotion": "earnest-gentle", "tempo": "natural"},
+      "search_queries_ko": [
+        "순정만화 여주 성우 연기",
+        "드라마CD 청순 여주 독백",
+        "로맨스 웹툰 오디오드라마 여주"
+      ],
+      "candidate_channels": ["드라마CD 전문 (예: 오디오코믹스 스튜디오)", "공식 로맨스 드라마 채널"],
+      "fallback_tts": "Naver Clova 'vara' or 'nara'",
+      "notes": "prioritize 밝은-순한 tone; avoid sad-crying takes"
+    },
+    {
+      "id": 13,
+      "name": "tsundere_oppa",
+      "archetype": "츤데레 선배/오빠 — 까칠·다정 반전",
+      "voice_target": {"pitch_hz": [115, 175], "style": "range-wide", "emotion": "annoyed→caring pivot", "tempo": "variable"},
+      "search_queries_ko": [
+        "츤데레 남자 성우 연기 모음",
+        "로맨스 웹툰 드라마CD 선배",
+        "애니메이션 한국어 더빙 츤데레"
+      ],
+      "candidate_channels": ["한국어 애니 더빙 공식 채널", "성우 개인 유튜브"],
+      "fallback_tts": "없음 — 츤데레는 감정 전환이 핵심, TTS 불가",
+      "notes": "2-tone samples critical — need both 까칠 and 다정 takes; split 15min/15min"
+    },
+    {
+      "id": 14,
+      "name": "airhead_friend",
+      "archetype": "사차원 친구 — 엉뚱·명랑",
+      "voice_target": {"pitch_hz": [230, 310], "style": "bouncy-bright-energetic", "emotion": "cheerful-quirky", "tempo": "fast-variable"},
+      "search_queries_ko": [
+        "예능 리액션 4차원 여성",
+        "웹예능 엉뚱 캐릭터 성우",
+        "드라마 조연 명랑 친구역 모음"
+      ],
+      "candidate_channels": ["예능 공식 채널 클립", "웹예능 (문명특급/뜨또 류)"],
+      "fallback_tts": "Naver Clova 'dara' (young female)",
+      "notes": "변화 많은 억양이 필수 — flat TTS는 부적합; 예능 클립 우선"
+    },
+    {
+      "id": 15,
+      "name": "charismatic_prez",
+      "archetype": "카리스마 학생회장 — 위엄있는 남성",
+      "voice_target": {"pitch_hz": [90, 140], "style": "deep-resonant-authoritative", "emotion": "commanding-composed", "tempo": "deliberate"},
+      "search_queries_ko": [
+        "드라마 학생회장 남자 연설",
+        "카리스마 남주 모놀로그 성우",
+        "사극 위엄 남자 독백"
+      ],
+      "candidate_channels": ["공식 사극 채널 (KBS 대하)", "성우 데모릴"],
+      "fallback_tts": "Naver Clova 'jinho' (deep)",
+      "notes": "저음역대 희귀 — 사극/다큐 나레이션 섞기"
+    },
+    {
+      "id": 16,
+      "name": "thug_returnee",
+      "archetype": "복학생 양아치 — 껄렁·거친",
+      "voice_target": {"pitch_hz": [105, 155], "style": "raspy-drawled-lazy", "emotion": "bored-cocky", "tempo": "slow-draggy"},
+      "search_queries_ko": [
+        "양아치 남자 연기 드라마 클립",
+        "복학생 캐릭터 성우 연기",
+        "조폭 코미디 남성 모놀로그"
+      ],
+      "candidate_channels": ["조폭 코미디 영화 공식 클립 (두사부일체/달마야 류)", "드라마 청춘물 공식"],
+      "fallback_tts": "없음 — raspy 양아치 톤은 TTS 재현 불가",
+      "notes": "satoori(사투리) 섞여도 OK — 캐릭터 특성; 욕설/폭력 장면 제외"
+    },
+    {
+      "id": 17,
+      "name": "cold_heiress",
+      "archetype": "냉정 재벌 영애 — 도도·우아",
+      "voice_target": {"pitch_hz": [200, 260], "style": "refined-crisp-controlled", "emotion": "composed-distant", "tempo": "measured-clear"},
+      "search_queries_ko": [
+        "드라마 재벌 영애 독백 모음",
+        "사극 왕비 연기 성우",
+        "고상한 여성 성우 오디오북"
+      ],
+      "candidate_channels": ["공식 드라마 (상속자들/펜트하우스)", "고전 오디오북 채널"],
+      "fallback_tts": "Naver Clova 'nara' (refined female)",
+      "notes": "id 10 (ice_queen)과 구분 — ice_queen은 학생의 날카로움, cold_heiress는 성인의 우아함"
+    },
+    {
+      "id": 18,
+      "name": "gentle_oppa",
+      "archetype": "순둥 훈남 — 다정 남주",
+      "voice_target": {"pitch_hz": [120, 170], "style": "soft-warm-smiling", "emotion": "affectionate-calm", "tempo": "gentle"},
+      "search_queries_ko": [
+        "다정한 남주 드라마 고백 모음",
+        "훈남 성우 연기 ASMR",
+        "로맨스 웹툰 오디오드라마 남주 순둥"
+      ],
+      "candidate_channels": ["ASMR 한국어 남성 채널", "로맨스 드라마 공식 클립"],
+      "fallback_tts": "Naver Clova 'shinji' (gentle male)",
+      "notes": "강한 저음보다 중음 + 부드러운 smile-voice; id 11 chaebol과 대칭쌍"
+    },
+    {
+      "id": 19,
+      "name": "fallen_antagonist",
+      "archetype": "흑화 반동주인공 — 음울한 악역",
+      "voice_target": {"pitch_hz": [95, 150], "style": "breathy-whispered-venomous", "emotion": "cold-bitter-resigned", "tempo": "irregular-pausing"},
+      "search_queries_ko": [
+        "흑화 빌런 남자 성우 모놀로그",
+        "다크 판타지 드라마CD 악역",
+        "사이코패스 연기 성우 샘플"
+      ],
+      "candidate_channels": ["다크 판타지 드라마CD 채널", "성우 데모릴 (악역 트랙)"],
+      "fallback_tts": "없음 — 음울·whispered 톤은 TTS 재현 불가",
+      "notes": "psychological complexity — 다양한 감정 샘플 필요 (quiet rage, resignation, cold humor)"
+    }
+  ],
+
+  "aggregate": {
+    "total_target_minutes": 300,
+    "total_target_hours": 5.0,
+    "per_slot_min_clips": 10,
+    "per_slot_max_clip_duration_min": 3,
+    "estimated_download_hours": 2,
+    "disk_needed_gb": 2.5,
+    "r2_upload_path_pattern": "r2:anima-corpus/voice/{name}/wav16k/"
+  },
+
+  "fallback_strategy": {
+    "tier1": "YouTube Creative Commons + yt-dlp auto-subs",
+    "tier2": "Public domain K-drama clips (educational fair-use excerpts ≤3min)",
+    "tier3": "User-recorded samples (user records 30min reading ChatML prompts in each archetype)",
+    "tier4_blocked": "Naver Clova / Google TTS — requires .py SDKs, currently .py ban. If user authorizes exception OR hexa-native HTTP client to REST endpoints, can unlock tier4"
+  },
+
+  "next_actions": [
+    "User review this plan — approve/reject source channels",
+    "Execute tier1 harvest for top-3 archetypes (id 10/12/15 — distinct voice targets) as pilot",
+    "Validate vocoder conditioning quality on pilot before scaling to all 10",
+    "If tier1 yields <20min/archetype, fall back to tier3 (user recording) or revisit tier4 (unlock hexa-native HTTP TTS client)"
+  ],
+
+  "tooling_verified_20260417": {
+    "yt_dlp": "/opt/homebrew/bin/yt-dlp",
+    "rclone": "/opt/homebrew/bin/rclone",
+    "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+    "r2_anima_corpus": "exists (confirmed via rclone lsd r2:)"
+  },
+
+  "blockers": [
+    "User review of channel candidates — some K-drama channels enforce copyright claims on downloads",
+    "No hexa-native HTTP client yet (blocks tier4 TTS REST calls if needed)",
+    "Transcript quality — auto-subs often mis-transcribe voice-acted lines; may need manual correction pass"
+  ]
+}
