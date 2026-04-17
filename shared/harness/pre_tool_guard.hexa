@@ -801,6 +801,27 @@ fn check_annot_rules_stdin() -> str {
 // [DISPATCHER] — tool 분기 + category 별 check 리스트 실행
 // ═══════════════════════════════════════════════════════════
 
+// .hexa-attrs forbid 정책 매칭 시 REJECT + alternate path 제시
+// hexa-lang 프로젝트의 self/attr_cli.hexa policy <path> 호출
+// attr_cli 가 exit 0 이면 통과, exit 1 이면 stdout 의 유도 메시지 반환
+fn check_project_forbid_attrs(tool: str, file_path: str) -> str {
+    if tool != "Write" && tool != "Edit" { return "" }
+    let home = env("HOME")
+    let cli = home + "/Dev/hexa-lang/self/attr_cli.hexa"
+    let cli_exists = to_string(exec("test -f '" + cli + "' && echo y || echo n")).trim()  // @allow-bare-exec
+    if cli_exists != "y" { return "" }
+    let hexa_bin = home + "/Dev/nexus/shared/bin/hexa"
+    let cmd = hexa_bin + " run " + cli + " policy '" + file_path + "' 2>&1; echo __RC:$?"
+    let out = to_string(exec(cmd)).trim()  // @allow-bare-exec
+    let rc_idx = out.index_of("__RC:")
+    if rc_idx < 0 { return "" }
+    let rc = out.substring(rc_idx + 5, out.len()).trim()
+    if rc == "0" { return "" }
+    let msg = out.substring(0, rc_idx).trim()
+    if msg.len() == 0 { return "" }
+    return msg
+}
+
 fn _run_write_checks(tool: str, file_path: str) -> str {
     let checks = [
         check_forbidden_ext(tool, file_path),
@@ -815,7 +836,8 @@ fn _run_write_checks(tool: str, file_path: str) -> str {
         check_l3_meta_lock(tool, file_path),
         check_lockdown_tier(tool, file_path),
         check_session_lock(tool, file_path),
-        check_annot_rules(tool, file_path)
+        check_annot_rules(tool, file_path),
+        check_project_forbid_attrs(tool, file_path)
     ]
     for c in checks {
         if c.len() > 0 { return c }
