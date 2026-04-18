@@ -65,20 +65,27 @@
     },
     "smash": {
       "desc": "blowup 9-phase 특이점 돌파",
-      "usage": "nexus-cli smash --seed \"...\" [--depth 3] [--json]",
+      "usage": "nexus-cli smash (--seed \"...\" | --batch \"s1|s2|...\") [--depth 3] [--seeds \"s1,s2,...|auto\"] [--json]",
       "flags": {
-        "--seed": { "type": "string", "required": true, "desc": "돌파 시드 텍스트" },
-        "--depth": { "type": "int", "default": 3, "desc": "돌파 깊이" }
+        "--seed": { "type": "string", "required": false, "desc": "돌파 시드 텍스트 (single 모드). --batch 와 상호배타" },
+        "--batch": { "type": "string", "required": false, "desc": "`|` 구분 N seed 일괄 발사 (1 dispatch, bash 기동 1회). seed_engine 풀 amortize" },
+        "--depth": { "type": "int", "default": 3, "desc": "돌파 깊이" },
+        "--seeds": { "type": "string", "required": false, "desc": "blowup.hexa passthrough (seed_engine crossover 보강). 값 `auto` 시 seed_engine merge 자동 주입 — bash SSOT 완전 parity" }
       },
-      "delegates_to": "exec_validated smash <seed> blowup.hexa <depth>",
+      "modes": {
+        "single": "nexus-cli smash --seed \"target\" [--seeds \"s1,s2\"|auto]",
+        "batch":  "nexus-cli smash --batch \"t1|t2|t3\" [--seeds auto] — startup amortize"
+      },
+      "delegates_to": "exec_validated smash <seed> blowup.hexa <depth> [--seeds <v>]",
       "gate": "cmd_gate.hexa",
       "output_json": { "seed": "string", "depth": "int", "result": "string", "exit_code": "int" }
     },
     "free": {
       "desc": "compose 5-module DFS 탐색",
-      "usage": "nexus-cli free --seed \"...\" [--dfs 3] [--json]",
+      "usage": "nexus-cli free (--seed \"...\" | --batch \"s1|s2|...\") [--dfs 3] [--json]",
       "flags": {
-        "--seed": { "type": "string", "required": true, "desc": "DFS 시드" },
+        "--seed": { "type": "string", "required": false, "desc": "DFS 시드 (single). --batch 와 상호배타" },
+        "--batch": { "type": "string", "required": false, "desc": "`|` 구분 N seed 일괄 DFS 발사 (1 dispatch)" },
         "--dfs": { "type": "int", "default": 3, "desc": "DFS 재귀 깊이" }
       },
       "delegates_to": "exec_validated free_dfs <seed> compose.hexa --modules all --dfs <dfs>",

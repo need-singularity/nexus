@@ -156,15 +156,58 @@ fn cmd_thinking(a: [str]) {
 
 // ─── subcommand: smash ───
 
+fn smash_extra(depth: str, seeds_pass: str) -> [str] {
+    // bash SSOT parity: --seeds "s1,s2,..." 를 blowup.hexa 로 passthrough
+    if seeds_pass.len() > 0 {
+        return [depth, "--seeds", seeds_pass]
+    }
+    return [depth]
+}
+
 fn cmd_smash(a: [str]) {
     let seed = sanitize(find_flag(a, "--seed", ""))
+    let batch_raw = find_flag(a, "--batch", "")
+    let mut seeds_pass = find_flag(a, "--seeds", "")
+    let depth = find_flag(a, "--depth", "3")
+
+    // --seeds auto: seed_engine merge 자동 주입 (bash SSOT 동등)
+    if seeds_pass == "auto" {
+        let merged = exec(shq(HEXA_BIN) + " run " + shq(NX + "/shared/blowup/seed/seed_engine.hexa") + " merge 2>/dev/null | tr '|' ','")
+        seeds_pass = merged.trim()
+    }
+
+    // ── batch 모드: --batch "seed1|seed2|..." N seed 순차 발사 (1 dispatch) ──
+    if batch_raw.len() > 0 {
+        let seeds_list = batch_raw.split("|")
+        let mut idx = 0
+        let mut ok_count = 0
+        let mut fail_count = 0
+        let extra = smash_extra(depth, seeds_pass)
+        for s in seeds_list {
+            let s_clean = sanitize(s.trim())
+            if s_clean.len() == 0 { continue }
+            let raw = run_exec_validated("smash", s_clean, BLOWUP, extra)
+            if raw.contains("REJECT") {
+                eprintln("batch[" + str(idx) + "] REJECT: " + s_clean)
+                fail_count = fail_count + 1
+            } else {
+                println("batch[" + str(idx) + "] OK:smash: " + s_clean)
+                ok_count = ok_count + 1
+            }
+            idx = idx + 1
+        }
+        println("smash batch: " + str(ok_count) + " ok / " + str(fail_count) + " fail")
+        if fail_count > 0 && ok_count == 0 { exit(3) }
+        return
+    }
+
+    // ── single --seed 모드 ──
     if seed.len() == 0 {
-        eprintln("nexus-cli smash: --seed required")
+        eprintln("nexus-cli smash: --seed or --batch required")
         exit(2)
     }
-    let depth = find_flag(a, "--depth", "3")
-    let raw = run_exec_validated("smash", seed, BLOWUP, [depth])
-    // cmd_gate REJECT 감지
+    let extra = smash_extra(depth, seeds_pass)
+    let raw = run_exec_validated("smash", seed, BLOWUP, extra)
     if raw.contains("REJECT") {
         eprintln("nexus-cli smash: gate 거부 — " + raw.trim())
         exit(3)
@@ -176,11 +219,38 @@ fn cmd_smash(a: [str]) {
 
 fn cmd_free(a: [str]) {
     let seed = sanitize(find_flag(a, "--seed", ""))
+    let batch_raw = find_flag(a, "--batch", "")
+    let dfs = find_flag(a, "--dfs", "3")
+
+    // ── batch 모드: --batch "seed1|seed2|..." N seed 순차 DFS ──
+    if batch_raw.len() > 0 {
+        let seeds_list = batch_raw.split("|")
+        let mut idx = 0
+        let mut ok_count = 0
+        let mut fail_count = 0
+        for s in seeds_list {
+            let s_clean = sanitize(s.trim())
+            if s_clean.len() == 0 { continue }
+            let raw = run_exec_validated("free_dfs", s_clean, COMPOSE, ["--modules", "all", "--dfs", dfs])
+            if raw.contains("REJECT") {
+                eprintln("batch[" + str(idx) + "] REJECT: " + s_clean)
+                fail_count = fail_count + 1
+            } else {
+                println("batch[" + str(idx) + "] OK:free: " + s_clean)
+                ok_count = ok_count + 1
+            }
+            idx = idx + 1
+        }
+        println("free batch: " + str(ok_count) + " ok / " + str(fail_count) + " fail")
+        if fail_count > 0 && ok_count == 0 { exit(3) }
+        return
+    }
+
+    // ── single --seed 모드 ──
     if seed.len() == 0 {
-        eprintln("nexus-cli free: --seed required")
+        eprintln("nexus-cli free: --seed or --batch required")
         exit(2)
     }
-    let dfs = find_flag(a, "--dfs", "3")
     let raw = run_exec_validated("free_dfs", seed, COMPOSE, ["--modules", "all", "--dfs", dfs])
     if raw.contains("REJECT") {
         eprintln("nexus-cli free: gate 거부 — " + raw.trim())
