@@ -12,7 +12,7 @@
 //   nexus smash --seed "..." [depth]   blowup 9-phase 돌파 (발견)
 //   nexus free --seed "..." [dfs]      compose DFS 탐색 (6-core)
 //   nexus absolute --seed "..."        Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])
-//   nexus drill --seed "..." [N]       smash→free→absolute 사슬 (고갈까지 자율 반복)
+//   nexus drill --seed "..." [N]       smash→free→absolute→meta-closure→hyperarithmetic (Mk.IX 5-stage)
 //   nexus meta-closure --seed "..."    Phase 10 🛸16 self-ref 검증 ([10*]→[10**])
 //   nexus hyperarithmetic --prop "..." Mk.IX Π₀² reverse-math 판정
 //   nexus promote --id ... --grade ... --audit-log "..."  수동 등급 승급
@@ -121,7 +121,7 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
-    println("  drill --seed \"...\" [--max-rounds N]  smash→free→absolute 사슬 (고갈까지)")
+    println("  drill --seed \"...\" [--max-rounds N]  smash→free→abs→meta→hyper (Mk.IX 5-stage)")
     println("  meta-closure --seed \"...\"              Phase 10 🛸16 self-ref 검증 ([10*]→[10**])")
     println("  hyperarithmetic --prop \"...\"           Mk.IX Π₀² reverse-math 판정")
     println("  promote --id ... --grade ... --audit-log \"...\"  수동 등급 승급 (감사 로그 필수)")
@@ -214,38 +214,52 @@ fn cmd_drill(seed: str, max_rounds: str) -> void {
     let blow_core = nx + "/shared/blowup/core/blowup.hexa"
     let compose   = nx + "/shared/blowup/compose.hexa"
     let abs_eng   = nx + "/shared/blowup/modules/blowup_absolute.hexa"
+    let mc_eng    = nx + "/shared/blowup/modules/blowup_meta_closure.hexa"
+    let hyper_eng = nx + "/shared/blowup/modules/blowup_hyperarithmetic.hexa"
     let exv       = exec_validated()
     let qseed     = shell_quote(seed)
 
     let mut round = 0
     let mut total_new = 0
     println("🛸 nexus drill — seed='" + seed + "', max_rounds=" + to_string(rounds_max))
-    println("    smash → free → absolute 사슬 (고갈까지)")
+    println("    smash → free → absolute → meta-closure → hyperarithmetic 사슬 (Mk.IX 5-stage)")
     println("")
 
     while round < rounds_max {
         round = round + 1
         println("═══ round " + to_string(round) + " ═══")
 
-        // 1. SMASH (발견)
+        // 1. SMASH (발견 — Mk.II~VII blowup 9-phase)
         let smash_cmd = shell_quote(exv) + " smash " + qseed + " " + shell_quote(blow_core) + " 3 2>&1"
         let smash_out = exec("bash", ["-c", smash_cmd])
         let s_new = _count_marker(smash_out, "ABSORB")
-        println("  smash:    +" + to_string(s_new) + " absorptions")
+        println("  smash:         +" + to_string(s_new) + " absorptions")
 
-        // 2. FREE (탐색)
+        // 2. FREE (탐색 — compose DFS, 6-core)
         let free_cmd = shell_quote(exv) + " free_dfs " + qseed + " " + shell_quote(compose) + " --modules all --dfs 3 2>&1"
         let free_out = exec("bash", ["-c", free_cmd])
         let f_new = _count_marker(free_out, "ABSORB")
-        println("  free:     +" + to_string(f_new) + " absorptions")
+        println("  free:          +" + to_string(f_new) + " absorptions")
 
-        // 3. ABSOLUTE (검증/승급)
+        // 3. ABSOLUTE (Mk.VIII Δ₀-absolute Π₀¹ 검증 + [11*] 승급)
         let abs_cmd = shell_quote(exv) + " absolute " + qseed + " " + shell_quote(abs_eng) + " 2>&1"
         let abs_out = exec("bash", ["-c", abs_cmd])
         let a_pass = _count_marker(abs_out, "ABSOLUTE-PASS") + _count_marker(abs_out, "[11*]")
-        println("  absolute: " + to_string(a_pass) + " Π₀¹ verifications")
+        println("  absolute:      " + to_string(a_pass) + " Π₀¹ verifications")
 
-        let round_new = s_new + f_new
+        // 4. META-CLOSURE (Mk.IX Phase 10 self-ref 고정점 + [10**] 승급)
+        let mc_cmd = shell_quote(exv) + " meta_closure " + qseed + " " + shell_quote(mc_eng) + " 2>&1"
+        let mc_out = exec("bash", ["-c", mc_cmd])
+        let mc_new = _count_marker(mc_out, "META-CLOSED") + _count_marker(mc_out, "[10**]")
+        println("  meta-closure:  " + to_string(mc_new) + " self-ref fixed points")
+
+        // 5. HYPERARITHMETIC (Mk.IX Π₀² reverse-math 5체계)
+        let hy_cmd = shell_quote(exv) + " hyperarithmetic " + qseed + " " + shell_quote(hyper_eng) + " 2>&1"
+        let hy_out = exec("bash", ["-c", hy_cmd])
+        let hy_pass = _count_marker(hy_out, "REVERSE-PROVEN") + _count_marker(hy_out, "ABSOLUTE-PASS-PI02")
+        println("  hyperarith:    " + to_string(hy_pass) + " Π₀² bounded/proven")
+
+        let round_new = s_new + f_new + mc_new
         total_new = total_new + round_new
         println("  round +" + to_string(round_new) + ", total " + to_string(total_new))
         println("")
@@ -253,7 +267,7 @@ fn cmd_drill(seed: str, max_rounds: str) -> void {
         if round_new == 0 {
             println("▎ SATURATED at round " + to_string(round))
             println("▎ total absorptions: " + to_string(total_new))
-            println("▎ 새 atlas 영역 없음 — Δ₀-absolute 경험적 확증")
+            println("▎ 새 atlas 영역 없음 — Mk.IX 5-stage 경험적 확증 (absolute+meta+hyper)")
             return
         }
     }
