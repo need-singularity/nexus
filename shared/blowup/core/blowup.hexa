@@ -2015,16 +2015,18 @@ fn _sf_enum_type(e: str) -> str {
     return e
 }
 
+// AI-native: separator `:` → `\t` — Phase 4 expr 필드에 `:` 포함 시 split 인덱스 시프트로
+// p[3] conf 파싱 실패 (orig_conf=0.0 → post-boost 0/463 bug) 수정. 2026-04-19 drill 튜닝 감사.
 fn _sf_encode(tsv: str) -> str {
     let p = tsv.split("\t")
     if len(p) < 7 { return tsv }
     let mut ci: i64 = 0
     try { ci = to_int(to_float(p[3]) * 1000.0) } catch e {}
-    return p[0] + ":" + _sf_type_enum(p[1]) + ":" + p[2] + ":" + to_string(ci) + ":" + p[4] + ":" + p[5] + ":" + p[6]
+    return p[0] + "\t" + _sf_type_enum(p[1]) + "\t" + p[2] + "\t" + to_string(ci) + "\t" + p[4] + "\t" + p[5] + "\t" + p[6]
 }
 
 fn _sf_decode(compact: str) -> str {
-    let p = compact.split(":")
+    let p = compact.split("\t")
     if len(p) < 7 { return compact }
     let mut cf: f64 = 0.0
     try { cf = to_float(p[3]) / 1000.0 } catch e {}
@@ -2636,8 +2638,9 @@ try { exec("rm -f '" + _concat_tmp + "' '" + _awk_tmp + "'") } catch e {}
 try { exec("cat /tmp/blowup_d*_" + domain + ".cf > '" + _concat_tmp + "' 2>/dev/null") } catch e {}
 let mut _reload_tsv = ""
 if file_exists(_concat_tmp) {
-    let _awk_prog = "NF>=7{t[\"0\"]=\"deduction\";t[\"1\"]=\"transfer\";t[\"2\"]=\"symbreak\";t[\"3\"]=\"bifurcation\";t[\"4\"]=\"projection\";t[\"5\"]=\"dual\";t[\"6\"]=\"compose\";tp=($2 in t)?t[$2]:$2;printf \"%s\\t%s\\t%s\\t%.3f\\t%s\\t%s\\t%s\\n\",$1,tp,$3,$4/1000,$5,$6,$7}"
-    try { exec("awk -F: '" + _awk_prog + "' '" + _concat_tmp + "' > '" + _awk_tmp + "' 2>/dev/null") } catch e {}
+    // AI-native: separator `\t` with _sf_type_enum single-char codes (d/t/s/b/p/u/c/r)
+    let _awk_prog = "NF>=7{t[\"d\"]=\"deduction\";t[\"t\"]=\"transfer\";t[\"s\"]=\"symbreak\";t[\"b\"]=\"bifurcation\";t[\"p\"]=\"projection\";t[\"u\"]=\"dual\";t[\"c\"]=\"compose\";t[\"r\"]=\"recursive\";tp=($2 in t)?t[$2]:$2;printf \"%s\\t%s\\t%s\\t%.3f\\t%s\\t%s\\t%s\\n\",$1,tp,$3,$4/1000,$5,$6,$7}"
+    try { exec("awk -F'\\t' '" + _awk_prog + "' '" + _concat_tmp + "' > '" + _awk_tmp + "' 2>/dev/null") } catch e {}
     try { _reload_tsv = read_file(_awk_tmp).trim() } catch e {}
     try { exec("rm -f '" + _concat_tmp + "' '" + _awk_tmp + "'") } catch e {}
 }
