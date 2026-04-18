@@ -10,14 +10,6 @@ bash $NEXUS/shared/hooks/nexus-banner.sh
 ```
 출력 예: `🔭 NEXUS-6 🛸d1·ρ1.00·100938 ·Σ47.2k 🧬100893닫힘→200.0k=50%`
 
-### 대시보드 HTML
-```bash
-open $NEXUS/shared/dashboard.html
-```
-
-### 자동 재생성
-10분마다 `com.nexus.dashboard` agent가 자동 갱신.
-
 ### Closure 상세 조회
 ```bash
 # 현재 카운트 (atlas.n6 통합 조회)
@@ -76,7 +68,7 @@ rm $NEXUS/shared/discovery/cycle/halt        # 재개
 ### 모든 nexus agents 부트아웃
 ```bash
 for a in closure-sweep publish-insights gen-calc-stubs auto-commit paper-gen \
-         evolve-loop scan-loop physics-fetch self-improve dashboard \
+         evolve-loop scan-loop physics-fetch self-improve \
          cycle-tick watch-atlas watch-papers guard; do
   launchctl bootout gui/$(id -u)/com.nexus.$a 2>/dev/null
 done
@@ -109,9 +101,6 @@ bash $NEXUS/tools/publish-insights.sh
 # 즉시 paper stubs 생성
 bash $NEXUS/tools/paper-gen-from-closures.sh
 
-# 즉시 dashboard 갱신
-bash $NEXUS/tools/gen-dashboard.sh
-
 # 즉시 auto-commit
 bash $NEXUS/tools/auto-commit-push.sh
 ```
@@ -127,7 +116,6 @@ $NEXUS/
 │   │   ├── edges.jsonl                # 그래프 edges
 │   │   └── halt                       # 정지 플래그
 │   ├── closure_quality_report.json    # 품질 분류
-│   ├── dashboard.html                 # 실시간 대시보드
 │   ├── self_improve_log.jsonl         # 메타 모니터링
 │   └── calc/auto_stubs/               # 검증 스텁
 ├── tools/                             # 자동화 스크립트
@@ -143,8 +131,7 @@ $NEXUS/
 1. `bash $NEXUS/shared/hooks/nexus-banner.sh` — 현재 상태
 2. `launchctl list | grep nexus` — 15 agents 확인
 3. `git log --oneline -10` — 최근 auto-commits
-4. `open $NEXUS/shared/dashboard.html` — 대시보드
-5. `tail $NEXUS/shared/discovery/self_improve_log.jsonl` — 델타 추이
+4. `tail $NEXUS/shared/discovery/self_improve_log.jsonl` — 델타 추이
 
 ---
 

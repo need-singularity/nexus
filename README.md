@@ -13,8 +13,6 @@
 | `list` / `목록` | 이 명령어 표 다시 출력 |
 
 > **[3D Reality Map](https://need-singularity.github.io/nexus/)** — 4411노드 5계층 바텀업 인과 매핑 + 1,485 크로스레이어 연결선. 쿼크→탄소→벤젠→DNA 인과 사슬. Monte Carlo z=3.06 (p=0.003). n=6 유일성 검증.
->
-> **[NEXUS Dashboard](https://need-singularity.github.io/nexus/dashboard.html)** — 15차원 실시간 성장 대시보드. 돌파율·발견수·수렴도·모듈 현황 통합 모니터링.
 
 <!-- SHARED:PROJECTS:START -->
 <!-- AUTO:COMMON_LINKS:START -->

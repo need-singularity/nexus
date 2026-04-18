@@ -24,7 +24,7 @@ blowup/      → blowup/CLAUDE.md
 
 flat HOT     infra_state.json bridge_state.json hexa_pitfalls_log.jsonl auto_gap.log growth_tick_preflight.log .bt_cooldown .gap_cooldown
 flat RUNTIME .runtime/accounts/{accounts,cl-state,usage-cache}.json (cl SSOT, gitignore)
-flat L0      CLAUDE.md SECRET.md dashboard.html
+flat L0      CLAUDE.md SECRET.md
 
 infra                            # SSOT=infra_state.json 4호스트
 nexus {scan|verify|evolve|auto} <d>   # --full=400렌즈
