@@ -30,6 +30,33 @@
 
 let VERSION = "0.1.0-hive-hub"
 
+// ─── Linux stage1 hexa polyfill (shared/blowup/lib/str_compat.hexa.inc) ───
+// @include shared/blowup/lib/str_compat.hexa.inc (str_find)
+fn str_find(s: str, needle: str) -> i64 {
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    while i <= end {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn str_find_from(s: str, needle: str, start: i64) -> i64 {
+    if start <= 0 { return str_find(s, needle) }
+    let n = s.len()
+    if start >= n { return -1 }
+    let tail = s.substring(start, n)
+    let r = str_find(tail, needle)
+    if r < 0 { return -1 }
+    return r + start
+}
+
 fn nexus_root() -> str {
     let n = env("NEXUS")
     if n.len() > 0 { return n }
@@ -163,7 +190,7 @@ fn _count_marker(text: str, marker: str) -> int {
     let mut n = 0
     let mut t = text
     while true {
-        let idx = t.find(marker)
+        let idx = str_find(t, marker)
         if idx < 0 { break }
         n = n + 1
         t = t.substring(idx + marker.len(), t.len())

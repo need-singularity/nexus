@@ -44,11 +44,11 @@ fn _trace(tag: string) {
 }
 _trace("[00-init-start] blowup.hexa load begins")
 
-// exec("printenv HOME") 1회만 호출 — 이후 전부 _HOME 참조 (15회 → 1회)
+// AI-native: env() 네이티브 fn 사용 — 쉘 exec 회피 (metachar 경고 0)
 let mut _HOME = ""
-try { _HOME = to_string(exec("printenv HOME")).trim() } catch e {}
+try { _HOME = env("HOME") } catch e {}
 if _HOME == "" {
-    try { _HOME = to_string(exec("echo $HOME")).trim() } catch e {}
+    try { _HOME = to_string(exec("printenv HOME")).trim() } catch e {}
 }
 let _NEXUS = _HOME + "/Dev/nexus"
 let _ATLAS_PATH = _NEXUS + "/shared/n6/atlas.n6"
@@ -69,13 +69,30 @@ let mut _n6d_cache = #{}
 let mut _n6d_cache_hits: i64 = 0
 
 // hexa 바이너리 1회 탐색 캐시 — HEXA_BIN 환경변수 우선
+// AI-native: env() + file_exists() 네이티브 fn — 쉘 exec 완전 회피
 let mut _HEXA_BIN = ""
-try { _HEXA_BIN = to_string(exec("echo $HEXA_BIN")).trim() } catch e {}
+try { _HEXA_BIN = env("HEXA_BIN") } catch e {}
 if _HEXA_BIN == "" {
-    try {
-        _HEXA_BIN = to_string(exec("for p in /home/hexa-lang/hexa " + _HOME + "/Dev/hexa-lang/hexa $(which hexa 2>/dev/null); do [ -x \"$p\" ] && echo $p && break; done 2>/dev/null")).trim()
-    } catch e {
-        _HEXA_BIN = _HOME + "/Dev/hexa-lang/hexa"
+    // 후보 경로 순차 탐색 (Linux/Mac 공통)
+    let _hx_candidates = [
+        _HOME + "/.hx/bin/hexa",
+        _HOME + "/Dev/hexa-lang/.hx/bin/hexa",
+        _HOME + "/Dev/hexa-lang/hexa",
+        "/home/hexa-lang/hexa",
+        "/usr/local/bin/hexa",
+        "/opt/homebrew/bin/hexa",
+        "/usr/bin/hexa",
+    ]
+    for _hx_p in _hx_candidates {
+        if file_exists(_hx_p) {
+            _HEXA_BIN = _hx_p
+            break
+        }
+    }
+    if _HEXA_BIN == "" {
+        // 최후 fallback — which 호출 단일 명령 (metachar 없음)
+        try { _HEXA_BIN = to_string(exec("command -v hexa")).trim() } catch e {}
+        if _HEXA_BIN == "" { _HEXA_BIN = _HOME + "/Dev/hexa-lang/hexa" }
     }
 }
 
@@ -406,12 +423,14 @@ fn batch_sector_classify(lines: list) {
 
     // 2. 임시 파일에 도메인 텍스트 쓰기
     let _tmp = "/tmp/blowup_sector_batch.txt"
-    let mut _wbuf = ""
+    let mut _wbuf_parts: [string] = []
     di = 0
     while di < dn {
-        _wbuf = _wbuf + domain_list[di] + "\n"
+        _wbuf_parts.push(to_string(domain_list[di]))
+        _wbuf_parts.push("\n")
         di = di + 1
     }
+    let _wbuf = _wbuf_parts.join("")
     let mut _write_ok = true
     try {
         write_file(_tmp, _wbuf)
@@ -705,21 +724,23 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     if has_any_dedup {
         // 후보 라인을 tmpfile로 작성 → grep -Fxf 로 atlas에서 일치 검색
         let _tmp = "/tmp/.blowup_dedup_batch." + to_string(exec("echo $$").trim())
-        let mut patterns = ""
+        let mut pattern_parts: [string] = []
         i = 0
         while i < dedup_count {
             if needs_dedup[i] {
-                if len(patterns) > 0 { patterns = patterns + "\n" }
-                patterns = patterns + valid_trimmed[i]
+                pattern_parts.push(to_string(valid_trimmed[i]))
             }
             i = i + 1
         }
+        let patterns = pattern_parts.join("\n")
         try {
-            // tmpfile에 패턴 기록
-            exec("cat > '" + _tmp + "' <<'__DEDUP_PAT__'\n" + patterns + "\n__DEDUP_PAT__")
+            // tmpfile에 패턴 기록 — write_file 네이티브 (heredoc 회피, metachar 경고 0)
+            try { write_file(_tmp, patterns) } catch e {}
             // grep -Fxf: 패턴 파일의 각 라인을 고정 문자열 전체 라인 매치로 검색
             // 결과 = atlas.n6에 이미 존재하는 라인 목록
-            let found_raw = exec("grep -Fxf '" + _tmp + "' '" + path + "' 2>/dev/null || true")
+            // AI-native: || true 제거 — grep 실패 (no-match exit 1) 는 try/catch 로 처리
+            let mut found_raw = ""
+            try { found_raw = exec("grep -Fxf '" + _tmp + "' '" + path + "' 2>/dev/null") } catch e {}
             let found_lines = found_raw.split("\n")
             for fl in found_lines {
                 let ft = fl.trim()
@@ -733,8 +754,7 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     }
 
     // (3) 최종 필터: dup_set에 있으면 dedup, 없으면 통과
-    let mut clean = ""
-    let mut first = true
+    let mut clean_parts: [string] = []
     i = 0
     while i < dedup_count {
         if needs_dedup[i] {
@@ -747,11 +767,10 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
                 continue
             }
         }
-        if !first { clean = clean + "\n" }
-        clean = clean + valid_lines[i]
-        first = false
+        clean_parts.push(to_string(valid_lines[i]))
         i = i + 1
     }
+    let mut clean = clean_parts.join("\n")
 
     if rejected > 0 {
         println("  [schema guard] rejected " + to_string(rejected) + " invalid lines -> " + path)
@@ -807,16 +826,46 @@ fn graph_deg_cache_path() -> string {
 }
 
 fn _stat_mtime_size(path: string) -> string {
-    // path single-quote 보호 (공백/특수문자 포함 경로 대응)
-    let mut r = ""
-    try { r = to_string(exec("stat -f '%m %z' '" + path + "' 2>/dev/null || stat -c '%Y %s' '" + path + "' 2>/dev/null")).trim() } catch e {}
-    return r
+    // AI-native: file_size() 네이티브 + stat mtime 플랫폼별 분리 exec
+    // 이전: stat -f ... || stat -c ... (|| 메타문자 경고)
+    // 현재: file_size() 네이티브 + BSD/GNU 순차 try (|| 제거)
+    let mut size_s = ""
+    try { size_s = to_string(file_size(path)) } catch e {}
+    if size_s == "" { return "" }
+    let mut mt = ""
+    // BSD (macOS) 먼저 시도 — 실패 시 빈 문자열
+    try { mt = to_string(exec("stat -f %m '" + path + "' 2>/dev/null")).trim() } catch e {}
+    if mt == "" {
+        // GNU (Linux) fallback
+        try { mt = to_string(exec("stat -c %Y '" + path + "' 2>/dev/null")).trim() } catch e {}
+    }
+    if mt == "" { return "" }
+    return mt + " " + size_s
 }
 
 fn _head_hash_256(path: string) -> string {
-    // path single-quote 보호
+    // AI-native: BSD(md5)/GNU(md5sum) 플랫폼별 분리 exec — 파이프/|| 제거
+    // 이전: head | md5 -q || head | md5sum | cut
+    // 현재: tmp 파일 + 단일 커맨드 per 플랫폼 (순차 fallback)
     let mut r = ""
-    try { r = to_string(exec("head -c 256 '" + path + "' 2>/dev/null | md5 -q 2>/dev/null || head -c 256 '" + path + "' 2>/dev/null | md5sum | cut -d' ' -f1")).trim() } catch e {}
+    if !file_exists(path) { return "" }
+    let _tmp = "/tmp/.blowup_headhash." + to_string(exec("echo $$").trim())
+    // head -c 256 → tmp (redirect 는 metachar 경고 없음)
+    try { exec("head -c 256 '" + path + "' > '" + _tmp + "'") } catch e {}
+    if file_exists(_tmp) {
+        // BSD: md5 -q tmp
+        try { r = to_string(exec("md5 -q '" + _tmp + "' 2>/dev/null")).trim() } catch e {}
+        if r == "" {
+            // GNU: md5sum tmp → first column
+            let mut raw = ""
+            try { raw = to_string(exec("md5sum '" + _tmp + "' 2>/dev/null")).trim() } catch e {}
+            if len(raw) > 0 {
+                let parts = raw.split(" ")
+                if len(parts) > 0 { r = parts[0].trim() }
+            }
+        }
+        try { exec("rm -f '" + _tmp + "'") } catch e {}
+    }
     return r
 }
 
@@ -1203,7 +1252,7 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
     let parts = seeds_csv.split("|")
     let mut best_score: f64 = 0.0
     let mut discoveries: i64 = 0
-    let mut out_vals = ""
+    let mut out_parts: [string] = []
 
     // For each seed value, apply mutations and keep best
     let mut si: i64 = 0
@@ -1324,12 +1373,12 @@ fn evo_cycle(seeds_csv: string, cycle_num: i64) -> string {
             if best_conf > best_score { best_score = best_conf }
             if best_conf >= 0.25 { discoveries = discoveries + 1 }
 
-            if len(out_vals) > 0 { out_vals = out_vals + "|" }
-            out_vals = out_vals + to_string(best_mut)
+            out_parts.push(to_string(best_mut))
         }
         si = si + 1
     }
 
+    let out_vals = out_parts.join("|")
     return to_string(best_score) + "|" + to_string(discoveries) + "|" + out_vals
 }
 
@@ -1844,16 +1893,16 @@ println("")
 _trace("[phase-2-ouroboros] start")
 println("--- Phase 2: OUROBOROS Evolution ---")
 // Build seed values from domain metrics
-let mut seed_csv = ""
+let mut seed_parts: [string] = []
 let mut si: i64 = 0
 while si < mc {
-    if len(seed_csv) > 0 { seed_csv = seed_csv + "|" }
-    seed_csv = seed_csv + to_string(m_val(si, domain))
+    seed_parts.push(to_string(m_val(si, domain)))
     si = si + 1
 }
+let seed_csv = seed_parts.join("|")
 
 let evo_max_cycles: i64 = if fast_mode { if max_depth < 3 { max_depth } else { 3 } } else { if max_depth < 8 { max_depth } else { 8 } }
-let mut evo_history = ""
+let mut evo_history_parts: [string] = []
 let mut evo_total_disc: i64 = 0
 let mut evo_best_score: f64 = 0.0
 let mut current_seeds = seed_csv
@@ -1872,17 +1921,17 @@ while ec < evo_max_cycles {
     evo_total_disc = evo_total_disc + cycle_disc
 
     // Update history
-    if len(evo_history) > 0 { evo_history = evo_history + "|" }
-    evo_history = evo_history + to_string(cycle_disc)
+    evo_history_parts.push(to_string(cycle_disc))
+    let evo_history = evo_history_parts.join("|")
 
     // Extract evolved values for next cycle
-    let mut new_seeds = ""
+    let mut new_seed_parts: [string] = []
     let mut ri: i64 = 2
     while ri < len(rparts) {
-        if len(new_seeds) > 0 { new_seeds = new_seeds + "|" }
-        new_seeds = new_seeds + rparts[ri]
+        new_seed_parts.push(rparts[ri])
         ri = ri + 1
     }
+    let new_seeds = new_seed_parts.join("|")
     if len(new_seeds) > 0 { current_seeds = new_seeds }
 
     evo_status = evo_check_convergence(evo_history)
@@ -1979,14 +2028,16 @@ fn _sf_decode(compact: str) -> str {
 }
 
 fn filter_flush(lines: list, path: str) -> i64 {
-    let mut buf = ""
+    let mut buf_parts: [string] = []
     let mut i: i64 = 0
     let mut count: i64 = 0
     while i < len(lines) {
-        buf = buf + _sf_encode(to_string(lines[i])) + "\n"
+        buf_parts.push(_sf_encode(to_string(lines[i])))
+        buf_parts.push("\n")
         count = count + 1
         i = i + 1
     }
+    let buf = buf_parts.join("")
     // hexa 내장 write/append — shell 특수문자 문제 없음
     if len(buf) > 0 {
         if file_exists(path) {
@@ -2572,8 +2623,20 @@ try { arena_reset() } catch e {}  // AI-native: Phase 4 임시 메모리 해제 
 // STREAM FILTER: 전 depth compact 파일에서 buf_lines 복원 (Phase 5/6 에서 필요)
 // 각 depth 파일 순차 로드 → 메모리 부담 = 1 depth 분량만
 // OPT-16+17+18: shell awk decode + split 1회 (hexa push O(n²) 완전 우회)
-// compact 파일을 shell awk로 디코드 → TSV 문자열 → hexa split → 배열 1회 생성
-let _reload_tsv = exec("for f in /tmp/blowup_d*_" + domain + ".cf 2>/dev/null; do cat \"$f\"; done 2>/dev/null | awk -F: 'NF>=7{t[\"0\"]=\"deduction\";t[\"1\"]=\"transfer\";t[\"2\"]=\"symbreak\";t[\"3\"]=\"bifurcation\";t[\"4\"]=\"projection\";t[\"5\"]=\"dual\";t[\"6\"]=\"compose\";tp=($2 in t)?t[$2]:$2;printf \"%s\\t%s\\t%s\\t%.3f\\t%s\\t%s\\t%s\\n\",$1,tp,$3,$4/1000,$5,$6,$7}' 2>/dev/null || echo ''").trim()
+// AI-native: pipeline 분리 — cat(glob) → tmp → awk → tmp (|| + | + ; 제거)
+// metachar 경고 회피: 각 exec 은 단일 명령 (redirect 만 허용)
+let _concat_tmp = "/tmp/.blowup_concat." + domain + "." + to_string(exec("echo $$").trim())
+let _awk_tmp = "/tmp/.blowup_awk." + domain + "." + to_string(exec("echo $$").trim())
+try { exec("rm -f '" + _concat_tmp + "' '" + _awk_tmp + "'") } catch e {}
+// glob * 는 허용 — cat 은 no-match 시 에러지만 try 로 포괄
+try { exec("cat /tmp/blowup_d*_" + domain + ".cf > '" + _concat_tmp + "' 2>/dev/null") } catch e {}
+let mut _reload_tsv = ""
+if file_exists(_concat_tmp) {
+    let _awk_prog = "NF>=7{t[\"0\"]=\"deduction\";t[\"1\"]=\"transfer\";t[\"2\"]=\"symbreak\";t[\"3\"]=\"bifurcation\";t[\"4\"]=\"projection\";t[\"5\"]=\"dual\";t[\"6\"]=\"compose\";tp=($2 in t)?t[$2]:$2;printf \"%s\\t%s\\t%s\\t%.3f\\t%s\\t%s\\t%s\\n\",$1,tp,$3,$4/1000,$5,$6,$7}"
+    try { exec("awk -F: '" + _awk_prog + "' '" + _concat_tmp + "' > '" + _awk_tmp + "' 2>/dev/null") } catch e {}
+    try { _reload_tsv = read_file(_awk_tmp).trim() } catch e {}
+    try { exec("rm -f '" + _concat_tmp + "' '" + _awk_tmp + "'") } catch e {}
+}
 if len(_reload_tsv) > 0 {
     buf_lines = _reload_tsv.split("\n")
 }
@@ -3020,12 +3083,35 @@ let atlas_n6_path = _ATLAS_PATH
 let mut absorb_atlas_count: i64 = 0
 if file_exists(atlas_n6_path) {
     let atlas_content = _atlas_cache  // AI-native: 캐시 재사용
-    // 마지막 BT 번호 추출 — grep + sort (hexa char 비교 회피)
+    // AI-native: hexa 문자열 스캔 — exec pipeline 회피 (metachar 경고 0)
+    // 이전: grep -oE 'n6-bt-N' | grep -oE N | sort -n | tail -1  (파이프 4개)
+    // 현재: _atlas_cache 1회 스캔, split("n6-bt-") → 리딩 digits 파싱 → max
     let mut atlas_last_bt: i64 = 0
+    let _bt_digits = ["0","1","2","3","4","5","6","7","8","9"]
     try {
-        let _bt_max_str = exec("grep -oE 'n6-bt-[0-9]+' " + atlas_n6_path + " | grep -oE '[0-9]+$' | sort -n | tail -1").trim()
-        if len(_bt_max_str) > 0 {
-            atlas_last_bt = to_int(_bt_max_str)
+        let _bt_parts = atlas_content.split("n6-bt-")
+        let mut _bpi: i64 = 1  // 첫 요소는 prefix, 건너뜀
+        while _bpi < len(_bt_parts) {
+            let _bp = to_string(_bt_parts[_bpi])
+            // 리딩 digits 만 추출 (hexa char 범위비교 회피 — 명시적 set 사용)
+            let mut _num_s = ""
+            let mut _cj: i64 = 0
+            let _bpl = len(_bp)
+            while _cj < _bpl {
+                let _ch = _bp[_cj]
+                let mut _is_d = false
+                for _d in _bt_digits {
+                    if _ch == _d { _is_d = true; break }
+                }
+                if !_is_d { break }
+                _num_s = _num_s + _ch
+                _cj = _cj + 1
+            }
+            if len(_num_s) > 0 {
+                let _nv = to_int(_num_s)
+                if _nv > atlas_last_bt { atlas_last_bt = _nv }
+            }
+            _bpi = _bpi + 1
         }
     } catch e {}
 
@@ -3157,7 +3243,7 @@ if fast_mode {
 println("")
 
 // ── discovery_log append (append_file 사용 — 전체 읽기 제거) ──
-let mut new_entries = ""
+let mut new_entry_parts: [string] = []
 li = 0
 while li < len(buf_lines) {
     let line = buf_lines[li]
@@ -3186,13 +3272,15 @@ while li < len(buf_lines) {
                 }
                 let dn = if name != "" { name } else { parts[0] }
                 let entry = "{\"constant\":\"blowup-" + dn + "\",\"value\":\"" + to_string(value) + "\",\"source\":\"hexa-blowup-mk2\",\"timestamp\":\"2026-04-06\",\"grade\":\"" + grade + "\",\"processed\":true,\"alien_index\":{\"d\":" + to_string(ai_d) + ",\"r\":" + to_string(ai_r) + "},\"mk2\":{\"sector\":\"" + sector + "\",\"confidence\":" + to_string(conf) + ",\"paths\":1,\"prime_set\":[],\"layer\":" + to_string(ai_d) + "},\"blowup\":{\"type\":\"" + parts[1] + "\",\"src\":\"" + parts[6] + "\"},\"telescope\":{\"consensus\":" + to_string(tele_agree) + ",\"level\":\"" + tele_level + "\",\"boost\":" + to_string(tele_boost) + "},\"evolution\":{\"cycles\":" + to_string(evo_max_cycles) + ",\"best_score\":" + to_string(evo_best_score) + ",\"status\":\"" + evo_status + "\"}}"
-                new_entries = new_entries + entry + "\n"
+                new_entry_parts.push(entry)
+                new_entry_parts.push("\n")
                 logged = logged + 1
             }
         }
     }
     li = li + 1
 }
+let new_entries = new_entry_parts.join("")
 if logged > 0 {
     let _rej_disc = _guarded_append_atlas(log_path, new_entries)
 }
@@ -3356,12 +3444,14 @@ try {
     let gap_result = exec(absorb_hexa_bin, [gap_finder_path, "quick"])
     // 결과에서 EXACT 라인만 추출하여 이번 돌파 결과와 교차 확인
     // buf_lines를 하나의 문자열로 합쳐서 O(1) contains 체크 (O(gap×buf) → O(gap))
-    let mut buf_concat = ""
+    let mut buf_concat_parts: [string] = []
     let mut bci: i64 = 0
     while bci < len(buf_lines) && bci < 100 {
-        buf_concat = buf_concat + " " + buf_lines[bci]
+        buf_concat_parts.push(" ")
+        buf_concat_parts.push(to_string(buf_lines[bci]))
         bci = bci + 1
     }
+    let buf_concat = buf_concat_parts.join("")
     let gap_lines = gap_result.split("\n")
     let mut gap_shown = 0
     let mut gli: i64 = 0
@@ -3406,7 +3496,8 @@ if bt_dir_count > 0 {
     let _nd_script = _NEXUS + "/shared/blowup/lib/update_next_directions.hexa"
     let _nd_tmp = "/tmp/.blowup_directions_" + to_string(exec("echo $$").trim())
     try { write_file(_nd_tmp, bt_directions) } catch e {}
-    try { exec("cat " + _nd_tmp + " | " + absorb_hexa_bin + " " + _nd_script + " " + domain + " " + to_string(bt_dir_count)) } catch e {}
+    // AI-native: cat | hexa → hexa < tmp  (pipe | 제거)
+    try { exec(absorb_hexa_bin + " " + _nd_script + " " + domain + " " + to_string(bt_dir_count) + " < " + _nd_tmp) } catch e {}
     try { exec("rm -f " + _nd_tmp) } catch e {}
 }
 

@@ -26,6 +26,33 @@
 //   Bounded exponential: "<2^n", "<n^n", "<p^k", "≤p"
 // ═══════════════════════════════════════════════════════════
 
+// ─── Linux stage1 hexa polyfill (shared/blowup/lib/str_compat.hexa.inc) ───
+// @include shared/blowup/lib/str_compat.hexa.inc (str_find)
+fn str_find(s: str, needle: str) -> i64 {
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    while i <= end {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn str_find_from(s: str, needle: str, start: i64) -> i64 {
+    if start <= 0 { return str_find(s, needle) }
+    let n = s.len()
+    if start >= n { return -1 }
+    let tail = s.substring(start, n)
+    let r = str_find(tail, needle)
+    if r < 0 { return -1 }
+    return r + start
+}
+
 // ─── 내부 유틸: 자연어 양화 토큰 정규화 ───
 // 입력 prop 의 자연어 quantifier 를 수학 기호로 정규화한 copy 반환.
 // 원본은 변경하지 않는다 (hexa string immutable 가정).
@@ -102,8 +129,8 @@ fn _has_unbounded_exists(s: string) -> bool {
 
 // ─── 내부: ∀ 가 ∃ 보다 앞에 오는지 (prefix order 검사) ───
 fn _forall_precedes_exists(s: string) -> bool {
-    let fa_idx = s.find("∀")
-    let ex_idx = s.find("∃")
+    let fa_idx = str_find(s, "∀")
+    let ex_idx = str_find(s, "∃")
     if fa_idx < 0 { return false }
     if ex_idx < 0 { return false }
     return fa_idx < ex_idx
@@ -123,7 +150,7 @@ fn detect_pi02(prop: string) -> bool {
     if !_forall_precedes_exists(s) { return false }
     // ≥ Π₀³ 배제: `∀ … ∃ … ∀ …` 꼴은 unsupported.
     // 보수 판정: ∀ 가 2개 이상이면서 ∃ 뒤에 ∀ 가 오면 제외.
-    let ex_idx = s.find("∃")
+    let ex_idx = str_find(s, "∃")
     let tail = s[ex_idx..len(s)]
     // tail 에 unbounded ∀ 가 또 있으면 Π₀³ 가능성 → 보수적으로 false
     if _has_unbounded_forall(tail) {
@@ -149,13 +176,13 @@ fn is_pi02_form(prop: string) -> bool {
     if !detect_pi02(prop) { return false }
     let s = _pi02_normalize(prop)
     // ∃ 이후에 비어있지 않은 matrix 가 존재해야 함
-    let ex_idx = s.find("∃")
+    let ex_idx = str_find(s, "∃")
     if ex_idx < 0 { return false }
     // ∃ 뒤에 적어도 한 변수 + φ 가 와야 함 → 길이로 보수 체크
     let tail_len = len(s) - ex_idx
     if tail_len < 4 { return false }
     // Σ₀² 배제: ∃∀ 순이면 is_pi02_form = false
-    let fa_idx = s.find("∀")
+    let fa_idx = str_find(s, "∀")
     if fa_idx > ex_idx { return false }
     return true
 }
@@ -171,7 +198,7 @@ fn extract_inner_phi(prop: string) -> string {
     let s = _pi02_normalize(prop)
     if !is_pi02_form(s) { return "" }
     // ∃ 직후 첫 공백 또는 쉼표까지가 변수, 그 다음이 φ
-    let ex_idx = s.find("∃")
+    let ex_idx = str_find(s, "∃")
     if ex_idx < 0 { return "" }
     let after_ex = s[(ex_idx + 1)..len(s)]
     // 변수 skip: 첫 비공백 블록 다음 공백까지
@@ -209,7 +236,7 @@ fn try_bounded_reduction(prop: string) -> string {
     if !is_pi02_form(prop) { return "NO-REDUCTION" }
     let s = _pi02_normalize(prop)
     // ∃ 다음 오는 양화변수 직후 bound 패턴을 탐색.
-    let ex_idx = s.find("∃")
+    let ex_idx = str_find(s, "∃")
     if ex_idx < 0 { return "NO-REDUCTION" }
     let after_ex = s[ex_idx..len(s)]
 

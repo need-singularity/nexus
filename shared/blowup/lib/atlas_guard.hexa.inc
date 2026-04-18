@@ -133,7 +133,9 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
         }
         try {
             write_file(_tmp, "\n".join(patterns))
-            let found_raw = exec("grep -Fxf '" + _tmp + "' '" + path + "' 2>/dev/null || true")
+            // AI-native: || true 제거 — grep no-match(exit 1) 는 try/catch 처리
+            let mut found_raw = ""
+            try { found_raw = exec("grep -Fxf '" + _tmp + "' '" + path + "' 2>/dev/null") } catch e {}
             let found_lines = found_raw.split("\n")
             for fl in found_lines {
                 let ft = fl.trim()

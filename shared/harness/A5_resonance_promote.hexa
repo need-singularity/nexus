@@ -20,6 +20,33 @@ let SIGNALS = NEXUS + "/shared/n6/atlas.signals.n6"
 let QUEUE = NEXUS + "/shared/n6/signals/A5_promote_queue.jsonl"
 let LOG = NEXUS + "/shared/n6/signals/A5_promote_log.jsonl"
 
+// ─── Linux stage1 hexa polyfill (shared/blowup/lib/str_compat.hexa.inc) ───
+// @include shared/blowup/lib/str_compat.hexa.inc (str_find)
+fn str_find(s: str, needle: str) -> i64 {
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    while i <= end {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn str_find_from(s: str, needle: str, start: i64) -> i64 {
+    if start <= 0 { return str_find(s, needle) }
+    let n = s.len()
+    if start >= n { return -1 }
+    let tail = s.substring(start, n)
+    let r = str_find(tail, needle)
+    if r < 0 { return -1 }
+    return r + start
+}
+
 fn _str(x) -> string {
     let t = type_of(x)
     if t == "str" || t == "string" { return x }
@@ -34,12 +61,12 @@ fn now_ts() -> string {
 // 라인에서 `resonance_n6: "..."` 추출
 fn extract_resonance(line: string) -> string {
     let trimmed = line.trim()
-    if trimmed.find("resonance_n6:") < 0 { return "" }
+    if str_find(trimmed, "resonance_n6:") < 0 { return "" }
     let parts = trimmed.split("resonance_n6:")
     if parts.len() < 2 { return "" }
     let val = parts[1].trim()
     // 인용부호 제거 (간단)
-    if val.find("\"") >= 0 {
+    if str_find(val, "\"") >= 0 {
         let q = val.split("\"")
         if q.len() >= 2 { return q[1].trim() }
     }
@@ -60,10 +87,10 @@ fn collect_resonance_pool() -> i64 {
     let mut current_grade: string = ""
     while i < n {
         let line = lines[i]
-        if line.find("@S SIG-") >= 0 {
+        if str_find(line, "@S SIG-") >= 0 {
             current_grade = ""
-            if line.find("[M10*]") >= 0 { current_grade = "M10*" }
-            else if line.find("[M10]") >= 0 { current_grade = "M10" }
+            if str_find(line, "[M10*]") >= 0 { current_grade = "M10*" }
+            else if str_find(line, "[M10]") >= 0 { current_grade = "M10" }
         }
         if current_grade == "M10*" {
             let r = extract_resonance(line)
@@ -92,7 +119,7 @@ fn enqueue_seven_candidates(limit: i64) -> i64 {
     while i < n && written < limit {
         let line = lines[i]
         // 정확히 ` [7]` (괄호 닫기 포함) 후보로 간주
-        if line.find(" [7]") >= 0 && (line.find("@R ") >= 0 || line.find("@X ") >= 0) {
+        if str_find(line, " [7]") >= 0 && (str_find(line, "@R ") >= 0 || str_find(line, "@X ") >= 0) {
             let id = "?"
             let parts = line.trim().split(" ")
             let idval = if parts.len() >= 2 { parts[1] } else { "?" }
