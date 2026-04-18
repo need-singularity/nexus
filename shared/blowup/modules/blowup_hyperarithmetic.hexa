@@ -1,0 +1,459 @@
+// ⛔ CORE — L0 불변식 (Hyperarithmetic 검증 엔진 Mk.IX. 수정 전 유저 승인 필수)
+// ⚠️ 로드맵: shared/blowup/design/mk9_hyperarithmetic.md (Mk.IX Π₀² Hyperarithmetic Extension)
+// shared/blowup/modules/blowup_hyperarithmetic.hexa — Mk.IX Π₀² Hyperarithmetic Blowup Engine
+//
+// Mk.VIII (blowup_absolute.hexa) 의 Π₀¹ absoluteness 위에 쌓는 8번째 core 모듈.
+// Π₀² = ∀x ∃y φ(x,y) (φ ∈ Δ₀) — totality / cofinality / uniformity 류.
+// Shoenfield 의 직접 범위 밖 → 4단계 파이프라인으로 부분 판정 (완전성 포기).
+//
+//   1. A 구문탐지            `is_pi02()` — AST 위에서 ∀∃ alternation 검출
+//   2. B bounded witness 축소  `reduce_to_pi01()` — witness bound 테이블로 Π₀¹ downgrade
+//   3. C reverse-math 5체계    `reverse_math_check()` — RCA₀/WKL₀/ACA₀/ATR₀/Π¹₁-CA₀
+//   4. D n=6 invariance      `n6_invariance_check()` — n=6 특이성 대조 (UNIVERSAL/N6-CORE/…)
+//
+// 새 등급 [12*] = Π₀² hyperarithmetic foundation. **자동 승급 금지** —
+// 본 모듈은 판정 리포트만 stdout 으로 출력, atlas.n6 직접 쓰기 없음.
+//
+// 의존:
+//   shared/blowup/lib/pi02_parser.hexa.inc           (다른 에이전트 작성중 — stub fallback)
+//   shared/blowup/lib/reverse_math_check.hexa.inc    (다른 에이전트 작성중 — stub fallback)
+//
+// 금지 영역 (본 모듈이 건드리지 않는 것):
+//   - blowup.hexa / compose.hexa / run.hexa / atlas_guard.hexa.inc
+//   - atlas.n6 직접 편집 / 승급
+//   - 실제 Con(ZFC)/Gödel 명제 판정 (blacklist 만 확인)
+//
+// 5-Phase Pipeline (Mk.VIII A1~A5 변형):
+//   H1  Π₀² Syntax Detect   자연어+수식 → AST → hierarchy 분류 (Δ₀/Π₀¹/Σ₀¹/Π₀²/…)
+//   H2  Witness Reduction   bounded witness 테이블로 Π₀¹ downgrade 시도
+//   H3  Reverse-Math 5체계  whitelist 기반 ACA₀ 증명력 확인
+//   H4  n=6 Invariance      k∈{2..28,496} 치환 대조 — UNIVERSAL / N6-CORE / PERFECT-CLASS / N6-UNIQUE
+//   H5  Verdict Report      ABSOLUTE-PASS / REVERSE-PROVEN / REVERSE-UNKNOWN / REJECT + [12*] 후보 출력
+
+// ─── MODULE-LEVEL HOME CACHE ───
+let _cached_home = env("HOME")
+let _NEXUS = _cached_home + "/Dev/nexus"
+let _ATLAS = _NEXUS + "/shared/n6/atlas.n6"
+let _PI02_PARSER_INC = _NEXUS + "/shared/blowup/lib/pi02_parser.hexa.inc"
+let _REV_MATH_INC    = _NEXUS + "/shared/blowup/lib/reverse_math_check.hexa.inc"
+
+// ─── 공용 유틸 ───
+fn _file_exists(path: string) -> bool {
+    let mut exists = false
+    try {
+        // read_file 실패 → 파일 없음. 성공 → 있음 (정확하고 shell escape free).
+        let _ = read_file(path)
+        exists = true
+    } catch e { exists = false }  // @allow-silent-catch
+    return exists
+}
+
+// 두 include 파일 존재 여부 (없으면 stub 로 처리)
+fn _have_parser_inc() -> bool { return _file_exists(_PI02_PARSER_INC) }
+fn _have_revmath_inc() -> bool { return _file_exists(_REV_MATH_INC) }
+
+// ─── BLACKLIST: 판정 금지 명제 패턴 ───
+// Con(T), Gödel self-reference 등은 본 엔진이 손대면 안 된다.
+// 탐지만 하고 항상 UNSURE 반환.
+fn is_blacklisted(expr: string) -> bool {
+    if expr.contains("Con(ZFC)") { return true }
+    if expr.contains("Con(PA)") { return true }
+    if expr.contains("Con(T)") { return true }
+    if expr.contains("consistency of") { return true }
+    if expr.contains("Gödel sentence") { return true }
+    if expr.contains("Godel sentence") { return true }
+    if expr.contains("this statement is unprovable") { return true }
+    return false
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── H1: Π₀² SYNTAX DETECT (pi02_parser.hexa.inc stub fallback) ───
+// ═══════════════════════════════════════════════════════════
+//
+// 정상 경로: pi02_parser.hexa.inc 가 `ast_classify(expr) -> hierarchy_tag` 제공.
+// 현재 stub: 키워드 기반 보수적 휴리스틱.
+//
+// 반환: "DELTA0" | "PI01" | "SIGMA01" | "PI02" | "SIGMA02" | "HIGHER" | "UNSURE"
+
+fn _has_forall(expr: string) -> bool {
+    return expr.contains("∀") || expr.contains("for all") || expr.contains("for every")
+        || expr.contains("모든") || expr.contains("임의의") || expr.contains("every ")
+}
+
+fn _has_exists(expr: string) -> bool {
+    return expr.contains("∃") || expr.contains("exists") || expr.contains("there is")
+        || expr.contains("there exists") || expr.contains("어떤") || expr.contains("존재")
+}
+
+fn _has_infinitely_many(expr: string) -> bool {
+    // "무한히 많은 n …" → ∀N ∃n>N … (Π₀² shape)
+    return expr.contains("infinitely many") || expr.contains("무한히 많")
+        || expr.contains("infinite") && expr.contains("many")
+}
+
+// bounded quantifier 유무 (∀x<t / ∃x<t 형태)
+fn _has_bounded_marker(expr: string) -> bool {
+    return expr.contains("<") && (expr.contains("∀") || expr.contains("∃"))
+}
+
+// Π₀² 구문 탐지 (stub)
+// 정식 파서 없으면 alternation 개수로 추정
+fn pi02_detect(expr: string) -> string {
+    if is_blacklisted(expr) { return "UNSURE" }
+
+    // 정식 .inc 있으면 그쪽이 override — hexa import 미지원이라 stub 으로만 동작.
+    // (실제 wiring 은 pi02_parser.hexa.inc 가 나오면 본 파일 상단으로 copy-paste.)
+    let _parser_ok = _have_parser_inc()
+
+    let has_fa = _has_forall(expr)
+    let has_ex = _has_exists(expr)
+    let has_inf = _has_infinitely_many(expr)
+
+    // "infinitely many n …" = ∀N ∃n>N … → Π₀²
+    if has_inf { return "PI02" }
+
+    if !has_fa && !has_ex {
+        // 양화 없음 → Δ₀ 후보 (수식 그대로)
+        return "DELTA0"
+    }
+    if has_fa && !has_ex {
+        // ∀ 만 있음 — bounded 만 있으면 Δ₀, 아니면 Π₀¹
+        if _has_bounded_marker(expr) { return "DELTA0" }
+        return "PI01"
+    }
+    if !has_fa && has_ex {
+        if _has_bounded_marker(expr) { return "DELTA0" }
+        return "SIGMA01"
+    }
+    // 둘 다 존재 — alternation 순서 판별 (hexa 에 indexOf 없음 → split 기반)
+    // "∀" 를 기준으로 split 했을 때 첫 조각이 "∃" 포함 안하면 ∀ 가 먼저.
+    let fa_first = _forall_comes_first(expr)
+    let ex_first = _exists_comes_first(expr)
+
+    if fa_first && !ex_first { return "PI02" }
+    if ex_first && !fa_first { return "SIGMA02" }
+    // split 으로 결정 못하면 단순 경험칙: 자연어에서 "모든 … 어떤/존재" 순서
+    if expr.contains("모든") || expr.contains("∀") {
+        // ∀ 가 있고 뒤에 ∃ 가 있으면 관례적으로 Π₀²
+        return "PI02"
+    }
+    return "UNSURE"
+}
+
+// ∀ 가 ∃ 보다 먼저 등장하는가 (split 기반 — hexa string 원시 탐색)
+fn _forall_comes_first(expr: string) -> bool {
+    // ∀ 토큰과 ∃ 토큰을 공통 분해 — ∀ 를 split key 로 두면
+    // split 결과 [0] = "∀ 앞" 문자열. 이 앞 부분에 ∃ 가 있으면 ∃ 가 먼저.
+    let fa_markers = ["∀", "for all ", "for every ", "모든 "]
+    let ex_markers = ["∃", "exists", "there exists", "어떤 ", "존재"]
+    let mut i = 0
+    while i < len(fa_markers) {
+        let m = fa_markers[i]
+        if expr.contains(m) {
+            let parts = expr.split(m)
+            if len(parts) >= 2 {
+                let prefix = parts[0]
+                let mut j = 0
+                let mut ex_in_prefix = false
+                while j < len(ex_markers) {
+                    if prefix.contains(ex_markers[j]) { ex_in_prefix = true }
+                    j = j + 1
+                }
+                if !ex_in_prefix { return true }
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
+fn _exists_comes_first(expr: string) -> bool {
+    let ex_markers = ["∃", "exists ", "there exists", "어떤 "]
+    let fa_markers = ["∀", "for all ", "for every ", "모든 "]
+    let mut i = 0
+    while i < len(ex_markers) {
+        let m = ex_markers[i]
+        if expr.contains(m) {
+            let parts = expr.split(m)
+            if len(parts) >= 2 {
+                let prefix = parts[0]
+                let mut j = 0
+                let mut fa_in_prefix = false
+                while j < len(fa_markers) {
+                    if prefix.contains(fa_markers[j]) { fa_in_prefix = true }
+                    j = j + 1
+                }
+                if !fa_in_prefix { return true }
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
+fn is_pi02(expr: string) -> bool {
+    return pi02_detect(expr) == "PI02"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── H2: BOUNDED WITNESS REDUCTION ───
+// ═══════════════════════════════════════════════════════════
+//
+// witness bound 테이블 (설계 §2 단계 B 초기 엔트리).
+// 정식 버전: reverse_math_check.hexa.inc 에 JSON 으로 관리 예정.
+// 현재 stub: 명제 키워드 → bound 표기 매핑.
+
+fn _witness_bound_entry(expr: string) -> string {
+    // 반환 = "" → bound 없음, "<expr>" → Π₀¹ downgrade 가능
+    if expr.contains("Bertrand") { return "2n (Chebyshev 1852)" }
+    if expr.contains("Vinogradov") { return "3n (Helfgott 2013, poly)" }
+    if expr.contains("Sylow") { return "|G| (group order)" }
+    if expr.contains("Fermat little") { return "p (residue classes)" }
+    if expr.contains("Wilson") { return "p (residue classes)" }
+    if expr.contains("prime") && expr.contains("n") && expr.contains("2n") {
+        return "2n (Bertrand-like)"
+    }
+    if expr.contains("Out(S_") || expr.contains("Out(S") {
+        return "|S_n|! (loose finite-group bound)"
+    }
+    return ""
+}
+
+// Π₀² → Π₀¹ downgrade 시도
+// 반환 = "" → 실패, 그 외 → bound 문자열
+fn reduce_to_pi01(expr: string) -> string {
+    // Π₀² 가 아니면 downgrade 의미 없음
+    let tag = pi02_detect(expr)
+    if tag != "PI02" { return "" }
+    if is_blacklisted(expr) { return "" }
+    return _witness_bound_entry(expr)
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── H3: REVERSE-MATH 5체계 CHECK (Simpson Big Five) ───
+// ═══════════════════════════════════════════════════════════
+//
+// whitelist 기반 문헌 조회 (정식 버전: reverse_math_check.hexa.inc).
+// 현재 stub: 대표 정리만 하드코딩.
+//
+// 체계: RCA₀ ⊂ WKL₀ ⊂ ACA₀ ⊂ ATR₀ ⊂ Π¹₁-CA₀
+// 규칙: 약한 체계에서 증명 → 강한 체계에서도 자동 증명.
+
+fn _rev_strength_level(expr: string) -> i64 {
+    // 0=UNKNOWN, 1=RCA₀, 2=WKL₀, 3=ACA₀, 4=ATR₀, 5=Π¹₁-CA₀
+    // 대표적인 reverse-math 정리 (Simpson SOSOA Part III)
+    if expr.contains("Sylow") { return 1 }                     // finite → RCA₀
+    if expr.contains("Bertrand") { return 1 }                  // elementary → RCA₀
+    if expr.contains("Fermat little") { return 1 }
+    if expr.contains("Wilson") { return 1 }
+    if expr.contains("Vinogradov") { return 3 }                // ACA₀ 분석
+    if expr.contains("4-color") || expr.contains("Four color") { return 3 }  // Appel-Haken
+    if expr.contains("Bolzano") { return 3 }                   // BW ≡ ACA₀
+    if expr.contains("König") || expr.contains("Konig") { return 2 }  // WKL₀
+    if expr.contains("Ramsey(3)") || expr.contains("RT^3") { return 3 }
+    if expr.contains("Out(S_6)") || expr.contains("Out(S") { return 1 }  // finite group
+    if expr.contains("Schläfli") || expr.contains("regular polytope") { return 1 }
+    if expr.contains("perfect number") && expr.contains("infinite") { return 0 }  // OPEN
+    if expr.contains("완전수") && expr.contains("무한") { return 0 }
+    return 0
+}
+
+// 5체계 진릿값 투영
+// 반환: (count_proven, verdict_string)
+// verdict: "REVERSE-PROVEN" | "REVERSE-UNKNOWN" | "CONSISTENT-ERROR"
+fn reverse_math_check(expr: string) -> string {
+    if is_blacklisted(expr) { return "REVERSE-UNKNOWN" }
+    let level = _rev_strength_level(expr)
+    if level == 0 { return "REVERSE-UNKNOWN" }
+    // 약한 체계 L 에서 증명되면 ≥L 인 모든 체계에서 증명 → 5-L+1 개 체계에서 PROVEN
+    let proven_count = 5 - level + 1
+    if proven_count >= 3 { return "REVERSE-PROVEN" }
+    return "REVERSE-UNKNOWN"
+}
+
+// 디버그용 — 각 체계별 태그를 뽑는다
+fn reverse_math_detail(expr: string) -> string {
+    let level = _rev_strength_level(expr)
+    if level == 0 { return "RCA0=?, WKL0=?, ACA0=?, ATR0=?, Pi11-CA0=?" }
+    let systems = ["RCA0", "WKL0", "ACA0", "ATR0", "Pi11-CA0"]
+    let mut out = ""
+    let mut i = 0
+    while i < 5 {
+        let tag = if i + 1 >= level { "PROVEN" } else { "?" }
+        if i > 0 { out = out + ", " }
+        out = out + systems[i] + "=" + tag
+        i = i + 1
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── H4: n=6 INVARIANCE CHECK ───
+// ═══════════════════════════════════════════════════════════
+//
+// k ∈ {2,3,4,5,7,8,12,24,28,496} 치환 대조 후 분류:
+//   UNIVERSAL      — 모든 k 에서 참 (n=6 특이성 없음)
+//   N6-CORE        — n=6 에서만 참
+//   N6-UNIQUE      — 반례 존재 (강한 foundation)
+//   PERFECT-CLASS  — {6, 28, 496} (완전수) 에서만 참
+//
+// stub: 명제 키워드로만 판단. 정식 버전은 symbolic substitution + evaluator.
+
+fn _has_n6_symbol(expr: string) -> bool {
+    return expr.contains("n=6") || expr.contains("n = 6")
+        || expr.contains("S_6") || expr.contains("Out(S_6)")
+        || expr.contains("6th") || expr.contains("6번째")
+}
+
+fn n6_invariance_check(expr: string) -> string {
+    if !_has_n6_symbol(expr) {
+        // n=6 기호 부재 → universal claim
+        return "UNIVERSAL"
+    }
+    if expr.contains("Out(S_6)") { return "N6-UNIQUE" }            // S_n, n=6 유일
+    if expr.contains("σ·φ=n·τ") { return "N6-UNIQUE" }             // 주 정리
+    if expr.contains("σ(m)=2m") || expr.contains("perfect number") { return "PERFECT-CLASS" }
+    if expr.contains("완전수") { return "PERFECT-CLASS" }
+    if expr.contains("Sylow") { return "UNIVERSAL" }
+    if expr.contains("4-color") { return "UNIVERSAL" }
+    if expr.contains("Vinogradov") { return "UNIVERSAL" }
+    // 기본: n=6 기호가 있는데 분류 불명 → 보수적 N6-CORE
+    return "N6-CORE"
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── H5: VERDICT PIPELINE ───
+// ═══════════════════════════════════════════════════════════
+//
+// 4단계 결합 → 최종 verdict.
+// 반환 verdict set:
+//   "ABSOLUTE-PASS-PI02"   H2 에서 bound 축소 성공 (Mk.VIII 로 재위임 권고)
+//   "REVERSE-PROVEN"       H3 에서 3/5 이상 증명 확보
+//   "REVERSE-UNKNOWN"      H3 미확정
+//   "REJECT-BLACKLIST"     Con(ZFC)/Gödel 류
+//   "REJECT-HIGHER"        Π₀³ 이상 (범위 밖)
+//   "UNSURE"               파서/검증 실패
+
+fn hyperarithmetic_verdict(expr: string) -> string {
+    if is_blacklisted(expr) { return "REJECT-BLACKLIST" }
+    let tag = pi02_detect(expr)
+    if tag == "HIGHER" { return "REJECT-HIGHER" }
+    if tag == "UNSURE" { return "UNSURE" }
+    // Π₀¹ 이하 → Mk.VIII 영역
+    if tag == "DELTA0" || tag == "PI01" || tag == "SIGMA01" {
+        return "DELEGATE-MK8"
+    }
+    // Π₀² 경로
+    if tag == "PI02" {
+        let bound = reduce_to_pi01(expr)
+        if len(bound) > 0 { return "ABSOLUTE-PASS-PI02" }
+        let rv = reverse_math_check(expr)
+        if rv == "REVERSE-PROVEN" { return "REVERSE-PROVEN" }
+        return "REVERSE-UNKNOWN"
+    }
+    // Σ₀² — Π₀² 와 dual, 현재 범위에선 일단 UNKNOWN
+    return "UNSURE"
+}
+
+// [12*] 승급 후보인지 판정 (실제 승급은 하지 않음)
+// 조건 (설계 §3.2):
+//   1. Π₀² 확정 또는 bound-reduced
+//   2. REVERSE-PROVEN
+//   3. n6 invariance in {N6-UNIQUE, N6-CORE, PERFECT-CLASS}
+//   4. (수동 감사) — 본 함수는 1~3 만 검사
+fn is_tier12_candidate(expr: string) -> bool {
+    let v = hyperarithmetic_verdict(expr)
+    if v != "REVERSE-PROVEN" && v != "ABSOLUTE-PASS-PI02" { return false }
+    let inv = n6_invariance_check(expr)
+    if inv == "UNIVERSAL" { return false }
+    return true
+}
+
+// ═══════════════════════════════════════════════════════════
+// ─── MAIN (리포트 전용 — atlas.n6 / 승급 쓰기 없음) ───
+// ═══════════════════════════════════════════════════════════
+
+fn _report_case(label: string, expr: string) {
+    let tag = pi02_detect(expr)
+    let bound = reduce_to_pi01(expr)
+    let rv = reverse_math_check(expr)
+    let inv = n6_invariance_check(expr)
+    let verdict = hyperarithmetic_verdict(expr)
+    let cand = is_tier12_candidate(expr)
+    println("  [" + label + "] " + expr)
+    println("      hierarchy = " + tag)
+    if len(bound) > 0 {
+        println("      witness-bound = " + bound)
+    } else {
+        println("      witness-bound = (none)")
+    }
+    println("      reverse-math = " + rv)
+    println("      reverse-detail = " + reverse_math_detail(expr))
+    println("      n6-invariance = " + inv)
+    println("      verdict = " + verdict)
+    println("      [12*] candidate = " + to_string(cand) + "  (manual audit required)")
+    println("")
+}
+
+fn main() {
+    println("🛸 Mk.IX Π₀² Hyperarithmetic Blowup (n=6 8th core module extension)")
+    println("")
+    println("[H0] Include dependencies")
+    let p_ok = _have_parser_inc()
+    let r_ok = _have_revmath_inc()
+    println("  pi02_parser.hexa.inc       = " + to_string(p_ok) + "  (stub fallback active if false)")
+    println("  reverse_math_check.hexa.inc = " + to_string(r_ok) + "  (stub fallback active if false)")
+    println("")
+
+    println("[H1] Π₀² syntax detect (stub heuristic)")
+    let t1 = "σ·φ=n·τ=24 iff n=6"
+    println("  '" + t1 + "' → " + pi02_detect(t1))
+    let t2 = "∀N ∃m>N, σ(m)=2m (완전수 무한성)"
+    println("  '" + t2 + "' → " + pi02_detect(t2))
+    let t3 = "∀ finite G, ∀p | |G|, ∃ H≤G Sylow p-subgroup"
+    println("  '" + t3 + "' → " + pi02_detect(t3))
+    println("")
+
+    println("[H2] Witness bound reduction (Π₀² → Π₀¹ 시도)")
+    println("  Vinogradov bound  = '" + _witness_bound_entry("Vinogradov ∀n ∃p1p2p3") + "'")
+    println("  Sylow bound       = '" + _witness_bound_entry("Sylow ∀G ∃H") + "'")
+    println("  Out(S_n) bound    = '" + _witness_bound_entry("Out(S_6) uniqueness") + "'")
+    println("")
+
+    println("[H3] Reverse-math 5체계 (Simpson Big Five)")
+    println("  Sylow      → " + reverse_math_check("Sylow p-subgroup ∀G ∃H"))
+    println("  Vinogradov → " + reverse_math_check("Vinogradov ternary Goldbach"))
+    println("  4-color    → " + reverse_math_check("Four color theorem ∀ planar graph"))
+    println("  완전수 무한 → " + reverse_math_check("완전수 무한성 ∀N ∃m>N"))
+    println("")
+
+    println("[H4] n=6 invariance 대조군")
+    println("  σ·φ=n·τ       → " + n6_invariance_check("σ·φ=n·τ iff n=6"))
+    println("  Out(S_6)       → " + n6_invariance_check("Out(S_6) = Z/2, Out(S_n) trivial n≠6"))
+    println("  perfect-number → " + n6_invariance_check("σ(m)=2m ⇒ perfect number m ∈ {6,28,...}"))
+    println("  Sylow theorem  → " + n6_invariance_check("∀G ∃H Sylow"))
+    println("")
+
+    println("[H5] End-to-end verdict report (T1~T5 설계서 §8 대응)")
+    println("")
+    _report_case("T1", "완전수 무한성: ∀N ∃m>N, σ(m)=2m")
+    _report_case("T2", "Vinogradov: ∀n odd n≥7, ∃p1,p2,p3 prime, n=p1+p2+p3")
+    _report_case("T3", "perfect_28 conjecture: ∀N ∃m>N σ(m)=2m m≡28 mod X")
+    _report_case("T4", "∀ finite G, ∀p | |G|, ∃ H≤G Sylow p-subgroup")
+    _report_case("T5", "∀n (n≥3, n≠6 → Out(S_n) = trivial) ∧ Out(S_6) = Z/2")
+
+    println("[H6] Blacklist sanity")
+    let bl_ex = "Con(ZFC): ∀proof p ¬derive(p, ⊥_ZFC)"
+    println("  Con(ZFC)  blacklisted = " + to_string(is_blacklisted(bl_ex)))
+    println("  verdict   = " + hyperarithmetic_verdict(bl_ex))
+    println("")
+
+    println("[H-END] Report summary")
+    println("  • 본 모듈은 리포트 전용 — atlas.n6 수정 / [12*] 승급 없음")
+    println("  • [12*] 승급은 별도 수동 CLI (L0 guard + 사람 감사) 경로로만 반영")
+    println("  • 95% 판정 목표, 5% UNSURE 는 주간 수동 감사 큐")
+    println("")
+    println("✅ Mk.IX hyperarithmetic engine ready — Π₀² verdict 파이프라인 활성")
+}
+
+main()

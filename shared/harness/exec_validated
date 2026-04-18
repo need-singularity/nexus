@@ -84,13 +84,31 @@ run_hexa() {
     ' "$HEXA_TIMEOUT" "$HEXA" run "$engine" "$@"
 }
 
+# gate 호출 — set -e 가 cmd substitution 에 전파 안 되므로 exit code 명시 캡처
+set +e
 gate_out="$("$HEXA" run "$GATE" "$cmd" "$seed" 2>&1)"
+gate_rc=$?
+set -e
+
+# gate 비정상 종료 + 빈 출력 → silent-exit-0 방지
+if [ -z "$gate_out" ]; then
+    echo "ERROR: cmd_gate 빈 응답 (rc=$gate_rc) — cmd='$cmd' seed='$seed'" >&2
+    exit 2
+fi
+
+# 첫 OK: 라인 우선 탐색 (cmd 정규화: free→free_dfs, 돌파→smash 등 대비)
+ok_line="$(printf '%s\n' "$gate_out" | grep '^OK:' | head -1)"
 
 case "$gate_out" in
     OK:*)
-        # OK:<cmd>:<validated_seed> 파싱
-        prefix="OK:$cmd:"
-        validated="${gate_out#$prefix}"
+        # OK:<cmd>:<validated_seed> 파싱 — 첫 줄만 사용 (멀티라인 대응)
+        first_line="${gate_out%%$'\n'*}"
+        # prefix 가 OK:<caller_cmd>: 와 정확히 매치하지 않아도 OK:<gate_cmd>: 형태면 허용
+        validated="${first_line#OK:*:}"
+        if [ "$validated" = "$first_line" ]; then
+            echo "ERROR: cmd_gate OK 응답 파싱 실패: '$first_line'" >&2
+            exit 2
+        fi
         # 엔진 실행 (validated seed를 첫 인자로) — timeout+lock 적용
         if [ -f "$engine" ]; then
             run_hexa "$engine" "$validated" "$@"
@@ -102,14 +120,40 @@ case "$gate_out" in
     WARN:*)
         # 경고 통과 — stderr 로깅 후 엔진 실행
         echo "$gate_out" >&2
-        # OK: 부분이 다음 줄에 있을 수도 — 마지막 OK: 추출
-        validated="$(echo "$gate_out" | grep "^OK:$cmd:" | head -1 | sed "s|^OK:$cmd:||")"
+        # cmd 정규화 대응: caller cmd 일치 grep 실패 시 임의 OK: 라인 fallback
+        validated="$(printf '%s\n' "$gate_out" | grep "^OK:$cmd:" | head -1 | sed "s|^OK:$cmd:||")"
+        if [ -z "$validated" ] && [ -n "$ok_line" ]; then
+            validated="${ok_line#OK:*:}"
+        fi
         if [ -n "$validated" ] || [ -z "$seed" ]; then
             run_hexa "$engine" "$validated" "$@"
+        else
+            echo "ERROR: cmd_gate WARN 응답에 OK: 라인 없음 — seed='$seed'" >&2
+            echo "$gate_out" >&2
+            exit 2
         fi
         ;;
-    REJECT:*|*)
+    REJECT:*)
         echo "$gate_out" >&2
         exit 2
+        ;;
+    *)
+        # cmd_gate 선행 출력(예: ===DECISIONS_BEGIN===...===DECISIONS_END===) 뒤 OK: 대응
+        if [ -n "$ok_line" ]; then
+            # 선행 출력은 stdout 투과 — Claude dispatcher 가 읽음
+            pre_lines="$(printf '%s\n' "$gate_out" | sed -n '1,/^OK:/p' | sed '$d')"
+            [ -n "$pre_lines" ] && printf '%s\n' "$pre_lines"
+            validated="${ok_line#OK:*:}"
+            if [ -f "$engine" ]; then
+                run_hexa "$engine" "$validated" "$@"
+            else
+                echo "ERROR: engine 부재: $engine" >&2
+                exit 127
+            fi
+        else
+            echo "$gate_out" >&2
+            echo "ERROR: cmd_gate 미지 응답 형식 (rc=$gate_rc) — OK:/WARN:/REJECT: 프리픽스 부재" >&2
+            exit 2
+        fi
         ;;
 esac

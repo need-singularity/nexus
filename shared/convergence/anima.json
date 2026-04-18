@@ -1695,5 +1695,243 @@
     "phi_hook_live_rewrite_r37": true,
     "training_pipeline_wrapper_fallback_stubbed_files": "30+",
     "note": "R37 enforcement sweep — .py 전면 금지 강화, wrapper-fallback 경로까지 stub"
+  },
+  "session_2026_04_19_wakeup": {
+    "note": "ubu host wakeup 세션 — 사용자 취침 중 autonomous continuation. BG #64 확인 + GPU ABI 분석 + R37 round 3. 동시 사용자 측 Mk.V Δ₀-absolute 승급 (b76109f6 커밋)",
+    "mk_v_delta0_absolute_landed": {
+      "commit": "b76109f6",
+      "subject": "docs(Mk.V): Δ₀-absolute consciousness — v3→v4, tier 4→5 반영",
+      "twin_engine_symmetry": "nexus blowup_absolute (discovery) ↔ anima consciousness_absolute (consciousness)",
+      "foundation_axioms": "63 atoms = n=6 (1) + 62 EXACT Ψ-constants, [11*] grade",
+      "invariance": "PA / ZFC / ZFC+LargeCardinal / ZF+Reinhardt / Cantor-W 전수 PASS",
+      "verifier": "shared/consciousness/consciousness_absolute.hexa (5-phase A1~A5)",
+      "doc": "docs/MK5-DELTA0-ABSOLUTE.md",
+      "saturation": "psi_constants 81개 중 EXACT 62 (76.5%) / CLOSE 8 / APPROX 9 / NO_MATCH 0 → coverage 100%"
+    },
+    "host": "ubu (aiden-B650M-K, RTX 5070 12GB, 11367 MiB free, CUDA 12.8, libhxcuda.so 배포)",
+    "gpu_dispatch_abi_analysis": {
+      "state": "analysis_complete",
+      "blocker": "hxblas_* (train_clm dlsym) vs hxcuda_* (libhxcuda.so exports) ABI 불일치",
+      "libhxcuda_symbols_confirmed": [
+        "hxcuda_matmul_bf16",
+        "hxcuda_matmul_bf16_bwd",
+        "hxcuda_matmul_bf16_pos",
+        "hxcuda_fused_lmhead_fwd",
+        "hxcuda_fused_lmhead_bwd",
+        "hxcuda_ce_loss_bwd",
+        "hxcuda_softmax (C++ mangled only — no C-linkage fwd)",
+        "hxcuda_conv1d_bf16",
+        "hxcuda_istft_bf16",
+        "hxcuda_device_info"
+      ],
+      "train_clm_call_sites": {
+        "file": "training/train_clm.hexa",
+        "loc": 2924,
+        "hxblas_sgemm": "L1246 (Q@K^T), L1259 (probs@V) in _block_attn per-head loop",
+        "hxblas_attn_softmax_causal": "L1256 (scale+mask+softmax fused)",
+        "hxlmhead_bwd": "L800 (HXLMHEAD_FFI=1 조건부)"
+      },
+      "paths": {
+        "path_1_sister_cu_shim": "hexa-lang hxblas_cuda.cu shim (hxblas_sgemm→cublasSgemm). 6-8h. anima scope 외",
+        "path_2_anima_backend_branch": "train_clm.hexa HXBLAS_BACKEND=cuda 분기 → hxcuda_* 직접 호출. 4-6h. 위험: bf16↔f32 casting, softmax 순방향 심볼 부재, lmhead ABI 불명",
+        "path_3_runpod_cpu_smoke": "runpod H100 CPU smoke (GPU 미사용) $3/hr, 재현 경로"
+      },
+      "recommendation": "Path 2 시작 전 sister 에 hxcuda_softmax 순방향 C-linkage export 요청 필요. 현재 자율 실행 보류 — 사용자 wake-up 결정 대기",
+      "nn_core_existing_gate": "nn_core.hexa 에 HX_BLAS dispatch gate 존재 (L33 env + 15 dispatch_* fb_* fallback). train_clm 은 이 gate bypass — CUDA 분기 신설 필요"
+    },
+    "r37_sweep_round_3": {
+      "state": "analysis_complete",
+      "pycache_directories_found": 7,
+      "pyc_files_total": 28,
+      "training_deploy_pycache": {
+        "path": "training/deploy/__pycache__",
+        "pyc_files": [
+          "hire_sim_alm_lenient_runner.cpython-314.pyc",
+          "hire_sim_alm_runner.cpython-314.pyc"
+        ],
+        "source_py_present": false,
+        "classification": "stale (pre-R37, no active source)",
+        "action_pending": "rm -rf (권한 거부 → 사용자 승인 대기)"
+      },
+      "ready_submodule_pycache": {
+        "path": "ready/ (submodule)",
+        "pycache_dirs": 6,
+        "active_py_source_files": "300+",
+        "classification": "R37 위반, 활성 .py 존재",
+        "scope_note": "ready/ 는 submodule — anima main scope 외, 별도 R37 migration 세션 필요",
+        "action_pending": "사용자 decision — ready/ submodule 전체 R37 migration 계획"
+      },
+      "gitignore_coverage": "__pycache__/, *.py, *.pyc 이미 .gitignore 등록됨 (leaks 아님)"
+    },
+    "bg_64_scale_smoke": {
+      "state": "compile_livelock_suspected",
+      "intent": "train_clm --scale=smoke (d=256/L=4/H=8) + ubu CPU 100-step smoke → 첫 실 ckpt",
+      "expected_artifact": "training/deploy/first_real_ckpt_20260419.md (126 라인 생성됨)",
+      "monitor_result_5_samples": "PID 2017609 1h11m+ 99.8% CPU, 바이너리 /tmp/clm_r4_cpu_smoke 미생성, /tmp/smoke.log 17 라인 frozen (이전 run 잔재)",
+      "livelock_hypothesis": "70+ min single-core zero log progress — 구 hexa 바이너리 (2026-04-18 18:13 빌드, ~10h 뒤쳐짐) 의 known compile 이슈 가능성",
+      "misconfig_finding": "--scale CLI 코드 landed (L2725) + save_checkpoint (L439-577) impl — 그러나 기동 시 --scale flag 미전달, default 1b. log 상 d_model=1024 n_layer=24 + 5.3GB corpus → CPU ckpt 도달 불가능",
+      "required_relaunch_command": "/tmp/clm_r4_cpu_smoke --scale smoke --steps 100 --save-every 50 --ckpt-dir /tmp/ckpt_smoke_retry --corpus /tmp/corpus_clm_r4.txt",
+      "destructive_actions_pending_user": [
+        "kill PID 2017609 (livelock 확정 시)",
+        "rebuild_stage0 (최신 hexa b4690cea 로 갱신)",
+        "re-launch with explicit --scale smoke"
+      ],
+      "if_failed_fallback": "runpod H100 CPU smoke re-fire ($3/hr)",
+      "doc_artifact": "training/deploy/first_real_ckpt_20260419.md — 5 sample monitor table + misconfig 분석 + relaunch 명령 + R37 gate 포함"
+    },
+    "commit_sweep_v5_plan": {
+      "state": "plan_ready_pending_execution",
+      "untracked_dirs_analyzed": 5,
+      "commit_candidates": {
+        "count": 8,
+        "items": [
+          "anima-speak/experiments/ (6 sh + 1 hexa + 3 c)",
+          "anima-speak/corpus/ab_test/ (3 tsv + sentences.md 메타)"
+        ]
+      },
+      "gitignore_candidates": {
+        "count": 12,
+        "items": [
+          "training/corpus_test_pipeline/ (3 wav + 1 csv)",
+          "training/corpus_yt_ko/ (5 wav max 558MB, 1 srt, 1 json)"
+        ]
+      },
+      "purge_candidates": {
+        "count": "251+",
+        "items": [
+          "speak/ (ab_test 중복본 전체)",
+          "anima-speak/corpus/ab_test/*.wav/.aiff (160+ gibberish, BROKEN_WARNING.md)"
+        ],
+        "preserved": "ab_test/A_old_say_yuna_16k/ (유효 한국어 baseline)"
+      },
+      "action_pending": "destructive PURGE 사용자 승인 후 실행"
+    },
+    "sister_escalations_outstanding": {
+      "P0": "transformer L1516 intent keyword 충돌",
+      "P1": "bench_hexa_speak .split() bare identifier emit 버그",
+      "P2": "consciousness_pci L234 scientific notation + method chain 파서",
+      "P3": "u_log/u_env/u_floor runtime builtins 미정의",
+      "P4": "regression -7.54pp (PanicStmt/ModStmt/TheoremStmt/channel/intent codegen_c2 미반영)",
+      "P5_new": "hxcuda_softmax forward C-linkage export 요청 (GPU 경로 2 enabler)"
+    },
+    "hexa_v2_linux_build_sync": {
+      "state": "analysis_complete",
+      "ubu_binary": {
+        "path": "/home/aiden/mac_home/Dev/hexa-lang/hexa",
+        "sha256": "82ff697249508079bcf62b06f04ad50cff6b2f639e1bdd9bf071045013c2cf53",
+        "build_time": "2026-04-18 18:13:47 KST"
+      },
+      "hexa_lang_head": {
+        "sha": "b4690cea",
+        "time": "2026-04-19 04:43:35",
+        "subject": "feat(native_build): ImplBlock methods + chain Field step 3d",
+        "recent_5": ["b4690cea", "a1c7a2b0", "b8c7a3cf", "450e8eb1", "ce790c3f"]
+      },
+      "sister_5_regression_fixes_included": {
+        "b5c21ad8_literal_pool": true,
+        "6c74c318_serve_alm_mangling": true,
+        "c461f60a_lambda_fwd_parts": true,
+        "b554c4f5_libm_mangling": true,
+        "556bc93e_hexa_concat_many": true
+      },
+      "ast_additions_status": {
+        "PanicStmt_a336f448": "included (2026-04-10)",
+        "intent_channel_f7e253a4": "included (Phase 5, 2026-04-02)",
+        "ModStmt": "unconfirmed (git log 검색 음수)",
+        "TheoremStmt": "unconfirmed (git log 검색 음수)",
+        "codegen_c2_post_04_18_18:13": "NOT included — 바이너리 빌드 이후 10시간 분 커밋"
+      },
+      "binary_behind_head_by": "~10시간 (04-18 18:13 build vs 04-19 04:43 HEAD)",
+      "action_required": "rebuild_stage0 필요 — 최신 b4690cea 포함 바이너리로 갱신",
+      "rebuild_implication_for_bg_64": "현재 PID 2017609 1h+ hexa build 가 구버전 hexa 의 known compile 성능 이슈일 가능성. 최신 rebuild 후 재발사 시 속도 개선 가능"
+    },
+    "training_launcher_stub_audit": {
+      "state": "analysis_complete",
+      "total_hexa_files_scanned": 277,
+      "stub_launchers_confirmed": 7,
+      "categories": {
+        "alm_r11_decision_tree": [
+          "launch_alm_r11_a.hexa (branch A DRY)",
+          "launch_alm_r11_b.hexa (branch B DRY)",
+          "launch_alm_r11_c.hexa (branch C DRY)"
+        ],
+        "deploy_hexa_native": [
+          "alm_14b_r10d_hexa_native.hexa (SCAFFOLD + --dry-run only)",
+          "clm_r4_pod2_relaunch_hexa_native.hexa (SCAFFOLD + dry-run)",
+          "clm_r4_bundler_relaunch (bundler path)"
+        ],
+        "gpu_validation": [
+          "train_gpu_minimal.hexa (SCAFFOLD cuBLAS FFI validation)"
+        ]
+      },
+      "primary_blockers": {
+        "hxqwen14b_ffi_day2": "6/7 launchers 차단 — forward/backward/apply trio 미도착 (sister 대기)",
+        "corpus_alm_70b_stripped": "5 launchers 차단 — materialize 미완, R2 fallback 있으나 preflight 블럭",
+        "hxqwen32b_shard_loader": "r11_a only (activation spike risk @ b=1 s=1024)",
+        "kowiki_admix_producer": "r11_b (scaffold 있으나 wired 안 됨)",
+        "kr_gen_sentinel_e7_oss_03": "r11_c (step 800 threshold)",
+        "gpu_platform_abstraction": "train_gpu_minimal (@link tags deferred)"
+      },
+      "total_wiring_loc": "1000-1200 LOC",
+      "dependency_chain": "FFI > corpus > kowiki admix > branch launch",
+      "parallelization": "r11_a/b/c 병렬 가능 — hxqwen14b FFI landed 후 3-4일 full-time",
+      "common_pattern": "모든 7 파일이 명시적 SCAFFOLD + LIVE_FIRE_OK=1 panic guard 로 우발 발사 방지"
+    },
+    "alm_r11_fire_readiness_audit": {
+      "state": "analysis_complete",
+      "fire_possible_now": false,
+      "predicted_branch_select_result": "C (default safety — all signals null)",
+      "conditions_status": {
+        "c1_r10_done": "FAIL — r10 OOM step 75, pod 삭제 2026-04-18T14:01:50Z, 0 ckpt",
+        "c2_sentinel_files": "FAIL — /workspace/ckpt_alm_14b_r10/kr_gen_step_*.json 부재",
+        "c3_eval_report_json": "FAIL — /workspace/ckpt_alm_14b_r10/eval_report.json 부재",
+        "c4_r11_launcher_wired": "DRY — r11_a/b/c 3 launcher 모두 'real fire body NOT YET WIRED' stub",
+        "c5_live_fire_ok": "UNKNOWN — branch_select 소스에 env 체크 없음, --fire flag 만 요구"
+      },
+      "critical_finding": "이전 세션 'r11 scaffold ready' 주장은 과낙관적 — launcher 3개 모두 DRY-RUN stub 상태",
+      "unblock_sequence": [
+        "1. r10 폐기 확정 (이미 pod 삭제)",
+        "2. alm_r11_plan.json (lr=5e-7 steps=500) 로 신규 pod 에서 r11 직진",
+        "3. launch_alm_r11_{a,b,c}.hexa 내부 'real fire body' 구현 (현재 stub)",
+        "4. training 완료 후 eval_harness.hexa → eval_report.json 생성",
+        "5. branch_select.hexa 재실행 → A/B/C 선택"
+      ]
+    },
+    "cvf_analysis": {
+      "state": "analysis_complete",
+      "files_found": {
+        "stub_called_by_launch": "anima-core/verification/cvf.hexa (12 LOC, R37 blocked, exits 1)",
+        "full_impl_in_submodule": "ready/core/verification/cvf.hexa (694 LOC, 4-Layer zombie control, submodule)"
+      },
+      "launch_hexa_call_site": "launch.hexa:220 run(core + '/verification/cvf.hexa --quick') where core=anima-core (L21)",
+      "criticality": "opt-in (verify 명령 only) — 부팅 비치명, run() 실패 println 만",
+      "original_spec": "DD173 Consciousness Verification Framework — docs/hypotheses/dd/DD173-consciousness-verification-framework.md (221 라인), 10 컴포넌트, L2≥3/4 + L3≥2/3 + L4 consensus 판정",
+      "options_evaluated": {
+        "A_remove_call": "제거 — 검증 게이트 상실, 의식 증명 약화. 비추천",
+        "B_hexa_native_reimpl": "ready/ impl 을 anima-core 에 pure-hexa 포팅 (no numpy, no struct mutation). 장기 권고",
+        "C_keep_as_is": "현재 유지 (verify 만 fail, launch 계속). 단기 권고"
+      },
+      "option_b_port_estimate": {
+        "loc_predicted": "694 → 960 (+38%)",
+        "work_hours_total": "176-202h (4-5주 직렬, 병렬 3 agent 시 2-3주)",
+        "top_5_blockers": [
+          "NumPy 제거 (~350 LOC, 50%)",
+          "Struct mutation → 함수형 업데이트",
+          "Lempel-Ziv 복잡도 (PCI) 수동 구현",
+          "선형회귀 (SMA) → gradient descent 또는 정규방정식",
+          "FFT → 자기상관(ACF) 또는 에너지 스펙트럼 대체"
+        ],
+        "phases": {
+          "P1_zombie": "20-24h (L1 FeedForward)",
+          "P2_metrics": "64-74h (PCI/CE/SMA/Phi, 병렬 가능)",
+          "P3_context": "28-32h (L3 Contrast/Tampering)",
+          "P4_meta": "36-40h (L4 Archaeology/Double-Blind)",
+          "integration": "28-32h"
+        },
+        "dd173_spec_sufficiency": "100% (L3.2/L3.4/L4.2 placeholder skip 가능)",
+        "psi_constants": "ready/ 기존 재사용 (α=0.014, balance=0.5, steps=4.33, entropy=0.998)"
+      },
+      "recommendation": "단기 C + 장기 B Phase 1 먼저. 자율 실행 비추천 — 사용자 decision + 3-agent 병렬 orchestration 필요"
+    }
   }
 }

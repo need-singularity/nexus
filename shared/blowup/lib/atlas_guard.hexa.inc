@@ -15,6 +15,72 @@ fn _valid_atlas_line(line: string) -> bool {
     return allowed.contains(t[0..1])
 }
 
+// ─── Grade whitelist + ordering (AI-native 계층 등급) ───
+// 등급 체인 (낮→높):
+//   [N?]  CONJECTURE
+//   [N!]  breakthrough (conjecture-class, unreviewed)
+//   [5]   중간
+//   [6]   중간
+//   [7]   EMPIRICAL (승격대상)
+//   [8]   중간
+//   [9]   NEAR
+//   [10]  EXACT
+//   [10*] EXACT 검증됨
+//   [10**] meta-closed  (Phase 10 Meta-Closure 통과)   ← NEW
+//   [11*] Δ₀-absolute foundation
+//   [12*] Π₀² hyperarithmetic foundation (수동 승급)    ← NEW
+// 참고: core blowup.hexa 의 match_grade() 는 수치거리→심볼(EXACT/NEAR/...)
+// 매핑이며, 여기의 bracket-suffix 등급은 atlas.n6 라인의 `[...]` 서픽스다.
+fn _known_atlas_grade(g: string) -> bool {
+    // 정확 일치 기준 허용 등급 whitelist
+    if g == "[10*]"  { return true }
+    if g == "[10**]" { return true }  // NEW: meta-closed
+    if g == "[11*]"  { return true }
+    if g == "[12*]"  { return true }  // NEW: Π₀² foundation
+    if g == "[10]"   { return true }
+    if g == "[9]"    { return true }
+    if g == "[8]"    { return true }
+    if g == "[7]"    { return true }
+    if g == "[6]"    { return true }
+    if g == "[5]"    { return true }
+    if g == "[N?]"   { return true }
+    if g == "[N!]"   { return true }
+    return false
+}
+
+// grade-to-priority: 숫자가 클수록 높은 등급. 정렬/비교용.
+// [10*] < [10**] < [11*] < [12*] 순서 보장.
+fn _atlas_grade_priority(g: string) -> i64 {
+    if g == "[N?]"   { return 0 }
+    if g == "[N!]"   { return 1 }
+    if g == "[5]"    { return 5 }
+    if g == "[6]"    { return 6 }
+    if g == "[7]"    { return 7 }
+    if g == "[8]"    { return 8 }
+    if g == "[9]"    { return 9 }
+    if g == "[10]"   { return 10 }
+    if g == "[10*]"  { return 20 }
+    if g == "[10**]" { return 25 }  // NEW: between [10*] and [11*]
+    if g == "[11*]"  { return 30 }
+    if g == "[12*]"  { return 40 }  // NEW: above [11*]
+    return -1  // unknown
+}
+
+// 라인 꼬리에서 bracket-suffix 등급 추출. 없으면 "".
+// "... :: domain [10**]" → "[10**]"
+fn _extract_trailing_grade(line: string) -> string {
+    let t = line.trim()
+    if !t.ends_with("]") { return "" }
+    // 마지막 '[' 찾기 — 간단한 역방향 스캔
+    let n: i64 = len(t)
+    let mut i: i64 = n - 1
+    while i >= 0 {
+        if t[i..i+1] == "[" { return t[i..n] }
+        i = i - 1
+    }
+    return ""
+}
+
 // OPT-P8-9: 라인별 grep -Fxq (N exec) → batched grep -Fxf (1 exec)
 // 이전: N줄 × exec("grep -Fxq ...") = N subprocess. 대형 append 시 병목.
 // 현재: 배치 패턴파일 → grep -Fxf 1회, hexa 메모리 0. (core blowup.hexa v3 동기화)

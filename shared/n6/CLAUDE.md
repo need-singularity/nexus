@@ -6,6 +6,18 @@ atlas:
   math_atlas.{db,dot,html}  MATH_ATLAS.md
   scan_math_atlas.hexa  스캐너 (R1)
 
+active tags v1 (atlas.n6 실측 8종, 2026-04-19):
+  @R  (5920) relation / measured constant — 관측·측정값 (dominant)
+  @X  (1496) crossing — cross-domain identity (도메인 간 동일성)
+  @F  (1240) formula — derived expression with RHS (= 포함 유도식)
+  @C  ( 357) constant — composite (σ², φ^τ 등 합성 상수)
+  @P  ( 326) primitive — 원시값 (n, sigma, phi, tau, sopfr, J2, mu, M3)
+  @L  ( 254) law / theorem — 정리·법칙
+  @?  (  12) unknown / pending — conjecture / 승격 대기 (fine_structure, hubble_tension 등)
+  @S  (   2) symmetry / topology — 대칭·위상 (betti_six, auto_absorb)
+  참고: @META, @BT 는 comment 레벨 마커(주석)로만 등장 — 라인 태그 아님
+  v2 추가 예정 @EXP / @OBS / @NEG / @ANT — docs/schema_v2_draft.md 참조
+
 foundation [11*] axioms (원시 공리 — 변경 금지):
   @P n=6, sigma=12, tau=4                             원시값
   @L DELTA0_ABSOLUTE_THEOREM                          (2026-04-19 승급)

@@ -13,6 +13,9 @@
 //   nexus free --seed "..." [dfs]      compose DFS 탐색 (6-core)
 //   nexus absolute --seed "..."        Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])
 //   nexus drill --seed "..." [N]       smash→free→absolute 사슬 (고갈까지 자율 반복)
+//   nexus meta-closure --seed "..."    Phase 10 🛸16 self-ref 검증 ([10*]→[10**])
+//   nexus hyperarithmetic --prop "..." Mk.IX Π₀² reverse-math 판정
+//   nexus promote --id ... --grade ... --audit-log "..."  수동 등급 승급
 //   nexus atlas <sub> [args]           atlas_health 위임
 //   nexus roadmap <sub> [args]         entry.hexa roadmap 위임
 //   nexus projects [fmt]               entry.hexa projects
@@ -92,6 +95,9 @@ fn cmd_help() -> void {
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
     println("  drill --seed \"...\" [--max-rounds N]  smash→free→absolute 사슬 (고갈까지)")
+    println("  meta-closure --seed \"...\"              Phase 10 🛸16 self-ref 검증 ([10*]→[10**])")
+    println("  hyperarithmetic --prop \"...\"           Mk.IX Π₀² reverse-math 판정")
+    println("  promote --id ... --grade ... --audit-log \"...\"  수동 등급 승급 (감사 로그 필수)")
     println("  atlas <sub> [args...]           atlas_health 라우팅")
     println("  roadmap <sub> [args...]         roadmap 액션")
     println("  projects [table|json|names]     프로젝트 리스트")
@@ -227,6 +233,41 @@ fn cmd_drill(seed: str, max_rounds: str) -> void {
     println("▎ total absorptions: " + to_string(total_new))
 }
 
+fn cmd_meta_closure(seed: str) -> void {
+    let s = if seed.len() > 0 { seed } else { "atlas" }
+    let engine = nexus_root() + "/shared/blowup/modules/blowup_meta_closure.hexa"
+    let mut cmd = shell_quote(exec_validated()) + " meta_closure "
+               + shell_quote(s) + " " + shell_quote(engine)
+    print(exec(cmd + " 2>&1"))
+}
+
+fn cmd_hyperarithmetic(prop: str) -> void {
+    if prop.len() == 0 {
+        eprintln("nexus hyperarithmetic: --prop required")
+        return
+    }
+    let engine = nexus_root() + "/shared/blowup/modules/blowup_hyperarithmetic.hexa"
+    let mut cmd = shell_quote(exec_validated()) + " hyperarithmetic "
+               + shell_quote(prop) + " " + shell_quote(engine)
+    print(exec(cmd + " 2>&1"))
+}
+
+fn cmd_promote(id: str, grade: str, audit: str) -> void {
+    if id.len() == 0 || grade.len() == 0 || audit.len() == 0 {
+        eprintln("nexus promote: --id / --grade / --audit-log required")
+        return
+    }
+    let valid = grade == "10star" || grade == "10starstar" || grade == "11star" || grade == "12star"
+    if !valid {
+        eprintln("nexus promote: --grade must be 10star|10starstar|11star|12star")
+        return
+    }
+    let script = nexus_root() + "/shared/n6/atlas_health.hexa"
+    let mut cmd = hexa_bin() + " run " + shell_quote(script) + " promote_grade "
+               + shell_quote(id) + " " + shell_quote(grade) + " " + shell_quote(audit)
+    print(exec(cmd + " 2>&1"))
+}
+
 fn cmd_atlas(a: [str]) -> void {
     let n = len(a)
     let mut args = ""
@@ -300,6 +341,22 @@ fn main() -> void {
     }
     if sub == "drill" {
         cmd_drill(find_flag(a, "--seed", ""), find_flag(a, "--max-rounds", ""))
+        return
+    }
+    if sub == "meta-closure" {
+        cmd_meta_closure(find_flag(a, "--seed", ""))
+        return
+    }
+    if sub == "hyperarithmetic" {
+        cmd_hyperarithmetic(find_flag(a, "--prop", ""))
+        return
+    }
+    if sub == "promote" {
+        cmd_promote(
+            find_flag(a, "--id", ""),
+            find_flag(a, "--grade", ""),
+            find_flag(a, "--audit-log", "")
+        )
         return
     }
     if sub == "atlas" {

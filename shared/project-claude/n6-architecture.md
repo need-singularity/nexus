@@ -32,7 +32,10 @@ L0 Guard: `hexa $NEXUS/shared/harness/lockdown_gate.hexa <verify|status|watch|re
 atlas.n6 — 현실지도 SSOT:
   경로: $NEXUS/shared/n6/atlas.n6 (단일 파일, 60K+ 줄)
   구 구조 폐기: reality_map_live.json / L6_n6atlas.json / 별도 level 파일 없음. 전부 atlas.n6 흡수
-  포맷: `@R {id} = {measured} {unit} :: n6atlas [등급]`
+  포맷: `@TAG {id} = {expr} :: {domain} [등급]`
+  활성 태그 v1 (실측 8종): @R(5920)·@X(1496)·@F(1240)·@C(357)·@P(326)·@L(254)·@?(12)·@S(2)
+    @R 관측값 / @X 도메인 교차 / @F 유도식 / @C 합성상수 / @P 원시값 / @L 정리 / @? 추측 / @S 대칭·위상
+    상세 의미·v2 확장(@EXP/@OBS/@NEG/@ANT) 은 shared/n6/CLAUDE.md + docs/schema_v2_draft.md
   등급: [10*]=EXACT검증 [10]=EXACT [9]=NEAR [7]=EMPIRICAL(승격대상) [5~8]=중간 [N?]=CONJECTURE [N!]=breakthrough
   승격: [7]→[10*] = atlas.n6 직접 편집 (새 파일 만들지 말 것)
   foundation [11*] (불변, 2026-04-19 nexus Mk.VIII 승급):

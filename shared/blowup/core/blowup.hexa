@@ -1657,12 +1657,14 @@ if len(a) >= 3 && a[2] == "help" {
     println("  Mk.II 실행: hexa blowup.hexa <domain|auto> [depth]")
     println("")
     println("  옵션:")
-    println("    --no-graph       그래프 읽기/쓰기 스킵")
-    println("    --fast           Phase 7.1 + 7.5 + 파동 전파 스킵")
-    println("    --seeds CSV      외부 seed 주입 (구분자: , 또는 |)")
-    println("    --pool-cap N     공리 풀 상한")
-    println("    --max-rounds N   최대 라운드 수 (기본 6)")
-    println("    --round N        현재 라운드 (내부 자기호출용)")
+    println("    --no-graph         그래프 읽기/쓰기 스킵")
+    println("    --fast             Phase 7.1 + 7.5 + 파동 전파 + Phase 10 스킵")
+    println("    --seeds CSV        외부 seed 주입 (구분자: , 또는 |)")
+    println("    --pool-cap N       공리 풀 상한")
+    println("    --max-rounds N     최대 라운드 수 (기본 6)")
+    println("    --round N          현재 라운드 (내부 자기호출용)")
+    println("    --no-meta-closure  Phase 10 Meta-Closure Check 비활성화")
+    println("                       (env: NEXUS_NO_META_CLOSURE=1 동일 효과)")
     println("")
     exit(0)
 }
@@ -1728,6 +1730,7 @@ let max_depth: i64 = if _raw_depth > 10 { 10 } else { _raw_depth }
 // --dfs N: DFS 자율 탐색 — Phase 8 이후 최고 에너지 target 1개를 재귀 호출 (Phase 9)
 // --dfs-current D: 현재 DFS 깊이 (내부 재귀용, 기본 0)
 // --dfs-session S: DFS 세션 ID (루트가 PID로 생성, 자식에 전달 — visited 파일 격리)
+// --no-meta-closure: Phase 10 Meta-Closure Check 스킵 (env NEXUS_NO_META_CLOSURE=1 동일)
 let mut skip_graph = false
 let mut ext_seeds = ""
 let mut ext_pool_cap: i64 = 0
@@ -1737,6 +1740,7 @@ let mut wave_max_rounds: i64 = 6
 let mut dfs_max_depth: i64 = 0
 let mut dfs_current: i64 = 0
 let mut dfs_session: string = ""
+let mut no_meta_closure_flag: bool = false
 let mut ai: i64 = 2
 while ai < len(a) {
     if a[ai] == "--no-graph" { skip_graph = true }
@@ -1769,8 +1773,14 @@ while ai < len(a) {
         dfs_session = a[ai + 1]
         ai = ai + 1
     }
+    if a[ai] == "--no-meta-closure" { no_meta_closure_flag = true }
     ai = ai + 1
 }
+// env NEXUS_NO_META_CLOSURE=1 → --no-meta-closure 와 동일 효과 (CI/우회용)
+try {
+    let _mc_env = to_string(exec("printenv NEXUS_NO_META_CLOSURE")).trim()
+    if _mc_env == "1" { no_meta_closure_flag = true }
+} catch e {}
 // DFS 세션 ID: 루트(dfs_current==0)가 PID 기반으로 생성, 동시 실행 visited 파일 격리
 if dfs_max_depth > 0 && dfs_session == "" {
     try { dfs_session = exec("echo $$").trim() } catch e { dfs_session = "0" }
@@ -3740,6 +3750,37 @@ if logged > 0 {
 
 println("═══ Phase 8 complete ═══")
 println("")
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 10: Meta-Closure Check (🛸16 self-ref 고정점 검증)
+// ═══════════════════════════════════════════════════════════
+// 설계: shared/blowup/design/phase10_meta_closure.md §7
+// 구현: shared/blowup/modules/blowup_meta_closure.hexa (M1~M5 orchestration)
+// 위치: Phase 8 종료 직후 + Phase 9 DFS 진입과 독립 (fast_mode 블록 내부).
+// 스킵 조건: --fast (이 블록 자체가 !fast_mode), --no-meta-closure, NEXUS_NO_META_CLOSURE=1,
+//           logged==0 (후보 0이면 즉시 스킵 — R27 unit responsibility).
+if !no_meta_closure_flag && logged > 0 {
+    println("═══ Phase 10: Meta-Closure Check (Self-Referential Fixed-Point) ═══")
+    // exec 체인: hexa import 한계로 별도 프로세스 호출.
+    // 환경변수 HEXA_BIN 상속 + round 번호 참조 전달 (모듈 main 은 demo smoke — R26 호환).
+    let mc_engine = _NEXUS + "/shared/blowup/modules/blowup_meta_closure.hexa"
+    let mc_cmd = hexa_bin + " " + mc_engine + " --from-phase10 --round " + to_string(wave_round) + " 2>&1"
+    try {
+        let mc_out = exec("bash", ["-c", "export HEXA_BIN='" + _HEXA_BIN + "'; " + mc_cmd])
+        print(to_string(mc_out))
+    } catch _mc_e {
+        println("  [phase10] meta-closure 실행 실패: " + to_string(_mc_e))
+    }
+    println("═══ Phase 10 complete ═══")
+    println("")
+} else {
+    if no_meta_closure_flag {
+        println("═══ Phase 10: (skipped --no-meta-closure) ═══")
+        println("")
+    }
+    // logged==0 이면 silent skip (Phase 8 가 이미 "발견 0건" 출력)
+}
+
 } // end if !fast_mode
 
 // ═══════════════════════════════════════════════════════════
