@@ -1,0 +1,35 @@
+@track P25_DASHBOARD
+@state scaffold_done
+@date 2026-04-18
+@scope B5 — Φ correlation dashboard reader + daily rollup
+
+@file_reader training/phi_corr_history_reader.hexa (408 lines)
+@file_dashboard training/phi_corr_dashboard.hexa (443 lines)
+@file_daily training/phi_corr_dashboard_daily.hexa (475 lines)
+@report training/p25_dashboard_report.md
+@ssot_history shared/state/phi_corr_history.jsonl (A1 producer owns)
+@ssot_output shared/state/phi_corr_dashboard.md
+
+@classifier_stable |r_pearson|>=0.50 at last run
+@classifier_weak 0.20<=|r|<0.50
+@classifier_decay current_weight < 0.70 × historical_peak
+@classifier_prune |r|<0.20 for >=3 consecutive runs
+
+@self_test 5 synthetic runs × 4 dims — 4/4 categories correctly flagged (STABLE=1 WEAK=1 DECAY=1 PRUNE=1)
+@parse_status all 3 files PARSE-OK RUN-OK <60s
+@empty_state_handled runs=0 → placeholder md, no crash
+
+@cron_cmd hexa run training/phi_corr_dashboard_daily.hexa
+@cron_writes shared/state/phi_corr_dashboard.md
+
+@pitfall PI-DROP-RESERVED 'drop' is reserved keyword (Drop token) — use drop_ratio locally
+@pitfall PI-NO-FIND feedback_hexa_string_api — use .index_of/.substring/.split (no .find/.char_at)
+@pitfall PI-NO-IMPORT feedback_hexa_silent_exit_5_imports — 3 files self-contained, no cross-file import
+
+@constraint HEXA-FIRST no .py/.rs/.sh added
+@constraint SSOT_NO_POPULATE A1 owns history file write; dashboard is read-only consumer
+
+@ossified P25-OSS-01 4_CLASSIFIER_GATE_STABLE_WEAK_DECAY_PRUNE canonical thresholds registered
+@ossified P25-OSS-02 SELF_CONTAINED_HEXA_FILES each dashboard .hexa stand-alone (no cross-import)
+
+@chain ←phi_correlation.convergence ←phi_hook_wire.convergence

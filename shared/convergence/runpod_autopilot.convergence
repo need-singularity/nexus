@@ -1,0 +1,35 @@
+@track RUNPOD_AUTOPILOT_F1
+@state ossified
+@date 2026-04-18
+@file training/runpod_autopilot.hexa
+@ssot shared/config/runpod_autopilot.json
+@test training/runpod_autopilot_test.hexa
+@incident_log shared/state/runpod_incidents.jsonl
+@queue shared/config/training_queue.json
+@report training/runpod_autopilot_ossification_report.md
+@report_e6 training/e6_oom_fix_report.md
+@report_g3 training/g3_watchdog_swap_report.md
+@watchdog_file training/runpod_watchdog.hexa (7813B — scp'd to pod /workspace/anima/training/)
+
+@stages create→bootstrap→train→monitor→sentinel→crash_recover→ckpt_save→r2_upload→teardown→next_round
+@safety AUTOPILOT_DRY_RUN=1 default; pod_lock_file refuses teardown when human/E5 active
+
+@initial_closed_loop 8/8 PASS (F1)
+@post_e6_closed_loop 9/9 PASS (added T9 cuda_oom_kr_gen)
+
+@pain_points_covered
+@pp RUNPOD_R9_9H_IDLE_TEARDOWN_MISSING teardown gate on idle_hours>=2 + heartbeat stale
+@pp RUNPOD_R10_LOGITS_TO_KEEP kwarg rename trap (num_logits_to_keep→logits_to_keep) captured as known_bug pattern
+@pp CUDA_OOM_BATCH "reserved by PyTorch but unallocated" → drop_batch_size_half_and_restart
+@pp CUDA_OOM_KR_GEN "run_attention|generate|fast_generate" → inject_cuda_empty_cache_before_generate_and_restart (patch_kr_gen_oom_fix)
+
+@gap_found_e7 F1_WATCHDOG_FALSE_TRAINING dead_pid_not_detected — status file says TRAINING after process death. Fix: kill -0 $PID gate before writing TRAINING line.
+
+@ossified F1-OSS-01 PATTERN_MATCHING_OVER_COARSE_REGEX refine "CUDA out of memory" into N discriminative patterns by stack-trace site (kr_gen vs train-batch vs ckpt-save) — each maps to distinct action.
+@ossified F1-OSS-02 IDEMPOTENT_PYTHON_PATCH crash_fix_command emits python3 -c sed-style idempotent patch — rerunning same fix is no-op.
+@ossified F1-OSS-03 INCIDENT_JSONL_APPEND_ONLY all crashes → shared/state/runpod_incidents.jsonl with timestamp+pod_id+run_id+stage+root_cause+autopilot_action_taken.
+
+@closed_gap WATCHDOG_PID_LIVENESS (E7-OSS-02) — PATCHED 2026-04-18 in training/deploy/alm14b_r10_watcher.hexa. runpod_watchdog.hexa already has ps -p gate (line 121). Remaining: propagate pgrep fallback + DEAD_PID override into runpod_watchdog.hexa line-6 status decide path for consistency.
+@pending_gap AUTOPILOT_DRY_RUN_FLIP schedule for after r10c PASS
+
+@chain ←runpod.convergence →alm_14b_r10.convergence (shared fix loop) →clm_1b_r4.convergence (autopilot covers both)

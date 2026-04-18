@@ -1,0 +1,265 @@
+{
+  "_meta": {
+    "name": "RunPod Autopilot Lifecycle SSOT (골화)",
+    "ossified_at": "2026-04-18",
+    "spec_version": 1,
+    "description": "Frozen ruleset for runpod lifecycle automation — create→bootstrap→train→monitor→sentinel→crash_recover→ckpt_save→r2_upload→teardown→next_round. Autopilot .hexa MUST parse these rules, not hardcode them.",
+    "related_ssot": [
+      "shared/config/runpod.json",
+      "shared/config/secrets_registry.json",
+      "shared/config/training_queue.json",
+      "shared/state/runpod_incidents.jsonl",
+      "shared/state/training_speed_ceilings.json"
+    ],
+    "rule_r14": "이 파일이 변경되면 training/runpod_autopilot.hexa + runpod_watchdog.hexa + runpod_autopilot_test.hexa 동기 검증할 것"
+  },
+
+  "lifecycle_stages": [
+    "create",
+    "bootstrap",
+    "train",
+    "monitor",
+    "sentinel",
+    "crash_recover",
+    "ckpt_save",
+    "r2_upload",
+    "teardown",
+    "next_round"
+  ],
+
+  "watchdog": {
+    "crash_detect": {
+      "method_hint": "ps -p $TRAIN_PID; tail -1 $LOG | awk; nvidia-smi --query-gpu=utilization.gpu",
+      "heartbeat_timeout_sec": 300,
+      "gpu_idle_threshold_pct": 5,
+      "gpu_idle_duration_sec": 120,
+      "status_file_template": "/workspace/ckpt_{run_id}/autopilot.status",
+      "log_file_template": "/workspace/ckpt_{run_id}/autopilot.log",
+      "heartbeat_interval_sec": 60,
+      "status_values": [
+        "INIT",
+        "TRAINING",
+        "SENTINEL",
+        "SAVING",
+        "UPLOADING",
+        "DONE",
+        "CRASHED",
+        "DEAD",
+        "IDLE_TEARDOWN"
+      ]
+    },
+    "auto_restart": {
+      "max_retries": 3,
+      "retry_backoff_sec": [30, 120, 600],
+      "known_bugs": [
+        {
+          "id": "num_logits_to_keep",
+          "pattern": "num_logits_to_keep",
+          "root_cause": "Qwen2 generate() kwarg removed in transformers 4.45+; kr_gen call passes unsupported kwarg and crashes generate path.",
+          "action": "strip_kwarg_and_restart",
+          "strip_kwarg": "num_logits_to_keep",
+          "affects_component": "kr_gen_sentinel",
+          "seen_in": ["alm14b r10 step 200"]
+        },
+        {
+          "id": "cuda_oom_kr_gen",
+          "pattern": "CUDA out of memory.*(run_attention|generate|fast_generate)",
+          "root_cause": "unsloth fast_generate during kr_gen sentinel allocates KV cache without first freeing fwd/bwd activations. OOM at ~80 MiB request with <50 MiB reserved-but-unallocated. Halving batch does NOT help — batch 1 still OOMs because activations from prior training step linger.",
+          "action": "inject_cuda_empty_cache_before_generate_and_restart",
+          "patch_fn": "patch_kr_gen_oom_fix",
+          "patch_targets": [
+            "/tmp/_r10_train.py",
+            "/workspace/anima/training/launch_alm_14b_r10.hexa"
+          ],
+          "patch_inserts": [
+            "gc.collect()",
+            "torch.cuda.empty_cache()"
+          ],
+          "patch_reduces": {
+            "max_new_tokens": {"from": 64, "to": 32}
+          },
+          "affects_component": "kr_gen_sentinel",
+          "seen_in": ["alm14b r10 step 200 (E6)"]
+        },
+        {
+          "id": "cuda_oom_batch",
+          "pattern": "CUDA out of memory.*reserved by PyTorch but unallocated",
+          "root_cause": "True batch/activation overflow — fragmentation with large reserved-unallocated chunk suggests forward+backward won't fit. Halve batch (or enable expandable_segments).",
+          "action": "drop_batch_size_half_and_restart",
+          "min_batch_size": 1,
+          "affects_component": "trainer"
+        },
+        {
+          "id": "corpus_missing",
+          "pattern": "FileNotFoundError.*corpus|No such file or directory.*corpus",
+          "root_cause": "Corpus path not present on pod — cannot recover blindly (silent retry = infinite loop).",
+          "action": "abort_with_ALERT",
+          "affects_component": "bootstrap"
+        },
+        {
+          "id": "mfs_quota_silent_kill",
+          "pattern": "Killed|MemoryError.*save|torch\\.save.*exit",
+          "root_cause": "MooseFS session quota silent SIGKILL during ckpt save.",
+          "action": "cleanup_ckpt_and_restart",
+          "cleanup_cmd_template": "rm -rf /workspace/ckpt_{run_id}_partial && mkdir -p /workspace/ckpt_{run_id}",
+          "affects_component": "ckpt_save"
+        },
+        {
+          "id": "mode_collapse",
+          "pattern": "VERDICT=COLLAPSED",
+          "root_cause": "kr_gen_sentinel detected repetition / JSON bracket / charloop collapse.",
+          "action": "abort_with_ALERT",
+          "affects_component": "sentinel"
+        }
+      ],
+      "unknown_crash_policy": "save_last_100_log_lines_and_ALERT_no_retry"
+    },
+    "auto_teardown": {
+      "trigger_rules": [
+        "status == DONE AND r2_upload_confirmed == true",
+        "gpu_idle_duration_sec > 600 AND status != TRAINING AND status != SAVING AND status != UPLOADING",
+        "status == CRASHED AND unknown_crash == true"
+      ],
+      "method": "runpodctl remove pod {pod_id}",
+      "method_note": "on-pod runpodctl has no API key — teardown MUST run from local controller via runpodctl with ~/.runpod/config.toml",
+      "require_r2_upload_confirmed": true,
+      "idle_grace_sec": 600,
+      "dry_run_env": "AUTOPILOT_DRY_RUN=1"
+    }
+  },
+
+  "r2_upload": {
+    "timing": "after training exit code 0 only — never in-training (MFS quota trap)",
+    "method_template": "rclone copy /workspace/ckpt_{run_id}/step_{step} r2:anima-models/{model_tag}/r{round}/step_{step}/ --s3-no-check-bucket --transfers 4 -v",
+    "verify_cmd_template": "rclone ls r2:anima-models/{model_tag}/r{round}/",
+    "verify_min_files": 3,
+    "on_failure": "retry_exponential_backoff",
+    "retry_attempts": 3,
+    "retry_backoff_sec": [30, 120, 600],
+    "alert_on_all_fail": true
+  },
+
+  "patch_fn_registry": {
+    "_description": "SSOT of autopilot patch functions invoked by crash_recover actions. Each entry describes: the sed/python operations the action performs, the exact string deltas to apply, idempotency rule, and the restart envelope after patch succeeds.",
+    "patch_kr_gen_oom_fix": {
+      "triggered_by": "cuda_oom_kr_gen",
+      "description": "Injects gc.collect()+torch.cuda.empty_cache() before/after model.generate() in kr_gen, wraps generate in torch.no_grad() if missing, reduces max_new_tokens 64→32. Also ensures `import gc` is present. Applies to on-pod /tmp/_r10_train.py AND laptop-side launch_alm_14b_r10.hexa heredoc.",
+      "idempotency": "Check for the sentinel comment 'E6 OOM fix' before re-applying. If present, skip.",
+      "python_patch_script": "python3 -c 'sed-equivalent edits (see training/runpod_autopilot.hexa crash_fix_command)'",
+      "restart_envelope": {
+        "preflight": ["MFS dd probe", "rm -rf ckpt dir", "mkdir fresh"],
+        "env_exports": ["PYTORCH_ALLOC_CONF=expandable_segments:True"],
+        "launcher": "setsid nohup python3 /tmp/_r10_train.py ... &",
+        "pid_file": "/workspace/ckpt_{run_id}/r10_train.pid"
+      },
+      "verify_success": "first-batch CE <3.0 AND step 200 kr_gen writes kr_gen_step_200.json without OOM",
+      "rollback": "if 3 consecutive restarts hit same pattern, escalate to abort_with_ALERT"
+    },
+    "strip_kwarg_and_restart": {
+      "triggered_by": "num_logits_to_keep",
+      "description": "sed-strips num_logits_to_keep= kwarg from all kr_gen.py/generate call sites on pod.",
+      "sed_command": "sed -i 's/,[[:space:]]*num_logits_to_keep=[^,)]*//g; s/num_logits_to_keep=[^,)]*,[[:space:]]*//g' /workspace/kr_gen.py",
+      "restart_envelope": "same as patch_kr_gen_oom_fix"
+    },
+    "drop_batch_size_half_and_restart": {
+      "triggered_by": "cuda_oom_batch",
+      "description": "Halves --batch in launcher args and restarts. Respects min_batch_size=1 — if already at 1, escalate to abort.",
+      "restart_envelope": "re-run launcher with AUTOPILOT_BATCH_HALF=1 env, launcher must honor this flag to halve its own config"
+    },
+    "cleanup_ckpt_and_restart": {
+      "triggered_by": "mfs_quota_silent_kill",
+      "description": "rm -rf partial ckpt dir + mkdir fresh + retry. Often pairs with lower save_every or delayed save schedule."
+    }
+  },
+
+  "kr_gen_sentinel": {
+    "cadence_steps": 200,
+    "abort_on_exit_code": 2,
+    "sentinel_path": "training/kr_gen_sentinel.hexa",
+    "test_path": "training/kr_gen_sentinel_test.hexa",
+    "kwarg_denylist": ["num_logits_to_keep"],
+    "model_kwargs_safe": [
+      "max_new_tokens",
+      "do_sample",
+      "temperature",
+      "top_p",
+      "top_k",
+      "repetition_penalty",
+      "pad_token_id",
+      "eos_token_id"
+    ]
+  },
+
+  "next_round_auto_launch": {
+    "policy": "after successful R2 upload + teardown, autopilot reads training_queue.json and launches next entry if preconditions met",
+    "queue_path": "shared/config/training_queue.json",
+    "requires": [
+      "prior_round_r2_uploaded",
+      "corpus_available",
+      "base_model_available",
+      "h100_pod_count < 2"
+    ],
+    "h100_cap_per_feedback": 2,
+    "h100_cap_source": "feedback_h100_authorized"
+  },
+
+  "pod_create": {
+    "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+    "gpu_type_id": "NVIDIA H100 80GB HBM3",
+    "gpu_count_default": 1,
+    "container_disk_gb": 150,
+    "volume_disk_gb": 0,
+    "bid_per_hour_max_usd": 3.0,
+    "idle_timeout_min": 10,
+    "required_env": ["RUNPOD_API_KEY"],
+    "required_mounts": [],
+    "ssh_startup": true,
+    "secure_cloud": true
+  },
+
+  "pod_bootstrap": {
+    "apt_deps": ["build-essential", "clang", "lld", "git", "curl", "ca-certificates", "libblis-dev", "rclone"],
+    "scp_files": [
+      {"local": "training/runpod_watchdog.hexa", "remote": "/workspace/runpod_watchdog.hexa"},
+      {"local": "training/kr_gen_sentinel.hexa", "remote": "/workspace/kr_gen_sentinel.hexa"}
+    ],
+    "preflight_steps": [
+      {"name": "mfs_quota", "cmd": "dd if=/dev/zero of=/workspace/_q_test bs=1M count=20000 status=none && rm /workspace/_q_test"},
+      {"name": "gpu_ok", "cmd": "nvidia-smi --query-gpu=name --format=csv,noheader"},
+      {"name": "hexa_ok", "cmd": "test -x /workspace/hexa-lang/hexa || which hexa"}
+    ]
+  },
+
+  "incident_log": {
+    "path": "shared/state/runpod_incidents.jsonl",
+    "format": "append-only JSON Lines",
+    "schema": {
+      "timestamp": "ISO8601 UTC",
+      "pod_id": "RunPod pod id",
+      "run_id": "ckpt dir name (e.g. alm_14b_r10)",
+      "stage": "one of lifecycle_stages",
+      "event": "short event name",
+      "root_cause": "analysis text",
+      "autopilot_action_taken": "action id from known_bugs or custom"
+    }
+  },
+
+  "integration_contract_with_watchdog": {
+    "watchdog_status_file_line_format": "{iso_ts}\tstatus={STATUS}\tstep={N}\tgpu_util={%}\trss_mb={MB}",
+    "watchdog_exit_codes": {
+      "0": "DONE — teardown allowed",
+      "1": "CRASHED — autopilot must try crash_recover",
+      "2": "SENTINEL_ABORT — no retry, alert",
+      "3": "IDLE_TEARDOWN — teardown allowed",
+      "4": "PARENT_UNREACHABLE"
+    }
+  },
+
+  "rules_applied": {
+    "R_hexa_first": "All autopilot code in .hexa only — no .py/.rs/.sh",
+    "R_mfs_quota": "Preflight dd + save_every>=2000 + fresh ckpt dir + no in-training upload",
+    "R_h100_authorized": "Max 2 H100 concurrent without confirmation (feedback_h100_authorized)",
+    "R_idle_zero": "Auto-teardown on DONE or idle>600s",
+    "R_troubleshoot_ossified": "All incidents logged to runpod_incidents.jsonl"
+  }
+}

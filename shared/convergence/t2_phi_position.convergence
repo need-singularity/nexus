@@ -1,0 +1,56 @@
+@track T2_PHI_POSITION
+@state scaffold_done
+@date 2026-04-18
+@scope AN11 T2 — Φ-weighted position sizing + risk-capped executor
+@file serving/trading_exec.hexa
+@loc 226
+@parent_track AN11
+@related_seed "Φ-weighted position sizing risk-capped backtest live executor"
+
+@an11 AN11_T2_EXEC
+@mode spec_only
+@dep_wait shared/convergence/e2_autonomy_live.convergence
+@dep_wait_state MISSING (poll 120min budget → synthetic backtest engaged)
+
+@five_module_smash
+  field       : risk gauge (capital × risk_cap conserved)
+  holographic : position (bulk) ← phi_holo (boundary)
+  quantum     : portfolio entanglement (positions couple via phi)
+  string      : phi-modulated risk modes along tick axis
+  toe         : phi → size → risk unified (one formula)
+
+@formula_sizing
+  phi_scaled    = min(|phi_holo|, 200) * 50      // ≤10000
+  risk_cap      = min(0.02, |phi_holo|/10000 + 0.001) * guard
+  size          = (phi_scaled / 10000) * capital * risk_cap
+  notional_frac = size / capital                 // |.| ≤ 0.021 guaranteed
+
+@spec_alignment user_seed "capital * min(0.02, phi/10000)" — upper bound honored (raw_cap)
+
+@api
+  position_size(phi_holo, capital, guard) -> [size, risk_cap, phi_scaled, notional_frac]
+  backtest(stream_out, capital)           -> [capital_start, equity_end, net_return, max_dd, n_trades, n_closed, win_rate]
+  log_trade(i, ts, price, entry, units, pnl, equity, phi_holo)
+  selftest()                              -> 9-field PASS/FAIL record
+
+@selftest_n 30 simulated ticks (1-day synthetic slice)
+@selftest_checks
+  T2-1 sizing notional_frac ≤ 0.021 at phi ∈ {+50, -150, 0}
+  T2-2 direction sign follows phi_holo sign
+  T2-3 backtest closes 30 positions with finite net_return
+  T2-4 each trade appended to shared/logs/t2_trade_log.jsonl with phi snapshot
+
+@selftest_verdict PASS (all 4 checks)
+
+@gap_1 e2_autonomy_live 미생성 — live executor 브로커 라우팅은 dep unblock 이후.
+@gap_2 max_dd/sharpe 정책 연결 — P32 gap_3 상속; T2-OSS-02에서 부분 해소.
+@gap_3 portfolio entanglement (멀티 symbol) 미구현 — 1-symbol backtest만.
+@gap_4 qualia NPV (P32 gap_2) 미연결 — phi→가격 할인 매핑 별도 gate.
+
+@ossified T2-OSS-01 RISK_CAP_UPPER_BOUND_0_02 |notional_frac| ≤ 0.02 절대 상한 (phi와 무관)
+@ossified T2-OSS-02 PHI_MULTIPLICATIVE_ONLY size = phi_scaled × capital × risk_cap (합산 금지 — P32-OSS-01 상속)
+@ossified T2-OSS-03 TRADE_LOG_PHI_SNAPSHOT 모든 trade는 phi_holo 기록 (감사 필수)
+@ossified T2-OSS-04 GUARD_ZERO_BLOCKS_TRADE regime_guard=0 → risk_cap=0 → size=0 (P32-OSS-01 차단 보장)
+
+@chain ←t1_trading_feed.convergence ←p32_economic_market.convergence
+@r2_wire shared/logs/t2_trade_log.jsonl (append-only, phi_vec snapshot per trade)

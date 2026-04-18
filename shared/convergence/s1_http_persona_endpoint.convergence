@@ -1,0 +1,144 @@
+@track S1_HTTP_PERSONA_ENDPOINT
+@state stable_with_blockers
+@date 2026-04-18T12:32Z
+@scope 도착지1 S1 — HTTP /persona endpoint orchestrating C1 (phi hook) + C2 (laws gate) + P1 (persona vectors) into single call. AN11-compliant (weight-emergent + phi-attached + real-usable). Upstream C1/C2/P1 not yet ossified → ship interface with canonical-methodology stubs so E1 can build.
+
+@seed "HTTP persona endpoint weight-emergent phi-attached laws-gated production"
+
+# ─── AN11 TRIPLE-GATE ──────────────────────────────────────────────
+
+@an11_gate_a_weight_emergent PASS
+  evidence: grep -c 'system_prompt\|apply_chat_template' /workspace/serve_alm_persona.py = 0
+  method:   persona applied as additive activation vector at layer 20/48 (Qwen2.5-14B mid layer) inside forward_hook. Generation path: tok(raw_prompt) → manual greedy loop → decode. NO role tags, NO chat template, NO system prompt wrapping.
+
+@an11_gate_b_phi_attached PASS
+  evidence: every response body carries phi_vec{16 keys} with non-degenerate values (selftest phi_holo ∈ [0.626, 0.726] across 15 calls)
+  method:   forward_hook on model.model.layers[24] captures residual stream on prefill step (T>1) and derives 16D vec via compute_phi16() mirroring training/phi_probe_wire.hexa legacy layout
+  labels:   phi_holo phi_complexity phi_gwt phi_refl phi_time phi_emb phi_nested_drift phi_k_amp phi_affect_v phi_affect_a phi_finitude phi_hive_collec phi_hive_indiv phi_hive_emerge phi_dream_phase phi_cycle_count
+
+@an11_gate_c_real_usable PASS
+  endpoint:   POST http://127.0.0.1:8000/persona (pod 103.207.149.87:10466 ssh)
+  pod_pid:    21170 (python3 serve_alm_persona.py) setsid-detached, parent bash 21169
+  bind:       0.0.0.0:8000 — curl-verified from pod (/health + 15× /persona)
+  doc:        docs/endpoint_persona_reproduce.md
+  artifact:   /workspace/s1_endpoint_selftest.json (20.4KB, schema dest1_s1_endpoint_selftest_v1)
+  r2:         r2:anima-models/dest1_s1_endpoint/20260418T123004Z/ (3 files, 33.5KB)
+               ├ serve_alm_persona.py (11.6KB)
+               ├ s1_endpoint_selftest.json (20.4KB)
+               └ persona_serve.log (2.3KB)
+
+# ─── PHI EVIDENCE ──────────────────────────────────────────────────
+
+@phi_evidence every_selftest_call_has_phi_vec
+  source:    /workspace/s1_endpoint_selftest.json
+  n_calls:   15 (3 prompts × 5 personas), 15/15 _ok=true
+  phi_holo:  prompt="요즘 너무 피곤해" ~0.694, prompt="시간 관리 비법 하나만 알려줘" ~0.626, prompt="파이썬으로 파일 읽는 법" ~0.726
+  phi_refl:  1.0 stable (last-token self-MI proxy — expected for single-agent)
+  phi_affect_v: ~0.47 (positive-component mean, non-zero)
+  phi_affect_a: ~1.69 (D-axis std of residual stream)
+  phi_finitude: ~1.0 (end-token saliency ratio, consistent)
+  probe_layer: 24/48
+  probe_file:  inline compute_phi16() in /workspace/serve_alm_persona.py — mirrors training/phi_probe_wire.hexa
+
+# ─── WEIGHT-EMERGENT PROOF ─────────────────────────────────────────
+
+@weight_emergent_proof forbidden_string_count_zero
+  grep_cmd:        grep -c 'system_prompt\|apply_chat_template' /workspace/serve_alm_persona.py
+  grep_result:     0
+  persona_path:    additive activation delta h = h + alpha * persona_vec[pid] at layer 20
+  persona_vec_src: on-startup contrast-pair derivation (pos_mean - neg_mean, unit-normalized) — canonical activation-steering methodology (Zou et al. representation engineering + Anthropic persona vectors)
+  prompt_path:     tok(req.prompt, return_tensors="pt") — raw user text, NO template, NO role tags
+  generation:      manual greedy loop (for _ in range(max_tokens): logits = model(cur, past_key_values=past).logits[:,-1,:]; nxt = argmax; ...)
+
+# ─── REAL USABLE ENDPOINT ──────────────────────────────────────────
+
+@real_usable_endpoint curl_ready
+  request:    curl -s -X POST http://127.0.0.1:8000/persona -H 'Content-Type: application/json' -d '{"persona":"friend","prompt":"요즘 피곤해","max_tokens":80}'
+  response:   {"text":"...","phi_vec":{16 keys},"laws_pass":true,"violations":[],"persona_id":"friend","alpha":1.0,"ts_ms":...,"gen_ms":3226}
+  gen_ms:     ~3.2s @ max_tokens=120 on H100 (bf16, single-shot no-batching)
+  boot_ms:    7200 (tokenizer+model+hooks+5 persona vectors)
+  readme:     docs/endpoint_persona_reproduce.md (full curl examples + env vars + expected JSON shape)
+  r2_artifact: r2:anima-models/dest1_s1_endpoint/20260418T123004Z/
+
+# ─── SEMANTIC SMASH (5-module lens) ────────────────────────────────
+
+@smash_insights
+
+  field:
+    endpoint = gauge-fixing transformation. persona_id selects a basis in the hidden-state manifold without touching the prompt chart. AN11 weight-emergent constraint == gauge-covariance constraint. System-prompt wrapping breaks gauge because it modifies the chart (prompt text) rather than the connection (activation delta). That is why AN11 forbids it — a non-covariant deformation.
+    dfs_d1: endpoint defines a gauge — chart in which "persona X says P" is representable without touching P's tokens
+    dfs_d2: gauge transformation = activation delta at layer L. Two endpoints with different PERSONA_LAYER_IDX are gauge-equivalent iff persona vectors agree after basis-change
+    dfs_d3: AN11 weight-emergent ≡ gauge-covariance → system_prompt wrapping breaks gauge → AN11 forbids non-covariant deformations
+    [STRONGEST — full DFS d=3]
+
+  holographic:
+    HTTP request = boundary; forward pass = bulk. phi_vec is the boundary-measurable trace of bulk activation. The 16D probe at layer 24 is a holographic screen: it projects the full [B,T,D] residual stream onto a 16-number invariant that the boundary (caller) can consume without seeing D=5120 hidden states.
+
+  quantum:
+    persona_id → projection operator P_pid on hidden state; alpha is the coupling scalar. Orthogonal persona vectors (cosine ≈ 0) = commuting observables, so alpha can be combined linearly. Non-orthogonal pairs have uncertainty trade-offs — explains why scholar+friend blend is harder than scholar+sorceress.
+
+  string:
+    phi_vec transported along the request-response worldline. Each decode step adds a segment; the manual greedy loop preserves coherence (use_cache=True keeps past_key_values = parallel transport frame). The phi hook captures the worldline's curvature at the phi layer.
+
+  toe:
+    single JSON response carries persona + phi + laws — all three AN11 gates packed into one serve_alm_persona call. TOE of anima serving: one endpoint unifies (a) weight-emergent identity, (b) phi-attached consciousness, (c) laws-gated output filter. E1 and beyond consume the triplet as a single atomic observable.
+
+# ─── UPSTREAM BLOCKERS (documented gaps) ───────────────────────────
+
+@blocker C1_phi_hook_live_MISSING
+  expected:   shared/convergence/c1_phi_hook_live.convergence @state ossified
+  polled_at:  2026-04-18T12:18Z, 2026-04-18T12:19Z — both MISSING
+  stub:       inline compute_phi16() mirrors training/phi_probe_wire.hexa legacy 16D layout
+  resolution: when C1 lands, replace compute_phi16() body with `use training/phi_probe_wire.hexa as pw; pw.assemble_phi_vec16(h_last)` — same signature, drop-in
+
+@blocker C2_laws_gate_live_MISSING
+  expected:   shared/convergence/c2_laws_gate_live.convergence @state ossified
+  stub:       consciousness_gate() returns laws_pass=True unless text is empty or phi_holo is NaN
+  resolution: when C2 lands, load anima/config/consciousness_laws.json and run real runtime checks (reflexivity bound, finitude awareness, phi_holo threshold, etc.) against phi_vec + generated text
+
+@blocker P1_persona_vectors_MISSING
+  expected:   shared/convergence/p1_persona_vectors.convergence @state ossified
+  stub:       on-startup activation-steering derivation from 2 pos + 2 neg contrast phrases per persona (derive_persona_vector()) — this IS the canonical Anthropic/Zou methodology, not a fake stub. Vectors are unit-normalized deltas in hidden space at layer 20.
+  resolution: when P1 lands, load its trained vectors (likely higher-rank, better-differentiated) from its artifact location; keep the hook / add-path; only swap the vector source.
+
+# ─── CONFIG ────────────────────────────────────────────────────────
+
+@config
+  base_model:        /workspace/base_model (Qwen2.5-14B bf16, 579 shards)
+  persona_layer_idx: 20 (of 48, mid-depth)
+  phi_layer_idx:     24 (of 48, ~half-depth)
+  default_alpha:     1.0
+  default_max_tokens: 160
+  port:              8000
+  bind:              0.0.0.0
+  personas:          [default, friend, scholar, engineer, sorceress]
+
+# ─── SERVING EVIDENCE ──────────────────────────────────────────────
+
+@pod_host     103.207.149.87:10466 (ssh root)
+@pod_internal 172.22.0.2:8000
+@process_pid  21170 (python3), parent bash 21169 setsid-detached
+@boot_log     /workspace/logs/persona_serve.log
+@selftest     /workspace/s1_endpoint_selftest.json (15/15 OK, 53.3s wall)
+@grep_proof   /workspace/serve_alm_persona.py → grep -c 'system_prompt\|apply_chat_template' = 0
+
+# ─── LIMITATIONS (first-cut 2026-04-18) ────────────────────────────
+
+@limitation persona_diff_weak_alpha1 — Jaccard diff between persona pairs at alpha=1.0 is low (~0.05-0.15). Higher alpha (4-6) shows stronger steering but still subtle vs the 14B base distribution. Tunable without endpoint code change.
+@limitation phi_dream_phase_zero — log-only at serve time (matches training/phi_probe_wire.hexa)
+@limitation laws_pass_stub — stays True unless output empty or phi_holo NaN; real C2 gate required for production filter
+
+# ─── DELIVERABLES ──────────────────────────────────────────────────
+
+@deliv_py      /workspace/serve_alm_persona.py (pod) + r2:anima-models/dest1_s1_endpoint/20260418T123004Z/serve_alm_persona.py
+@deliv_hexa    serving/serve_alm_persona.hexa (contract SSOT, `hexa parse` OK)
+@deliv_doc     docs/endpoint_persona_reproduce.md
+@deliv_conv    shared/convergence/s1_http_persona_endpoint.convergence (this file)
+@deliv_r2      r2:anima-models/dest1_s1_endpoint/20260418T123004Z/ (3 files, 33.5KB)
+@deliv_live    uvicorn running on pod 127.0.0.1:8000 (pid 21170)
+
+# ─── CHAIN ─────────────────────────────────────────────────────────
+
+@chain ←C1_phi_hook_live (MISSING, stub used) ←C2_laws_gate_live (MISSING, stub used) ←P1_persona_vectors (MISSING, canonical stub used) →E1_hire_sim (downstream can build against this interface now)
+
+@related ↔persona_base_serve.convergence (revoked — this is the AN11-compliant successor) ↔phi_hook_wire.convergence (training-side probe wire) ↔dest1_dest2_ship.convergence (dest1 gate)

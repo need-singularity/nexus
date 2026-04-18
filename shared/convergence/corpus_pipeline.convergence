@@ -1,0 +1,59 @@
+@track CORPUS_PIPELINE_KR
+@state partial
+@date 2026-04-18
+@scope P22 corpus ingest + kowiki pull + shard — fuels ALM r10/r10c + CLM r5
+
+@ingest training/corpus_ingest.hexa
+@ingest_probe training/corpus_ingest_probe.hexa
+@shard training/corpus_shard.hexa
+@strip training/corpus_strip_chatml.hexa
+@auto_dir training/corpus_auto/
+@auto_manifest training/corpus_auto/manifest.json
+@auto_pipeline training/corpus_auto/run_pipeline.hexa
+@auto_dedup training/corpus_auto/dedup.hexa
+@auto_quality training/corpus_auto/quality_filter.hexa
+@auto_rotation training/corpus_auto/source_rotation.hexa
+@auto_tok_compat training/corpus_auto/tokenizer_compat_check.hexa
+@auto_kowiki_log training/corpus_auto/kowiki_pull.log
+@auto_kowiki_report training/corpus_auto/kowiki_pull_report.md
+@report training/corpus_pipeline_report.md
+@report_ingest training/corpus_ingest_kowiki_report.md
+@report_parquet training/parquet_to_jsonl_report.md
+@parquet_tool training/parquet_to_jsonl.hexa
+@tool_corpus_clean training/build_tool_corpus_clean.hexa
+@tool_corpus_mixed training/build_tool_corpus_mixed.hexa
+@report_kowiki_slicer training/kowiki_slice.hexa (BUILT 2026-04-18 — head|awk stream, target = main*0.15/0.85; consumed by alm_14b_r10c --kowiki mix; PI-EXEC-SPLIT-OOM safe)
+
+@kowiki_bytes 1377317862 (1.28 GiB)
+@kowiki_lines 647897
+@kowiki_sha256 d1aabfdb...cb1c
+@kowiki_hangul_pct 85 (threshold 60 PASS)
+
+@local_discovery_bytes 4382739 (4.38 MB) — below 100MB gate → pull pivot
+@local_sources corpus_tool/mixed_tool_corpus.jsonl(3.2MB) corpus_tool/clean_tool_corpus_dryrun(0.6MB) rotated.txt(0.4MB) seed_tool_corpus(31KB) + 6_persona_transcripts(4.7KB)
+@pull_targets kowiki(850MB p1) namuwiki(6GB) aihub(2.5GB) news(4GB) mc4-ko(50GB)
+@sources_registry shared/config/corpus_sources.json
+@total_post_kowiki_sources 11 (kowiki + 3 tool_corpus + rotated + 6 transcripts)
+@only_new_sources 1 (kowiki.jsonl only)
+
+@ingest_cli --only-new (restrict to corpus_auto/*.jsonl) --list-only (enumerate w/o read)
+@self_loop_guard excludes corpus_merged_kr.jsonl
+
+@local_cap_4gb_rss read_file(1.28GiB)+content_hash loop blows 4GB RSS → SIGKILL empirical
+@h100_dispatch_cmd HEXA_LOCAL=0 hexa run training/corpus_ingest.hexa --only-new --limit-mb 2048
+@stage_cmd hexa run training/corpus_shard.hexa --shard-mb 512
+
+@expected_output 4_shards x 512MB ~= 1.0B byte-tokens
+@fuel_targets alm_14b_r10c CLM_r5
+
+@ossified CORPUS-OSS-01 STREAMING_FOR_LARGE_CORPUS head|jq|head-c pattern for >100MB probes
+@ossified CORPUS-OSS-02 HANGUL_RATIO_PROBE_60PCT_GATE 4GB RSS safe (10MB sample byte-scan U+AC00..D7AF)
+@ossified CORPUS-OSS-03 ONLY_NEW_FLAG_FOR_DELTA_INGEST corpus_auto/*.jsonl allowlist avoids re-process
+
+@pitfall PI-STAGE0-FIND stage0 '.find()' absence — use .index_of / .substring
+@pitfall PI-EXEC-SPLIT-OOM exec+split pattern OOMs — stream via shell pipe instead
+
+@gap_1 full ingest deferred — pod H100 dispatch required
+@gap_2 BPE tokenizer (training/tokenizer/kr_bpe_32k.model exists) not yet wired into corpus_shard hexa loader
+
+@chain ←alm_14b_r10.convergence (collapse → corpus diversity fix) →alm_14b_r10c (pending) →clm_1b_r4.convergence →dest1_dest2_ship.convergence (kowiki_slice consumer)

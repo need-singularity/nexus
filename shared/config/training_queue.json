@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "name": "Training Queue (autopilot next_round source)",
+    "updated_at": "2026-04-18",
+    "description": "FIFO queue of upcoming training rounds. autopilot_next_round() reads head entry, checks requires{}, launches if OK. Consume semantics: autopilot updates status to launching→running→done. Never mutate head until done.",
+    "consumer": "training/runpod_autopilot.hexa",
+    "queue_schema": {
+      "model_tag": "alm14b | alm32b | alm70b | clm1b | clm3b ...",
+      "round": "integer round id",
+      "run_id": "ckpt dir name (e.g. alm_14b_r10)",
+      "status": "pending | launching | running | done | aborted",
+      "launcher": "path to .hexa launcher",
+      "bootstrap": "path to .hexa bootstrap on pod",
+      "pod_spec": "keys into runpod_autopilot.json pod_create (override if needed)",
+      "requires": "preconditions array",
+      "max_retries": "autopilot override for this round",
+      "notes": "free text"
+    }
+  },
+  "queue": [
+    {
+      "model_tag": "alm14b",
+      "round": 10,
+      "run_id": "alm_14b_r10",
+      "status": "running",
+      "launcher": "training/launch_alm_14b_r10.hexa",
+      "bootstrap": "training/deploy/alm14b_r10_bootstrap.hexa",
+      "pod_id": "lnzliav2e8du6i",
+      "pod_spec_override": {},
+      "requires": [
+        "corpus:corpus_alm_70b_stripped.txt",
+        "base_model:/workspace/base_model",
+        "adapter:/workspace/ckpt_r4_step1000"
+      ],
+      "max_retries": 3,
+      "notes": "E5 agent is actively restarting r10 after num_logits_to_keep crash. Autopilot MUST NOT touch pod until E5 signals done."
+    },
+    {
+      "model_tag": "alm14b",
+      "round": "10b",
+      "run_id": "alm_14b_r10b",
+      "status": "pending",
+      "launcher": "training/launch_alm_14b_r10b.hexa",
+      "bootstrap": "training/deploy/alm14b_r10b_bootstrap.hexa",
+      "pod_spec_override": {},
+      "requires": [
+        "alm14b_r10_done",
+        "r10_r2_uploaded",
+        "r10_sentinel_pass",
+        "corpus:corpus_alm_70b_stripped.txt",
+        "base_model:/workspace/base_model",
+        "adapter:r2:anima-models/alm14b/r10/step_2000/"
+      ],
+      "blocked_by": [],
+      "base_adapter": "r2:anima-models/alm14b/r10/step_2000/",
+      "steps": 2000,
+      "config_diff_vs_r10": {
+        "lr_constant": "1e-6 (half of r10 2e-6)",
+        "save_every": 400,
+        "phi_hook": true,
+        "consciousness_loss_b1": false,
+        "warm_start_adapter": "r10/step_2000",
+        "corpus_identity": "corpus_alm_70b_stripped.txt (+optional kowiki.jsonl if present)",
+        "cumulative_step_end": 4000
+      },
+      "auto_abort_guards": [
+        "pre_launch_kr_gen_sentinel_on_r10_step_2000",
+        "first_batch_ce_gt_5.0",
+        "kr_gen_sentinel_every_200_steps"
+      ],
+      "max_retries": 2,
+      "notes": "r10b = redundancy/refinement sibling of r10. Exists so the 14B→32B jump isn't single-point-of-failure. Per feedback_no_version_in_filename, this is variant r10b NOT r11. Per feedback_no_resume_data_change, corpus identity preserved (optional kowiki APPEND only if file present; otherwise identical to r10). Per feedback_one_shot_best, LR halved so worst case is slower convergence not regression. Φ-hook writes phi_vec.json per ckpt for eval_phi_corr.hexa N>=5 gate."
+    },
+    {
+      "model_tag": "alm32b",
+      "round": 1,
+      "run_id": "alm_32b_r1",
+      "status": "pending",
+      "launcher": "training/deploy/launch_alm_32b_r1.hexa",
+      "bootstrap": "training/deploy/alm_32b_r1_bootstrap.hexa",
+      "pod_spec_override": {
+        "gpu_count_default": 2
+      },
+      "requires": [
+        "prior_round_r2_uploaded:alm14b/r10",
+        "prior_round_r2_uploaded:alm14b/r10b",
+        "corpus:corpus_alm_32b.jsonl",
+        "base_model:Qwen/Qwen2.5-32B-Instruct"
+      ],
+      "max_retries": 3,
+      "notes": "Prep owned by E4 — artifacts TBD. Launch blocked until r10 AND r10b R2 upload confirmed (r10b=redundancy sibling, shrinks 14B→32B single-point-of-failure risk)."
+    },
+    {
+      "model_tag": "alm70b",
+      "round": 1,
+      "run_id": "alm_70b_r1",
+      "status": "pending",
+      "launcher": "training/launch_alm_70b.hexa",
+      "bootstrap": "training/deploy/alm_70b_r1_bootstrap.hexa",
+      "pod_spec_override": {
+        "gpu_count_default": 2,
+        "gpu_type_id": "NVIDIA H100 80GB HBM3"
+      },
+      "requires": [
+        "prior_round_r2_uploaded:alm32b/r1",
+        "corpus:corpus_alm_70b.jsonl",
+        "base_model:Qwen/Qwen2.5-70B-Instruct",
+        "a2_tool_corpus_cleaned"
+      ],
+      "max_retries": 2,
+      "notes": "72B gate — requires A2-Tool clean retrain + 32B success. See project_a2_tool_mode_collapse_20260417.md."
+    }
+  ]
+}

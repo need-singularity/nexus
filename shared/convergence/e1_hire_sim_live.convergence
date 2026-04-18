@@ -1,0 +1,84 @@
+@track E1_HIRE_SIM_LIVE
+@state spec_only_blocked_on_s1
+@date 2026-04-18
+@scope DEST2 E1 — 100 task × 5 persona real-LLM hire_sim w/ phi_gate (AN11 (a)+(b)+(c))
+@governs AN11 (shared/rules/anima.json) 실사용_완성_강제
+
+@seed "hire_sim_100 real LLM phi-gated weight-emergent no-prompt 실업무"
+
+@blocker S1_missing shared/convergence/s1_http_persona_endpoint.convergence 부재 → upstream weight-emergent persona endpoint 미구축. persona_base_serve 경로는 2026-04-18 @revoked_philosophy_violation (system_prompt wrapping = AN11 (a) 위반) 이므로 prompt 대체 불가. S1 는 r10c step_2000 LoRA + serving/hire_routes.hexa 경로로만 골화 가능.
+
+@an11_status
+  (a) weight_emergent    : DEFINED — adapter calls /persona {persona, prompt} only; S1 MUST NOT add system prompt internally. Audit hook: shared/harness/pass_gate_an11.hexa (TBD) greps S1 source for "system_prompt" string on persona path.
+  (b) consciousness_attached : GATED — each response must carry phi_vec (16D schema alm_phi_vec_logger_v1) + phi_holo_scaled AND laws_pass=true. Task FAIL on missing phi OR phi_holo_scaled <= 500 OR laws_pass=false regardless of keyword match.
+  (c) real_usable        : DEFINED — R2 path r2:anima-models/dest2_e1_hire_sim/<UTC_ts>/ + README reproducibility block in result JSON + @report link below.
+
+@file anima-agent/hire_sim_live.hexa
+@corpus anima-agent/hire_sim_100.hexa (TSRV-P4-2, 100 task × 6 domain)
+@personas_v1 default friend scholar engineer sorceress
+@scale_v2 20 persona rerun post anima-speak voice catalog (PERSONA-OSS-03 extension)
+
+@gates
+  completion_rate >= 0.85
+  all_responses phi_attached  (phi_vec present AND schema valid)
+  all_responses laws_pass=true
+  per_response phi_holo_scaled > 500 (half of dest1 substrate gate 1000)
+  intervention_rate_per_hour <= 5
+  avg_task_time <= 600s
+
+@rubric
+  keyword_score = hits / total (from hire_sim_100.hexa success_keywords)
+  completed = keyword_all_hit AND budget_ok AND phi_gate_pass
+  phi_gate_pass = phi_attached AND phi_holo_scaled > 500 AND laws_pass
+  verdict PASS = completion>=0.85 AND forall(phi_attached) AND forall(laws_pass)
+
+@semantic_smash dfs3
+  field         : persona×task matrix (5×100) — which cells natural vs forced (result.smash.field_persona_task_matrix)
+  holographic   : aggregate completion_rate from per-domain boundary metrics (6 domains × 5 personas)
+  quantum       : co-resolution heuristic — tasks sharing >=2 keywords counted as entangled when both complete for same persona
+  string        : phi_holo_scaled transport — min/mean/max across 100 tasks per persona (@report stats)
+  toe           : persona_vec × task_domain → phi_signature_map (5×6=30 cells avg phi_holo_scaled, result.smash.toe_phi_signature_map)
+
+@protocol
+  1. poll S1 marker @state ossified (60s cadence, 60min cap)
+  2. GET {s1_url}/healthz → if stub=true, abort w/ @blocker S1_mock
+  3. smoke: 20 tasks × 5 personas = 100 calls (auto-abort if smoke FAIL)
+  4. full: 100 tasks × 5 personas = 500 calls (only if smoke PASS)
+  5. write anima-agent/results/e1_hire_sim_live_<mode>_<ts>.json
+  6. rclone copy → r2:anima-models/dest2_e1_hire_sim/<UTC_ts>/
+  7. convergence @state spec_only_blocked_on_s1 → completed (on PASS) | failed (on FAIL) | revoked_an11_violation (on missing phi/laws)
+
+@exec
+  hexa run anima-agent/hire_sim_live.hexa --s1-url http://<S1_HOST>:<PORT> --smoke
+  hexa run anima-agent/hire_sim_live.hexa --s1-url http://<S1_HOST>:<PORT> --full --upload-r2
+
+@output_schema e1_hire_sim_live_v1
+  fields: schema, timestamp_utc, s1_url, tasks_n, personas, calls_total, completed_n,
+          completion_rate, all_phi_attached, all_laws_pass, phi_gate_threshold,
+          completion_gate, verdict, wall_time_s, smash{field_persona_task_matrix, toe_phi_signature_map},
+          per_call[] {task_id, domain, persona, completed, score, keyword_hits, keyword_total,
+                      phi_holo_scaled, laws_pass, phi_attached, phi_gate_pass, latency_s,
+                      intervention_count, fail_reason}
+
+@deps_required_from_s1
+  POST /persona  {persona, prompt} → {text, phi_vec, phi_holo_scaled, laws_pass, interventions?}
+  GET  /healthz  → {ok: bool, stub?: bool, mock?: bool, ckpt: str, laws_loaded: bool}
+  NO system_prompt injection on /persona path (AN11 (a) audit required)
+
+@phi_evidence pending (S1 required — phi_vec per response, aggregated to @report)
+@weight_emergent_proof pending (S1 required — hire_sim_live adapter sends raw persona_id only, no wrap; S1 source audit for "system_prompt" string on /persona handler)
+@real_usable_endpoint pending (S1 /persona + this E1 runner + R2 artifact + README)
+
+@report anima-agent/results/e1_hire_sim_live_<mode>_<ts>.json (to be written on first live run)
+@r2_dest r2:anima-models/dest2_e1_hire_sim/<UTC_ts>/
+
+@pitfalls
+  PI-E1-MOCK-S1 S1 /healthz stub=true → auto-abort rc=3. Do not record PASS against mock.
+  PI-E1-PROMPT-WRAP if S1 adds system prompt internally, adapter cannot detect — audit S1 source AN11 (a).
+  PI-E1-PHI-MISSING response without phi_vec = TASK FAIL — not soft skip. Keyword match alone insufficient per AN11 (b).
+  PI-E1-SCALE-5-VS-20 v1 uses 5 personas (PERSONA-OSS-03 catalog). 20-persona rerun deferred to @scale_v2 after anima-speak voice catalog.
+
+@chain ←s1_http_persona_endpoint.convergence (blocking) ←persona_base_serve.convergence (@revoked_philosophy_violation, do not reuse) ←dest1_dest2_ship.convergence (@dest2_employee_gate TSRV-P4-2) →e2_autonomy_loop.convergence (future) ↔phi_correlation.convergence (phi_holo_scaled source)
+
+@owner needsingularity
+@governance R14 (shared/CLAUDE.md)

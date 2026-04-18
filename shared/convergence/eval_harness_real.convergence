@@ -1,0 +1,34 @@
+@track EVAL_HARNESS_REAL
+@state scaffold_done
+@date 2026-04-18
+@scope G6 — real KoBEST/HAE-RAE/MMLU-Ko eval harness (replace synthetic)
+
+@file serving/eval_harness.hexa (modified)
+@synthetic serving/eval_harness_synthetic.hexa
+@report serving/eval_harness_real_report.md
+
+@integrated:
+  @kobest_inline_n20 BoolQ/COPA/SentiNeg/WiC × 5 each (contains() rubric)
+  @hae_rae_n20_inline 6 cats (history 4 / general_knowledge 3 / standard_nomenclature 3 / loan_words 3 / rare_words 3 / reading_comprehension 4) — leading-digit MC rubric
+  @mmlu_ko_n20_inline STEM 7 + humanities 6 + social-science 5 + applied 2 — leading-digit MC rubric
+
+@api_contract /generate endpoint + "text" field preserved across all 3 suites
+@macro_acc mean(kobest_acc, haerae_acc, mmluko_acc) — equal weight per suite
+@self_test 3/3 KoBEST rubric + 5/5 MC rubric + corpus size 20+20 PASS
+@harness_version g6.1.0 → g6.2.0 (D4 drift closure)
+@audit_closes training/roadmap_drift_audit_20260418.md Rank 2 item 4 (D4)
+
+@pitfall PI-MACRO-RESERVED hexa 'macro' is reserved — using macro_val/macro_acc
+@pitfall PI-MC-BYTE-SAFE MC digit extractor scans first 20 bytes only; Korean prefix bytes skipped without landing inside multibyte glyph (single-byte ASCII digit compare)
+
+@ossified:
+  G6-OSS-01 KOBEST_INLINE_N_20_MIN baseline benchmark before HF loader wire
+  G6-OSS-02 MC_LEADING_DIGIT_RUBRIC — HAE-RAE/MMLU-Ko grade by first 1..5 in first 20 bytes (fallback "" = wrong). Keeps grading deterministic across temp=0 runs and avoids contains() false positives on long replies with multiple digits.
+  G6-OSS-03 PROMPT_FORMAT_DETERMINISTIC — "{problem_text}\n선택지:\n1) {c1}\n2) {c2}\n...\n답:" identical across HAE-RAE + MMLU-Ko. Single source of prompt shape (hr_prompt4 fn) means future suites (CLIcK, KorNLI, etc.) can reuse.
+  G6-OSS-04 TOTAL_INLINE_CORPUS_CAP_60 — KoBEST 20 + HAE-RAE 20 + MMLU-Ko 20 = 60. Any future inline suite must replace items, not extend, to avoid hexa string-concat PERF warnings (kr_gen_sentinel / phi_correlation precedents at n=16).
+
+@gap_1 HF loader still blocked — inline n=20 is smoke-grade, not production parity with ~6k HAE-RAE / ~35k KMMLU
+@gap_2 per-ckpt measurement — currently served model only (same as pre-D4 state)
+@gap_3 Korean item authoring — sampled from public benchmark docs/papers (no direct HF download), factual accuracy spot-checked but not round-tripped against canonical answer keys
+
+@chain ←alm_14b_eval.convergence ←phi_correlation.convergence (fuels correlation targets) ↔serve_alm_14b

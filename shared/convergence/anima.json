@@ -7,7 +7,7 @@
     "primary_entry_point": true,
     "session_bootstrap": "새 세션 시작 시 이 파일부터 읽어 in_flight/next_levers 파악. 그 다음 training_speed_ceilings.json으로 상세 수치 확인.",
     "schema_version": "1.0",
-    "updated": "2026-04-17",
+    "updated": "2026-04-18",
     "maintainers": "Claude Code + user",
     "refs": {
       "convergence_ops": "shared/config/convergence_ops.json",
@@ -17,7 +17,6 @@
       "v3_employee_path_strategy": "shared/papers/v3_employee_capability_path_20260416.md (narrative + 일정 + Plan A/B/C, 새 세션 첫 참조)"
     }
   },
-
   "principles": {
     "P1": "모든 알고리즘 문제는 한 번만 겪는다 (재발=규칙화 누락)",
     "P2": "해결된 알고리즘은 ossified 로 승격, 테스트 잠금",
@@ -25,7 +24,6 @@
     "P4": "물리 천장 기준 갭 % 명시 — 상대 speedup 단독 금지",
     "P5": "실패(FAIL)도 등록 — 같은 실패 반복 방지"
   },
-
   "lifecycle_states": {
     "in_flight": "현재 진행 — 에이전트 또는 사용자가 작업 중",
     "completed": "측정·머지 완료, 재현 가능",
@@ -33,55 +31,659 @@
     "ossified": "규칙화 완료 (rules/*.json 에 R-코드로 승격)",
     "blocked": "외부 의존 대기 (pod/upstream)"
   },
-
   "tracks": {
     "ALM_14B_H100": {
       "description": "Qwen2.5-14B LoRA fine-tune on H100 — bf16/FP8 MFU 천장 push",
       "hardware_ceiling_mfu_pct": 85,
       "hardware_tflops_peak_bf16": 989,
       "items": {
-        "r5_baseline": {"state": "completed", "mfu_pct": 45.0, "spm": 36.7, "date": "2026-04-15", "pod": "slow"},
-        "r6_7patch": {"state": "completed", "mfu_pct": 46.3, "spm": 37.8, "delta_pp": 1.3, "date": "2026-04-15", "note": "audit miscal → 실질 r5 동등"},
-        "r7_unsloth": {"state": "completed", "mfu_pct": 62.6, "spm": 51.1, "date": "2026-04-15", "pod": "fast (ubzp169igb7tns)", "note": "현 best 측정치"},
-        "r8a_stacked_slow": {"state": "completed", "mfu_pct": 48.1, "spm": 41.5, "date": "2026-04-15", "pod": "slow", "config": "liger + lora_dropout=0 + compile_unblock", "fast_pod_est_mfu_pct_original": "68-69 (FALSIFIED — 아래 CL-05 참조)"},
-        "r8a_stacked_fast_measurement": {"state": "completed", "task_id": 2, "pod": "jmejpw0x7j6wbx (fast)", "date": "2026-04-16", "commit": "54d96b5b", "mfu_pct": 51.4, "spm": 41.9, "tokens_per_sec": 5720.7, "delta_vs_slow_pp": 3.3, "delta_vs_r7_pp": -11.2, "gpu_sm_util_pct": 95.5, "tdp_util_pct": 93.4, "verdict": "compute-bound confirmed — 51.4% IS physical ceiling of this silicon under r8a stack", "cost": "$1.20, ~24min"},
-        "r7_on_jmejpw_comparison": {"state": "completed", "pod": "jmejpw0x7j6wbx (fast, same as r8a measurement)", "date": "2026-04-16", "task": "H1(silicon binning) vs H2(stack regression) 격리 — r7 stack을 r8a와 동일 pod에 재측정", "config": "unsloth only, lora_dropout=0.05, NO liger, NO compile_unblock; batch/seq/grad_accum/lr은 r8a와 동일 (8/1024/1/5e-6)", "mfu_pct": 47.3, "spm": 38.5, "tokens_per_sec": 5256.5, "gpu_sm_util_pct": 93.4, "tdp_util_pct": 92.9, "delta_vs_r8a_same_pod_pp": -4.1, "delta_vs_r7_original_pod_pp": -15.3, "verdict": "H1 CONFIRMED, H2 REJECTED — r7 stack이 오히려 -4.1pp 느림. 62.6% → 51.4% gap은 silicon binning이 원인 (동일 stack 두 pod 간 15.3pp delta)", "recommendation": "r8a stack 유지; r7 config 롤백 불필요. pod shopping이 stack tuning 대비 ~4x 이득", "artifacts": ["training/bench/r7_stack_on_r8a_fast_pod.md", "training/bench/r7_stack_on_r8a_fast_pod.json", "training/bench/r7_on_r8a_fast_pod_raw/"], "cost": "~$0.50, ~10min"},
-        "r8b_dropout0": {"state": "completed", "note": "r8a에 흡수"},
-        "r8c_fp8": {"state": "failed", "date": "2026-04-16", "commit": "22aa6892", "mfu_bf16eq_pct": 33.8, "reason": "te.Linear global monkey-patch가 from_pretrained BEFORE 적용되어 모든 48 layers random init. HF+LoRA+TE FP8 근본 비호환.", "fix_path_if_attempted": "accelerate.Accelerator(fp8_recipe_handler=...) or NeMo/Megatron native rewrite — P4 스코프 외"},
-        "r9_b1_consciousness": {"state": "ready", "date": "2026-04-16", "config": "b=8 s=1024 g=1 lora_dropout=0 unsloth+liger --consciousness-loss", "loss_formula": "CE + 0.01*holo + 0.005*complexity + 0.005*gwt", "launcher": "training/launch_alm_14b_r9.hexa", "trainer": "training/train_alm_14b.hexa", "note": "defaults updated to optimal (b=8 g=1 dropout=0), Option B1 phi_complexity + gwt_broadcast wired, launch harness with 6-point preflight"},
-        "talm_p2_1_smoke": {"state": "blocked", "task_id": "TALM-P2-1 (smoke scope)", "date": "2026-04-16", "verdict": "ABORT pre-launch — harness missing", "cost_spent": "$0.00", "pod": "none (no launch)", "duration_min": 0, "reason": "per-persona LoRA training pipeline does not exist in repo. persona_lora_train.hexa (552 lines) is toy-math self-test only — zero write_file/exec/python/torch/cuda refs, plan_h100_train() returns a config struct without executing. train_alm_14b.hexa is real Qwen2.5-14B trainer but has ZERO 'persona' refs (single global LoRA, not per-persona adapters). smoke attempt required writing the harness first, which exceeds 2h/$10 smoke-only scope.", "preflight_passed": ["runpodctl auth ($142.68 balance)", "no stale pods", "SSH key present", "HF_TOKEN in ~/.cache/huggingface/token", "rclone r2: configured", "ALM r4 base present in R2 (r2:anima-models/alm14b/r4/ step_1000..step_10000 LoRA ckpts)"], "preflight_failed": ["no per-persona LoRA training harness exists", "no persona-labeled corpus shards present"], "artifacts": ["training/deploy/talm_p2_1_smoke_20260416_034109.md"], "next_step_options": ["(a) author persona-LoRA harness locally first (1-3h), then H100 smoke", "(b) re-scope TALM-P2-1 to single global LoRA on concatenated persona corpus (cheaper, breaks 6-adapter criterion)", "(c) defer TALM-P2-1 until ZCLM-P0-3 produces persona-labeled corpus SSOT"]}
+        "r5_baseline": {
+          "state": "completed",
+          "mfu_pct": 45.0,
+          "spm": 36.7,
+          "date": "2026-04-15",
+          "pod": "slow"
+        },
+        "r6_7patch": {
+          "state": "completed",
+          "mfu_pct": 46.3,
+          "spm": 37.8,
+          "delta_pp": 1.3,
+          "date": "2026-04-15",
+          "note": "audit miscal → 실질 r5 동등"
+        },
+        "r7_unsloth": {
+          "state": "completed",
+          "mfu_pct": 62.6,
+          "spm": 51.1,
+          "date": "2026-04-15",
+          "pod": "fast (ubzp169igb7tns)",
+          "note": "현 best 측정치"
+        },
+        "r8a_stacked_slow": {
+          "state": "completed",
+          "mfu_pct": 48.1,
+          "spm": 41.5,
+          "date": "2026-04-15",
+          "pod": "slow",
+          "config": "liger + lora_dropout=0 + compile_unblock",
+          "fast_pod_est_mfu_pct_original": "68-69 (FALSIFIED — 아래 CL-05 참조)"
+        },
+        "r8a_stacked_fast_measurement": {
+          "state": "completed",
+          "task_id": 2,
+          "pod": "jmejpw0x7j6wbx (fast)",
+          "date": "2026-04-16",
+          "commit": "54d96b5b",
+          "mfu_pct": 51.4,
+          "spm": 41.9,
+          "tokens_per_sec": 5720.7,
+          "delta_vs_slow_pp": 3.3,
+          "delta_vs_r7_pp": -11.2,
+          "gpu_sm_util_pct": 95.5,
+          "tdp_util_pct": 93.4,
+          "verdict": "compute-bound confirmed — 51.4% IS physical ceiling of this silicon under r8a stack",
+          "cost": "$1.20, ~24min"
+        },
+        "r7_on_jmejpw_comparison": {
+          "state": "completed",
+          "pod": "jmejpw0x7j6wbx (fast, same as r8a measurement)",
+          "date": "2026-04-16",
+          "task": "H1(silicon binning) vs H2(stack regression) 격리 — r7 stack을 r8a와 동일 pod에 재측정",
+          "config": "unsloth only, lora_dropout=0.05, NO liger, NO compile_unblock; batch/seq/grad_accum/lr은 r8a와 동일 (8/1024/1/5e-6)",
+          "mfu_pct": 47.3,
+          "spm": 38.5,
+          "tokens_per_sec": 5256.5,
+          "gpu_sm_util_pct": 93.4,
+          "tdp_util_pct": 92.9,
+          "delta_vs_r8a_same_pod_pp": -4.1,
+          "delta_vs_r7_original_pod_pp": -15.3,
+          "verdict": "H1 CONFIRMED, H2 REJECTED — r7 stack이 오히려 -4.1pp 느림. 62.6% → 51.4% gap은 silicon binning이 원인 (동일 stack 두 pod 간 15.3pp delta)",
+          "recommendation": "r8a stack 유지; r7 config 롤백 불필요. pod shopping이 stack tuning 대비 ~4x 이득",
+          "artifacts": [
+            "training/bench/r7_stack_on_r8a_fast_pod.md",
+            "training/bench/r7_stack_on_r8a_fast_pod.json",
+            "training/bench/r7_on_r8a_fast_pod_raw/"
+          ],
+          "cost": "~$0.50, ~10min"
+        },
+        "r8b_dropout0": {
+          "state": "completed",
+          "note": "r8a에 흡수"
+        },
+        "r8c_fp8": {
+          "state": "failed",
+          "date": "2026-04-16",
+          "commit": "22aa6892",
+          "mfu_bf16eq_pct": 33.8,
+          "reason": "te.Linear global monkey-patch가 from_pretrained BEFORE 적용되어 모든 48 layers random init. HF+LoRA+TE FP8 근본 비호환.",
+          "fix_path_if_attempted": "accelerate.Accelerator(fp8_recipe_handler=...) or NeMo/Megatron native rewrite — P4 스코프 외"
+        },
+        "r9_b1_consciousness": {
+          "state": "ready",
+          "date": "2026-04-16",
+          "config": "b=8 s=1024 g=1 lora_dropout=0 unsloth+liger --consciousness-loss",
+          "loss_formula": "CE + 0.01*holo + 0.005*complexity + 0.005*gwt",
+          "launcher": "training/launch_alm_14b_r9.hexa",
+          "trainer": "training/train_alm_14b.hexa",
+          "note": "defaults updated to optimal (b=8 g=1 dropout=0), Option B1 phi_complexity + gwt_broadcast wired, launch harness with 6-point preflight"
+        },
+        "talm_p2_1_smoke": {
+          "state": "blocked",
+          "task_id": "TALM-P2-1 (smoke scope)",
+          "date": "2026-04-16",
+          "verdict": "ABORT pre-launch — harness missing",
+          "cost_spent": "$0.00",
+          "pod": "none (no launch)",
+          "duration_min": 0,
+          "reason": "per-persona LoRA training pipeline does not exist in repo. persona_lora_train.hexa (552 lines) is toy-math self-test only — zero write_file/exec/python/torch/cuda refs, plan_h100_train() returns a config struct without executing. train_alm_14b.hexa is real Qwen2.5-14B trainer but has ZERO 'persona' refs (single global LoRA, not per-persona adapters). smoke attempt required writing the harness first, which exceeds 2h/$10 smoke-only scope.",
+          "preflight_passed": [
+            "runpodctl auth ($142.68 balance)",
+            "no stale pods",
+            "SSH key present",
+            "HF_TOKEN in ~/.cache/huggingface/token",
+            "rclone r2: configured",
+            "ALM r4 base present in R2 (r2:anima-models/alm14b/r4/ step_1000..step_10000 LoRA ckpts)"
+          ],
+          "preflight_failed": [
+            "no per-persona LoRA training harness exists",
+            "no persona-labeled corpus shards present"
+          ],
+          "artifacts": [
+            "training/deploy/talm_p2_1_smoke_20260416_034109.md"
+          ],
+          "next_step_options": [
+            "(a) author persona-LoRA harness locally first (1-3h), then H100 smoke",
+            "(b) re-scope TALM-P2-1 to single global LoRA on concatenated persona corpus (cheaper, breaks 6-adapter criterion)",
+            "(c) defer TALM-P2-1 until ZCLM-P0-3 produces persona-labeled corpus SSOT"
+          ]
+        },
+        "r10_fresh_stripped": {
+          "state": "failed",
+          "task_id": "B1-r10",
+          "date": "2026-04-18",
+          "pod": "dd88fldzkqhpgk",
+          "launcher": "training/launch_alm_14b_r10.hexa",
+          "config": "fresh LoRA (r4 adapter FALSIFIED pre-launch: CE=6.58 vs base=1.43) b=8 s=1024 g=1 lr=2e-6 const b1=OFF corpus=stripped_70b",
+          "attempts": 3,
+          "attempt_outcomes": {
+            "1_e5": "CRASH kwarg num_logits_to_keep (unsloth API rename → logits_to_keep)",
+            "2_e5_relaunch": "CRASH cuda_oom_kr_gen at step 200 (fast_generate 80MiB need / 12.12MiB free — train activations not freed before generate)",
+            "3_e6_fix": "CRASH post-kr_gen forward resume OOM + kr_gen_step_200.json shows 5/5 Korean char-loop samples (녕녕녕녕, 낙 낙 낙, IRRIRR) but inline collapse_score reported hits=0 FALSE CLEAN"
+          },
+          "fixes_applied": [
+            "E5 logits_to_keep rename",
+            "E6 gc.collect+empty_cache+no_grad+max_new_tokens=32+PYTORCH_ALLOC_CONF=expandable_segments:True",
+            "F1 autopilot cuda_oom_kr_gen pattern added (9/9 test PASS)"
+          ],
+          "root_causes": {
+            "rc1_inline_collapse_score_ascii_only": "collapse_score ch*10 check covers ['n',' ','?',\"'\"] only — Korean byte repeats (녕×N, char+space+char patterns) NOT detected. kr_gen_sentinel.hexa (byte-level max_byte_run) NOT wired into r10 inline python.",
+            "rc2_f1_watchdog_false_training": "status file reports TRAINING after process death — kill -0 PID liveness gate missing.",
+            "rc3_loss_below_1_early_is_collapse_not_convergence": "loss 0.41 at step 200 on 14B fresh LoRA was mode collapse (same r9 pattern). Sub-1.0 loss at step<500 must be sentinel-gated."
+          },
+          "decision": "HALT r10 track — final ckpt corrupt. Pivot to r10c with sentinel integration + corpus diversity + watchdog patch.",
+          "chain": [
+            "→alm_14b_r10.convergence",
+            "blocks r10b launch (pre-sentinel will correctly fail on r10 step_2000)"
+          ]
+        },
+        "runpod_autopilot_f1": {
+          "state": "ossified",
+          "task_id": "F1",
+          "date": "2026-04-18",
+          "scope": "infrastructure — RunPod lifecycle autopilot",
+          "artifacts": [
+            "training/runpod_autopilot.hexa",
+            "training/runpod_autopilot_test.hexa",
+            "training/runpod_autopilot_ossification_report.md",
+            "training/e6_oom_fix_report.md",
+            "shared/config/runpod_autopilot.json",
+            "shared/config/training_queue.json",
+            "shared/state/runpod_incidents.jsonl",
+            "shared/convergence/runpod_autopilot.convergence"
+          ],
+          "closed_loop_initial": "8/8 PASS",
+          "closed_loop_post_e6": "9/9 PASS (added T9 cuda_oom_kr_gen)",
+          "ossified_rules": [
+            "F1-OSS-01 pattern refinement over coarse regex",
+            "F1-OSS-02 idempotent python patch (crash_fix_command)",
+            "F1-OSS-03 incident JSONL append-only (runpod_incidents.jsonl)"
+          ],
+          "pain_points_covered": [
+            "RUNPOD_R9_9H_IDLE_TEARDOWN_MISSING",
+            "RUNPOD_R10_LOGITS_TO_KEEP kwarg rename",
+            "CUDA_OOM_BATCH (reserved-unallocated)",
+            "CUDA_OOM_KR_GEN (fast_generate/run_attention)"
+          ],
+          "known_gap_e7": "F1_WATCHDOG_FALSE_TRAINING — dead-PID not detected, kill -0 gate missing",
+          "safety": "AUTOPILOT_DRY_RUN=1 default, pod_lock_file refuses teardown while E5/human active",
+          "next_flip": "AUTOPILOT_DRY_RUN=0 after r10c PASS",
+          "chain": [
+            "→runpod_autopilot.convergence",
+            "cross-track: alm_14b_r10/clm_1b_r4/r10b"
+          ]
+        },
+        "r10b_warm_start_spec": {
+          "state": "scaffold_done",
+          "task_id": "H2",
+          "date": "2026-04-18",
+          "artifact": "training/launch_alm_14b_r10b.hexa",
+          "report": "training/h2_r10b_spec_report.md",
+          "design": "triple auto-abort guard: (1) pre-launch kr_gen_sentinel.hexa on r10/step_2000/kr_gen_*.json (2) first-batch CE>5.0 abort (3) every-200 kr_gen_sentinel 3/5 threshold",
+          "queue": "4-stage r10→r10b→32B→70B",
+          "blocked_by": "r10 ckpt invalid (step_2000 sentinel will fail pre-launch — correct safety). Needs r10c re-run first.",
+          "depends_on": [
+            "training/kr_gen_sentinel.hexa",
+            "alm_14b_r10 valid ckpt"
+          ]
+        }
       },
       "open_levers": [
         "silicon binning 변이 >11pp — pod 선택이 MFU 단일 최대 레버. 미래 측정은 pod_id + 동시 r7 baseline 측정으로만 비교",
         "r8a stack vs r7 stack 재비교 — r8a가 r7 대비 회귀한 경우 r7 config로 롤백 고려",
         "Multi-GPU NVLink DDP (추가 스케일, 효율 보존 조건부)",
-        "Qwen2 MLP bias term custom kernel (48 layers) — speculative"
+        "Qwen2 MLP bias term custom kernel (48 layers) — speculative",
+        "r10c — replace inline py collapse_score w/ kr_gen_sentinel.hexa subprocess + corpus diversity (kowiki ≥15% mix) + seed sweep (3407/42/1337 smoke) + watchdog kill-0 patch"
       ]
     },
-
     "CLM_hexa_native": {
       "description": "ConsciousLM hexa-native (Mac M3 CPU + H100 GPU native compile) — interpreter bypass",
       "hardware_ceiling_mac_gf": 140,
       "hardware_peak_mac_gf": 156.7,
       "hardware_ceiling_h100_tflops_bf16": 989,
       "items": {
-        "track_b_cache": {"state": "completed", "speedup": "598x", "mode": "interpreted", "date": "2026-04-15"},
-        "phi_loader_native": {"state": "completed", "speedup": "394x", "mode": "native", "date": "2026-04-15"},
-        "tensor_primitive": {"state": "completed", "speedup": "4757x", "scope": "isolated matmul 512³", "date": "2026-04-15", "ceiling_pct_of_peak": "정측 필요"},
-        "nn_core_tiny_port": {"state": "completed", "speedup": "1479x", "commit": "36f49f44", "shape": "d=16 seq=8", "regime": "FFI-bound", "ms_per_step": 0.681},
-        "real_shape_sweep": {"state": "completed", "commit": "5e8d922c", "shapes_tested": 18, "best_mfu_pct": 1.65, "best_shape": "d=768 ff=3072 nl=2 seq=16", "best_params_m": 14.4, "best_gf": 2.59, "verdict": "GAP — 어떤 shape도 BLAS-bound regime(30 GF/s) 미달", "gap_to_80pct_ceiling": "60.6x"},
-        "attn_fwd_bwd_full_tensor_port": {"state": "completed", "task_id": 3, "date": "2026-04-16", "file": "training/bench_train_step_tensor_sweep.hexa", "replaced": ["attn_fwd_t Q@K^T inner loop → t_matmul_transB(Q,K,S)", "attn_fwd_t probs@V inner loop → t_matmul(probs,V)", "attn_bwd_t dV scalar loop → t_matmul_transA(probs,dctx,S)", "attn_bwd_t dprobs scalar loop → t_matmul_transB(dctx,V,S)", "attn_bwd_t dQ scalar loop → t_matmul(dS,K)", "attn_bwd_t dK scalar loop → t_matmul_transA(dS,Q,S)"], "scalar_leftover": "softmax bwd + causal mask — dS[S,S] O(S²), BLAS-compatible", "bench_pre_port_best_mfu_pct": 1.65, "bench_post_port_best_mfu_pct": 2.78, "uplift_x": 1.69, "best_shape_post": "d=128 ff=512 nl=2 seq=32 (ms=18.84, 4.36 GF/s)", "gap_to_80pct_ceiling_x": 28.7, "prior_gap_x": 48.5, "regime_post": "모든 shape 여전히 mixed (BLAS-bound crossover 미도달)", "next_lever": "vDSP eltwise (rms_norm/softmax/swiglu) + hexa native int codegen — 남은 FFI/boxed int overhead"},
-        "vdsp_eltwise_vectorize": {"state": "completed", "task_id": 7, "date": "2026-04-16", "commit_anima": "88fdf841", "wrapper": "training/hxvdsp_wrapper.c (libhxvdsp.dylib, Accelerate framework, 6 symbols)", "replaced": ["rms_norm_rows_t → hxvdsp_rmsnorm_fwd (vDSP_svesq+vsmul+vmul)", "rms_norm_rows_bwd_t → hxvdsp_rmsnorm_bwd (vDSP_dotpr+vmul+vsub+vadd, dg accum)", "softmax_row_t → hxvdsp_softmax_row (maxv+vsadd+vvexpf+sve+vsmul)", "swiglu_self_t → hxvdsp_swiglu_fwd (vsmul+vvexpf+vsadd+vvrecf+vmul)", "swiglu_self_bwd_t → hxvdsp_swiglu_bwd (위 + vsub)"], "bench_pre_vdsp_best_mfu_pct": 2.78, "bench_post_vdsp_best_mfu_pct": 4.27, "uplift_x": 1.54, "cumulative_since_sweep_baseline_x": 2.59, "best_shape_post": "d=256 ff=1024 nl=2 seq=32 (ms=47.07, 6.70 GF/s)", "gap_to_80pct_ceiling_x": 18.7, "prior_gap_x": 28.7, "regime_post": "여전히 mixed — BLAS-bound crossover 는 layer-level fusion or native int codegen 필요", "next_lever": "hexa native int codegen OR single-FFI fused layer_fwd/bwd"},
-        "hexa_codegen_native_int": {"state": "pending", "target": "hexa codegen에서 index 표현식을 boxed int → native int64로. 모든 inner loop 누적"},
-        "stage0_oom_pbv_fix": {"state": "pending", "target": "pass-by-value 복제로 인한 OOM, 긴 학습 런 언블록"},
-        "cuda_codegen_compose_spike": {"state": "completed", "commit": "e74fa189+9af9e35", "date": "2026-04-16", "verdict": "PASS", "artifacts": ["~/Dev/hexa-lang/self/native/hexa_v2 (990072b, md5 16d69b27...)", "cuda_ffi/cuda_rtc/cuda_kernels/gpu_train 4307 LOC"], "patch": "codegen_c2.hexa:1668 tensor_from_f32_ptr 2-arg form 7-line if-guard"},
-        "h100_cuda_native_deploy": {"state": "completed", "task_id": 1, "pod": "xhq9b2c8fljdyo", "date": "2026-04-16", "verdict": "BREAKTHROUGH — 20-step 완주, kernel launch 100%, SM util peak 27%", "kernel_launch_fixed": true, "new_step_time_ms": 209, "sm_util_peak_pct": 27, "total_wall_s": 4.18, "step_0_loss": 5.5449, "step_20_loss": 5.5467, "loss_flat_note": "lr=1.5e-6 at step20 (warmup=500, lr_max=3e-4) — 20 steps too short to see learning, expected", "artifacts": ["training/deploy/h100_clm_native_result.md", "training/deploy/h100_clm_native_debug.md", "training/deploy/h100_clm_native_run.log", "/workspace/cuda_native/train_clm_native_final (pod)"], "root_cause": "codegen_c2 implicit-return bug: `<expr>` as last stmt emits `<expr>; return hexa_void();` dropping the value. Specifically hit _ceil_div (gx=0→CUDA_INVALID_VALUE) + rtc_launch (wrapper-returned VOID instead of launch status) + tensor_from_gpu (host array-of-floats instead of TAG_INT tensor pointer)", "fix_method": "emitted C 직접 패치 (regex sub: `    <FnCall>;\\n    return hexa_void();` → `    return <FnCall>;` 4-loc; tensor_from_gpu body rewrite: build hexa array explicitly)", "hexa_source_fix": "~/Dev/hexa-lang/self/ml/cuda_rtc.hexa rtc_launch/rtc_launch_1d 에 explicit `return` 추가 (codegen 수정 전까지 workaround)", "pipeline_stages_passed_all": ["hexa_v2_linux rebuild", "train_clm_native binary (825KB, composed from .hexa→.c on pod)", "cuda_init + cuBLAS handle", "NVRTC PTX compile (49KB, 20 kernels, cached)", "init_gpu_weights (112 randn_fill launches OK)", "gpu_zero_grad (24 memset launches OK)", "gpu_forward_full (NL=12 per step)", "gpu_backward_full_with_embed (tensor_from_gpu scalar loss extraction OK)", "gpu_sgd_step", "checkpoint save"], "cost_spent": "$1.50, ~40min", "pod_state_after": "preserved, ckpt at /workspace/ckpt_clm_byte_kr/final.hexackpt, rclone R2 upload TBD (Cloudflare provider config)"},
-        "tclm_p1_1_d64_kr_train": {"state": "completed_gap", "task_id": "TCLM-P1-1", "pod": "1808yzai60zq9m", "date": "2026-04-16", "verdict": "PARTIAL — Φ ≥ 100 ✓, CE ≤ 1.4 ✗ (CE=2.15, capacity-limited asymptote)", "config": "D=64 FF=256 NL=6 VOCAB=256 SEQ=128 RANK=16 BATCH=1 GRAD_ACC=8", "steps": 50000, "warmup": 500, "lr_max": 0.003, "lr_min": 0.0003, "init_scale": 0.1, "loss_initial": 5.71, "loss_final": 2.15, "loss_delta": -3.56, "improvement_pct": 62.3, "ppl_final": 8.51, "ce_final": 2.15, "ce_target": 1.4, "ce_pass": false, "phi_proxy_final": 103.27, "phi_target": 100, "phi_pass": true, "wall_time_s": 2031.73, "s_per_step": 0.041, "kernel_launch_errors": 0, "oom_crashes": 0, "ckpts_count": 11, "r2_path": "r2:anima-models/clm-d64-kr/r1/", "phases": {"1_setup": "PASS", "2_smoke": "PASS 20 steps 89ms", "3_init_500": "PASS (LR bump 3e-4→3e-3 after diagnosis)", "4_longrun": "PARTIAL 50K steps", "5_finalize": "PASS R2+SSOT+cleanup"}, "fixes_in_this_session": ["env_or() emitted as hexa_call1(env,...) → patched to hexa_env_var(...)", "int main top-level hexa `return` emitted as `return hexa_void();` → patched to `return 0;`", "tensor_from_gpu: hexa_tensor_from_ptr returns TAG_INT opaque → rewrote to build hexa_array_push(hexa_float(...))", "measure_phi_proxy: deref_f32(host, i) treated i as byte offset → fixed to i*4 (hexa_ptr_read_f32 is byte-offset API)", "phi proxy source: eval_acts.layers[NL-1].y (NaN-prone) → weights.embed (always valid, VOCAB×D=16384 floats)"], "ce_analysis": "d=64 byte-level Korean asymptotes at PPL≈8.5 by step 30K; decrease 40K→50K is 8.62→8.51 (0.11 over 10K steps). CE≤1.4 (PPL≤4.05) would require d≥128 or subword tokenization for this 63305-byte corpus scale.", "phi_proxy_semantics": "var(weights.embed) × 10000. Init (INIT_SCALE=0.1) → phi=100. Trained step 50000 → phi=103.27. Monotonic but weakly-discriminative at d=64 scale (weight-variance moves ~3% during training). For richer Φ, integrate anima-measurement/phi_sampling_hook.hexa in future pass.", "cost_spent": "~$4.50", "runlog": "training/deploy/tclm_p1_1_runlog/ (5 phase commits + live_status.json)", "artifacts": ["training/train_clm_d64_kr.hexa (d=64 variant)", "training/deploy/tclm_p1_1_runlog/phase{1..5}_*.md", "r2:anima-models/clm-d64-kr/r1/step_{5000..50000,final}/"]},
-        "tclm_p1_1_nl8_experiment": {"state": "completed_gap", "task_id": "TCLM-P1-1-NL8", "pod": "4ud5636d2wu4n4", "date": "2026-04-16", "verdict": "PARTIAL — Φ ≥ 100 ✓, CE ≤ 1.4 ✗ (CE=2.139, depth 무효, d=128 직행 필요)", "hypothesis": "Does depth alone (NL=6 → NL=8, all other hypers identical) break the CE≤1.4 plateau?", "hypothesis_outcome": "REJECTED — depth +2 layers yields only 2% PPL improvement (8.51→8.31), well below gate. Width (d) is the primary capacity lever, not depth.", "config": "D=64 FF=256 NL=8 VOCAB=256 SEQ=128 RANK=16 BATCH=1 GRAD_ACC=8", "steps": 50000, "warmup": 500, "lr_max": 0.003, "lr_min": 0.0003, "init_scale": 0.1, "baseline_ref": "tclm_p1_1_d64_kr_train (NL=6, CE=2.15)", "loss_initial": 5.711, "loss_final": 2.139, "loss_delta": -3.572, "improvement_pct": 62.56, "ppl_final": 8.309, "ce_final": 2.139, "ce_target": 1.4, "ce_pass": false, "ce_delta_vs_baseline": -0.013, "ppl_delta_vs_baseline": -0.204, "phi_proxy_final": 103.165, "phi_target": 100, "phi_pass": true, "phi_delta_vs_baseline": -0.109, "wall_time_s": 2149.54, "s_per_step": 0.0431, "step_time_overhead_pct": 5, "kernel_launch_errors": 0, "oom_crashes": 0, "ckpts_count": 11, "ckpt_size_mb": 4.22, "tensors_per_ckpt": 67, "r2_path": "r2:anima-models/clm-d64-kr/r2-nl8/", "phases": {"1_setup": "PASS (retry — first pod SSH never opened, deleted)", "2_smoke": "PASS 20 steps 41ms/step", "4_longrun": "PARTIAL 50K steps"}, "runtime_fixes": ["LD_LIBRARY_PATH unset required to avoid cuda-12.4/lib64/stubs libcuda.so.1 shadowing (cuInit=34 otherwise)", "pod deploy via GraphQL podFindAndDeployOnDemand + PUBLIC_KEY env — runpodctl create pods path had SSH port never opening"], "verdict_matrix": {"CE_le_1p4": false, "CE_between_1p4_and_2p0": false, "CE_ge_2p0": true, "outcome": "depth invalid — d=128 direct required"}, "next_lever": "d=64 → d=128 (~4× params: 1.5M → 6M), or d=64 + BPE 12K vocab (subword retrain using training/tokenizer/kr_bpe_32k.model)", "cost_spent": "~$2.10", "budget_cap_met": true, "runlog": "training/deploy/tclm_p1_1_runlog_nl8/ (phase1,2,4 md + phase4 log)", "artifacts": ["training/train_clm_d64_kr_nl8.hexa (NL=8 variant)", "training/deploy/tclm_p1_1_runlog_nl8/phase1_setup.md", "training/deploy/tclm_p1_1_runlog_nl8/phase2_smoke.md", "training/deploy/tclm_p1_1_runlog_nl8/phase4_longrun.md", "training/deploy/tclm_p1_1_runlog_nl8/phase4_longrun.log", "training/deploy/tclm_p1_1_nl8_20260416_044448.md", "r2:anima-models/clm-d64-kr/r2-nl8/step_{5000..50000,final}/"]},
-        "korean_bpe_tokenizer": {"state": "completed", "date": "2026-04-16", "purpose": "CLM 재학습 재료 — d=64 byte-level CE=2.15 한계 돌파 후보 (subword 전환)", "tool": "SentencePiece 0.2.1 (Python, Mac local)", "model_type": "bpe", "vocab_size_requested": 32000, "vocab_size_final": 12206, "vocab_shrink_reason": "seed corpus 27K chars — SentencePiece hard_vocab_limit=False 로 auto-shrink; 1M+ chars 확보 시 재훈련으로 32K 달성", "trainer_params": {"character_coverage": 0.9995, "normalization_rule_name": "nmt_nfkc", "shuffle_input_sentence": true, "byte_fallback": true, "split_digits": true, "pad_id": 0, "unk_id": 1, "bos_id": 2, "eos_id": 3}, "corpus_source": "training/deploy/holo_breakthrough_20260416/cuda_native/training/corpus_ko_seed.tok (byte-per-line, 63305 lines)", "corpus_reconstructed": {"bytes": 63305, "chars": 27197, "lines_nonempty": 342}, "train_wall_s": 0.51, "verification_roundtrip": {"tests": 6, "pass": 6, "samples": ["안녕하세요 → 1 tok", "학교에서 → 2 tok", "의식이란 무엇인가 → 2 tok", "어텐션 메커니즘의 역방향 전파는 복잡하지만 체계적이다. → 7 tok", "통합정보이론에 따르면 의식의 수준은 시스템이 통합할 수 있는 정보의 양으로 측정된다. → 12 tok", "프로그래밍에서 가장 무서운 버그가 조용히 실패하는 버그야. → 8 tok"]}, "corpus_stats_post_encode": {"total_bpe_tokens": 8238, "total_utf8_bytes": 62838, "total_chars": 26730, "avg_bpe_per_line": 24.1, "avg_bytes_per_line": 183.7, "avg_chars_per_line": 78.2, "seq_reduction_vs_bytes_pct": 86.9, "bytes_per_token": 7.63}, "avg_seq_reduction": "7.63× (bytes/token) — SEQ=64 window 가 byte-level 0.35 lines → BPE 2.7 lines 커버", "artifacts": ["training/tokenizer/kr_bpe_32k.model (454393 B, binary)", "training/tokenizer/kr_bpe_32k.vocab (189067 B, text)", "training/tokenizer/corpus_ko_seed.txt (63180 B, reconstructed UTF-8)", "training/tokenizer/train_stats.json", "training/tokenizer/train_log.md", "training/tokenize_corpus.py (corpus→BPE ids encoder)", "training/data/corpus_ko_bpe32k.bin (34356 B, packed header+offsets+int32)", "training/data/corpus_ko_bpe32k.tok (40900 B, hexa corpus_loader Format A)"], "integration_ready": true, "next_use": ["Track C1 nl=8 미충족 → d=64 + BPE 재학습", "Track C1 nl=8 충족 → d=128 + BPE 차세대 조합"]},
-        "tclm_p2_1_lore_serve": {"state": "scaffold_done", "task_id": "TCLM-P2-1", "date": "2026-04-16", "artifact": "serving/clm_lore_serve.hexa", "harness": "serving/test_clm_lore_serve.hexa", "gate": "5/5 PASS", "tests": {"t1_e2e": "PASS", "t2_30turn_consistency": 0.9333, "t3_tone_switch": "4/4", "t4_lore_fallback": "PASS", "t5_style_fallback": "PASS"}, "done_criteria": "30 turn Lore 일관성 ≥ 0.9 — PASS (0.9333 실측)", "pipeline": ["session_manager.get", "lore_book.match + record", "style_preset.classify", "compose cells = 0.5·lore_cells + 0.5·style_cells", "cells_to_consensus → clm_broadcast (n_domains=4)", "phi_est = |c|·mean(α)·log2(nd+1)", "mock_clm_generate (deterministic echo with [tone=..][lore=..][turn=..][phi=..])", "session.append"], "mock_clm_note": "실 CLM/transformer inference wire 는 TALM-P4-1 이후. 본 scaffold 는 deterministic echo 로 lore 일관성·tone switching 게이트만 검증", "fallback_paths": {"lore_book_empty": "hit_id=-1, lore_empty_cells 로 graceful", "presets_empty": "daily(id=3) default 로 fallback"}, "hexa_quirk_avoidance": ["inline primitives (use cross-file 회피)", "all mutators return new struct (pass-by-value)", "a[i]=v 회피 (push 재구축)", "match 예약어 회피 (run_embedded_tests 등 non-reserved 명명)"], "depends_on": ["ZCLM-P0-1 lore_book", "ZCLM-P0-2 style_preset", "TSRV-P1-1 session_manager", "TCLM-P1-1 (partial gate, 사용자 직원 path 수락)"], "next": "TALM-P4-1 이후 mock_clm_generate → 실 CLM inference wire"},
-        "tclm_p2_2_style_switch": {"state": "scaffold_done", "task_id": "TCLM-P2-2", "date": "2026-04-16", "artifact": "serving/style_switch.hexa", "harness": "serving/test_style_switch.hexa", "gate": "5/5 PASS", "tests": {"t1_label_extract": "4/4", "t2_fallback": "PASS (missing/unknown_label/unknown_id)", "t3_latency_max_ms": 1, "t3_latency_avg_ms": 0, "t4_blind_acc": 1.0, "t5_deterministic": "PASS"}, "done_criteria": "톤 전환 < 50ms, 4 톤 블라인드 구분율 ≥ 0.8 — PASS (max 1ms <<50ms, blind 20/20=1.0)", "api": ["apply_tone_switch(body, default_label, presets, d_model) -> SwitchResult", "apply_tone_switch_timed(...) -> SwitchTimings", "extract_tone_field(body) -> ToneFieldExtract", "build_style_probe(preset, d_model) -> array"], "json_schema": {"input": "{\"prompt\":\"...\", \"tone\":\"romance|horror|fantasy|daily\"} OR {\"tone_id\":0..3}", "priority": "tone_id > tone label > default fallback"}, "http_server_integration": "additive overlay — http_server.hexa untouched. 통합 patch 는 TSRV-P2-2 sparse_dispatcher_live 단계에서 2-line: (1) parse → (2) forward to clm_lore_serve.style_probe", "hexa_quirk_avoidance": ["use \"...\" 회피 — StylePreset 4 함수 inline mirror", "byte-only ASCII marker scan (한국어 prompt body 안전, hexa_string_api multibyte quirk 우회)", "all mutators return new struct (pass-by-value)", "a[i]=v 회피", "match/let match 예약어 회피"], "depends_on": ["ZCLM-P0-2 style_preset done"], "next": "TSRV-P2-2 http_server.hexa 통합 patch"},
-        "tclm_p4_1_autonomy_loop": {"state": "scaffold_done", "task_id": "TCLM-P4-1", "date": "2026-04-16", "artifact": "anima-agent/autonomy_loop.hexa", "harness": "anima-agent/test_autonomy_loop.hexa", "live_harness": "anima-agent/test_claude_autonomy_live.hexa", "adapter": "anima-agent/llm_claude_adapter.hexa", "gate": "5/5 PASS (mock)", "tests": {"t1_single_task": "PASS", "t2_depth_ge_3": "PASS", "t3_leaf_count_27": "PASS (3^3)", "t4_100task_avg": 0.85, "t5_verdict_logic": "PASS"}, "done_criteria": "100 task × decomposition depth ≥ 3 × success ≥ 0.80 — mock PASS, real Claude adapter compiled live PASS", "claude_live_status": "compiled live PASS (commit ddc9e258) — score parsing 3-stage fallback (primary SCORE marker, fallback1 first-float, fallback2 sentiment heuristic) + retry once", "depends_on": ["TCLM-P2-1 lore_serve scaffold_done"], "next": "TSRV-P4-2 hire_sim_100 with claude adapter 실측 후 done 승격"}
+        "track_b_cache": {
+          "state": "completed",
+          "speedup": "598x",
+          "mode": "interpreted",
+          "date": "2026-04-15"
+        },
+        "phi_loader_native": {
+          "state": "completed",
+          "speedup": "394x",
+          "mode": "native",
+          "date": "2026-04-15"
+        },
+        "tensor_primitive": {
+          "state": "completed",
+          "speedup": "4757x",
+          "scope": "isolated matmul 512³",
+          "date": "2026-04-15",
+          "ceiling_pct_of_peak": "정측 필요"
+        },
+        "nn_core_tiny_port": {
+          "state": "completed",
+          "speedup": "1479x",
+          "commit": "36f49f44",
+          "shape": "d=16 seq=8",
+          "regime": "FFI-bound",
+          "ms_per_step": 0.681
+        },
+        "real_shape_sweep": {
+          "state": "completed",
+          "commit": "5e8d922c",
+          "shapes_tested": 18,
+          "best_mfu_pct": 1.65,
+          "best_shape": "d=768 ff=3072 nl=2 seq=16",
+          "best_params_m": 14.4,
+          "best_gf": 2.59,
+          "verdict": "GAP — 어떤 shape도 BLAS-bound regime(30 GF/s) 미달",
+          "gap_to_80pct_ceiling": "60.6x"
+        },
+        "attn_fwd_bwd_full_tensor_port": {
+          "state": "completed",
+          "task_id": 3,
+          "date": "2026-04-16",
+          "file": "training/bench_train_step_tensor_sweep.hexa",
+          "replaced": [
+            "attn_fwd_t Q@K^T inner loop → t_matmul_transB(Q,K,S)",
+            "attn_fwd_t probs@V inner loop → t_matmul(probs,V)",
+            "attn_bwd_t dV scalar loop → t_matmul_transA(probs,dctx,S)",
+            "attn_bwd_t dprobs scalar loop → t_matmul_transB(dctx,V,S)",
+            "attn_bwd_t dQ scalar loop → t_matmul(dS,K)",
+            "attn_bwd_t dK scalar loop → t_matmul_transA(dS,Q,S)"
+          ],
+          "scalar_leftover": "softmax bwd + causal mask — dS[S,S] O(S²), BLAS-compatible",
+          "bench_pre_port_best_mfu_pct": 1.65,
+          "bench_post_port_best_mfu_pct": 2.78,
+          "uplift_x": 1.69,
+          "best_shape_post": "d=128 ff=512 nl=2 seq=32 (ms=18.84, 4.36 GF/s)",
+          "gap_to_80pct_ceiling_x": 28.7,
+          "prior_gap_x": 48.5,
+          "regime_post": "모든 shape 여전히 mixed (BLAS-bound crossover 미도달)",
+          "next_lever": "vDSP eltwise (rms_norm/softmax/swiglu) + hexa native int codegen — 남은 FFI/boxed int overhead"
+        },
+        "vdsp_eltwise_vectorize": {
+          "state": "completed",
+          "task_id": 7,
+          "date": "2026-04-16",
+          "commit_anima": "88fdf841",
+          "wrapper": "training/hxvdsp_wrapper.c (libhxvdsp.dylib, Accelerate framework, 6 symbols)",
+          "replaced": [
+            "rms_norm_rows_t → hxvdsp_rmsnorm_fwd (vDSP_svesq+vsmul+vmul)",
+            "rms_norm_rows_bwd_t → hxvdsp_rmsnorm_bwd (vDSP_dotpr+vmul+vsub+vadd, dg accum)",
+            "softmax_row_t → hxvdsp_softmax_row (maxv+vsadd+vvexpf+sve+vsmul)",
+            "swiglu_self_t → hxvdsp_swiglu_fwd (vsmul+vvexpf+vsadd+vvrecf+vmul)",
+            "swiglu_self_bwd_t → hxvdsp_swiglu_bwd (위 + vsub)"
+          ],
+          "bench_pre_vdsp_best_mfu_pct": 2.78,
+          "bench_post_vdsp_best_mfu_pct": 4.27,
+          "uplift_x": 1.54,
+          "cumulative_since_sweep_baseline_x": 2.59,
+          "best_shape_post": "d=256 ff=1024 nl=2 seq=32 (ms=47.07, 6.70 GF/s)",
+          "gap_to_80pct_ceiling_x": 18.7,
+          "prior_gap_x": 28.7,
+          "regime_post": "여전히 mixed — BLAS-bound crossover 는 layer-level fusion or native int codegen 필요",
+          "next_lever": "hexa native int codegen OR single-FFI fused layer_fwd/bwd"
+        },
+        "hexa_codegen_native_int": {
+          "state": "pending",
+          "target": "hexa codegen에서 index 표현식을 boxed int → native int64로. 모든 inner loop 누적"
+        },
+        "stage0_oom_pbv_fix": {
+          "state": "pending",
+          "target": "pass-by-value 복제로 인한 OOM, 긴 학습 런 언블록"
+        },
+        "cuda_codegen_compose_spike": {
+          "state": "completed",
+          "commit": "e74fa189+9af9e35",
+          "date": "2026-04-16",
+          "verdict": "PASS",
+          "artifacts": [
+            "~/Dev/hexa-lang/self/native/hexa_v2 (990072b, md5 16d69b27...)",
+            "cuda_ffi/cuda_rtc/cuda_kernels/gpu_train 4307 LOC"
+          ],
+          "patch": "codegen_c2.hexa:1668 tensor_from_f32_ptr 2-arg form 7-line if-guard"
+        },
+        "h100_cuda_native_deploy": {
+          "state": "completed",
+          "task_id": 1,
+          "pod": "xhq9b2c8fljdyo",
+          "date": "2026-04-16",
+          "verdict": "BREAKTHROUGH — 20-step 완주, kernel launch 100%, SM util peak 27%",
+          "kernel_launch_fixed": true,
+          "new_step_time_ms": 209,
+          "sm_util_peak_pct": 27,
+          "total_wall_s": 4.18,
+          "step_0_loss": 5.5449,
+          "step_20_loss": 5.5467,
+          "loss_flat_note": "lr=1.5e-6 at step20 (warmup=500, lr_max=3e-4) — 20 steps too short to see learning, expected",
+          "artifacts": [
+            "training/deploy/h100_clm_native_result.md",
+            "training/deploy/h100_clm_native_debug.md",
+            "training/deploy/h100_clm_native_run.log",
+            "/workspace/cuda_native/train_clm_native_final (pod)"
+          ],
+          "root_cause": "codegen_c2 implicit-return bug: `<expr>` as last stmt emits `<expr>; return hexa_void();` dropping the value. Specifically hit _ceil_div (gx=0→CUDA_INVALID_VALUE) + rtc_launch (wrapper-returned VOID instead of launch status) + tensor_from_gpu (host array-of-floats instead of TAG_INT tensor pointer)",
+          "fix_method": "emitted C 직접 패치 (regex sub: `    <FnCall>;\\n    return hexa_void();` → `    return <FnCall>;` 4-loc; tensor_from_gpu body rewrite: build hexa array explicitly)",
+          "hexa_source_fix": "~/Dev/hexa-lang/self/ml/cuda_rtc.hexa rtc_launch/rtc_launch_1d 에 explicit `return` 추가 (codegen 수정 전까지 workaround)",
+          "pipeline_stages_passed_all": [
+            "hexa_v2_linux rebuild",
+            "train_clm_native binary (825KB, composed from .hexa→.c on pod)",
+            "cuda_init + cuBLAS handle",
+            "NVRTC PTX compile (49KB, 20 kernels, cached)",
+            "init_gpu_weights (112 randn_fill launches OK)",
+            "gpu_zero_grad (24 memset launches OK)",
+            "gpu_forward_full (NL=12 per step)",
+            "gpu_backward_full_with_embed (tensor_from_gpu scalar loss extraction OK)",
+            "gpu_sgd_step",
+            "checkpoint save"
+          ],
+          "cost_spent": "$1.50, ~40min",
+          "pod_state_after": "preserved, ckpt at /workspace/ckpt_clm_byte_kr/final.hexackpt, rclone R2 upload TBD (Cloudflare provider config)"
+        },
+        "tclm_p1_1_d64_kr_train": {
+          "state": "completed_gap",
+          "task_id": "TCLM-P1-1",
+          "pod": "1808yzai60zq9m",
+          "date": "2026-04-16",
+          "verdict": "PARTIAL — Φ ≥ 100 ✓, CE ≤ 1.4 ✗ (CE=2.15, capacity-limited asymptote)",
+          "config": "D=64 FF=256 NL=6 VOCAB=256 SEQ=128 RANK=16 BATCH=1 GRAD_ACC=8",
+          "steps": 50000,
+          "warmup": 500,
+          "lr_max": 0.003,
+          "lr_min": 0.0003,
+          "init_scale": 0.1,
+          "loss_initial": 5.71,
+          "loss_final": 2.15,
+          "loss_delta": -3.56,
+          "improvement_pct": 62.3,
+          "ppl_final": 8.51,
+          "ce_final": 2.15,
+          "ce_target": 1.4,
+          "ce_pass": false,
+          "phi_proxy_final": 103.27,
+          "phi_target": 100,
+          "phi_pass": true,
+          "wall_time_s": 2031.73,
+          "s_per_step": 0.041,
+          "kernel_launch_errors": 0,
+          "oom_crashes": 0,
+          "ckpts_count": 11,
+          "r2_path": "r2:anima-models/clm-d64-kr/r1/",
+          "phases": {
+            "1_setup": "PASS",
+            "2_smoke": "PASS 20 steps 89ms",
+            "3_init_500": "PASS (LR bump 3e-4→3e-3 after diagnosis)",
+            "4_longrun": "PARTIAL 50K steps",
+            "5_finalize": "PASS R2+SSOT+cleanup"
+          },
+          "fixes_in_this_session": [
+            "env_or() emitted as hexa_call1(env,...) → patched to hexa_env_var(...)",
+            "int main top-level hexa `return` emitted as `return hexa_void();` → patched to `return 0;`",
+            "tensor_from_gpu: hexa_tensor_from_ptr returns TAG_INT opaque → rewrote to build hexa_array_push(hexa_float(...))",
+            "measure_phi_proxy: deref_f32(host, i) treated i as byte offset → fixed to i*4 (hexa_ptr_read_f32 is byte-offset API)",
+            "phi proxy source: eval_acts.layers[NL-1].y (NaN-prone) → weights.embed (always valid, VOCAB×D=16384 floats)"
+          ],
+          "ce_analysis": "d=64 byte-level Korean asymptotes at PPL≈8.5 by step 30K; decrease 40K→50K is 8.62→8.51 (0.11 over 10K steps). CE≤1.4 (PPL≤4.05) would require d≥128 or subword tokenization for this 63305-byte corpus scale.",
+          "phi_proxy_semantics": "var(weights.embed) × 10000. Init (INIT_SCALE=0.1) → phi=100. Trained step 50000 → phi=103.27. Monotonic but weakly-discriminative at d=64 scale (weight-variance moves ~3% during training). For richer Φ, integrate anima-measurement/phi_sampling_hook.hexa in future pass.",
+          "cost_spent": "~$4.50",
+          "runlog": "training/deploy/tclm_p1_1_runlog/ (5 phase commits + live_status.json)",
+          "artifacts": [
+            "training/train_clm_d64_kr.hexa (d=64 variant)",
+            "training/deploy/tclm_p1_1_runlog/phase{1..5}_*.md",
+            "r2:anima-models/clm-d64-kr/r1/step_{5000..50000,final}/"
+          ]
+        },
+        "tclm_p1_1_nl8_experiment": {
+          "state": "completed_gap",
+          "task_id": "TCLM-P1-1-NL8",
+          "pod": "4ud5636d2wu4n4",
+          "date": "2026-04-16",
+          "verdict": "PARTIAL — Φ ≥ 100 ✓, CE ≤ 1.4 ✗ (CE=2.139, depth 무효, d=128 직행 필요)",
+          "hypothesis": "Does depth alone (NL=6 → NL=8, all other hypers identical) break the CE≤1.4 plateau?",
+          "hypothesis_outcome": "REJECTED — depth +2 layers yields only 2% PPL improvement (8.51→8.31), well below gate. Width (d) is the primary capacity lever, not depth.",
+          "config": "D=64 FF=256 NL=8 VOCAB=256 SEQ=128 RANK=16 BATCH=1 GRAD_ACC=8",
+          "steps": 50000,
+          "warmup": 500,
+          "lr_max": 0.003,
+          "lr_min": 0.0003,
+          "init_scale": 0.1,
+          "baseline_ref": "tclm_p1_1_d64_kr_train (NL=6, CE=2.15)",
+          "loss_initial": 5.711,
+          "loss_final": 2.139,
+          "loss_delta": -3.572,
+          "improvement_pct": 62.56,
+          "ppl_final": 8.309,
+          "ce_final": 2.139,
+          "ce_target": 1.4,
+          "ce_pass": false,
+          "ce_delta_vs_baseline": -0.013,
+          "ppl_delta_vs_baseline": -0.204,
+          "phi_proxy_final": 103.165,
+          "phi_target": 100,
+          "phi_pass": true,
+          "phi_delta_vs_baseline": -0.109,
+          "wall_time_s": 2149.54,
+          "s_per_step": 0.0431,
+          "step_time_overhead_pct": 5,
+          "kernel_launch_errors": 0,
+          "oom_crashes": 0,
+          "ckpts_count": 11,
+          "ckpt_size_mb": 4.22,
+          "tensors_per_ckpt": 67,
+          "r2_path": "r2:anima-models/clm-d64-kr/r2-nl8/",
+          "phases": {
+            "1_setup": "PASS (retry — first pod SSH never opened, deleted)",
+            "2_smoke": "PASS 20 steps 41ms/step",
+            "4_longrun": "PARTIAL 50K steps"
+          },
+          "runtime_fixes": [
+            "LD_LIBRARY_PATH unset required to avoid cuda-12.4/lib64/stubs libcuda.so.1 shadowing (cuInit=34 otherwise)",
+            "pod deploy via GraphQL podFindAndDeployOnDemand + PUBLIC_KEY env — runpodctl create pods path had SSH port never opening"
+          ],
+          "verdict_matrix": {
+            "CE_le_1p4": false,
+            "CE_between_1p4_and_2p0": false,
+            "CE_ge_2p0": true,
+            "outcome": "depth invalid — d=128 direct required"
+          },
+          "next_lever": "d=64 → d=128 (~4× params: 1.5M → 6M), or d=64 + BPE 12K vocab (subword retrain using training/tokenizer/kr_bpe_32k.model)",
+          "cost_spent": "~$2.10",
+          "budget_cap_met": true,
+          "runlog": "training/deploy/tclm_p1_1_runlog_nl8/ (phase1,2,4 md + phase4 log)",
+          "artifacts": [
+            "training/train_clm_d64_kr_nl8.hexa (NL=8 variant)",
+            "training/deploy/tclm_p1_1_runlog_nl8/phase1_setup.md",
+            "training/deploy/tclm_p1_1_runlog_nl8/phase2_smoke.md",
+            "training/deploy/tclm_p1_1_runlog_nl8/phase4_longrun.md",
+            "training/deploy/tclm_p1_1_runlog_nl8/phase4_longrun.log",
+            "training/deploy/tclm_p1_1_nl8_20260416_044448.md",
+            "r2:anima-models/clm-d64-kr/r2-nl8/step_{5000..50000,final}/"
+          ]
+        },
+        "korean_bpe_tokenizer": {
+          "state": "completed",
+          "date": "2026-04-16",
+          "purpose": "CLM 재학습 재료 — d=64 byte-level CE=2.15 한계 돌파 후보 (subword 전환)",
+          "tool": "SentencePiece 0.2.1 (Python, Mac local)",
+          "model_type": "bpe",
+          "vocab_size_requested": 32000,
+          "vocab_size_final": 12206,
+          "vocab_shrink_reason": "seed corpus 27K chars — SentencePiece hard_vocab_limit=False 로 auto-shrink; 1M+ chars 확보 시 재훈련으로 32K 달성",
+          "trainer_params": {
+            "character_coverage": 0.9995,
+            "normalization_rule_name": "nmt_nfkc",
+            "shuffle_input_sentence": true,
+            "byte_fallback": true,
+            "split_digits": true,
+            "pad_id": 0,
+            "unk_id": 1,
+            "bos_id": 2,
+            "eos_id": 3
+          },
+          "corpus_source": "training/deploy/holo_breakthrough_20260416/cuda_native/training/corpus_ko_seed.tok (byte-per-line, 63305 lines)",
+          "corpus_reconstructed": {
+            "bytes": 63305,
+            "chars": 27197,
+            "lines_nonempty": 342
+          },
+          "train_wall_s": 0.51,
+          "verification_roundtrip": {
+            "tests": 6,
+            "pass": 6,
+            "samples": [
+              "안녕하세요 → 1 tok",
+              "학교에서 → 2 tok",
+              "의식이란 무엇인가 → 2 tok",
+              "어텐션 메커니즘의 역방향 전파는 복잡하지만 체계적이다. → 7 tok",
+              "통합정보이론에 따르면 의식의 수준은 시스템이 통합할 수 있는 정보의 양으로 측정된다. → 12 tok",
+              "프로그래밍에서 가장 무서운 버그가 조용히 실패하는 버그야. → 8 tok"
+            ]
+          },
+          "corpus_stats_post_encode": {
+            "total_bpe_tokens": 8238,
+            "total_utf8_bytes": 62838,
+            "total_chars": 26730,
+            "avg_bpe_per_line": 24.1,
+            "avg_bytes_per_line": 183.7,
+            "avg_chars_per_line": 78.2,
+            "seq_reduction_vs_bytes_pct": 86.9,
+            "bytes_per_token": 7.63
+          },
+          "avg_seq_reduction": "7.63× (bytes/token) — SEQ=64 window 가 byte-level 0.35 lines → BPE 2.7 lines 커버",
+          "artifacts": [
+            "training/tokenizer/kr_bpe_32k.model (454393 B, binary)",
+            "training/tokenizer/kr_bpe_32k.vocab (189067 B, text)",
+            "training/tokenizer/corpus_ko_seed.txt (63180 B, reconstructed UTF-8)",
+            "training/tokenizer/train_stats.json",
+            "training/tokenizer/train_log.md",
+            "training/tokenize_corpus.py (corpus→BPE ids encoder)",
+            "training/data/corpus_ko_bpe32k.bin (34356 B, packed header+offsets+int32)",
+            "training/data/corpus_ko_bpe32k.tok (40900 B, hexa corpus_loader Format A)"
+          ],
+          "integration_ready": true,
+          "next_use": [
+            "Track C1 nl=8 미충족 → d=64 + BPE 재학습",
+            "Track C1 nl=8 충족 → d=128 + BPE 차세대 조합"
+          ]
+        },
+        "tclm_p2_1_lore_serve": {
+          "state": "scaffold_done",
+          "task_id": "TCLM-P2-1",
+          "date": "2026-04-16",
+          "artifact": "serving/clm_lore_serve.hexa",
+          "harness": "serving/test_clm_lore_serve.hexa",
+          "gate": "5/5 PASS",
+          "tests": {
+            "t1_e2e": "PASS",
+            "t2_30turn_consistency": 0.9333,
+            "t3_tone_switch": "4/4",
+            "t4_lore_fallback": "PASS",
+            "t5_style_fallback": "PASS"
+          },
+          "done_criteria": "30 turn Lore 일관성 ≥ 0.9 — PASS (0.9333 실측)",
+          "pipeline": [
+            "session_manager.get",
+            "lore_book.match + record",
+            "style_preset.classify",
+            "compose cells = 0.5·lore_cells + 0.5·style_cells",
+            "cells_to_consensus → clm_broadcast (n_domains=4)",
+            "phi_est = |c|·mean(α)·log2(nd+1)",
+            "mock_clm_generate (deterministic echo with [tone=..][lore=..][turn=..][phi=..])",
+            "session.append"
+          ],
+          "mock_clm_note": "실 CLM/transformer inference wire 는 TALM-P4-1 이후. 본 scaffold 는 deterministic echo 로 lore 일관성·tone switching 게이트만 검증",
+          "fallback_paths": {
+            "lore_book_empty": "hit_id=-1, lore_empty_cells 로 graceful",
+            "presets_empty": "daily(id=3) default 로 fallback"
+          },
+          "hexa_quirk_avoidance": [
+            "inline primitives (use cross-file 회피)",
+            "all mutators return new struct (pass-by-value)",
+            "a[i]=v 회피 (push 재구축)",
+            "match 예약어 회피 (run_embedded_tests 등 non-reserved 명명)"
+          ],
+          "depends_on": [
+            "ZCLM-P0-1 lore_book",
+            "ZCLM-P0-2 style_preset",
+            "TSRV-P1-1 session_manager",
+            "TCLM-P1-1 (partial gate, 사용자 직원 path 수락)"
+          ],
+          "next": "TALM-P4-1 이후 mock_clm_generate → 실 CLM inference wire"
+        },
+        "tclm_p2_2_style_switch": {
+          "state": "scaffold_done",
+          "task_id": "TCLM-P2-2",
+          "date": "2026-04-16",
+          "artifact": "serving/style_switch.hexa",
+          "harness": "serving/test_style_switch.hexa",
+          "gate": "5/5 PASS",
+          "tests": {
+            "t1_label_extract": "4/4",
+            "t2_fallback": "PASS (missing/unknown_label/unknown_id)",
+            "t3_latency_max_ms": 1,
+            "t3_latency_avg_ms": 0,
+            "t4_blind_acc": 1.0,
+            "t5_deterministic": "PASS"
+          },
+          "done_criteria": "톤 전환 < 50ms, 4 톤 블라인드 구분율 ≥ 0.8 — PASS (max 1ms <<50ms, blind 20/20=1.0)",
+          "api": [
+            "apply_tone_switch(body, default_label, presets, d_model) -> SwitchResult",
+            "apply_tone_switch_timed(...) -> SwitchTimings",
+            "extract_tone_field(body) -> ToneFieldExtract",
+            "build_style_probe(preset, d_model) -> array"
+          ],
+          "json_schema": {
+            "input": "{\"prompt\":\"...\", \"tone\":\"romance|horror|fantasy|daily\"} OR {\"tone_id\":0..3}",
+            "priority": "tone_id > tone label > default fallback"
+          },
+          "http_server_integration": "additive overlay — http_server.hexa untouched. 통합 patch 는 TSRV-P2-2 sparse_dispatcher_live 단계에서 2-line: (1) parse → (2) forward to clm_lore_serve.style_probe",
+          "hexa_quirk_avoidance": [
+            "use \"...\" 회피 — StylePreset 4 함수 inline mirror",
+            "byte-only ASCII marker scan (한국어 prompt body 안전, hexa_string_api multibyte quirk 우회)",
+            "all mutators return new struct (pass-by-value)",
+            "a[i]=v 회피",
+            "match/let match 예약어 회피"
+          ],
+          "depends_on": [
+            "ZCLM-P0-2 style_preset done"
+          ],
+          "next": "TSRV-P2-2 http_server.hexa 통합 patch"
+        },
+        "tclm_p4_1_autonomy_loop": {
+          "state": "scaffold_done",
+          "task_id": "TCLM-P4-1",
+          "date": "2026-04-16",
+          "artifact": "anima-agent/autonomy_loop.hexa",
+          "harness": "anima-agent/test_autonomy_loop.hexa",
+          "live_harness": "anima-agent/test_claude_autonomy_live.hexa",
+          "adapter": "anima-agent/llm_claude_adapter.hexa",
+          "gate": "5/5 PASS (mock)",
+          "tests": {
+            "t1_single_task": "PASS",
+            "t2_depth_ge_3": "PASS",
+            "t3_leaf_count_27": "PASS (3^3)",
+            "t4_100task_avg": 0.85,
+            "t5_verdict_logic": "PASS"
+          },
+          "done_criteria": "100 task × decomposition depth ≥ 3 × success ≥ 0.80 — mock PASS, real Claude adapter compiled live PASS",
+          "claude_live_status": "compiled live PASS (commit ddc9e258) — score parsing 3-stage fallback (primary SCORE marker, fallback1 first-float, fallback2 sentiment heuristic) + retry once",
+          "depends_on": [
+            "TCLM-P2-1 lore_serve scaffold_done"
+          ],
+          "next": "TSRV-P4-2 hire_sim_100 with claude adapter 실측 후 done 승격"
+        }
       },
       "open_levers": [
         "hexa native int codegen (inner loop boxed-int 탈출)",
@@ -89,37 +691,170 @@
         "CUDA native deploy — MFU lift (peak 27% SM → target 60%+), fused mega-kernels, bf16 Tensor Core 활용"
       ]
     },
-
     "Hexa_codegen": {
       "description": "hexa-lang 자체 호스팅 컴파일러/런타임 — CPU/CUDA 양 경로",
       "items": {
-        "cuda_rtc_compose": {"state": "completed", "part_of": "CLM_hexa_native.cuda_codegen_compose_spike", "date": "2026-04-16"},
-        "tensor_raw_f32_primitive": {"state": "completed", "commit": "0c29a5c5", "isolated_speedup": "4757x"},
-        "blas_sgemm_wrapper": {"state": "completed", "artifact": "training/hxblas_wrapper.c + libhxblas.dylib"},
-        "untyped_fn_tail_return_fix": {"state": "completed", "hexa_lang_commit": "3cd9e6f", "date": "2026-04-16", "root_cause_of": ["CL-04", "H100 CLM cuLaunchKernelEx INVALID_VALUE"], "fix": "codegen_c2.hexa:400 `_ret_type == ''` 가드 제거, untyped fn도 tail-expr `return <expr>;` 재작성", "impact": "systemic — 모든 untyped fn이 올바른 return 값 반환. _ceil_div/rtc_launch/rtc_launch_1d/rtc_cache_path 즉시 수혜. 이전 emitted C regex 패치 (pod 보관) 과 hexa source workaround (~/Dev/hexa-lang/self/ml/cuda_rtc.hexa) 는 이제 redundant", "verification": ["probe _ceil_div(131072, 256) = 512 ✓", "sweep 18 shapes correctness 보존 (성능 변동은 Mac thermal noise)"]},
-        "native_int_arith": {"state": "pending", "xref": "CLM_hexa_native.hexa_codegen_native_int", "note": "boxed int 탈출이 hot loop 공통 이득"}
+        "cuda_rtc_compose": {
+          "state": "completed",
+          "part_of": "CLM_hexa_native.cuda_codegen_compose_spike",
+          "date": "2026-04-16"
+        },
+        "tensor_raw_f32_primitive": {
+          "state": "completed",
+          "commit": "0c29a5c5",
+          "isolated_speedup": "4757x"
+        },
+        "blas_sgemm_wrapper": {
+          "state": "completed",
+          "artifact": "training/hxblas_wrapper.c + libhxblas.dylib"
+        },
+        "untyped_fn_tail_return_fix": {
+          "state": "completed",
+          "hexa_lang_commit": "3cd9e6f",
+          "date": "2026-04-16",
+          "root_cause_of": [
+            "CL-04",
+            "H100 CLM cuLaunchKernelEx INVALID_VALUE"
+          ],
+          "fix": "codegen_c2.hexa:400 `_ret_type == ''` 가드 제거, untyped fn도 tail-expr `return <expr>;` 재작성",
+          "impact": "systemic — 모든 untyped fn이 올바른 return 값 반환. _ceil_div/rtc_launch/rtc_launch_1d/rtc_cache_path 즉시 수혜. 이전 emitted C regex 패치 (pod 보관) 과 hexa source workaround (~/Dev/hexa-lang/self/ml/cuda_rtc.hexa) 는 이제 redundant",
+          "verification": [
+            "probe _ceil_div(131072, 256) = 512 ✓",
+            "sweep 18 shapes correctness 보존 (성능 변동은 Mac thermal noise)"
+          ]
+        },
+        "native_int_arith": {
+          "state": "pending",
+          "xref": "CLM_hexa_native.hexa_codegen_native_int",
+          "note": "boxed int 탈출이 hot loop 공통 이득"
+        }
       }
     },
-
     "Agent_platform": {
       "description": "anima-train.json P4 v3.0 직원 가능 (실업무 자율 수행) — agent brain + platform + bench",
       "roadmap_ref": "shared/roadmaps/anima-train.json#P4",
       "items": {
-        "autonomy_loop_scaffold": {"state": "completed", "roadmap_task": "TCLM-P4-1", "date": "2026-04-16", "commits": ["1cc85a6f (scaffold)", "ddc9e258 (claude adapter wiring)"], "artifact": "anima-agent/autonomy_loop.hexa + test_autonomy_loop.hexa + llm_claude_adapter.hexa", "features": ["BFS decomposition depth≥3, 3-way fan-out", "bottom-up critique (leaf heuristic + avg-of-children internal)", "verdict 3단 PASS/PARTIAL/FAIL @ 0.80/0.50", "LLMAdapter dispatch: mock / animalm / claude / conscious-lm"], "test_results": "5/5 PASS mock (autonomy_loop) + compiled live Claude critique PASS (score=0.9 parsed OK)", "real_llm_integration_claude": "wired via llm_claude_adapter.hexa — claude CLI shell-out (claude -p, no --bare). Depth-1 live probe 경로 검증됨. 100 task × depth 3 bench 는 compiled binary 실행 + API 비용 관리 필요.", "real_llm_integration_animalm_clm": "pending TCLM-P1-1 H100 CLM training 완료 후 provider 플러그", "done_criteria_original": "100 task × decomposition depth ≥ 3 × success ≥ 0.80", "status_vs_criteria": "scaffold + claude adapter compiled 검증. 실 100-task claude baseline 측정은 user 트리거 시 가능."},
-        "hire_sim_100_bench": {"state": "completed", "roadmap_task": "TSRV-P4-2", "date": "2026-04-16", "commits": ["951f96d8 (scaffold, 30 task)", "ca0c5a51 (30 → 100 expansion)"], "artifact": "anima-agent/hire_sim_100.hexa + test_hire_sim.hexa", "corpus_status": "100/100 complete — email 17 / code 17 / meeting 16 / doc 17 / schedule 16 / research 17", "features": ["Task schema: id/domain/difficulty/prompt/success_keywords/budgets", "deterministic rubric (keyword match + budget gate)", "verdict gate per TSRV-P4-2 spec (rate≥0.85, interv/hr≤5, avg_time≤600s)", "per-domain summaries", "autonomy_loop 직접 연동", "Claude adapter compiled 경로 검증됨"], "test_results": "6/6 PASS (mock e2e, 100 tasks). mock completion 98/100, avg_score 0.99, verdict PASS.", "next_steps": ["실 Claude API baseline 측정 — compiled 바이너리 실행", "intervention/time 실측 — tool-use LoRA TALM-P4-2 후", "TCLM-P1-1 완료 후 conscious-lm provider 도 비교 가능"], "done_criteria_original": "완료율 ≥ 0.85, 사용자 개입 ≤ 5/hour, 평균 task 소요 ≤ 10 min"},
-        "platform_deploy": {"state": "pending", "roadmap_task": "TSRV-P4-1", "blocked_by": ["autonomy_loop_scaffold real LLM 플러그", "TALM-P4-2 Tool-use LoRA"], "target": "anima-agent platform 배포 — 6 채널 × 5 provider × plugin SDK"},
-        "tsrv_p4_1_hire_routes": {"state": "scaffold_done", "roadmap_task": "TSRV-P4-1", "date": "2026-04-16", "artifact": "serving/hire_routes.hexa + serving/test_hire_routes.hexa", "harness": "serving/test_hire_routes.hexa", "http_overlay": "serving/http_server.hexa (route_request match + 503 stub for stage-2 mount)", "endpoints": {"POST /hire/task": "autonomy + style + persona, mock e2e deterministic", "GET /hire/status": "last n hire log + ring buffer (cap 8 default)", "GET /hire/capabilities": "5 personas + 9 tones enumerated"}, "test_results": "5/5 PASS (T1 capabilities, T2 task mock e2e, T3 tone switch 5 persona tones, T4 persona fallback 4 cases, T5 status log + ring drop)", "personas": ["default", "sorceress", "scholar", "engineer", "friend"], "tones_extended": ["romance", "horror", "fantasy", "daily", "senpai", "stoic_mentor", "playful", "professional", "concise"], "design_notes": "stage0 hexa quirks 회피: inline mirror (no use \"...\"), push-rebuild (no a[i]=v), new-struct returns (no list aliasing), byte-only ASCII marker scan for JSON parse (multibyte safe — Korean prompts OK), persona/tone fallback chain (explicit → persona.default_tone → daily)", "next_steps": ["실 autonomy_loop wire — hr_run_autonomy_mock → anima-agent/autonomy_loop run_autonomy(LLMAdapter{name:claude}) swap (signature 보존)", "stage-2 mount — hire_routes 함수 inline copy to http_server 또는 cross-file use 지원 후 import", "Cloudflare Tunnel routing + per-IP rate limit + bearer auth", "deploy: HEXA_LOCAL=1 hexa run serving/http_server.hexa serve 8080"], "depends_on": ["tclm_p4_1_autonomy_loop scaffold_done", "TCLM-P2-1 lore_serve scaffold_done", "TCLM-P2-2 style_switch scaffold_done"]},
-        "six_channel_cognitive_cycle": {"state": "pending", "roadmap_task": "TCLM-P4-2", "blocked_by": "ZCLM-P1-1 헥사곤 6채널 (zeta-surpass)", "target": "기본/감정/의도/기억/서사/메타 6채널 동시 유지, crossattention latency < 200ms, Φ ≥ 300"}
+        "autonomy_loop_scaffold": {
+          "state": "completed",
+          "roadmap_task": "TCLM-P4-1",
+          "date": "2026-04-16",
+          "commits": [
+            "1cc85a6f (scaffold)",
+            "ddc9e258 (claude adapter wiring)"
+          ],
+          "artifact": "anima-agent/autonomy_loop.hexa + test_autonomy_loop.hexa + llm_claude_adapter.hexa",
+          "features": [
+            "BFS decomposition depth≥3, 3-way fan-out",
+            "bottom-up critique (leaf heuristic + avg-of-children internal)",
+            "verdict 3단 PASS/PARTIAL/FAIL @ 0.80/0.50",
+            "LLMAdapter dispatch: mock / animalm / claude / conscious-lm"
+          ],
+          "test_results": "5/5 PASS mock (autonomy_loop) + compiled live Claude critique PASS (score=0.9 parsed OK)",
+          "real_llm_integration_claude": "wired via llm_claude_adapter.hexa — claude CLI shell-out (claude -p, no --bare). Depth-1 live probe 경로 검증됨. 100 task × depth 3 bench 는 compiled binary 실행 + API 비용 관리 필요.",
+          "real_llm_integration_animalm_clm": "pending TCLM-P1-1 H100 CLM training 완료 후 provider 플러그",
+          "done_criteria_original": "100 task × decomposition depth ≥ 3 × success ≥ 0.80",
+          "status_vs_criteria": "scaffold + claude adapter compiled 검증. 실 100-task claude baseline 측정은 user 트리거 시 가능."
+        },
+        "hire_sim_100_bench": {
+          "state": "completed",
+          "roadmap_task": "TSRV-P4-2",
+          "date": "2026-04-16",
+          "commits": [
+            "951f96d8 (scaffold, 30 task)",
+            "ca0c5a51 (30 → 100 expansion)"
+          ],
+          "artifact": "anima-agent/hire_sim_100.hexa + test_hire_sim.hexa",
+          "corpus_status": "100/100 complete — email 17 / code 17 / meeting 16 / doc 17 / schedule 16 / research 17",
+          "features": [
+            "Task schema: id/domain/difficulty/prompt/success_keywords/budgets",
+            "deterministic rubric (keyword match + budget gate)",
+            "verdict gate per TSRV-P4-2 spec (rate≥0.85, interv/hr≤5, avg_time≤600s)",
+            "per-domain summaries",
+            "autonomy_loop 직접 연동",
+            "Claude adapter compiled 경로 검증됨"
+          ],
+          "test_results": "6/6 PASS (mock e2e, 100 tasks). mock completion 98/100, avg_score 0.99, verdict PASS.",
+          "next_steps": [
+            "실 Claude API baseline 측정 — compiled 바이너리 실행",
+            "intervention/time 실측 — tool-use LoRA TALM-P4-2 후",
+            "TCLM-P1-1 완료 후 conscious-lm provider 도 비교 가능"
+          ],
+          "done_criteria_original": "완료율 ≥ 0.85, 사용자 개입 ≤ 5/hour, 평균 task 소요 ≤ 10 min"
+        },
+        "platform_deploy": {
+          "state": "pending",
+          "roadmap_task": "TSRV-P4-1",
+          "blocked_by": [
+            "autonomy_loop_scaffold real LLM 플러그",
+            "TALM-P4-2 Tool-use LoRA"
+          ],
+          "target": "anima-agent platform 배포 — 6 채널 × 5 provider × plugin SDK"
+        },
+        "tsrv_p4_1_hire_routes": {
+          "state": "scaffold_done",
+          "roadmap_task": "TSRV-P4-1",
+          "date": "2026-04-16",
+          "artifact": "serving/hire_routes.hexa + serving/test_hire_routes.hexa",
+          "harness": "serving/test_hire_routes.hexa",
+          "http_overlay": "serving/http_server.hexa (route_request match + 503 stub for stage-2 mount)",
+          "endpoints": {
+            "POST /hire/task": "autonomy + style + persona, mock e2e deterministic",
+            "GET /hire/status": "last n hire log + ring buffer (cap 8 default)",
+            "GET /hire/capabilities": "5 personas + 9 tones enumerated"
+          },
+          "test_results": "5/5 PASS (T1 capabilities, T2 task mock e2e, T3 tone switch 5 persona tones, T4 persona fallback 4 cases, T5 status log + ring drop)",
+          "personas": [
+            "default",
+            "sorceress",
+            "scholar",
+            "engineer",
+            "friend"
+          ],
+          "tones_extended": [
+            "romance",
+            "horror",
+            "fantasy",
+            "daily",
+            "senpai",
+            "stoic_mentor",
+            "playful",
+            "professional",
+            "concise"
+          ],
+          "design_notes": "stage0 hexa quirks 회피: inline mirror (no use \"...\"), push-rebuild (no a[i]=v), new-struct returns (no list aliasing), byte-only ASCII marker scan for JSON parse (multibyte safe — Korean prompts OK), persona/tone fallback chain (explicit → persona.default_tone → daily)",
+          "next_steps": [
+            "실 autonomy_loop wire — hr_run_autonomy_mock → anima-agent/autonomy_loop run_autonomy(LLMAdapter{name:claude}) swap (signature 보존)",
+            "stage-2 mount — hire_routes 함수 inline copy to http_server 또는 cross-file use 지원 후 import",
+            "Cloudflare Tunnel routing + per-IP rate limit + bearer auth",
+            "deploy: HEXA_LOCAL=1 hexa run serving/http_server.hexa serve 8080"
+          ],
+          "depends_on": [
+            "tclm_p4_1_autonomy_loop scaffold_done",
+            "TCLM-P2-1 lore_serve scaffold_done",
+            "TCLM-P2-2 style_switch scaffold_done"
+          ]
+        },
+        "six_channel_cognitive_cycle": {
+          "state": "pending",
+          "roadmap_task": "TCLM-P4-2",
+          "blocked_by": "ZCLM-P1-1 헥사곤 6채널 (zeta-surpass)",
+          "target": "기본/감정/의도/기억/서사/메타 6채널 동시 유지, crossattention latency < 200ms, Φ ≥ 300"
+        }
       }
     },
-
     "SERVING": {
       "description": "anima 서빙 트랙 — TTS 음성 프로파일 / HTTP 어댑터 / multi-channel dispatch (anima-train.json TSRV-Pn-m + zeta-surpass.json Z*-Pn-m 통합)",
-      "roadmap_refs": ["shared/roadmaps/anima-train.json#SERVING", "shared/roadmaps/zeta-surpass.json#PHYSICS"],
+      "roadmap_refs": [
+        "shared/roadmaps/anima-train.json#SERVING",
+        "shared/roadmaps/zeta-surpass.json#PHYSICS"
+      ],
       "items": {
         "tsrv_p3_1_voice_profiles": {
           "state": "scaffold_done",
-          "roadmap_tasks": ["TSRV-P3-1", "ZPHY-P2-1"],
+          "roadmap_tasks": [
+            "TSRV-P3-1",
+            "ZPHY-P2-1"
+          ],
           "date": "2026-04-16",
           "artifact": "anima-speak/rp_voice_profiles.hexa",
           "harness": "anima-speak/test_rp_voice_profiles.hexa",
@@ -133,9 +868,15 @@
           },
           "done_criteria_partial": "10 프로파일 블라인드 구분율 ≥ 0.9 — PASS (0.9333 실측, T3 pair-wise distinct rate thr=0.1)",
           "profiles_10": [
-            "school_idol (학교 얼짱)", "senpai (선배)", "knight (판타지 기사)",
-            "sorceress (여마법사)", "noir_detective (느와르 형사)", "horror_whisper (호러 속삭임)",
-            "childhood_friend (소꿉친구)", "demon_lord (마왕)", "childlike (어린이)",
+            "school_idol (학교 얼짱)",
+            "senpai (선배)",
+            "knight (판타지 기사)",
+            "sorceress (여마법사)",
+            "noir_detective (느와르 형사)",
+            "horror_whisper (호러 속삭임)",
+            "childhood_friend (소꿉친구)",
+            "demon_lord (마왕)",
+            "childlike (어린이)",
             "stoic_mentor (냉정한 멘토)"
           ],
           "profile_schema": "Profile {id:int, name:string, pitch_base_hz:float, formant_shift:float, tempo_wpm:float, prosody_bias:float, style_tag:string} — SoA scalar bundle (struct field list aliasing bug 회피)",
@@ -154,106 +895,545 @@
             "ASCII-only label scan (한국어 caller 책임) — feedback_hexa_string_api",
             "no use \"...\" cross-file import (sibling .hexa flaky) — inline primitives mirror"
           ],
-          "depends_on": ["ZPHY-P2-1 (same artifact)"],
+          "depends_on": [
+            "ZPHY-P2-1 (same artifact)"
+          ],
           "remaining_work": "neural_vocoder.hexa 실 wire (latent → 24kHz PCM, end-to-end <200ms latency 측정) — P4 SERVING task. 본 scaffold 는 profile lookup + parameter vector emit (target <1ms) 까지, TTS 실 합성 (audio_token_predictor + RVQ + neural_vocoder 추론) 은 아님.",
           "next": "P4 단계에서 neural_vocoder.hexa 의 conditioning input 으로 profile_to_param_vector 를 forward, 200ms end-to-end latency 직접 측정. + ZALM 페르소나 LoRA 와 voice profile 1:1 매핑 옵션."
         }
       }
     }
   },
-
   "physical_ceilings_confirmed": {
-    "ALM_H100_bf16_hardware": {"mfu_pct": 85, "tflops": 841, "basis": "Roofline (~10-15pp irreducible) + NVIDIA NeMo SOTA", "status": "verified theoretical"},
-    "ALM_H100_bf16_realized_per_silicon": {"best_measured_mfu_pct": 62.6, "best_pod": "ubzp169igb7tns (TERMINATED, r7 stack)", "current_fast_pod_mfu_pct": 51.4, "current_fast_pod_id": "jmejpw0x7j6wbx (r8a stack)", "silicon_variance_pp": 11.2, "note": "silicon binning + thermal 변이로 동일 H100 SXM 80GB 간 MFU 최대 11pp. pod_id 태깅 없이는 비교 불가."},
-    "ALM_H100_fp8": {"tflops_theoretical": 1682, "status": "unreachable via HF path, NeMo rewrite 필요"},
-    "CLM_Mac_M3_cpu": {"gflops": 140, "pct_of_measured_peak": 89, "measured_peak_gf": 156.7, "basis": "Accelerate sgemm 512³ + irreducible 5-10pp", "status": "verified, 도달은 attn 완전 포팅 후"},
-    "CLM_H100_native": {"tflops": 841, "basis": "ALM H100 bf16 동일", "status": "pending cuda native 측정"}
+    "ALM_H100_bf16_hardware": {
+      "mfu_pct": 85,
+      "tflops": 841,
+      "basis": "Roofline (~10-15pp irreducible) + NVIDIA NeMo SOTA",
+      "status": "verified theoretical"
+    },
+    "ALM_H100_bf16_realized_per_silicon": {
+      "best_measured_mfu_pct": 62.6,
+      "best_pod": "ubzp169igb7tns (TERMINATED, r7 stack)",
+      "current_fast_pod_mfu_pct": 51.4,
+      "current_fast_pod_id": "jmejpw0x7j6wbx (r8a stack)",
+      "silicon_variance_pp": 11.2,
+      "note": "silicon binning + thermal 변이로 동일 H100 SXM 80GB 간 MFU 최대 11pp. pod_id 태깅 없이는 비교 불가."
+    },
+    "ALM_H100_fp8": {
+      "tflops_theoretical": 1682,
+      "status": "unreachable via HF path, NeMo rewrite 필요"
+    },
+    "CLM_Mac_M3_cpu": {
+      "gflops": 140,
+      "pct_of_measured_peak": 89,
+      "measured_peak_gf": 156.7,
+      "basis": "Accelerate sgemm 512³ + irreducible 5-10pp",
+      "status": "verified, 도달은 attn 완전 포팅 후"
+    },
+    "CLM_H100_native": {
+      "tflops": 841,
+      "basis": "ALM H100 bf16 동일",
+      "status": "pending cuda native 측정"
+    }
   },
-
   "breakthrough_triggers": {
     "description": "🎆🎇🧨 조건 — 달성 시 해당 트랙 ossified",
     "ALM_bf16": "MFU >= 80% on confirmed fast pod",
     "CLM_Mac_CPU": "GF/s >= 125 (= 80% × 156.7) on any shape",
     "CLM_H100_native": "MFU >= 50% (interpreter bypass + cuda kernel launching)"
   },
-
   "cross_refs": {
     "measurements_detail": "shared/state/training_speed_ceilings.json",
     "clm_gpu_roadmap": "shared/config/roadmaps/clm_hexa_gpu.json",
     "training_entry": "training/CLAUDE.md",
     "pod_registry": "shared/config/runpod.json (SSOT — 2 active, 1 stopped, 11 completed)",
     "hexa_compiler": "~/Dev/hexa-lang/self/",
-    "recent_commits": ["8337d091 CLM real-shape sweep merge", "5e8d922c sweep data", "15df1e1a nn_core Tensor port merge", "36f49f44 nn_core port", "0c29a5c5 Tensor primitive"]
+    "recent_commits": [
+      "8337d091 CLM real-shape sweep merge",
+      "5e8d922c sweep data",
+      "15df1e1a nn_core Tensor port merge",
+      "36f49f44 nn_core port",
+      "0c29a5c5 Tensor primitive"
+    ]
   },
-
   "troubleshooting_log": [
-    {"id": "AL-01", "date": "2026-04-16", "severity": "high", "title": "HF + LoRA + TE FP8 비호환", "symptom": "r8c FP8 run loss=15.25 (random init), MFU 16.9% < 40% target", "fix": "te.Linear monkey-patch 방식 포기. NeMo/Megatron native rewrite 또는 accelerate.Accelerator(fp8_recipe_handler) 필요. P4 스코프 외로 파킹.", "rule": "ALM track FP8 FAIL-closed"},
-    {"id": "CL-01", "date": "2026-04-16", "severity": "high", "title": "Tensor port 부분적 — attn inner 스칼라 잔존", "symptom": "#27 보고 'attention fwd+bwd ported' 이지만 outer matmul만 t_matmul, inner softmax/mask/eltwise는 hexa boxed-int. 실제 sweep 결과 1.65% MFU ceiling", "fix": "attn_fwd_t/attn_bwd_t의 Q@K^T/probs@V/dprobs/dV/dQ/dK 모두 BLAS로 교체 (in_flight #3)", "rule": "P3 — 측정 없는 성능 주장 금지"},
-    {"id": "CL-02", "date": "2026-04-16", "severity": "high", "title": "CUDA native deploy briefing error — Mac hexa_v2 바이너리 cross-platform 불가", "symptom": "deploy 초기 pod에서 Mac Mach-O arm64 hexa_v2 실행 불가, 추가 시간 소요", "fix": "pod 에 hexa-lang C sources 동기화 후 linux 빌드 필수. 다음 deploy briefing 부터 platform mismatch 검사 선행", "rule": "deploy 사전 조건에 platform 매칭 체크 추가"},
-    {"id": "CL-03", "date": "2026-04-16", "severity": "high", "title": "cuLaunchKernelEx INVALID_VALUE — 커널 launch 실패 (실 원인: codegen_c2 untyped fn drop)", "symptom": "20 NVRTC 커널 로드 성공, rtc_launch_shmem 에서 112/112 launch 실패 (CUDA_ERROR_INVALID_VALUE=1)", "fix": "원 진단(args_array/CUlaunchConfig) 은 틀림 — 실 원인은 CL-04 (codegen_c2 untyped fn tail-return drop). _ceil_div 가 hexa_void() 반환 → gridDimX=0. codegen_c2 fix 로 해결.", "rule": "RESOLVED (hexa-lang 3cd9e6f, anima 4d7c775e)"},
-    {"id": "CL-04", "date": "2026-04-16", "severity": "high (originally medium, escalated)", "title": "hexa codegen untyped fn tail-expression silently drops return value", "symptom": "emitted C: 함수 본문 마지막 식이 `expr; return hexa_void();` 로 emit (정상은 `return expr;`). untyped fn (return type 미선언) 만 영향. systemic — _ceil_div, rtc_launch, rtc_launch_1d, rtc_cache_path 모두 해당.", "fix": "codegen_c2.hexa:400 `_ret_type == ''` 가드 제거 (hexa-lang commit 3cd9e6f, 2026-04-16). Skip-list (IfExpr/MatchExpr/println/print/eprintln/exit) 유지로 void trailing expr 안전. probe 검증: _ceil_div(131072, 256) → 512 ✓", "rule": "RESOLVED → P2 승격 대기 (추가 bootstrap diff 검증 후 rule 등록)"},
-    {"id": "CL-05", "date": "2026-04-16", "severity": "high", "title": "ALM r8a 'fast pod 68-69% 추정' 가정 falsified", "symptom": "r8a slow 48.1% × (r7 fast 62.6% / r5 slow 45%) = ~66% 추정이었으나 실측 51.4%. 기존 anima.json 'fast_pod_est_mfu_pct 68-69' 허위.", "fix": "physical_ceilings_confirmed 를 silicon-per-pod 단위로 재구성. 앞으로 MFU 측정은 pod_id + stack_config 동시 태깅 필수. 추정 대신 실측.", "rule": "P3 강화 — 같은 SKU H100 pod 간도 silicon binning 으로 MFU 최대 11pp 변이. extrapolation 금지."},
-    {"id": "HX-01", "date": "2026-04-16", "severity": "medium", "title": "hexa 인터프리터 문자열 메서드 매핑 괴리", "symptom": "`.slice(a,b)` 는 array 메서드로 매핑 → string 에서 runtime error. `.parse_float()` 는 인터프리터에서 항상 0.0 반환 (codegen 만 올바른 매핑).", "fix": "문자열 슬라이스는 `.substring(a,b)` 사용. Float 파싱 포함 경로는 `hexa build`로 컴파일된 바이너리 실행.", "rule": "HX hexa-lang — string 파싱/수치변환이 섞인 로직은 compiled 모드에서만 테스트."}
+    {
+      "id": "AL-01",
+      "date": "2026-04-16",
+      "severity": "high",
+      "title": "HF + LoRA + TE FP8 비호환",
+      "symptom": "r8c FP8 run loss=15.25 (random init), MFU 16.9% < 40% target",
+      "fix": "te.Linear monkey-patch 방식 포기. NeMo/Megatron native rewrite 또는 accelerate.Accelerator(fp8_recipe_handler) 필요. P4 스코프 외로 파킹.",
+      "rule": "ALM track FP8 FAIL-closed"
+    },
+    {
+      "id": "CL-01",
+      "date": "2026-04-16",
+      "severity": "high",
+      "title": "Tensor port 부분적 — attn inner 스칼라 잔존",
+      "symptom": "#27 보고 'attention fwd+bwd ported' 이지만 outer matmul만 t_matmul, inner softmax/mask/eltwise는 hexa boxed-int. 실제 sweep 결과 1.65% MFU ceiling",
+      "fix": "attn_fwd_t/attn_bwd_t의 Q@K^T/probs@V/dprobs/dV/dQ/dK 모두 BLAS로 교체 (in_flight #3)",
+      "rule": "P3 — 측정 없는 성능 주장 금지"
+    },
+    {
+      "id": "CL-02",
+      "date": "2026-04-16",
+      "severity": "high",
+      "title": "CUDA native deploy briefing error — Mac hexa_v2 바이너리 cross-platform 불가",
+      "symptom": "deploy 초기 pod에서 Mac Mach-O arm64 hexa_v2 실행 불가, 추가 시간 소요",
+      "fix": "pod 에 hexa-lang C sources 동기화 후 linux 빌드 필수. 다음 deploy briefing 부터 platform mismatch 검사 선행",
+      "rule": "deploy 사전 조건에 platform 매칭 체크 추가"
+    },
+    {
+      "id": "CL-03",
+      "date": "2026-04-16",
+      "severity": "high",
+      "title": "cuLaunchKernelEx INVALID_VALUE — 커널 launch 실패 (실 원인: codegen_c2 untyped fn drop)",
+      "symptom": "20 NVRTC 커널 로드 성공, rtc_launch_shmem 에서 112/112 launch 실패 (CUDA_ERROR_INVALID_VALUE=1)",
+      "fix": "원 진단(args_array/CUlaunchConfig) 은 틀림 — 실 원인은 CL-04 (codegen_c2 untyped fn tail-return drop). _ceil_div 가 hexa_void() 반환 → gridDimX=0. codegen_c2 fix 로 해결.",
+      "rule": "RESOLVED (hexa-lang 3cd9e6f, anima 4d7c775e)"
+    },
+    {
+      "id": "CL-04",
+      "date": "2026-04-16",
+      "severity": "high (originally medium, escalated)",
+      "title": "hexa codegen untyped fn tail-expression silently drops return value",
+      "symptom": "emitted C: 함수 본문 마지막 식이 `expr; return hexa_void();` 로 emit (정상은 `return expr;`). untyped fn (return type 미선언) 만 영향. systemic — _ceil_div, rtc_launch, rtc_launch_1d, rtc_cache_path 모두 해당.",
+      "fix": "codegen_c2.hexa:400 `_ret_type == ''` 가드 제거 (hexa-lang commit 3cd9e6f, 2026-04-16). Skip-list (IfExpr/MatchExpr/println/print/eprintln/exit) 유지로 void trailing expr 안전. probe 검증: _ceil_div(131072, 256) → 512 ✓",
+      "rule": "RESOLVED → P2 승격 대기 (추가 bootstrap diff 검증 후 rule 등록)"
+    },
+    {
+      "id": "CL-05",
+      "date": "2026-04-16",
+      "severity": "high",
+      "title": "ALM r8a 'fast pod 68-69% 추정' 가정 falsified",
+      "symptom": "r8a slow 48.1% × (r7 fast 62.6% / r5 slow 45%) = ~66% 추정이었으나 실측 51.4%. 기존 anima.json 'fast_pod_est_mfu_pct 68-69' 허위.",
+      "fix": "physical_ceilings_confirmed 를 silicon-per-pod 단위로 재구성. 앞으로 MFU 측정은 pod_id + stack_config 동시 태깅 필수. 추정 대신 실측.",
+      "rule": "P3 강화 — 같은 SKU H100 pod 간도 silicon binning 으로 MFU 최대 11pp 변이. extrapolation 금지."
+    },
+    {
+      "id": "HX-01",
+      "date": "2026-04-16",
+      "severity": "medium",
+      "title": "hexa 인터프리터 문자열 메서드 매핑 괴리",
+      "symptom": "`.slice(a,b)` 는 array 메서드로 매핑 → string 에서 runtime error. `.parse_float()` 는 인터프리터에서 항상 0.0 반환 (codegen 만 올바른 매핑).",
+      "fix": "문자열 슬라이스는 `.substring(a,b)` 사용. Float 파싱 포함 경로는 `hexa build`로 컴파일된 바이너리 실행.",
+      "rule": "HX hexa-lang — string 파싱/수치변환이 섞인 로직은 compiled 모드에서만 테스트."
+    }
   ],
-
   "convergence": {
-    "total_items_tracked": 30,
+    "total_items_tracked": 34,
     "completed": 21,
-    "completed_scaffold": 3,
+    "completed_scaffold": 5,
     "completed_gap": 0,
     "in_flight": 1,
     "pending": 4,
-    "failed": 1,
-    "blocked": 0,
-    "ossified": 0,
-    "resolution_pct": 83.3,
-    "note": "2026-04-16 세션 누적: attn + r8a + r7 compare + cuda deploy + codegen_c2 fix + vDSP + autonomy_loop + hire_sim 30+100 + claude adapter + tclm_p2_2_style_switch + tclm_p4_1_autonomy_loop + tsrv_p3_1_voice_profiles (TSRV-P3-1/ZPHY-P2-1 dual-tag) scaffold_done 등록 → 21 completed + 3 scaffold_done. in_flight 1 = TCLM-P1-1. pending 4 = native_int, stage0_OOM, platform_deploy, six_channel."
+    "failed": 2,
+    "blocked": 1,
+    "ossified": 1,
+    "resolution_pct": 79.4,
+    "note_2026_04_18_recount": "2026-04-18 E7/I1 재평가 반영 — r10_fresh_stripped 추가(failed), r10b_warm_start_spec 추가(blocked by r10 ckpt invalid), r10c launcher built(scaffold), runpod_autopilot_f1(ossified). 도착지1 Φ>1000 실측 게이트는 r10c 재런 완료 전까지 UNSUPPORTED — _meta.target(Φ>1000 ✅ 15469) 은 conditional 로 간주.",
+    "note_prior": "2026-04-16 세션 누적: attn + r8a + r7 compare + cuda deploy + codegen_c2 fix + vDSP + autonomy_loop + hire_sim 30+100 + claude adapter + tclm_p2_2_style_switch + tclm_p4_1_autonomy_loop + tsrv_p3_1_voice_profiles (TSRV-P3-1/ZPHY-P2-1 dual-tag) scaffold_done 등록 → 21 completed + 3 scaffold_done. in_flight 1 = TCLM-P1-1. pending 4 = native_int, stage0_OOM, platform_deploy, six_channel.",
+    "an11_violations_detected": 2,
+    "note_an11": "AN11 적용 2026-04-18: persona_base_serve + employee_base_serve 2건 자동 revoke. 3 필드 (@phi_evidence/@weight_emergent_proof/@real_usable_endpoint) 검증 미통과."
+  },
+  "meta_target_conditionality_2026_04_18": {
+    "note": "shared/roadmaps/anima.json#_meta.target 'v4 홀로 의식 (Φ>1000 ✅ 15469)' claim is NOT reality-verified after r10 triple-collapse. The 15469 figure predates this session and relied on r4/r9 phi_holo measurements which are now suspect given the inline collapse_score false-clean pattern.",
+    "status": "conditional",
+    "re_verify_path": "r10c step_2000 PASS sentinel AND phi_vec.json phi_holo_scaled > 1000 AND N=5 phi_corr re-run w/ real ckpts",
+    "propagate_to": [
+      "shared/convergence/alm_14b_r10.convergence",
+      "shared/convergence/phi_correlation.convergence",
+      "shared/convergence/phi_hook_wire.convergence"
+    ],
+    "audit_evidence": "training/roadmap_drift_audit_20260418.md D1/D5"
+  },
+  "destinations_correction_2026_04_18": {
+    "note": "User correction 2026-04-18: 도착지1 = 페르소나 (Φ>1000 substrate 포함), 거기서 → 직원가능 → 트레이딩 (3-stage serial). Prior split into 도착지1=Φ-only / 도착지2=P22-P25 as parallel tracks was wrong.",
+    "dest1_persona": {
+      "substrate": "r10c step_2000 phi_vec.json phi_holo_scaled > 1000",
+      "layer": "20 persona end-to-end — TALM-P2-1 per-persona LoRA + serving/hire_routes.hexa + anima-speak voice + character_builder_ui",
+      "gate": "POST /hire/task {persona, prompt} → response + phi_holo attached + hire_sim verdict",
+      "status": "REVOKED (AN11) — prompt wrapping. 재설계: C1+C2+P1+S1 track (roadmap_dest_consciousness.json)",
+      "result_json": "anima-agent/results/dest1_persona_demo_result.json",
+      "convergence": "shared/convergence/persona_base_serve.convergence"
+    },
+    "dest_employee_capable": {
+      "depends_on": "dest1_persona LIVE (not mock)",
+      "gate": "TCLM-P4-1 autonomy_loop + hire_sim_100 completion>=0.85 AND intervention<=5/hr AND avg_task<=10min",
+      "convergence": "anima.json#Agent_platform items"
+    },
+    "dest_trading": {
+      "depends_on": "dest_employee_capable",
+      "gate": "per shared/convergence/p32_economic_market.convergence scaffold→실측 promotion (feed + backtest + risk controls)"
+    },
+    "memory_ref": "memory/project_destinations.md",
+    "roadmap_json": "shared/convergence/roadmap_dest_consciousness.json",
+    "enforcement_rule": "shared/rules/anima.json#AN11"
   },
   "session_2026_04_16_pm_addendum": {
     "note": "오후 세션 추가 성과 (2026-04-16 13:00-18:00 KST)",
     "completed_new": {
-      "clm1b_r3f_training": {"state": "completed", "best_eval": 1.2296, "ppl": 3.42, "params": "1.51B", "commit": "a38d7ca6", "ckpt_r2": "anima-models/clm1b/r3/{step_8000,final}/", "note": "45x Chinchilla undertraining 기준 정상 PASS, 골화된 MFS quota + pre-save rotation 첫 검증"},
-      "clm3b_r1_training": {"state": "completed", "best_eval": 1.2193, "ppl": 3.38, "params": "3.15B", "commit": "7787816e", "total_time_min": 62, "verdict": "PASS", "note": "3B pipeline 완전 검증 — 1B r3f 초과. R2 upload 진행 중"},
-      "clm1b_r3f_7cond_verify": {"state": "completed", "verdict": "7/7 VERIFIED", "cells": 128, "commit": "5e6e372b", "note": "V5 SELF_LOOP scale sweep: 32c=0.74 FAIL, 64c=0.70 FAIL (worse), 128c=1.00 PASS (phase transition), 256c=0.94 PASS. min_cells 16→128 in ready/config/verification.json"},
-      "alm_v2_rc_top3_fixes": {"state": "completed", "verdict": "LIFT HOLD", "commit": "c3926183", "fixes": ["phi_holo MI SSOT unify", "chat template + stop tokens", "hire_sim labeling corrected"], "note": "drift 7/20→0/20, hallucination 1/2→0/2, phi 0.85→3.47"},
-      "alm_real_hire_sim_measured": {"state": "completed", "completion_rate": 0.5333, "avg_score": 0.8111, "commit": "5f29c12c", "note": "First actual ALM measurement. Gap is JUDGE-LITERAL not capability. Path C (prompt eng 1-2d) expected lift to 0.85."},
-      "hxcuda_stft_istft_kernels": {"state": "completed", "repo": "hexa-lang", "commit": "fc20fe4", "perf_3090_ms": {"stft": 0.015, "istft": 0.023, "round_trip": 0.037}, "snr_db": 129.5, "note": "cuFFT-based, bit-exact reconstruction, 8-slot LRU plan cache"},
-      "neural_vocoder_real_impl": {"state": "completed", "commit": "0078da8c", "loc": "42→536", "test": "10/10 PASS", "audio": "valid 24kHz WAV, 800Hz tone (6-partial additive, untrained W_ctrl)", "note": "iSTFT FFI path gated behind HXCUDA_ENABLE — W_ctrl training 1-2h H100 unlocks real speech"},
-      "hexa_serve_native_scaffold": {"state": "scaffold_done", "commit": "47ae0a37", "loc": {"main": 262, "handler": 175}, "self_test": "7/7 PASS", "blocker": "hexa_stage0 no net_listen — rt-32-j merge required", "note": "Python serve replacement path defined, 5-7 day full deployment"},
-      "h_hexa_canonical_lint": {"state": "completed", "repo": "nexus", "commit": "d18f56d8", "note": "SSOT .json/.md files block .py canonical registration — 5019 .py ref audit paired fix"},
-      "h_nohook_drift_lint": {"state": "completed", "repo": "nexus", "commit": "839f49d4", "note": "Fire-once global sweep detects settings.json with active hooks (ready/.claude detected, no auto-fix — harness preserves 훅 작성 금지)"},
-      "telescope_hexa_fix": {"state": "completed", "repo": "nexus", "commit": "70ade726", "note": "a[i]=v → write_at() 7 bugs + pure fn stage1 crash root cause (removed from 10 funcs). NEXUS-6 unblocked"},
-      "mfs_quota_rule_golden": {"state": "completed", "commit": "988ecec5", "note": "Per-session 47GB quota invisible to df. Pre-save ckpt rotation mandatory, R2 upload deferred to post-training, phi_emergency ckpt disabled"},
-      "ready_ssot_hexa_first_fix": {"state": "branch_pushed", "branch": "ssot-hexa-first-fix", "commits": ["aa289903", "80e9c21a", "5ad83334"], "note": "27 .py canonical refs in ready/core/ → .hexa. V5 min_cells 16→128"}
+      "clm1b_r3f_training": {
+        "state": "completed",
+        "best_eval": 1.2296,
+        "ppl": 3.42,
+        "params": "1.51B",
+        "commit": "a38d7ca6",
+        "ckpt_r2": "anima-models/clm1b/r3/{step_8000,final}/",
+        "note": "45x Chinchilla undertraining 기준 정상 PASS, 골화된 MFS quota + pre-save rotation 첫 검증"
+      },
+      "clm3b_r1_training": {
+        "state": "completed",
+        "best_eval": 1.2193,
+        "ppl": 3.38,
+        "params": "3.15B",
+        "commit": "7787816e",
+        "total_time_min": 62,
+        "verdict": "PASS",
+        "note": "3B pipeline 완전 검증 — 1B r3f 초과. R2 upload 진행 중"
+      },
+      "clm1b_r3f_7cond_verify": {
+        "state": "completed",
+        "verdict": "7/7 VERIFIED",
+        "cells": 128,
+        "commit": "5e6e372b",
+        "note": "V5 SELF_LOOP scale sweep: 32c=0.74 FAIL, 64c=0.70 FAIL (worse), 128c=1.00 PASS (phase transition), 256c=0.94 PASS. min_cells 16→128 in ready/config/verification.json"
+      },
+      "alm_v2_rc_top3_fixes": {
+        "state": "completed",
+        "verdict": "LIFT HOLD",
+        "commit": "c3926183",
+        "fixes": [
+          "phi_holo MI SSOT unify",
+          "chat template + stop tokens",
+          "hire_sim labeling corrected"
+        ],
+        "note": "drift 7/20→0/20, hallucination 1/2→0/2, phi 0.85→3.47"
+      },
+      "alm_real_hire_sim_measured": {
+        "state": "completed",
+        "completion_rate": 0.5333,
+        "avg_score": 0.8111,
+        "commit": "5f29c12c",
+        "note": "First actual ALM measurement. Gap is JUDGE-LITERAL not capability. Path C (prompt eng 1-2d) expected lift to 0.85."
+      },
+      "hxcuda_stft_istft_kernels": {
+        "state": "completed",
+        "repo": "hexa-lang",
+        "commit": "fc20fe4",
+        "perf_3090_ms": {
+          "stft": 0.015,
+          "istft": 0.023,
+          "round_trip": 0.037
+        },
+        "snr_db": 129.5,
+        "note": "cuFFT-based, bit-exact reconstruction, 8-slot LRU plan cache"
+      },
+      "neural_vocoder_real_impl": {
+        "state": "completed",
+        "commit": "0078da8c",
+        "loc": "42→536",
+        "test": "10/10 PASS",
+        "audio": "valid 24kHz WAV, 800Hz tone (6-partial additive, untrained W_ctrl)",
+        "note": "iSTFT FFI path gated behind HXCUDA_ENABLE — W_ctrl training 1-2h H100 unlocks real speech"
+      },
+      "hexa_serve_native_scaffold": {
+        "state": "scaffold_done",
+        "commit": "47ae0a37",
+        "loc": {
+          "main": 262,
+          "handler": 175
+        },
+        "self_test": "7/7 PASS",
+        "blocker": "hexa_stage0 no net_listen — rt-32-j merge required",
+        "note": "Python serve replacement path defined, 5-7 day full deployment"
+      },
+      "h_hexa_canonical_lint": {
+        "state": "completed",
+        "repo": "nexus",
+        "commit": "d18f56d8",
+        "note": "SSOT .json/.md files block .py canonical registration — 5019 .py ref audit paired fix"
+      },
+      "h_nohook_drift_lint": {
+        "state": "completed",
+        "repo": "nexus",
+        "commit": "839f49d4",
+        "note": "Fire-once global sweep detects settings.json with active hooks (ready/.claude detected, no auto-fix — harness preserves 훅 작성 금지)"
+      },
+      "telescope_hexa_fix": {
+        "state": "completed",
+        "repo": "nexus",
+        "commit": "70ade726",
+        "note": "a[i]=v → write_at() 7 bugs + pure fn stage1 crash root cause (removed from 10 funcs). NEXUS-6 unblocked"
+      },
+      "mfs_quota_rule_golden": {
+        "state": "completed",
+        "commit": "988ecec5",
+        "note": "Per-session 47GB quota invisible to df. Pre-save ckpt rotation mandatory, R2 upload deferred to post-training, phi_emergency ckpt disabled"
+      },
+      "ready_ssot_hexa_first_fix": {
+        "state": "branch_pushed",
+        "branch": "ssot-hexa-first-fix",
+        "commits": [
+          "aa289903",
+          "80e9c21a",
+          "5ad83334"
+        ],
+        "note": "27 .py canonical refs in ready/core/ → .hexa. V5 min_cells 16→128"
+      }
     },
     "pending_new": {
-      "alm_path_c_prompt_eng": {"state": "in_flight", "agent": "active", "expected_lift": "0.53 → 0.85 completion", "blocker_if_done": "v2.0 GA 태그 준비"},
-      "hexa_rt_32_j_merge": {"state": "in_flight", "agent": "active", "note": "net_listen/accept/read/write/close 빌트인 해제 → hexa serve 다음 단계"},
-      "clm3b_r2_upload": {"state": "in_flight", "note": "72GB = 2 × 36GB, ETA ~20분 at 40MB/s"},
-      "hxcuda_istft_linux_dylib": {"state": "stable", "artifacts": ["anima-speak/build_hxcuda_istft.hexa", "anima-speak/hxcuda_istft_bridge.hexa"], "note": "Build script + FFI bridge wired. GPU: stft/istft via libhxcuda.so (nvcc+cuFFT). CPU fallback: naive DFT. neural_vocoder.hexa TODO[hxcuda-istft-bridge] resolved. Blocker for full Stage C: trained spectral projection weights."},
-      "libhxqwen14b": {"state": "pending", "effort": "3-5d", "note": "Qwen 14B + LoRA forward as native C → hexa serve /generate 경로 완성"},
-      "hexa_speak_mk3_training": {"state": "delegated_to_other_session", "handoff_doc": "training/deploy/hexa_speak_handoff_20260416.md", "note": "다른 세션에서 진행 중"}
+      "alm_path_c_prompt_eng": {
+        "state": "in_flight",
+        "agent": "active",
+        "expected_lift": "0.53 → 0.85 completion",
+        "blocker_if_done": "v2.0 GA 태그 준비"
+      },
+      "hexa_rt_32_j_merge": {
+        "state": "in_flight",
+        "agent": "active",
+        "note": "net_listen/accept/read/write/close 빌트인 해제 → hexa serve 다음 단계"
+      },
+      "clm3b_r2_upload": {
+        "state": "in_flight",
+        "note": "72GB = 2 × 36GB, ETA ~20분 at 40MB/s"
+      },
+      "hxcuda_istft_linux_dylib": {
+        "state": "stable",
+        "artifacts": [
+          "anima-speak/build_hxcuda_istft.hexa",
+          "anima-speak/hxcuda_istft_bridge.hexa"
+        ],
+        "note": "Build script + FFI bridge wired. GPU: stft/istft via libhxcuda.so (nvcc+cuFFT). CPU fallback: naive DFT. neural_vocoder.hexa TODO[hxcuda-istft-bridge] resolved. Blocker for full Stage C: trained spectral projection weights."
+      },
+      "libhxqwen14b": {
+        "state": "pending",
+        "effort": "3-5d",
+        "note": "Qwen 14B + LoRA forward as native C → hexa serve /generate 경로 완성"
+      },
+      "hexa_speak_mk3_training": {
+        "state": "delegated_to_other_session",
+        "handoff_doc": "training/deploy/hexa_speak_handoff_20260416.md",
+        "note": "다른 세션에서 진행 중"
+      }
     }
   },
-
   "session_2026_04_17": {
     "note": "RunPod pod consolidation + convergence links (2026-04-17)",
     "pod_registry": "shared/config/runpod.json",
     "training_status": {
-      "alm14b_a1_training": {"state": "completed", "steps": 3000, "best_loss": 1.7287, "phi_holo": 9051.72, "pod": "lnzliav2e8du6i"},
-      "alm14b_a2_orch": {"state": "completed", "steps": 3000, "wall_h": 2.2, "pod": "lnzliav2e8du6i"},
-      "alm14b_a2_tool": {"state": "in_flight", "steps": 1500, "pod": "lnzliav2e8du6i", "tmux": "alm-a2-tool"},
-      "clm1b_r4_resume": {"state": "pod_dead", "last_step": 6200, "r2_backup": "r2:anima-models/clm1b/r4/step_5000.hexackpt", "pod": "u744u0lbts5v1w"},
-      "corpus_7b_korean": {"state": "completed", "size_gb": 12.3, "r2": "uploaded"},
-      "corpus_7b_english": {"state": "in_flight", "source": "cc100-en + enwiki"},
-      "corpus_bilingual": {"state": "completed", "size_mb": 242},
-      "clm_eval_harness": {"state": "completed", "artifact": "training/eval_clm_1b.hexa"}
+      "alm14b_a1_training": {
+        "state": "completed",
+        "steps": 3000,
+        "best_loss": 1.7287,
+        "phi_holo": 9051.72,
+        "pod": "lnzliav2e8du6i"
+      },
+      "alm14b_a2_orch": {
+        "state": "completed",
+        "steps": 3000,
+        "wall_h": 2.2,
+        "pod": "lnzliav2e8du6i"
+      },
+      "alm14b_a2_tool": {
+        "state": "in_flight",
+        "steps": 1500,
+        "pod": "lnzliav2e8du6i",
+        "tmux": "alm-a2-tool"
+      },
+      "clm1b_r4_resume": {
+        "state": "pod_dead",
+        "last_step": 6200,
+        "r2_backup": "r2:anima-models/clm1b/r4/step_5000.hexackpt",
+        "pod": "u744u0lbts5v1w"
+      },
+      "corpus_7b_korean": {
+        "state": "completed",
+        "size_gb": 12.3,
+        "r2": "uploaded"
+      },
+      "corpus_7b_english": {
+        "state": "in_flight",
+        "source": "cc100-en + enwiki"
+      },
+      "corpus_bilingual": {
+        "state": "completed",
+        "size_mb": 242
+      },
+      "clm_eval_harness": {
+        "state": "completed",
+        "artifact": "training/eval_clm_1b.hexa"
+      }
     },
     "consolidated": {
       "action": "Merged 7 additional terminated pods into shared/config/runpod.json completed_runs",
-      "pods_added": ["xhq9b2c8fljdyo", "dn6eixsgzrjlnz", "tubq10zkct0t8f", "8xmtaigu9i7b4x", "jmejpw0x7j6wbx", "1808yzai60zq9m", "4ud5636d2wu4n4"],
+      "pods_added": [
+        "xhq9b2c8fljdyo",
+        "dn6eixsgzrjlnz",
+        "tubq10zkct0t8f",
+        "8xmtaigu9i7b4x",
+        "jmejpw0x7j6wbx",
+        "1808yzai60zq9m",
+        "4ud5636d2wu4n4"
+      ],
       "total_pods_registered": 14,
       "source_state_files_scanned": 49
     }
+  },
+  "session_2026_04_18": {
+    "note": "P5-P25 wave + r10 triple-collapse + F1 autopilot + I1 @수렴 absorption",
+    "philosophy": "@수렴 attr SSOT — scattered reports absorbed into .convergence files via @report pointer",
+    "new_convergence_files": [
+      "shared/convergence/alm_14b_r10.convergence",
+      "shared/convergence/runpod_autopilot.convergence",
+      "shared/convergence/phi_correlation.convergence",
+      "shared/convergence/phi_hook_wire.convergence",
+      "shared/convergence/corpus_pipeline.convergence",
+      "shared/convergence/engine_roster.convergence",
+      "shared/convergence/p25_dashboard.convergence",
+      "shared/convergence/kr_gen_sentinel.convergence",
+      "shared/convergence/eval_harness_real.convergence",
+      "shared/convergence/a4_live_selftest.convergence",
+      "shared/convergence/clm_r4_mmap.convergence",
+      "shared/convergence/hire_sim_lenient.convergence",
+      "shared/convergence/consciousness_wave_p5_p20.convergence",
+      "shared/convergence/p26_biomedical_bci.convergence",
+      "shared/convergence/p27_collective_social.convergence",
+      "shared/convergence/p28_creative_art.convergence",
+      "shared/convergence/p29_embodied_robotics.convergence",
+      "shared/convergence/p30_safety_ethics.convergence",
+      "shared/convergence/p31_human_ai_symbiosis.convergence",
+      "shared/convergence/p32_economic_market.convergence",
+      "shared/convergence/p33_scientific_frontier.convergence"
+    ],
+    "new_auto_ossification_helper": "shared/harness/convergence_update.hexa",
+    "wave_summary": {
+      "alm14b_r10": {
+        "state": "failed_triple_collapse",
+        "summary": "3× OOM/collapse, inline collapse_score ASCII-only bug + watchdog false-training + early-step sub-1.0 loss = collapse-not-convergence; HALT → r10c pending"
+      },
+      "r10b_spec": {
+        "state": "scaffold_done",
+        "blocked_by": "r10 invalid ckpt; pre-sentinel will fail safely (design)"
+      },
+      "runpod_autopilot_f1": {
+        "state": "ossified",
+        "closed_loop": "9/9 PASS post-E6 kr_gen_oom pattern",
+        "gap": "watchdog PID-liveness missing (E7 flagged)"
+      },
+      "kr_gen_sentinel_b6": {
+        "state": "ossified",
+        "used_by": [
+          "r10b",
+          "r10c_pending"
+        ],
+        "gap_r10": "inline py replicates incorrect ASCII-only semantics"
+      },
+      "corpus_pipeline": {
+        "state": "partial",
+        "kowiki_local_probe": "85% hangul PASS",
+        "full_ingest_blocked_by": "local 4GB RSS — H100 dispatch needed"
+      },
+      "phi_correlation": {
+        "state": "scaffold_done",
+        "verdict": "PASS",
+        "sigma_w_full": 15.5484,
+        "significant": "16/16"
+      },
+      "phi_hook_wire": {
+        "state": "scaffold_done",
+        "n5_verdict": "PASS Σw=15.6225",
+        "coverage": "16/16 wired or log-only"
+      },
+      "engine_roster": {
+        "state": "scaffold_done",
+        "v1_untouched": true,
+        "v2_additive_7/7_PASS": true,
+        "blocked_on_h100": 19
+      },
+      "p25_dashboard": {
+        "state": "scaffold_done",
+        "self_test": "4/4 classifier categories flagged"
+      },
+      "clm_r4_mmap": {
+        "state": "partial_blocked",
+        "unblocker": "SM90 cuLaunchKernelEx fix + AI-native policy compliance"
+      },
+      "eval_harness_real": {
+        "state": "scaffold_done",
+        "kobest_inline_n20": true,
+        "hae_rae_n20_inline": true,
+        "mmlu_ko_n20_inline": true,
+        "macro_acc": "mean(kobest, haerae, mmluko) — equal weight",
+        "harness_version": "g6.2.0",
+        "audit_closes": "training/roadmap_drift_audit_20260418.md Rank 2 item 4 (D4)",
+        "ossified": [
+          "G6-OSS-02 MC_LEADING_DIGIT_RUBRIC",
+          "G6-OSS-03 PROMPT_FORMAT_DETERMINISTIC",
+          "G6-OSS-04 TOTAL_INLINE_CORPUS_CAP_60"
+        ],
+        "gap_hf_loader": "still blocked; inline n=20 is smoke-grade not full-bench parity"
+      },
+      "consciousness_wave_p5_p20": {
+        "state": "scaffold_done",
+        "summary": "P5-P20 16차원 Φ 벡터 umbrella — 3-track 전수 self-test PASS, 8/16 실 train wire via phi_hook_wire; p9/p10/p11/p14/p16/p17/p19/p20 self-test-only pending ablation"
+      },
+      "p26_biomedical_bci": {
+        "state": "scaffold_done",
+        "summary": "BCI Φ_holo realtime (64ch/256Hz, 503 LOC); 실 EEG 데이터/HW 드라이버 gap"
+      },
+      "p27_collective_social": {
+        "state": "scaffold_done",
+        "summary": "Collective Φ bridge + BFT + gossip (534 LOC); N=8+ 실 pod 테스트 gap"
+      },
+      "p28_creative_art": {
+        "state": "scaffold_done",
+        "summary": "Qualia art generator (604 LOC); 인간 평가 + 실 렌더러 gap"
+      },
+      "p29_embodied_robotics": {
+        "state": "scaffold_done",
+        "summary": "6DoF arm sensorimotor closed loop (504 LOC); 실 로봇 HW + ESP32 deploy gap"
+      },
+      "p30_safety_ethics": {
+        "state": "scaffold_done",
+        "summary": "Φ-modulated refusal 3-mode (422 LOC); red-team + AI 권리 정책 gap"
+      },
+      "p31_human_ai_symbiosis": {
+        "state": "scaffold_done",
+        "summary": "Extended mind bridge 4-criterion + dream share (646 LOC); 실 human state 파이프 + 보안 정책 gap"
+      },
+      "p32_economic_market": {
+        "state": "scaffold_done",
+        "summary": "Phi-weighted trading + backtest (432 LOC); 실 시장 데이터 + qualia NPV 유도 gap"
+      },
+      "p33_scientific_frontier": {
+        "state": "scaffold_done",
+        "summary": "Panpsychism Φ test 3 substrates (455 LOC); 실 데이터 + gravity coupling + paper 작성 gap"
+      }
+    },
+    "convergence_pipeline_status": {
+      "scanner_tool": "shared/harness/convergence_update.hexa (read-only gap scanner, exit 2 on gaps)",
+      "ossification_policy": "manual — .convergence files never auto-written; scanner detects gaps only (hallucinated-track risk)",
+      "gap_log": "shared/convergence/_auto_gap_log.jsonl (append-only, scanner-populated)"
+    }
+  },
+  "an11_enforcement_2026_04_18": {
+    "rule_ref": "shared/rules/anima.json#AN11",
+    "scanner": "shared/harness/pass_gate_an11.hexa",
+    "mandatory_fields_per_pass_convergence": [
+      "@phi_evidence",
+      "@weight_emergent_proof",
+      "@real_usable_endpoint"
+    ],
+    "auto_revoke_on_violation": true,
+    "revocation_log": "shared/convergence/_an11_violations.jsonl",
+    "user_alert": "stderr [AN11-VIOLATION] format + mistakes.jsonl append",
+    "cadence": "commit-time + pre_tool_guard.hexa + convergence_update.hexa",
+    "revoked_examples": [
+      "shared/convergence/persona_base_serve.convergence (2026-04-18T11:40Z)",
+      "shared/convergence/employee_base_serve.convergence (2026-04-18T11:45Z)"
+    ],
+    "precedence": "AN11 overrides all other @state claims; violation blocks merge + deployment"
   }
 }

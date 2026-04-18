@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "generated": "2026-04-18",
+  "purpose": "P22 Korean corpus pull targets for ALM r10 + CLM r5 scale-up to 1GB+",
+  "local_inventory": {
+    "total_bytes": 4380739,
+    "manifest": "training/corpus_auto/manifest.json"
+  },
+  "pull_targets": [
+    {
+      "id": "kowiki_latest",
+      "role": "encyclopedia",
+      "priority": 1,
+      "estimated_bytes": 850000000,
+      "source": "huggingface:wikimedia/wikipedia",
+      "config": "20231101.ko",
+      "license": "CC-BY-SA-4.0",
+      "fetch_cmd": "hf datasets download wikimedia/wikipedia --include '20231101.ko/**' --local-dir training/corpus_auto/raw/kowiki",
+      "preprocess": "extract text field, strip markup, drop refs/see-also"
+    },
+    {
+      "id": "namuwiki_202403",
+      "role": "encyclopedia_informal",
+      "priority": 2,
+      "estimated_bytes": 6000000000,
+      "source": "huggingface:heegyu/namuwiki-extracted",
+      "license": "CC-BY-NC-SA-2.0-KR",
+      "fetch_cmd": "hf datasets download heegyu/namuwiki-extracted --local-dir training/corpus_auto/raw/namuwiki",
+      "note": "Non-commercial license — training allowed, commercial serve prohibited"
+    },
+    {
+      "id": "aihub_modern_kr_corpus",
+      "role": "formal_news_literature",
+      "priority": 3,
+      "estimated_bytes": 2500000000,
+      "source": "aihub.or.kr",
+      "license": "public-with-registration",
+      "fetch_cmd": "aihub dl --dataset 71493 --out training/corpus_auto/raw/aihub_modern",
+      "note": "Requires AIHub account; manual registration"
+    },
+    {
+      "id": "kor_ko_news_2019_2024",
+      "role": "news",
+      "priority": 4,
+      "estimated_bytes": 4000000000,
+      "source": "huggingface:bongsoo/news_ko",
+      "license": "research-only"
+    },
+    {
+      "id": "mc4_ko",
+      "role": "web_crawl",
+      "priority": 5,
+      "estimated_bytes": 50000000000,
+      "source": "huggingface:allenai/c4",
+      "config": "ko",
+      "license": "ODC-BY",
+      "note": "Only pull sharded subsets; full mc4-ko is >50GB"
+    }
+  ],
+  "pipeline": {
+    "ingest": "training/corpus_ingest.hexa",
+    "shard": "training/corpus_shard.hexa",
+    "target_bin_per_shard_mb": 512,
+    "tokenizer_preferred": "training/tokenizer/kr_bpe_32k.model",
+    "tokenizer_fallback": "byte-level (258 vocab: 0 reserved, 1-256 bytes, 257 EOD)"
+  },
+  "gates": {
+    "dedup_jaccard_threshold": 0.70,
+    "min_text_len_bytes": 8,
+    "max_shard_bytes": 536870912
+  },
+  "next_actions": [
+    "Fetch priority 1 (kowiki) on H100 pod — already licensed, fastest",
+    "Add priority 2 (namuwiki) behind NC flag",
+    "Re-run training/corpus_ingest.hexa --limit-mb 0 (unlimited) after pull",
+    "Run training/corpus_shard.hexa --shard-mb 512",
+    "Update shared/state/training_speed_ceilings.json with new corpus bytes"
+  ]
+}

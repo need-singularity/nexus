@@ -1,0 +1,28 @@
+@track CLM_R4_MMAP_DUAL
+@state partial_blocked
+@date 2026-04-18
+@scope G5/B3 — CLM r4 mmap continuation launch on ubu RTX 5070
+
+@launcher training/deploy/clm_r4_launch.hexa
+@smoke training/clm_r4_mmap_smoke.hexa
+@loader training/clm_mmap_loader.hexa
+@report_b3 training/clm_r4_mmap_launch_report.md
+@report_g5 training/g5_clm_r4_launch_report.md
+
+@dual_track_heartbeat AN8 satisfied (ubu RTX 5070 + 5.38GB corpus mmap)
+@mmap_test 7/7 PASS
+
+@critical_finding_1 clm_r4_launch.hexa wraps Python trainer — AI-native 정책 위반 (R7/R14)
+@critical_finding_2 train_clm.hexa has no main() — structural port only, not runnable
+@critical_finding_3 hexa-native GPU blocked by cuLaunchKernelEx SM90 failure
+
+@sm90_blocker cuLaunchKernelEx SM90 fails — prevents full hexa-native CLM GPU train
+@sm90_context H100 works via rtc_launch (codegen_c2 untyped_fn_tail_return_fix hexa-lang 3cd9e6f) but SM90 kernel launch path is different code
+
+@ossified G5-OSS-01 DUAL_TRACK_HEARTBEAT_MANDATORY AN8 — ubu CPU side must emit heartbeat alongside pod train
+@ossified G5-OSS-02 AI_NATIVE_NO_PYTHON_WRAP R7 — clm_r4_launch.hexa violates; redesign required
+
+@unblocker SM90_FIX cuLaunchKernelEx parameter pack — required for hexa-native CLM GPU training
+@next train_clm.hexa main() implementation OR pod-side hexa trainer compose
+
+@chain ←clm_1b_r4.convergence (H100 pod side) →CLM_hexa_native (anima.json items) blocked_by:SM90_fix

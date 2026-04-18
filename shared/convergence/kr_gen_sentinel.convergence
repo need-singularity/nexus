@@ -1,0 +1,34 @@
+@track KR_GEN_SENTINEL_B6
+@state ossified
+@date 2026-04-18
+@scope B6 — hexa-native mode-collapse detector for kr_gen output
+
+@file training/kr_gen_sentinel.hexa
+@test training/kr_gen_sentinel_test.hexa
+@report training/kr_gen_sentinel_report.md
+@diagnosis_source shared/state/r9_collapse_diagnosis.json
+
+@input JSON [{"prompt":"...","gen":"..."},...] >=1 sample
+@output stdout "[sentinel] VERDICT=<CLEAN|COLLAPSED> samples=N flagged=M signature_hits=<...>"
+@exit_codes 0=CLEAN 1=input_error 2=COLLAPSED
+@decision_rule flagged>=3 of typical 5 → COLLAPSED (absolute count, not ratio)
+
+@signature_json_bracket count('{"":""}')>=3
+@signature_charloop any_single_byte_repeat>=10 consecutive (byte-level — multibyte-safe for hangul)
+@signature_spaceloop count("' '")>=5
+@signature_rolebleed "roleassistant"|"\\\\n"|"\"},{:\" (>=1)
+@signature_qmark "?" byte run>=5 consecutive
+
+@byte_level_semantics max_byte_run — any byte >=10 repeat detects 녕녕녕녕... (Korean N×10 bytes)
+@constraint hexa-native only; no byte-index arithmetic on multibyte content
+@constraint safe_read probe — exit 1 on empty/malformed
+
+@consumer_r10b training/launch_alm_14b_r10b.hexa pre-launch sentinel + every-200 cadence (PATCHED 2026-04-18: cadence now also uses hexa subprocess w/ byte-run fallback, matches r10c)
+@consumer_r10 MISSING — inline py collapse_score ASCII-only (E7-OSS-01 gap, r10 HALT decision — no retrofit needed)
+@consumer_r10c training/launch_alm_14b_r10c.hexa — full subprocess integration w/ byte-run fallback (E7-OSS-01 ossified)
+
+@ossified B6-OSS-01 BYTE_LEVEL_ANY_REPEAT covers non-ASCII (Korean/Japanese/Chinese) single-byte-repeat patterns
+@ossified B6-OSS-02 ABSOLUTE_THRESHOLD_GE_3 not ratio — avoids 2/4 false positives on short banks
+@ossified B6-OSS-03 SUBPROCESS_EXIT_AUTHORITATIVE exit 2 = trainer must abort (don't trust in-process python reimplementations)
+
+@chain ←alm_14b_r10.convergence (r10 gap — inline py insufficient) →alm_14b_r10b.convergence →alm_14b_r10c (pending)

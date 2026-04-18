@@ -1,0 +1,38 @@
+@track ALM_32B_R1_PREP
+@state scaffold_done
+@date 2026-04-18
+@scope E4 — 32B r1 LoRA prep (launch blocked until r10/r10c PASS)
+
+@launcher training/launch_alm_32b_r1.hexa
+@bootstrap training/deploy/alm32b_r1_bootstrap.hexa
+@runpod_spec training/deploy/alm32b_r1_runpod_create.json
+@report training/alm32b_r1_prep_report.md
+
+@pod_spec 1×H100_80GB 200GB_disk 96GB_RAM 24_vCPU
+@r2_base_check qwen25-14b only (8 shards 28GB) — NO 32B; must HF download first run
+@hf_source Qwen/Qwen2.5-32B-Instruct ~65GB HF_TOKEN required
+@r2_mirror_post_dl r2:anima-models/base_models/qwen25-32b-instruct/ (next-run reuse)
+
+@config_lora r=32 α=64 dropout=0.0 bias=none
+@config_lr 2e-6 constant
+@config_steps 2000 save_every=2000 eval_every=200
+@config_batch batch=1 seq=1024 grad_accum=8 (eff=8; batch=1 forced by 65GB base on 80GB GPU)
+@config_b1 FALSE (per r9/r10 evidence B1 adds noise)
+
+@guards step1_loss_gt_8_abort kr_gen_sentinel_hexa_every_200 first_batch_ce_gt_8_abort
+
+@policy HEXA_FIRST launcher+bootstrap are .hexa; py emitted to /tmp only (r10 pattern)
+@policy_quant NO bf16 only; bnb presence check refuses
+@policy_fresh_from_base 32B LoRA cannot inherit 14B r10 adapter (param-class boundary) — lineage metadata-only
+@policy_naming r1 suffix no v-prefix
+
+@cost_smoke ~$2 (30min incl. base DL)
+@cost_prod ~$15-24 (5-8h) single H100 inside 2-pod cap
+
+@escalation_gate r10_step_2000_complete AND no_collapse AND korean_fluency_held AND CE_non_increasing_last_400_steps
+@blocked_by alm_14b_r10 HALT (triple collapse) → requires r10c PASS first
+
+@ossified E4-OSS-01 RSFM_32B_MUST_FRESH_FROM_BASE no cross-scale adapter inherit (param-class boundary)
+@ossified E4-OSS-02 BATCH_1_FORCED_ON_80GB 32B bf16 + LoRA r=32 + activations ≈ 80GB ceiling; batch=1 + grad_accum=8 the only viable shape
+
+@chain ←alm_14b_r10.convergence (blocker) →alm_70b.convergence

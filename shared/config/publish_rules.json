@@ -5,7 +5,42 @@
     "version": 1,
     "inherit": false,
     "updated": "2026-04-18",
-    "description": "@publish 글로벌 default — 커밋 메시지 템플릿, push 정책, branch allow list. 프로젝트별 .publish-rules.json 없을 때만 사용."
+    "description": "@publish 글로벌 default — 커밋 메시지 템플릿, push 정책, branch allow list. 프로젝트별 .publish-rules.json 없을 때만 사용.",
+    "schema_changelog": [
+      "2026-04-18: rules.registry.header_section field added (optional, default enabled=false)"
+    ]
+  },
+  "_schema": {
+    "rules.registry.header_section": {
+      "description": "SSOT JSON 의 헤더섹션 맵 자동 보장. enabled=false 면 완전 no-op — 기존 publish 동작과 100% 동일.",
+      "fields": {
+        "enabled": "bool — false(default) 면 이 기능 off",
+        "ssot_key": "string — JSON 안에서 헤더 맵이 사는 dot-path (예: '_meta.axes_header')",
+        "key_field": "string — ctx/entry 에서 어떤 필드가 헤더 키인지 (예: 'axis', 'section')",
+        "entry_schema": "map — 신규 키 자동 생성 시 default 필드 템플릿. '{key}' → 실제 key 로 치환. 'AUTO:APPEND' → 해당 필드의 기존 max+1 자동 계산.",
+        "merge_policy": "'preserve_existing'(default) | 'overwrite'",
+        "on_missing": "'auto_create'(default) | 'error' | 'warn'"
+      },
+      "example_project_override": {
+        "rules": {
+          "registry": {
+            "header_section": {
+              "enabled": true,
+              "ssot_key": "_meta.axes_header",
+              "key_field": "axis",
+              "entry_schema": {
+                "ko": "{key}",
+                "en": "{key}",
+                "emoji": "📌",
+                "order": "AUTO:APPEND"
+              },
+              "merge_policy": "preserve_existing",
+              "on_missing": "auto_create"
+            }
+          }
+        }
+      }
+    }
   },
   "rules": {
     "precondition": {
@@ -37,7 +72,11 @@
     },
     "registry": {
       "path": "/Users/ghost/Dev/nexus/shared/n6/docs/domains.json",
-      "path_description": "프로젝트가 자기 레지스트리 경로 override 가능"
+      "path_description": "프로젝트가 자기 레지스트리 경로 override 가능",
+      "header_section": {
+        "enabled": false,
+        "_comment": "필드만 선언해 둠 — 기본 off. 프로젝트가 .publish-rules.json 에서 enabled=true + ssot_key/key_field/entry_schema 주입 시 활성화. _schema.rules.registry.header_section 참고."
+      }
     }
   }
 }

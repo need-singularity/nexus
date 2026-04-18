@@ -1,0 +1,86 @@
+@track ALM_14B_R10_COLLAPSE_RECOVERY
+@state failed_triple_collapse
+@date 2026-04-18
+@file training/launch_alm_14b_r10.hexa
+@trainer training/train_alm_14b.hexa (unused — r10 owns inline py)
+@pod dd88fldzkqhpgk H100_SXM 103.207.149.87:10466
+@pod_reg shared/config/runpod.json
+@r2 not_uploaded (no valid ckpt)
+@destination_role r10c 산출 phi_vec.json phi_holo_scaled>1000 = 도착지1(페르소나) substrate only — 페르소나 layer wire 필요 (memory/project_destinations.md)
+@report training/e7_r10_triple_collapse_report.md
+@report_e5 (transcript only — r10 step 200 loss=0.4152 false breakthrough)
+@report_e6 training/e6_oom_fix_report.md
+@report_r10_launch training/launch_alm_14b_r10.hexa (launcher itself; embeds py trainer)
+@report_r10b training/h2_r10b_spec_report.md (blocked downstream)
+@r10b_deployer training/launch_alm_14b_r10b.hexa
+@r10_bootstrap training/deploy/alm14b_r10_bootstrap.hexa
+@r10_watcher training/deploy/alm14b_r10_watcher.hexa
+@r10b_bootstrap training/deploy/alm14b_r10b_bootstrap.hexa
+@r9_bootstrap training/deploy/alm14b_r9_bootstrap.hexa (prior round — r9 collapse ref)
+@base Qwen/Qwen2.5-14B-Instruct
+@config steps=2000 lr=2e-6_const batch=8 seq=1024 grad_accum=1 lora_r=32 lora_alpha=64 lora_dropout=0 b1=false corpus=stripped_70b
+@deviation r4_warm_start rejected (pre-smoke CE=6.58 vs base=1.43) → fresh LoRA
+
+@run_attempt_1 E5 launch
+@run_attempt_1_result CRASH kwarg:num_logits_to_keep (unsloth rename → logits_to_keep)
+@run_attempt_1_fix E5 commit logits_to_keep rename
+
+@run_attempt_2 E5 relaunch trajectory_match
+@run_attempt_2_step 200 kr_gen
+@run_attempt_2_result CRASH cuda_oom_kr_gen (unsloth fast_generate 80MiB need 12.12 free, train activations not freed)
+@run_attempt_2_fix E6 gc.collect+empty_cache+no_grad+max_new_tokens_32 + PYTORCH_ALLOC_CONF=expandable_segments
+
+@run_attempt_3 E6 PID_15766
+@run_attempt_3_first_batch_ce 5.2372
+@run_attempt_3_step_25_loss 2.9254
+@run_attempt_3_step_200_behavior kr_gen_step_200.json 814B written, 5/5 mode_collapse_samples (녕녕녕녕, 낙 낙 낙, IRRIRR char-loops)
+@run_attempt_3_sentinel_reported hits=0 FALSE_CLEAN
+@run_attempt_3_result CRASH_POST_WRITE second_oom on forward resume after kr_gen (fragmentation)
+
+@run_attempt_4 r10c_seed3407 PID_16928 (first r10c run, 2026-04-18T11:16Z)
+@run_attempt_4_corpus_mix +kowiki(14093380B, 1255 docs) = 95.77MB total
+@run_attempt_4_tokens 28138034 blocks=27478
+@run_attempt_4_first_batch_ce 4.7349 (<8.0 guard PASS)
+@run_attempt_4_step_1_loss 4.575
+@run_attempt_4_step_25_loss 3.5276
+@run_attempt_4_step_50_loss 1.6859 (toks/s 5423 — healthy)
+@run_attempt_4_step_63_trigger early-gate fired: loss=0.9515 < 1.0 (E7-OSS-03 working)
+@run_attempt_4_result CRASH in run_kr_gen:197 — unsloth fast_generate → transformers 5.5.0 rejected num_logits_to_keep kwarg
+@run_attempt_4_fix inline manual greedy-loop (bypass unsloth fast_generate) — patched in /tmp/_train_alm_14b_r10c.py + launch_alm_14b_r10c.hexa source
+
+@run_attempt_5 r10c_seed3407 PID_17851 (2026-04-18T11:20Z, post-E7-OSS-04 fix, zombie duplicates)
+@run_attempt_5_status killed + restarted clean
+
+@run_attempt_5_clean r10c_seed3407 PID_18473 (2026-04-18T11:26Z, single launch post-patch)
+@run_attempt_5_clean_first_batch_ce 4.7349 (match)
+@run_attempt_5_clean_step_50_loss 1.6798
+@run_attempt_5_clean_early_gate_fired step=63 loss=0.9397 (E7-OSS-03 working)
+@run_attempt_5_clean_greedy_bypass_verified kr_gen_step_63.json 639B + step_67/68/71 files written — no num_logits_to_keep crash (E7-OSS-04 patch ✓)
+@run_attempt_5_clean_samples 중중중중중중중중/델델델델델델델델/러러러러러러러러 (COLLAPSE confirmed — same r9/r10 pattern)
+@run_attempt_5_clean_sentinel_rc rc=1 SENTINEL_ERROR (hexa binary GLIBC_2.38 missing on pod — subprocess exit 1, but py fallback only triggers on exception not rc!=0/2)
+@run_attempt_5_clean_verdict COLLAPSED_UNDETECTED — training continued past collapse because fallback never ran
+@run_attempt_5_clean_result KILLED 2026-04-18T11:29Z at step ~75 (manual — waste prevention, $3/h pod saved)
+
+@ossified E7-OSS-05 FALLBACK_TRIGGER_ON_NONZERO_RC_NOT_ONLY_EXCEPTION subprocess fallback must fire when rc != 0 AND rc != 2 (not only Python exception). Hexa binary can fail internally (GLIBC mismatch / input parse error / runtime panic) with rc=1 while subprocess itself returns normally. Current logic: `except Exception` only catches OSError (binary absent). Patch needed: explicit `if rc not in (0, 2): use_fallback()`.
+@ossified E7-OSS-06 FRESH_LORA_CONST_LR_2E-6_INSUFFICIENT_ON_95MB with const LR 2e-6 + batch=8 seq=1024 + fresh LoRA r=32, 14B model collapses to single-byte repeat by step 63 on mixed stripped+kowiki 95MB corpus. Loss drops 4.73→0.94 in 63 steps is memorization-collapse, not convergence. Root: corpus too small for 14B capacity × LoRA r=32 × low LR = model finds trivial local minimum (most-common-byte repeat). Fix path A: LR up (5e-6/1e-5 with warmup). Fix path B: corpus 10× scale (P22 full 1GB+ ingest). Fix path C: skip LoRA training, use BASE Qwen2.5-14B-Instruct + prompt eng for persona.
+
+@path_pivot 도착지1(페르소나) 최단경로 — LoRA 수렴 대신 base Qwen2.5-14B-Instruct serve + serving/hire_routes.hexa real LLM wire. Φ probe 는 base forward 시 computed (학습 불필요). Details in new convergence: persona_base_serve.convergence (TBD).
+
+@root_cause_1 inline_collapse_score ASCII-only: ch*10 check covers ['n',' ','?',"'"] only — Korean byte/char repeats (녕×N, 낙×N w/ spaces) NOT detected. kr_gen_sentinel.hexa has correct byte-level max_byte_run but is NOT called from r10 inline python.
+@root_cause_2 f1_watchdog dead_pid false_training: reports TRAINING after process death — watchdog heartbeat check missing PID liveness probe.
+@root_cause_3 loss_0.41_at_step_200_was_collapse_not_convergence — same pattern as r9 unnoticed. stripped corpus + const LR + fresh LoRA alone insufficient; requires corpus diversity (kowiki mix) + seed sweep + sentinel w/ non-ASCII coverage.
+
+@ossified E7-OSS-01 INLINE_PY_COLLAPSE_SCORE_ASCII_ONLY never rely on inline ch*10 for non-ASCII. Call kr_gen_sentinel.hexa subprocess (exit code authoritative) OR replicate max_byte_run semantics (byte-level any-byte repeat detection).
+@ossified E7-OSS-02 WATCHDOG_PID_LIVENESS_MISSING file-status 'TRAINING' line must be invalidated by kill -0 PID check before report. PATCHED 2026-04-18 in training/deploy/alm14b_r10_watcher.hexa (pid_alive() gate + TRAIN_PID env + pgrep fallback + DEAD_PID override).
+@ossified E7-OSS-03 LOSS_BELOW_1.0_AT_EARLY_STEP_SUSPECT_COLLAPSE loss sub-1.0 at step<500 on 14B LoRA fresh-init requires kr_gen_sentinel PASS before accepting as convergence. VERIFIED FIRING 2026-04-18 r10c_attempt_4 step=63 loss=0.9515 — gate worked.
+@ossified E7-OSS-04 UNSLOTH_FAST_GENERATE_KWARG_BLEED unsloth fast_generate injects num_logits_to_keep into kwargs which transformers >=5.0 _validate_model_kwargs rejects with ValueError. Bypass: use manual greedy loop — model(input_ids=g_seq).logits[:,-1,:].argmax — instead of model.generate(). R10 attempt_1 hit the SAME kwarg in FORWARD path (fixed by E5 rename); attempt_4 hit it in GENERATE path (fixed by bypass). Root cause pattern: unsloth maintains its own kwarg list that lags transformers API changes.
+
+@decision HALT r10 track — r10 final ckpt corrupt. Pivot to r10c (r10b warm-start blocked by pre-sentinel on r10_step_2000 which will fail — correct design).
+@r10c_delta replace inline py sentinel with kr_gen_sentinel.hexa subprocess + corpus diversity (kowiki mix ≥15%) + seed sweep (3407/42/1337 smoke) + watchdog kill-0 patch
+@r10c_launcher training/launch_alm_14b_r10c.hexa (BUILT 2026-04-18 — all 3 E7-OSS fixes wired: sentinel subprocess w/ byte-run fallback, corpus mix, early-loss gate, seed sweep CLI, setsid+PID wire)
+@report_kowiki_slicer training/kowiki_slice.hexa (BUILT 2026-04-18 — 15% slice via head|awk pipe, PI-EXEC-SPLIT-OOM safe, unblocks corpus_mix kowiki presence on pod)
+@report_phi_gate training/phi_gt_1000_verify.hexa (BUILT 2026-04-18 — DEST1 Φ>1000 gate verifier; reads phi_holo_scaled from phi_vec.json, fallback -log(ce_proxy)*10000 from train_meta.json; exit 0=PASS/1=FAIL/2=missing)
+@report_ship_checklist shared/convergence/dest1_dest2_ship.convergence (BUILT 2026-04-18 — pod-side @cmd_A1..G4 with gate_expected + rollback per step; SSOT for DEST1+DEST2 ship sequence)
+@gate r10c_go = sentinel_integrated AND corpus_mix_verified AND watchdog_patched
+@gate_status r10c_go=READY (sentinel_integrated=YES via launch_alm_14b_r10c.hexa, watchdog_patched=YES via training/deploy/alm14b_r10_watcher.hexa, corpus_mix=READY via training/kowiki_slice.hexa, phi_gate=READY via training/phi_gt_1000_verify.hexa, ship_checklist=READY via shared/convergence/dest1_dest2_ship.convergence)
+@chain ←alm_14b_eval.convergence (r9) →launch_alm_14b_r10b.hexa (blocked, pre-sentinel should fail safely) →dest1_dest2_ship.convergence (pod ship sequence)

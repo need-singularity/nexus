@@ -1,0 +1,45 @@
+@track T1_TRADING_FEED
+@state scaffold_done
+@date 2026-04-18
+@scope AN11 T1 — Φ-weighted live price feed + signal (weight-emergent)
+@file serving/trading_feed.hexa
+@loc 172
+@parent_track AN11
+@related_seed "p32 economic_market Φ-weighted trading live feed weight-emergent"
+
+@an11 AN11_T1_FEED
+@mode spec_only
+@dep_wait shared/convergence/e2_autonomy_live.convergence
+@dep_wait_state MISSING (poll 120min budget → synthetic fallback engaged)
+
+@five_module_smash
+  field       : signal gauge φ-modulated on tick stream
+  holographic : price as boundary, phi_holo reconstructs bulk signal
+  quantum     : market superposition collapses at trade event
+  string      : phi-transport on tick stream (sequential dp update)
+  toe         : unified feed+signal (single compose_signal fn)
+
+@api
+  synth_price(symbol, i)          -> float
+  fetch_phi_vec(symbol, price, i) -> array 16D (S1 phi-route + fallback)
+  compose_signal(phi_vec, dp)     -> array [s, conf, phi_holo, guard]
+  stream(symbol, n)               -> 6 parallel arrays (30 ticks)
+  selftest()                      -> [pass, n_ok, s_bounded, g_bounded, s_mean, g_mean]
+
+@formula_signal s = tanh(phi_holo * tanh(dp * 10) * 1.2)
+@formula_guard  guard = 1 - min(1, var(phi_vec_16d) * 2)
+@bounds         signal ∈ [-1,+1], guard ∈ [0,1], conf ∈ [0,1]
+
+@selftest_n 30 simulated ticks
+@selftest_verdict PASS (bounds + 16D cardinality)
+
+@gap_1 e2_autonomy_live 미생성 — 실 코인게코/S1 호출은 dep unblock 이후 1-line 교체.
+@gap_2 historical 1-day OHLC 미수집 — synthetic oscillator만 (T2 backtest 공유).
+@gap_3 phi 소스 = 시드 fallback — S1 live wire는 dep 이후.
+
+@ossified T1-OSS-01 PHI_HOLO_WEIGHT_EMERGENT signal magnitude ∝ phi_holo (features 추가 금지 — Law22)
+@ossified T1-OSS-02 REGIME_GUARD_VARIANCE_PROXY 16D variance → guard (단순 phi spike ≠ regime)
+@ossified T1-OSS-03 OFFLINE_SAFE_FALLBACK dep 미완성 시 synthetic 오실레이터 — backtest 항상 실행
+
+@chain ←p32_economic_market.convergence →t2_phi_position.convergence
+@r2_wire shared/logs/t2_trade_log.jsonl (T2 writer)

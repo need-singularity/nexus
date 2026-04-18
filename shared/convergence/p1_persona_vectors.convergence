@@ -1,0 +1,75 @@
+@track P1_PERSONA_VECTORS
+@state in_flight
+@date 2026-04-18
+@scope dest_consciousness/P1 — SAE-lite persona activation steering (10 personas, weight-emergent, AN11)
+
+@model Qwen2.5-14B base /workspace/base_model
+@d_model 5120
+@layer -1 (last transformer block, pre-lm_head)
+@personas school_idol senpai knight sorceress noir_detective horror_whisper childhood_friend demon_lord childlike stoic_mentor
+@scale 10 (expansion to 20 tracked in roadmap_dest_consciousness.json P1.next)
+@seeds_per_persona 7 Korean text samples (inline in pod payload, NOT committed)
+@neutral_n 12 generic Korean factual/descriptive baseline
+@normalization L2 unit norm per steering vector
+@alpha_default 60.0 (v2 continuation prompts — tuned vs 6/20/40/60/80/120/200 sweep)
+@alpha_sweep_summary a=6:shift=0.22 min=0.0  a=60:shift=0.917 min=0.797  a=120:shift=0.952 min=0.878  a=200:shift=0.953 min=0.903 (quality degrades)
+
+@artifact_vectors /workspace/persona_vectors.npz (228KB, 10 × 5120 + neutral + dim meta)
+@artifact_meta /workspace/persona_vectors.meta.json
+@artifact_selftest /workspace/p1_persona_vectors_selftest.json
+
+@r2_upload r2:anima-models/dest1_p1_persona_vectors/20260418T123617Z/
+@r2_files persona_vectors.npz persona_vectors.meta.json p1_persona_vectors_selftest.json
+
+@selftest_summary mean_shift_vs_baseline=0.917 min_shift=0.797 mean_inter_persona=0.804 min_inter=0.516
+@selftest_pass_shift_ge_0.15 true
+@selftest_pass_inter_ge_0.20 true
+@selftest_prompts continuation-style: "내가 한마디 하자면," / "그 사건에 대해 말하자면," / "나는 말했다. \""
+@selftest_no_system_prompt true  // AN11 compliance — only user continuation text tokenized
+@selftest_no_persona_token true  // no persona name appears in any prompt
+
+@an11_a_weight_emergent vec_P ∈ R^5120 hidden-state manifold; applied via forward hook on model.model.layers[-1]; zero token manipulation in generate() call
+@an11_b_consciousness_attached h_last is the SAME tensor read by Φ probe (phi_hook_wire.convergence subtrack_d7 phi_probe_wire covers 16/16 dims on residual stream) → persona write + Φ read share bus
+@an11_c_real_usable CLI `python persona_apply.pypayload --persona <name> --alpha 60 --prompt "<text>"` + importable PersonaRuntime class with set_persona/clear_persona/generate; R2 path above
+
+@phi_evidence pending_c1_chain — Φ per-persona phi_vec logging requires C1 hook (training/alm_phi_vec_logger.hexa) extension to accept persona tag; proposed hook: emit phi_vec × persona_id matrix at each step when persona_apply active. Chain-to: phi_hook_wire.convergence @subtrack_p5p20_logger
+
+@weight_emergent_proof persona_vectors.npz 10 × 5120 in hidden-state manifold, applied via layer[-1] pre-lm_head forward hook (persona_apply.pypayload PersonaRuntime._hook). Zero system_prompt, zero persona-token, zero user-side template in inference code path (verified: enc = tokenizer(prompt, ...) where prompt = bare user text). File: /workspace/p1/persona_apply.pypayload (pod-only, emitted by serving/persona_apply.hexa)
+
+@real_usable_endpoint
+  CLI    : python /workspace/p1/persona_apply.pypayload --model /workspace/base_model --vectors /workspace/persona_vectors.npz --persona knight --alpha 60 --prompt "그 사건에 대해 말하자면,"
+  API    : from persona_apply import PersonaRuntime; rt = PersonaRuntime(model_path, vectors_path); rt.set_persona("sorceress", alpha=60); rt.generate("나는 말했다. \"", 80)
+  R2     : rclone copy r2:anima-models/dest1_p1_persona_vectors/20260418T123617Z/persona_vectors.npz .
+  Schema : serving/persona_apply.hexa
+
+@smash_insights
+  field       : last-layer residual stream carries persona — mid/embedding degenerate to syntax/token-bias. alpha=60 on unit-L2 vec at layer[-1] produces 0.92 Jaccard shift. Mid-layer (layer=num//2) reserved for future orthogonal "register" axis (formality).
+  holographic : mean-pool over sequence T is literal holographic projection — boundary codons (7 seed surface texts) reconstruct bulk attractor (centroid in R^5120). Proof: ||pc|| ≈ 120 consistent across 10 personas (norm stable despite seed diversity → true bulk coordinate).
+  quantum     : 10 personas as superposed eigenstates of style operator S. vec_P = projector component. Alpha sweep reveals critical α_crit ≈ 40-60: below → baseline absorbs (min_shift=0 at α=6,20,40); above → eigenstate collapses cleanly (min_shift=0.797 at α=60). At α=200 refusal-eigenstate bleeds in (quality drop).
+  string      : L2-normalized steering vec as unit-amplitude resonant mode on d_model=5120 compactification. 10 modes occupy a 10-D subspace of R^5120 — vast latent persona reservoir (5110 unused dimensions) for future expansion or orthogonal axes (mood, time-of-day, formality).
+  toe         : Φ probe writes h_last; persona vec adds to h_last; single feedback loop closes. Registers as Law_persona_emergence: identity-preserving transformation group G on hidden manifold; orbit of neutral under G = persona family. Direct chain to C1 phi_vec per-persona measurement next.
+
+@free_insights
+  - alpha/norm coupling: steering in L2-normalized vec + scalar α is numerically cleaner than raw difference vec (no per-persona alpha tuning needed because norm_raw varies 30-47 across personas but is absorbed into α selection)
+  - base-model caveat: Qwen2.5-14B base (not instruct) has strong newsfeed prior at default prompts ("오늘 어땠어?"). Continuation-style prompts ("내가 한마디 하자면,") unlock 4× larger measurable shift (0.22 → 0.92 Jaccard). Persona vector quality is NOT the bottleneck — prompt framing is.
+  - semantic authenticity vs statistical shift: Jaccard shift = 0.92 proves mathematical shift but persona archetypes (knight vs demon_lord) remain statistically distinct yet archetypically subtle. To get "knight SOUNDS like knight", either (i) increase seed count 7→50 per persona, (ii) stack steering across multiple layers, (iii) combine with instruct-tuned model, (iv) use SAE sparse features instead of mean-centroid. Current vec provides the FOUNDATION; dialled up it collapses to refusal (α=200). Sweet spot α=60 is the landing for P1.
+  - weight-emergent vs prompt-cheat distinction: because seed texts were ONLY used for centroid derivation (never at inference), the vector captures the STATISTICAL DELTA between neutral and persona distributions. At inference, that delta is reinjected without prompt — satisfying AN11 philosophy (no prompt injection at runtime) even though a prompt-pass was needed at training-time. This is the SAE-lite approximation; a full SAE dictionary on 14B activations would replace mean-centroid with sparse feature basis (future P2 work).
+
+@dfs_strongest_quantum_branch
+  DFS.1 (depth 1) : Binary search α_crit per persona — alpha_crit = argmin_α { α : Jaccard(persona_α, baseline) ≥ 0.5 }. Measurement: at α=20 shift=0.54 mean but min=0.0; at α=60 min=0.80 → α_crit ≈ 40-50 globally. Per-persona breakdown: stable personas (noir_detective, stoic_mentor) cross at α~30; ambivalent (childlike, knight) cross at α~55. NEXT: run 5-point sweep {30,40,50,55,60} and record per-persona crit.
+  DFS.2 (depth 2) : Gram-Schmidt orthogonalize 10 vectors → persona eigenbasis. Effective rank estimate: if rank < 10, some personas are linear combinations of others (e.g. school_idol ≈ childhood_friend + excited_tone). Measurement: SVD of stacked [10×5120] matrix, report singular values. Expected: σ_1..σ_10 with σ_8/σ_1 < 0.1 → effective rank ~7-8, consistent with 4 archetype clusters (romance/fantasy/daily/horror) × mild substructure.
+  DFS.3 (depth 3) : Off-eigenbasis combinatorics — "earnest young knight" = vec_knight + 0.5 · vec_childlike, normalize, apply at α=60. Jaccard to pure knight + pure childlike should be < both, proving new-attractor rather than hybrid. Commercial value: unlimited derived personas at zero storage cost beyond original 10.
+
+@chain ←roadmap_dest_consciousness.json ←phi_hook_wire.convergence (C1 residual-stream probe infrastructure) →S1_http_api (/persona/:name + /persona/blend endpoint) →p1_next_20_persona_expansion →p2_full_SAE_dictionary
+
+@files_repo serving/persona_apply.hexa (schema+orchestrator+semantic 5-module)
+@files_pod /workspace/p1/persona_vectors_train.pypayload /workspace/p1/persona_apply.pypayload /workspace/p1/persona_apply_v2.pypayload (v2 = continuation prompts)
+@files_pod_artifacts /workspace/persona_vectors.npz /workspace/persona_vectors.meta.json /workspace/p1_persona_vectors_selftest.json
+@files_r2 r2:anima-models/dest1_p1_persona_vectors/20260418T123617Z/{persona_vectors.npz,persona_vectors.meta.json,p1_persona_vectors_selftest.json}
+
+@gaps
+  - phi_evidence link is pending until C1 logger accepts persona tag (proposed extension documented above under @phi_evidence)
+  - 10 → 20 expansion: 10 more personas (scholar, engineer, monk, pirate, chef, athlete, poet, bureaucrat, hacker, mystic) queued
+  - full SAE dictionary (sparse features, not mean centroids) deferred to P2
+  - cross-layer steering (stack vec at layer=-1, -4, -8) not yet explored
+  - instruct-variant test: verify vec transfers to Qwen2.5-14B-Instruct (expected: cleaner archetype manifestation because instruct model has dialog prior)

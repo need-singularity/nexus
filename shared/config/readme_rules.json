@@ -1,9 +1,111 @@
 {
   "_meta": {
     "project": "_global_fallback",
-    "version": 1,
+    "version": 2,
     "inherit": false,
-    "description": "@readme global fallback — 프로젝트별 .readme-rules.json 이 없을 때만 사용"
+    "description": "@readme global fallback — 프로젝트별 .readme-rules.json 이 없을 때만 사용",
+    "_doc_v2_optional_fields": {
+      "description": "HX11 AI-native SELF-FORMAT 확장 필드 (2026-04-18). 각 scope 에 추가 가능. 기본 scope 에는 영향 없음 — 실제 동작은 프로젝트 rules 에 필드가 선언될 때만.",
+      "per_scope_optional": {
+        "header_order": {
+          "type": "list<string>",
+          "description": "README 의 H1/H2 시퀀스를 강제. 각 원소는 startswith 매칭.",
+          "example": ["# <TITLE>", "## NEXUS-6 Discovery Engine", "## Reference"]
+        },
+        "forbidden_blocks": {
+          "type": "list<string>",
+          "description": "금지 패턴 리스트. `/X/` 래퍼는 X 만 추출하여 substring contain 매칭.",
+          "example": ["TODO:", "FIXME:", "/\\bTBD\\b/"]
+        },
+        "fixed_content": {
+          "type": "object",
+          "description": "특정 anchor 이후 표 행수 고정 등",
+          "example": {
+            "blocks": [
+              { "id": "alien_rubric", "find": "### 외계인 지수", "min_rows": 13, "max_rows": 13 }
+            ]
+          }
+        },
+        "cell_rules": {
+          "type": "object",
+          "description": "표 셀 링크 규칙",
+          "example": {
+            "link_cells": { "max_links_per_cell": 1, "allowed_labels": ["문서"] }
+          }
+        },
+        "intent_allowed": {
+          "type": "list<string>",
+          "description": "허용 intent. regen 포함 안하면 @readme(intent=regen) 호출 시 error.",
+          "example": ["verify", "regen"]
+        },
+        "preamble": {
+          "type": "list<string>",
+          "description": "regen 경로에서 파일 최상단에 삽입되는 고정 블록 (타이틀/뱃지/링크 등)."
+        },
+        "postamble": {
+          "type": "list<string>",
+          "description": "regen 경로에서 파일 말미에 삽입되는 고정 블록."
+        },
+        "diff_policy": {
+          "type": "enum<warn|error>",
+          "description": "SSOT 대조 mismatch 시 level override (기본 ssot.strict 따름)."
+        },
+        "ssot": {
+          "type": "object",
+          "description": "SSOT(JSON) 대조 설정. 존재하면 _check_ssot 활성.",
+          "example": {
+            "source": "domains.json",
+            "strict": true,
+            "derive": {
+              "AUTO:STATS": {
+                "from": "domains[]",
+                "fields": {
+                  "completed_products": "sum(primary_or_legacy)",
+                  "domains_count":     "len()",
+                  "sections_count":    "unique(.section) | count",
+                  "papers_count":      "sum(.papers_count)",
+                  "updated":           "today"
+                },
+                "template": "완성제품 {completed_products}개 · 도메인 {domains_count}개 · 섹션 {sections_count}개 · 논문 {papers_count}편 · 갱신 {updated}"
+              },
+              "domain_sections": {
+                "from": "domains[]",
+                "group_by": "axis",
+                "order_by": "axis_order",
+                "header_template":  "# {emoji} {axis_ko} ({axis_en})",
+                "summary_marker":   "AUTO:SUMMARY_{section}",
+                "summary_template": "> 🛸{alien_index_ceiling} | {ceiling_check} | BT {bt_count}개 {bt_pct}%EXACT",
+                "row_template":     "| {alien_index} | {ceiling_check} | {mk_version} | **{product_name}** | {core_summary} | [문서]({path}) |",
+                "table_header": [
+                  "| 🛸 | 상한검사 | mk | 제품 | 핵심 | 문서 |",
+                  "|:--:|:--:|:--:|:--|:--|:--|"
+                ],
+                "footer_template": "_auto-footer for {section}_"
+              }
+            }
+          },
+          "expression_grammar_supported": [
+            "today / now",
+            "len() / len(<path>)",
+            "count(<path>)",
+            "sum(<path>) / sum(primary_or_legacy)",
+            "unique(<path>) | count",
+            "first(<path>)",
+            "<string-literal in quotes>",
+            "<numeric-literal>",
+            "<path>"
+          ],
+          "path_grammar_supported": [
+            "field",
+            "field.sub",
+            "list[]",
+            "list[].field",
+            "list[N]",
+            "list[N].field"
+          ]
+        }
+      }
+    }
   },
   "scopes": {
     "root": {
