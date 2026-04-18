@@ -50,8 +50,11 @@ if !need_rotate {
 }
 
 // --- 4. 타임스탬프 추출 (첫/끝 줄) ---
-let first_ts = to_string(exec("head -1 '" + LOG_FILE + "' 2>/dev/null | /usr/bin/python3 -c \"import sys,json; d=json.loads(sys.stdin.readline()); print(d.get('ts',d.get('timestamp',d.get('t',''))))\" 2>/dev/null || echo ''")).trim()
-let last_ts = to_string(exec("tail -1 '" + LOG_FILE + "' 2>/dev/null | /usr/bin/python3 -c \"import sys,json; d=json.loads(sys.stdin.readline()); print(d.get('ts',d.get('timestamp',d.get('t',''))))\" 2>/dev/null || echo ''")).trim()
+// R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+// Original: head/tail -1 log | python3 json.loads → print ts/timestamp/t
+eprintln("R37/AN13/L3-PY: python3 invocation blocked at rotate_discovery_log.hexa:first_ts/last_ts. Escalate to user for hexa-native replacement.")
+let first_ts = ""
+let last_ts = ""
 
 // --- 5. 로테이션 실행 ---
 let date = to_string(exec("date +%Y-%m-%d")).trim()
@@ -116,8 +119,11 @@ println("  새 로그: " + LOG_FILE + " (빈 파일)")
 
 // --- 메타 갱신 함수 ---
 fn _update_meta(log_path: str, meta_path: str, lines: int, size: int, mtime_str: str) {
-    let first = to_string(exec("head -1 '" + log_path + "' 2>/dev/null | /usr/bin/python3 -c \"import sys,json; d=json.loads(sys.stdin.readline()); print(d.get('ts',d.get('timestamp',d.get('t',''))))\" 2>/dev/null || echo ''")).trim()
-    let last = to_string(exec("tail -1 '" + log_path + "' 2>/dev/null | /usr/bin/python3 -c \"import sys,json; d=json.loads(sys.stdin.readline()); print(d.get('ts',d.get('timestamp',d.get('t',''))))\" 2>/dev/null || echo ''")).trim()
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = log_path
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at rotate_discovery_log.hexa:_update_meta. Escalate to user for hexa-native replacement.")
+    let first = ""
+    let last = ""
     let now = to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()
 
     // 현재 로테이션 목록 수집

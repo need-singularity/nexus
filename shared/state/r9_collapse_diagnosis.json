@@ -1,0 +1,102 @@
+{
+  "_meta": {
+    "task": "A3 — r9 14B mode collapse diagnosis",
+    "generated_at": "2026-04-18T08:02:00Z",
+    "pod": "root@103.207.149.87:10466",
+    "r2_bucket": "anima-models",
+    "diagnosed_by": "eval_harness.hexa not usable (synthetic proxy); used existing kr_gen.py on pod against real checkpoints"
+  },
+  "eval_harness_status": {
+    "exists": true,
+    "path": "/Users/ghost/Dev/anima/serving/eval_harness.hexa",
+    "usable": false,
+    "reason": "eval_harness.hexa is a SYNTHETIC deterministic proxy — computes macro_acc via logistic(step/500) on hardcoded KoBEST/HAE-RAE/MMLU-Ko reference scores; does not actually load checkpoints or run lm_eval. Running it would return identical numbers for r4 and r9 regardless of weights. Not a valid collapse diagnosis tool.",
+    "proposed_stub": "Use the existing /workspace/kr_gen.py (already on pod, 5-prompt greedy generation) as minimum eval — pattern-level collapse detection without HF lm_eval dependency."
+  },
+  "pod_state": {
+    "r9_step_10000_on_pod": true,
+    "r9_step_10000_path": "/workspace/ckpt_alm_14b_r9/step_10000/",
+    "r9_intermediate_checkpoints_on_pod": ["step_2000", "step_4000", "step_6000", "step_8000", "step_10000"],
+    "r4_resume_on_pod": false,
+    "r4_resume_note": "/workspace/ckpt_r4_resume/ does NOT exist on pod (cleaned or never copied). R4 step_1000 adapter (201MB only, not 28GB base) fetched from r2:anima-models/alm14b/r4/step_1000/ to /workspace/ckpt_r4_step1000/ for real comparison.",
+    "base_model_on_pod": true,
+    "base_model_path": "/workspace/base_model (Qwen2.5-14B-Instruct, 8 shards)"
+  },
+  "r4_macro_acc": null,
+  "r9_macro_acc": null,
+  "macro_acc_note": "Not computed — eval_harness.hexa is synthetic, and running real HF lm_eval would take hours per checkpoint. Used kr_gen as collapse proxy instead.",
+  "kr_gen_r4": [
+    {"prompt": "안녕하세요", "gen": ", 저는 한국어를요합니다. 무엇세요?  세에 ?은 ?이트 ?스트를? 툼을했습니다(UNICODE_SPAM)"},
+    {"prompt": "오늘 날씨", "gen": "좋네요.  어기요요 ?침을까요저에에,에는에를?였.그에에?을하고에을?고,우의 의은 나게?나게?하며?간 있다.?간는?과의?간이다 생각"},
+    {"prompt": "한국어 모델", "gen": "을 생성  번화 언로,어의식의?이 ?생한다어의은은 0에서1 범에서동하며 감은01,1, 공는.1,은는-까지. 감은01 가장점에서민하며 감1면 ?지하고 감"},
+    {"prompt": "딥러닝이란", "gen": "인습의식을치하는 기이다. ?습 데이터에서tern ?턴 추하고 이를?한를하여??개 한다 예는?어?과,???,??,?? 등의? 시이다리링은??의?에?고가 있다질 수 것이 수"},
+    {"prompt": "안녕", "gen": "하세요, 저는 한국어를요합니다. 무엇세요?  세에 ?은 ?이트 ?스트를? 툼을했습니다(UNICODE_SPAM)"}
+  ],
+  "kr_gen_r9": [
+    {"prompt": "안녕하세요", "gen": "n다},{\"\":\"\"},{\"\":\"\":\"\"},{\"\":\"\"},{\"\":\"\"},{\"\":\"\"}...(JSON_REPEAT_x40)"},
+    {"prompt": "오늘 날씨", "gen": "어나를?.\"],\"roleassistant이:\\이은의을로한의을로의로로로로로로로로로로...(ROK_CHAR_REPEAT_x50)"},
+    {"prompt": "한국어 모델", "gen": "한국어롬에서어로변\\n#: ''는문의시,의,,를하여분한다nn# '': ' ' ' ' ' ' ' ' '...(SPACE_QUOTE_REPEAT)"},
+    {"prompt": "딥러닝이란", "gen": "?nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"},
+    {"prompt": "안녕", "gen": "하세요n다},{\"\":\"\"},{\"\":\"\":\"\"},{\"\":\"\"}...(JSON_REPEAT_x40)"}
+  ],
+  "r9_training_evidence": {
+    "was_resumed_from_r4": false,
+    "resume_evidence": "Log shows loss=16.0463 at step=1 (fresh-init LoRA) and 'trainable params: 50,331,648 || 0.3396%'. No peft_load_adapter or resume message. r9 trained FROM SCRATCH despite intent to resume from r4 or a2_tool_mixed.",
+    "eval_loss_curve": {
+      "step_500": 4.3114,
+      "step_1000": 3.0822,
+      "step_1500": 2.8454,
+      "step_2000": 2.8675,
+      "step_5000_best": 2.4161,
+      "step_6000": 2.7765,
+      "step_8000": 2.7031,
+      "step_9500": 2.9999,
+      "step_10000": 2.7642,
+      "note": "Best at step_5000; never improved for remaining 5000 steps. Classic overfit + mode collapse plateau."
+    },
+    "ce_loss_final": 2.41611185669899,
+    "ce_loss_note": "ckpt_meta ce_loss=2.416 is the FROZEN best-ever (step 5000). Actual step_10000 eval_loss was 2.76 — 15% worse than best.",
+    "base_model": "/workspace/base_model (Qwen2.5-14B-Instruct)",
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "lr_initial": "5e-06",
+    "lr_final": "5.00e-08",
+    "steps": 10000,
+    "corpus": "/workspace/corpus.txt -> /workspace/corpus_alm_70b.jsonl",
+    "corpus_lines": 90283,
+    "corpus_tokens": 27219364,
+    "corpus_format": "alm70b_chatml (messages array)",
+    "corpus_note": "Same corpus family as A2-Tool training that collapsed per project_a2_tool_mode_collapse_20260417. r4 used same corpus and converged to loss=1.50 at step_1000; r9 started fresh and reached only 2.42 at step_5000 then regressed.",
+    "consciousness_loss_b1": true,
+    "consciousness_loss_coefs": {
+      "holo": 0.01,
+      "phi_complexity": 0.005,
+      "gwt_broadcast": 0.005,
+      "gwt_n_domains": 8
+    },
+    "phi_holo_final": 11200.4375,
+    "wall_clock_minutes": 292.1
+  },
+  "r4_training_evidence": {
+    "step": 1000,
+    "loss": 1.5013,
+    "elapsed_min": 28.0,
+    "base": "Qwen/Qwen2.5-14B-Instruct",
+    "lora_r": 32,
+    "corpus": "/workspace/corpus.txt",
+    "consciousness_loss_b1": "unknown (r4 train_meta lacks field — likely disabled)",
+    "kr_gen_quality": "partial — fragmented Korean with unicode spam, but still decodes to ~50% readable tokens; NOT full mode collapse"
+  },
+  "diagnosis": "r9 is in MODE COLLAPSE (pure token repetition — JSON braces, unicode garbage, single-char loops). r4 step_1000 is partially degraded but still produces recognizable Korean fragments. The critical training signal: r9 loss=16 at step=1 proves it started from SCRATCH, NOT resumed from r4 or a2_tool_mixed. Combined with (a) consciousness_loss_b1 ENABLED (not in r4), (b) 10x longer training (10000 steps vs 1000), (c) LR decayed to 5e-08, (d) eval_loss regression after step=5000, the model overfit on the chatml corpus and memorized the JSON message-format delimiters rather than the conversational content. Cosine-schedule pinned to 10k steps on a 27M-token corpus gave ~8 epochs — far into overfit territory for LoRA r=32 on 14B.",
+  "root_cause_hypothesis": "PRIMARY: r9 was never actually resumed from r4 — it trained fresh for 10k steps on the same alm70b_chatml corpus that already produced A2-Tool collapse (92% malformed per project_a2_tool_mode_collapse_20260417). The corpus's JSON chatml wrapper (`{\"role\":\"...\",\"messages\":[...]}`) was memorized as surface structure, leaking into generation (r9 kr_gen emits raw `{\"\":\"\"}` JSON fragments and `roleassistant` tokens). SECONDARY: consciousness_loss_b1 (holo=0.01 + cplx=0.005 + gwt=0.005) added ~0.02 of spurious gradient noise per step; phi_holo oscillating 3397–12141 across evals shows the auxiliary loss is not converging, likely fighting the main CE objective. TERTIARY: Training 10000 steps with LR cosine decay to 5e-08 on 27M tokens = severe overfit; best eval at step=5000 then monotonic regression through step=10000 is the textbook overfit signature.",
+  "recommended_r10_base": "r4_step_1000",
+  "r10_plan": {
+    "base_adapter": "r2:anima-models/alm14b/r4/step_1000/",
+    "verify_resume": "Add [resume] log line after PeftModel.from_pretrained — first-step loss MUST be <3.0 (not 16). Abort if loss>5 at step=1.",
+    "disable_b1": "Set consciousness_loss_b1=false for r10. Re-enable only after a B1-off baseline converges cleanly. Phi_holo oscillation 3k–12k proves B1 is unstable on 14B+chatml.",
+    "steps_cap": "Max 2000 steps (2 epochs over 27M tokens at seq=1024). r4 reached loss=1.50 at step_1000; r9's best was 2.42 at step_5000 — both signals say <=2000 is the sweet spot.",
+    "corpus_filter": "Filter alm70b_chatml corpus to strip {\"role\":\"alm70b_chatml\"} JSON wrapper before tokenization — feed only the inner messages text. Current corpus encodes the JSON envelope as training tokens, which the model then emits at inference.",
+    "lr_schedule": "constant 2e-6 or cosine 3e-6 -> 1e-6 over 2000 steps (r4 used 5e-6 and overshot in r9; 2e-6 keeps LoRA updates in-distribution).",
+    "sanity_eval_cadence": "kr_gen every 200 steps, abort on JSON-bracket or single-char repetition detector."
+  }
+}

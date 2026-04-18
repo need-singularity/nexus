@@ -19,24 +19,20 @@ fn md5_glob(pattern: str) -> str {
 }
 
 fn load_hash(task_id: str) -> str {
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 JSON get on sync_state.json[task_id]
     if file_exists(STATE) == false { return "" }
-    let raw = read_file(STATE)
-    let py = "import json,sys\n" +
-             "try: d=json.loads(sys.stdin.read())\n" +
-             "except: d={}\n" +
-             "print(d.get('" + task_id + "',''))"
-    return to_string(exec("/usr/bin/python3 -c \"" + py + "\" <<'PYEOF'\n" + raw + "\nPYEOF")).trim()
+    let _ = task_id
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync_state.hexa:load_hash. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn save_hash(task_id: str, hash_val: str) {
-    let raw = if file_exists(STATE) { read_file(STATE) } else { "{}" }
-    let py = "import json,sys\n" +
-             "try: d=json.loads(sys.stdin.read())\n" +
-             "except: d={}\n" +
-             "d['" + task_id + "']='" + hash_val + "'\n" +
-             "print(json.dumps(d,indent=2,sort_keys=True))"
-    let updated = to_string(exec("/usr/bin/python3 -c \"" + py + "\" <<'PYEOF'\n" + raw + "\nPYEOF")).trim()
-    try { write_file(STATE, updated + "\n") } catch e {}
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 JSON update sync_state.json[task_id]=hash_val
+    let _ = task_id
+    let _ = hash_val
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync_state.hexa:save_hash. Escalate to user for hexa-native replacement.")
 }
 
 // src/dst hash 비교 — drift 감지

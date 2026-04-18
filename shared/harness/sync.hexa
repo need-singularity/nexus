@@ -20,29 +20,23 @@ let TASKS = HARNESS + "/tasks"
 let LOG = HARNESS + "/sync_log.jsonl"
 
 fn json_field(task_id: str, field: str) -> str {
-    let py = "import json\n" +
-             "d=json.load(open('" + MANIFEST + "'))\n" +
-             "for t in d.get('tasks',[]):\n" +
-             "    if t.get('id')=='" + task_id + "':\n" +
-             "        v=t.get('" + field + "','')\n" +
-             "        if isinstance(v,list): print(' '.join(str(x) for x in v))\n" +
-             "        else: print(v)\n" +
-             "        break"
-    return to_string(exec("/usr/bin/python3 -c \"" + py + "\"")).trim()  // @allow-bare-exec
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = task_id
+    let _ = field
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync.hexa:json_field. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn task_ids_active() -> str {
-    let py = "import json\n" +
-             "d=json.load(open('" + MANIFEST + "'))\n" +
-             "print(' '.join(t['id'] for t in d.get('tasks',[]) if t.get('status')=='active'))"
-    return to_string(exec("/usr/bin/python3 -c \"" + py + "\"")).trim()  // @allow-bare-exec
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync.hexa:task_ids_active. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn task_ids_all() -> str {
-    let py = "import json\n" +
-             "d=json.load(open('" + MANIFEST + "'))\n" +
-             "print(' '.join(t['id'] for t in d.get('tasks',[])))"
-    return to_string(exec("/usr/bin/python3 -c \"" + py + "\"")).trim()  // @allow-bare-exec
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync.hexa:task_ids_all. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn task_status(task_id: str) -> str {
@@ -57,11 +51,12 @@ fn log_append(task_id: str, result: str, dry: bool) {
     let ts = to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()  // @allow-bare-exec
     let dry_str = if dry { "True" } else { "False" }
     let safe_res = result.replace("\"", "'")
-    // hexa 에서 bash quoting 이 어렵기 때문에 python3 로 JSON dump 후 append
-    let py = "import json,sys\n" +
-             "line=json.dumps({'ts':'" + ts + "','task':'" + task_id + "','result':'" + safe_res + "','dry':" + dry_str + "})\n" +
-             "open('" + LOG + "','a').write(line+'\\n')"
-    try { exec("/usr/bin/python3 -c \"" + py + "\"") } catch e {}  // @allow-bare-exec
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 json.dumps + append to LOG
+    let _ = ts
+    let _ = safe_res
+    let _ = dry_str
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync.hexa:log_append. Escalate to user for hexa-native replacement.")
 }
 
 fn usage() {
@@ -132,10 +127,13 @@ fn cmd_diff() {
                   "        print('  '+tid.ljust(30)+' dir_mode='+mode)\n" +
                   "    else:\n" +
                   "        print('  '+tid.ljust(30)+' mode='+mode+' (no hash)')"
-    try { write_file(py_file, py_body) } catch e {}
-    let out = to_string(exec("/usr/bin/python3 '" + py_file + "' 2>&1")).trim()  // @allow-bare-exec
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: write .sync_diff.py + /usr/bin/python3 exec for drift hash report
+    let _ = py_body
+    let _ = py_file
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync.hexa:cmd_diff. Escalate to user for hexa-native replacement.")
+    let out = ""
     println(out)
-    try { exec("rm -f '" + py_file + "'") } catch e {}  // @allow-bare-exec
 }
 
 fn expand_path(p: str) -> str {

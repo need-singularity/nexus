@@ -23,14 +23,19 @@ fn _load_state() -> str {
 }
 
 fn _get_stored_hash(state_raw: str, key: str) -> str {
-    let v = to_string(exec("/usr/bin/python3 -c \"import json,sys; d=json.loads(sys.stdin.read()); print(d.get('" + key + "',''))\" <<'PYEOF'\n" + state_raw + "\nPYEOF")).trim()
-    return v
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = state_raw
+    let _ = key
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync-nexus-lenses.hexa:_get_stored_hash. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn _save_hash(key: str, hash_val: str) {
-    let raw = _load_state()
-    let updated = to_string(exec("/usr/bin/python3 -c \"import json,sys; d=json.loads(sys.stdin.read()); d['" + key + "']='" + hash_val + "'; print(json.dumps(d,indent=2))\" <<'PYEOF'\n" + raw + "\nPYEOF")).trim()
-    write_file(STATE_FILE, updated + "\n")
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = _load_state()
+    let _ = key
+    let _ = hash_val
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync-nexus-lenses.hexa:_save_hash. Escalate to user for hexa-native replacement.")
 }
 
 // 소스 해시: telescope_test.rs (렌즈 수 소스)
@@ -138,13 +143,11 @@ let tools_json = SHARED_DIR + "/installed_tools.json"
 let tj_ok = to_string(exec("test -f '" + tools_json + "' && echo y || echo n")).trim()
 if tj_ok == "y" {
     let new_purpose = "NEXUS-6 Discovery Engine -- telescope " + total + " lenses + OUROBOROS evolution + graph + verifier"
-    try {
-        let result = to_string(exec("/usr/bin/python3 -c \"\nimport json\nwith open('" + tools_json + "') as f:\n    d = json.load(f)\nif 'nexus' in d.get('cli_tools', {}):\n    old = d['cli_tools']['nexus'].get('purpose', '')\n    if old != '" + new_purpose + "':\n        d['cli_tools']['nexus']['purpose'] = '" + new_purpose + "'\n        with open('" + tools_json + "', 'w') as f:\n            json.dump(d, f, indent=2, ensure_ascii=False)\n        print('갱신: ' + '" + new_purpose + "')\n    else:\n        print('이미 최신')\nelse:\n    print('SKIP: nexus 항목 없음')\n\" 2>/dev/null")).trim()
-        println("  " + result)
-        if result.contains("갱신") { changed = 1 }
-    } catch e {
-        println("  SKIP: 처리 실패")
-    }
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 JSON update installed_tools.json cli_tools.nexus.purpose
+    let _ = new_purpose
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync-nexus-lenses.hexa:installed_tools update. Escalate to user for hexa-native replacement.")
+    println("  SKIP: R37 python3 차단")
 } else {
     println("  SKIP: " + tools_json + " 없음")
 }
@@ -155,13 +158,10 @@ println("[5/5] calculators.json 갱신 중...")
 let calc_json = SHARED_DIR + "/calculators.json"
 let cj_ok = to_string(exec("test -f '" + calc_json + "' && echo y || echo n")).trim()
 if cj_ok == "y" {
-    try {
-        let result = to_string(exec("/usr/bin/python3 -c \"\nimport json\nwith open('" + calc_json + "') as f:\n    d = json.load(f)\nupdated = False\nfor repo_key in d:\n    if not isinstance(d[repo_key], list): continue\n    for entry in d[repo_key]:\n        if 'nexus' in entry.get('path', ''):\n            new_desc = 'NEXUS-6 Discovery Engine -- " + total + " lenses telescope + OUROBOROS'\n            if entry.get('description', '') != new_desc:\n                entry['description'] = new_desc\n                updated = True\nif updated:\n    with open('" + calc_json + "', 'w') as f:\n        json.dump(d, f, indent=2, ensure_ascii=False)\n    print('갱신 완료')\nelse:\n    print('변경 불필요')\n\" 2>/dev/null")).trim()
-        println("  " + result)
-        if result.contains("갱신") { changed = 1 }
-    } catch e {
-        println("  SKIP: 처리 실패")
-    }
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 JSON update calculators.json description field
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at sync-nexus-lenses.hexa:calculators update. Escalate to user for hexa-native replacement.")
+    println("  SKIP: R37 python3 차단")
 } else {
     println("  SKIP: " + calc_json + " 없음")
 }

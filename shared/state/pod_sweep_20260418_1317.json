@@ -1,0 +1,59 @@
+{
+  "_meta": {
+    "type": "h100_pod_sweep",
+    "created": "2026-04-18T13:17:00+09:00",
+    "observer": "Roadmap watchdog sweep agent",
+    "trigger": "3-pod idle burn concern from briefing",
+    "tool": "runpodctl pod list + ssh probe",
+    "safety_rule": "ambiguous => preserve"
+  },
+  "briefing_vs_reality": {
+    "briefing_claimed_pods": 3,
+    "runpodctl_actual_pods": 1,
+    "conclusion": "Two of the three briefed pods (CLM pod2 16oxzm6py5xdss + the 'stopped' third) are no longer in RunPod inventory. Either removed by prior BG teardown, or never existed on current account. No burn from ghosts."
+  },
+  "pods_observed": [
+    {
+      "id": "dd88fldzkqhpgk",
+      "name": "anima-alm14b-r9",
+      "gpu": "1 H100 SXM 80GB",
+      "cost_per_hr_usd": 2.99,
+      "status_runpodctl": "RUNNING",
+      "probe": {
+        "host": "root@103.207.149.87:10466",
+        "gpu_util_pct": 100,
+        "vram_used_mib": 61229,
+        "vram_total_mib": 81559,
+        "active_trainer_pid": 23112,
+        "trainer_cmd": "/usr/bin/python3 /tmp/_train_alm_14b_r10.py --steps 2000 --lr 2e-6 --batch 8 --seq 1024 --lora-r 32",
+        "trainer_elapsed": "02:47",
+        "trainer_cpu_pct": 147,
+        "serve_pid_21170": "serve_alm_persona.py (48:56 uptime)",
+        "recent_log_tail": [
+          "[step=1] loss=6.7972 lr=2e-06 toks/s=2482.0",
+          "[step=25] loss=2.9442 lr=2e-06 toks/s=5305.0",
+          "[step=50] loss=1.8054 lr=2e-06 toks/s=5429.0"
+        ]
+      },
+      "verdict": "ACTIVE",
+      "action": "PRESERVE",
+      "reason": "GPU 100% util, r10 trainer actively converging (loss 6.79->1.80 in 50 steps)"
+    }
+  ],
+  "pods_missing_from_inventory": [
+    {
+      "id": "16oxzm6py5xdss",
+      "name": "anima-clm1b-r4-pod2",
+      "referenced_in": "shared/state/clm_r4_pod2_abnormal_20260418.json",
+      "do_not_teardown_flag": true,
+      "observed_now": "not in runpodctl pod list",
+      "conclusion": "Already gone — either prior BG completed teardown, or pod was on different account. No action from this sweep."
+    }
+  ],
+  "teardown_actions": [],
+  "savings_usd_per_hour": 0.0,
+  "total_pods_alive": 1,
+  "total_burn_per_hour_usd": 2.99,
+  "total_burn_per_hour_justified": true,
+  "commit": "skipped — no state change; no idle pods found"
+}

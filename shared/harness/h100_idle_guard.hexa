@@ -78,15 +78,21 @@ fn jsonl_append(line: string) {
     let _ = exec("printf '%s\\n' '" + esc + "' >> '" + ALERTS + "' 2>/dev/null")  // @allow-bare-exec
 }
 
-// ── Plan loader (uses python3 — matches existing harness pattern) ──────────
+// ── Plan loader — R37/AN13/L3-PY: python3 stubs returning sentinels ─────────
 fn plan_get_int(path: string, key: string) -> int {
-    let cmd = "python3 -c \"import json;d=json.load(open('" + path + "'));print(d" + key + ")\" 2>/dev/null"
-    return to_int(sh(cmd))
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = path
+    let _ = key
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:plan_get_int. Escalate to user for hexa-native replacement.")
+    return 0
 }
 
 fn plan_get_str(path: string, key: string) -> string {
-    let cmd = "python3 -c \"import json;d=json.load(open('" + path + "'));print(d" + key + ")\" 2>/dev/null"
-    return sh(cmd)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = path
+    let _ = key
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:plan_get_str. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn plan_pod_count() -> int {
@@ -122,17 +128,17 @@ fn stash_resp(resp: string) {
 fn count_running_pods(resp: string) -> int {
     if len(resp) == 0 { return 0 }
     stash_resp(resp)
-    let cmd = "python3 -c \"import json;d=json.load(open('" + TMP_RESP + "'));ps=(d.get('data') or {}).get('myself',{}).get('pods') or [];print(sum(1 for p in ps if p.get('desiredStatus')=='RUNNING'))\" 2>/dev/null"
-    return to_int(sh(cmd))
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:count_running_pods. Escalate to user for hexa-native replacement.")
+    return 0
 }
 
 fn total_cost_per_hr(resp: string) -> string {
     if len(resp) == 0 { return "0.00" }
     stash_resp(resp)
-    let cmd = "python3 -c \"import json;d=json.load(open('" + TMP_RESP + "'));ps=(d.get('data') or {}).get('myself',{}).get('pods') or [];print('%.2f'%sum(float(p.get('costPerHr') or 0) for p in ps if p.get('desiredStatus')=='RUNNING'))\" 2>/dev/null"
-    let r = sh(cmd)
-    if len(r) == 0 { return "0.00" }
-    return r
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:total_cost_per_hr. Escalate to user for hexa-native replacement.")
+    return "0.00"
 }
 
 // ── GPU utilization check per pod ───────────────────────────────────────────
@@ -140,16 +146,17 @@ fn total_cost_per_hr(resp: string) -> string {
 fn get_running_pod_ids(resp: string) -> string {
     if len(resp) == 0 { return "" }
     stash_resp(resp)
-    // Returns "id1|gpu1|name1\nid2|gpu2|name2\n..." for RUNNING pods
-    let cmd = "python3 -c \"import json;d=json.load(open('" + TMP_RESP + "'));ps=(d.get('data') or {}).get('myself',{}).get('pods') or [];[print(f\\\"{p['id']}|{(p.get('runtime') or {}).get('gpus',[{}])[0].get('gpuUtilPerc','?')}|{p.get('name','?')}\\\") for p in ps if p.get('desiredStatus')=='RUNNING']\" 2>/dev/null"
-    return sh(cmd)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:get_running_pod_ids. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn get_pod_ssh(resp: string, pod_id: string) -> string {
-    // Returns "ip port" for SSH connection to a specific pod
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
     stash_resp(resp)
-    let cmd = "python3 -c \"import json;d=json.load(open('" + TMP_RESP + "'));ps=(d.get('data') or {}).get('myself',{}).get('pods') or [];[print(f\\\"{port['ip']} {port['publicPort']}\\\") for p in ps for port in (p.get('runtime') or {}).get('ports',[]) if p['id']=='" + pod_id + "' and port.get('privatePort')==22]\" 2>/dev/null"
-    return sh(cmd)
+    let _ = pod_id
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:get_pod_ssh. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn check_gpu_util_ssh(ip: string, port: string) -> int {
@@ -168,16 +175,19 @@ fn load_idle_counts() -> string {
 }
 
 fn get_idle_count(pod_id: string) -> int {
-    let data = load_idle_counts()
-    let cmd = "python3 -c \"import json;d=json.loads('" + data.replace("'", "'\\''") + "');print(d.get('" + pod_id + "',0))\" 2>/dev/null"
-    return to_int(sh(cmd))
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = load_idle_counts()
+    let _ = pod_id
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:get_idle_count. Escalate to user for hexa-native replacement.")
+    return 0
 }
 
 fn set_idle_count(pod_id: string, count: int) {
-    let data = load_idle_counts()
-    let cmd = "python3 -c \"import json;d=json.loads('" + data.replace("'", "'\\''") + "');d['" + pod_id + "']=" + to_string(count) + ";print(json.dumps(d))\" 2>/dev/null"
-    let new_data = sh(cmd)
-    if len(new_data) > 0 { write_file(TMP_IDLE, new_data) }
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = load_idle_counts()
+    let _ = pod_id
+    let _ = count
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:set_idle_count. Escalate to user for hexa-native replacement.")
 }
 
 fn clear_idle_count(pod_id: string) {
@@ -198,10 +208,14 @@ fn enforce_gpu_idle(resp: string, dry: bool) -> int {
     // Parse each pod line: "id|gpuUtil|name"
     let cmd = "echo '" + lines.replace("'", "'\\''") + "' | while IFS='|' read pid gpu name; do echo \"$pid $gpu $name\"; done"
     let parsed = sh(cmd)
-    // Process via python for safety
-    let kill_cmd = "python3 << 'PYEOF'\nimport subprocess, json, os\nlines = '''" + lines.replace("'", "'\\''") + "'''.strip().split('\\n')\nidle_file = '" + TMP_IDLE + "'\ntry:\n    idle = json.load(open(idle_file))\nexcept: idle = {}\nkilled = []\nfor line in lines:\n    parts = line.split('|')\n    if len(parts) < 3: continue\n    pid, gpu_s, name = parts[0], parts[1], parts[2]\n    try: gpu = int(gpu_s)\n    except: gpu = -1\n    if gpu < 0:\n        print(f'  [{name}] GPU util unknown — skip')\n        continue\n    if gpu < " + to_string(threshold) + ":\n        prev = idle.get(pid, 0)\n        idle[pid] = prev + 1\n        if idle[pid] >= " + to_string(max_consecutive) + ":\n            print(f'  [{name}] GPU {gpu}% — IDLE {idle[pid]}x consecutive → HARD KILL')\n            killed.append(pid)\n        else:\n            print(f'  [{name}] GPU {gpu}% — IDLE {idle[pid]}/" + to_string(max_consecutive) + " (warn)')\n    else:\n        idle[pid] = 0\n        print(f'  [{name}] GPU {gpu}% — OK')\njson.dump(idle, open(idle_file, 'w'))\nprint('KILL:' + ','.join(killed))\nPYEOF"
-    let result = sh_stderr(kill_cmd)
-    println(result)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 HEREDOC parsing lines → idle file update → HARD KILL decision
+    let _ = parsed
+    let _ = threshold
+    let _ = max_consecutive
+    let result = "R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:enforce_gpu_idle. Escalate to user for hexa-native replacement."
+    eprintln(result)
+    return 0
 
     // Extract KILL list and execute
     let kill_list = sh("echo '" + result.replace("'", "'\\''") + "' | grep '^KILL:' | sed 's/KILL://'")
@@ -267,8 +281,10 @@ fn terminate_pod(slot: string, dry: bool) -> string {
     if dry { return "dry-run (skipped terminate)" }
     // HARD KILL — runpodctl pod stop 실제 실행
     // slot name으로 pod_id 매핑: runpodctl pod list → name 매칭
-    let find_cmd = "runpodctl pod list 2>/dev/null | python3 -c \"import json,sys;ps=json.load(sys.stdin);[print(p['id']) for p in ps if p.get('desiredStatus')=='RUNNING' and '" + slot + "' in p.get('name','').lower()]\" 2>/dev/null"
-    let pod_id = sh(find_cmd)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: runpodctl pod list | python3 -c "..." for slot→pod_id mapping
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:terminate_pod. Escalate to user for hexa-native replacement.")
+    let pod_id = ""
     if len(pod_id) == 0 {
         emit_alert(slot, "terminate_no_match", 0, "no running pod matching slot=" + slot)
         return "no pod found for slot " + slot
@@ -409,7 +425,11 @@ fn main() {
 
     // budget alert
     let daily = plan_get_int(PLAN, "['limits']['daily_budget_usd_total']")
-    let projected = to_int(sh("python3 -c \"print(int(float('" + costhr + "')*24))\" 2>/dev/null"))
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 -c "print(int(float(costhr)*24))" for 24h cost projection
+    let _ = costhr
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at h100_idle_guard.hexa:budget-projection. Escalate to user for hexa-native replacement.")
+    let projected = 0
     if projected > daily {
         emit_alert("_global", "budget_over", projected, "24h projection $" + to_string(projected) + " > daily cap $" + to_string(daily))
         println("  [BUDGET] 24h projection $" + to_string(projected) + " > cap $" + to_string(daily))

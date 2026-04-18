@@ -30,27 +30,14 @@ fn main() {
         return
     }
 
-    // python3 로 JSON 머지: src 의 allow + deny_categories.*.patterns 을 dst 의 permissions 로 주입
-    let py = "import json\n" +
-             "s=json.load(open('" + src + "'))\n" +
-             "t=json.load(open('" + dst + "'))\n" +
-             "allow=sorted(set(s.get('allow',[])))\n" +
-             "deny=[]\n" +
-             "for cat in s.get('deny_categories',{}).values():\n" +
-             "    deny.extend(cat.get('patterns',[]))\n" +
-             "deny=sorted(set(deny))\n" +
-             "t.setdefault('permissions',{})\n" +
-             "# 기존 deny 에서 ssot 패턴 제외한 나머지 유지 (프로젝트 특수 deny 보존)\n" +
-             "existing_deny=t['permissions'].get('deny',[])\n" +
-             "new_deny=sorted(set(deny + existing_deny))\n" +
-             "current_allow=t['permissions'].get('allow',[])\n" +
-             "new_allow=sorted(set(allow + current_allow))\n" +
-             "changed=(t['permissions'].get('deny',[])!=new_deny or t['permissions'].get('allow',[])!=new_allow)\n" +
-             "t['permissions']['deny']=new_deny\n" +
-             "t['permissions']['allow']=new_allow\n" +
-             "print('CHANGED' if changed else 'NOCHANGE')\n" +
-             "print(json.dumps(t,indent=2,ensure_ascii=False))"
-    let raw = to_string(exec("/usr/bin/python3 -c \"" + py + "\"")).trim()
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 merged permissions_ssot.json (allow + deny_categories.*.patterns) into settings.json permissions
+    let _ = src
+    let _ = dst
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at tasks/gen_perm.hexa:main. Escalate to user for hexa-native replacement.")
+    println("[" + task_id + "] fail:python3_blocked_R37")
+    exit(1)
+    let raw = ""
     let lines = raw.split("\n")
     let status = lines[0].trim()
     if status == "NOCHANGE" {

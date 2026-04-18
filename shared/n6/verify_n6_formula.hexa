@@ -55,20 +55,16 @@ let py_script = "import re,sys\n" +
     "print(f'{status}: {formula} = {computed} (target={target}, diff={diff:.4f}, tol={tol:.4f})')\n" +
     "sys.exit(0 if ok else 1)\n"
 
-let cmd = "python3 -c " + "\"" + py_script.replace("\"", "\\\"") + "\" " + "'" + target_str.replace("'", "'\\''") + "' " + "'" + formula.replace("'", "'\\''") + "'"
-
-// 실행 — exec() 는 비-zero exit 시 throw, 0 시 stdout 반환
+// R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+// Original: python3 -c "<py_script>" <target> <formula> for n6 formula verification
+let _ = py_script
+let _ = target_str
+let _ = formula
+eprintln("R37/AN13/L3-PY: python3 invocation blocked at verify_n6_formula.hexa:main. Escalate to user for hexa-native replacement.")
 let mut out: string = ""
 let mut ok = false
-try {
-    out = exec(cmd)
-    ok = true
-} catch e {  // @allow-silent-catch (eprintln logs failure inside body)
-    // python sys.exit(1) (FAIL 케이스) — 메시지는 e.message 에 캡처됨
-    out = to_string(e)
-    ok = false
-    eprintln("[verify_n6_formula] exec returned non-zero (FAIL path): " + to_string(e))
-}
+out = ""
+ok = false
 
 // out 에는 GATE 디버그 + python source echo + 결과 라인이 섞여있음.
 // 결과 라인은 마지막 비어있지 않은 라인. OK:/FAIL: prefix 로 판정.

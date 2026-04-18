@@ -26,7 +26,7 @@ let SYNC_CODEOWNERS = HOME + "/Dev/nexus/shared/scripts/sync_codeowners.hexa"
 let LOG = HOME + "/Dev/nexus/shared/harness/lockdown_log.jsonl"
 let BRANCH = "main"
 let CODEOWNERS = ".github/CODEOWNERS"
-let PY3 = "/usr/bin/python3"
+// PY3 constant removed 2026-04-18 (R37/AN13/L3-PY) — python3 invocation blocked
 
 // R33 guard — grep -c + "|| echo 0" 이중 출력 방어. 첫 줄만 파싱.
 fn _to_int0(s: string) -> i64 {
@@ -71,31 +71,36 @@ fn detect_repo() -> string {
     return sh("echo '" + url + "' | sed -E 's|.*github\\.com[:/]||; s|\\.git$||'")
 }
 
-// ─── lockdown.json 조회 (PY3 헬퍼) ────────────────────────────────────────
+// ─── lockdown.json 조회 — R37/AN13/L3-PY: python3 stubs ──────────────────
 // tier: "L0" | "L1" | "L2"  — path 만 개행 구분 출력.
 fn paths_of(project: string, tier: string) -> string {
-    let py = "import json,sys;D=json.load(open('" + LOCKDOWN + "'));[print(e['path']) for e in D.get('projects',{}).get('" + project + "',{}).get('" + tier + "',[])]"
-    return sh(PY3 + " -c \"" + py + "\" 2>/dev/null")
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 reads LOCKDOWN json and emits projects[project][tier] paths
+    let _ = project
+    let _ = tier
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at lockdown_gate.hexa:paths_of. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 // path → tier (BLOCK=L0, WARN=L1, ALLOW=L2/미등록). repo-relative 매칭.
 fn classify_path(project: string, rel: string) -> string {
-    let py = "import json,sys;D=json.load(open('" + LOCKDOWN + "'));P=D.get('projects',{}).get('" + project + "',{});rel='" + rel + "';\n" +
-        "def hit(tier):\n" +
-        "    for e in P.get(tier,[]):\n" +
-        "        p=e.get('path','')\n" +
-        "        if p.endswith('/') and rel.startswith(p): return True\n" +
-        "        if rel==p: return True\n" +
-        "    return False\n" +
-        "print('L0' if hit('L0') else ('L1' if hit('L1') else ('L2' if hit('L2') else 'NONE')))"
-    return sh(PY3 + " -c \"" + py + "\" 2>/dev/null")
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 tier-matching against LOCKDOWN json
+    let _ = project
+    let _ = rel
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at lockdown_gate.hexa:classify_path. Escalate to user for hexa-native replacement.")
+    return "NONE"
 }
 
 // ─── gh CLI 헬퍼 ─────────────────────────────────────────────────────────
 
 fn gh_field(repo: string, field_expr: string) -> string {
-    let py = "import sys,json;d=json.load(sys.stdin);" + field_expr
-    return sh("gh api repos/" + repo + "/branches/" + BRANCH + "/protection 2>/dev/null | " + PY3 + " -c \"" + py + "\"")
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: gh api branches/protection | python3 -c "<field_expr>"
+    let _ = repo
+    let _ = field_expr
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at lockdown_gate.hexa:gh_field. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn gh_bool(repo: string, field_expr: string) -> bool {

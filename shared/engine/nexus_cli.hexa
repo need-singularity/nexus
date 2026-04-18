@@ -563,18 +563,10 @@ fn cmd_status_proj(a: [str]) {
     let mut name_desc = ""
 
     if r_exists {
-        // _meta.updated, _meta.total_tasks, tracks count 추출
-        let q = "python3 -c 'import json,sys;d=json.load(open(\"" + rp + "\"));m=d.get(\"_meta\",{});tr=d.get(\"tracks\",{});print(m.get(\"updated\",\"\"));print(m.get(\"total_tasks\",\"\"));print(len(tr) if isinstance(tr,dict) else 0);print(m.get(\"name\",\"\"))' 2>/dev/null"
-        let raw = exec(q).trim()
-        let lines = raw.split("\n")
-        if len(lines) >= 4 {
-            updated = lines[0].trim()
-            total_tasks = lines[1].trim()
-            track_count = lines[2].trim()
-            name_desc = lines[3].trim()
-            if updated.len() == 0 { updated = "null" } else { updated = "\"" + updated + "\"" }
-            if total_tasks.len() == 0 { total_tasks = "null" }
-        }
+        // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+        // Original: python3 extracted _meta.updated, _meta.total_tasks, tracks count, name
+        let _ = rp
+        eprintln("R37/AN13/L3-PY: python3 invocation blocked at nexus_cli.hexa:cmd_status_proj. Escalate to user for hexa-native replacement.")
     }
 
     if json_mode(a) {
@@ -657,9 +649,10 @@ fn cmd_convergence_proj(a: [str]) {
     let c_exists = file_exists(cp)
     let mut snapshot = ""
     if c_exists {
-        // 상위 키만 추출 (JSON 덤프 전체는 크기 가변)
-        let q = "python3 -c 'import json;d=json.load(open(\"" + cp + "\"));print(json.dumps({k:(len(v) if isinstance(v,(list,dict)) else v) for k,v in (d.items() if isinstance(d,dict) else [])}, ensure_ascii=False))' 2>/dev/null"
-        snapshot = exec(q).trim()
+        // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+        // Original: python3 extracted top-level key/value summary from convergence JSON
+        let _ = cp
+        eprintln("R37/AN13/L3-PY: python3 invocation blocked at nexus_cli.hexa:cmd_convergence_proj. Escalate to user for hexa-native replacement.")
     }
     if json_mode(a) {
         let mut js = "{\"nexus_cli\":\"" + VERSION + "\",\"subcmd\":\"convergence-proj\","

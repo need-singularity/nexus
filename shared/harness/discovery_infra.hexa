@@ -125,10 +125,11 @@ fn write_state(reindex_ts: i64, rollover_ts: i64, sqlite_ts: i64, lag: i64) {
 
 fn read_state_field(key: string) -> i64 {
     if !file_exists(STATE) { return 0 }
-    let cmd = "/usr/bin/python3 -c \"import json; d=json.load(open('" + STATE + "')); print(d.get('" + key + "', 0))\" 2>/dev/null"
-    let r = safe_exec_str(cmd, 5)
-    if r == "" { return 0 }
-    return to_int(r)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: /usr/bin/python3 -c "import json; d=json.load(open(STATE)); print(d.get(key, 0))"
+    let _ = key
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at discovery_infra.hexa:read_state_field. Escalate to user for hexa-native replacement.")
+    return 0
 }
 
 // ─── DISC-P1-2: edges reindex 트리거 ───
@@ -239,38 +240,11 @@ fn check_sqlite(force: bool) -> [string] {
         return ["fresh", cnt, "log_mt <= idx_mt"]
     }
 
-    // 빌드 — python3 1-pass: byte offset + ts + kind 추출 → SQLite
-    let py = "import sqlite3, json, os\n" +
-             "log='" + DISC_LOG + "'\n" +
-             "db='" + DISC_SQLITE + "'\n" +
-             "if os.path.exists(db): os.remove(db)\n" +
-             "c=sqlite3.connect(db)\n" +
-             "c.execute('CREATE TABLE line_index(line_no INTEGER PRIMARY KEY, byte_offset INTEGER, ts TEXT, kind TEXT)')\n" +
-             "rows=[]\n" +
-             "off=0\n" +
-             "n=0\n" +
-             "with open(log,'rb') as f:\n" +
-             "    for raw in f:\n" +
-             "        n+=1\n" +
-             "        try:\n" +
-             "            j=json.loads(raw.decode('utf-8','ignore'))\n" +
-             "            ts=j.get('ts','') or j.get('timestamp','') or ''\n" +
-             "            kind=j.get('kind','') or j.get('type','') or j.get('event','') or ''\n" +
-             "        except Exception:\n" +
-             "            ts=''\n" +
-             "            kind='_parse_err'\n" +
-             "        rows.append((n,off,str(ts)[:64],str(kind)[:64]))\n" +
-             "        off+=len(raw)\n" +
-             "        if len(rows)>=10000:\n" +
-             "            c.executemany('INSERT INTO line_index VALUES(?,?,?,?)',rows); rows=[]\n" +
-             "if rows: c.executemany('INSERT INTO line_index VALUES(?,?,?,?)',rows)\n" +
-             "c.execute('CREATE INDEX idx_ts ON line_index(ts)')\n" +
-             "c.execute('CREATE INDEX idx_kind ON line_index(kind)')\n" +
-             "c.commit(); c.close()\n" +
-             "print(n)\n"
-    let cmd = "/usr/bin/python3 -c " + _se_shq(py)
-    let out = safe_exec(cmd, 300)
-    let cnt = _se_str(out).trim()
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 1-pass scanner building SQLite line_index (byte offset + ts + kind)
+    log_mistake("disc_infra_sqlite", "R37/AN13/L3-PY: python3 invocation blocked at discovery_infra.hexa:check_sqlite. Escalate to user for hexa-native replacement.")
+    let out = ""
+    let cnt = ""
     if !file_exists(DISC_SQLITE) || cnt == "" {
         log_mistake("disc_infra_sqlite", "sqlite build failed: " + _se_str(out).substring(0, 200))
         return ["error", "0", "build failed"]

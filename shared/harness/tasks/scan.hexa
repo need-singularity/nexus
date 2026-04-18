@@ -12,8 +12,11 @@ fn expand_path(p: str) -> str {
 }
 
 fn project_list(key: str) -> str {
-    let py = "import json\nd=json.load(open('" + MANIFEST + "'))\nprint(' '.join(d.get('projects',{}).get('" + key + "',[])))"
-    return to_string(exec("/usr/bin/python3 -c \"" + py + "\"")).trim()
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    let _ = key
+    let _ = MANIFEST
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at tasks/scan.hexa:project_list. Escalate to user for hexa-native replacement.")
+    return ""
 }
 
 fn repo_of(name: str) -> str {
@@ -58,12 +61,15 @@ fn main() {
         return
     }
 
-    // 스캐너 실행 — scan-calculators.py / scan_math_atlas.py 가 --markdown/--readme-summary 인자를 받음
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: /usr/bin/python3 '<scanner_py>' --markdown --save | --readme-summary
     let mut arg_flag = "--markdown --save"
     if scanner.contains("math_atlas") { arg_flag = "--readme-summary" }
-    let body = to_string(exec("/usr/bin/python3 '" + scanner + "' " + arg_flag + " 2>/dev/null")).trim()
+    let _ = arg_flag
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at tasks/scan.hexa:main (scanner " + scanner + "). Escalate to user for hexa-native replacement.")
+    let body = ""
     if body.len() == 0 {
-        println("[" + task_id + "] skip:scan_empty")
+        println("[" + task_id + "] skip:scan_empty_R37_blocked")
         return
     }
 

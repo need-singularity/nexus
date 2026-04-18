@@ -23,49 +23,13 @@ fn main() {
 
     println("[index] scanning " + src + " ...")
 
-    // python3 single-pass scanner — hexa JSON 파싱 한계 우회
-    // 각 줄의 "project" 필드 추출, 연속 블록 start_line/count 집계
-    let py_script = "import json,sys\n" +
-        "domains={}\n" +
-        "order=[]\n" +
-        "cur=None\n" +
-        "cur_start=0\n" +
-        "cur_count=0\n" +
-        "with open(sys.argv[1]) as f:\n" +
-        "    for i,line in enumerate(f,1):\n" +
-        "        line=line.strip()\n" +
-        "        if not line: continue\n" +
-        "        try:\n" +
-        "            p=json.loads(line).get('project','UNKNOWN')\n" +
-        "        except: p='PARSE_ERROR'\n" +
-        "        if p!=cur:\n" +
-        "            if cur is not None:\n" +
-        "                domains[cur]={'start_line':cur_start,'count':cur_count}\n" +
-        "                order.append(cur)\n" +
-        "            cur=p; cur_start=i; cur_count=1\n" +
-        "        else:\n" +
-        "            cur_count+=1\n" +
-        "if cur is not None:\n" +
-        "    domains[cur]={'start_line':cur_start,'count':cur_count}\n" +
-        "    order.append(cur)\n" +
-        "idx={'source_mtime':int(sys.argv[2]),'total_lines':i,'domain_count':len(domains),'domains':{}}\n" +
-        "for d in order:\n" +
-        "    idx['domains'][d]=domains[d]\n" +
-        "print(json.dumps(idx,indent=2,ensure_ascii=False))"
-
-    let result = exec("/usr/bin/python3 -c '" + py_script + "' '" + src + "' '" + mtime + "'")
-
-    // 결과 쓰기
-    write_file(idx_out, result)
-
-    // 요약 출력
-    let domain_count = exec("/usr/bin/python3 -c 'import json; d=json.load(open(\"" + idx_out + "\")); print(d[\"domain_count\"])'").trim()
-    let total = exec("/usr/bin/python3 -c 'import json; d=json.load(open(\"" + idx_out + "\")); print(d[\"total_lines\"])'").trim()
-    let fsize = exec("wc -c < '" + idx_out + "' | tr -d ' '").trim()
-
-    println("[index] wrote " + idx_out)
-    println("[index] domains=" + domain_count + " total_lines=" + total + " idx_size=" + fsize + "B")
-    println("[index] source_mtime=" + mtime)
+    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
+    // Original: python3 single-pass scanner of verified_constants.jsonl → idx.json (domain line-ranges)
+    let _ = src
+    let _ = idx_out
+    let _ = mtime
+    eprintln("R37/AN13/L3-PY: python3 invocation blocked at index_verified_constants.hexa:main. Escalate to user for hexa-native replacement.")
+    println("[index] skipped — R37/AN13/L3-PY python3 block")
 }
 
 main()

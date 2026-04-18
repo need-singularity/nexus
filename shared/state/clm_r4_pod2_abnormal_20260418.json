@@ -1,0 +1,83 @@
+{
+  "_meta": {
+    "type": "training_abnormal_diagnosis",
+    "created": "2026-04-18T22:10:00+09:00",
+    "observer": "GO mode watcher agent (pod2 monitor)",
+    "severity": "HIGH",
+    "action_required": "user_decision",
+    "do_not_teardown": true,
+    "related": [
+      "training/deploy/clm_r4_launch.hexa",
+      "training/clm_mmap_loader.hexa",
+      "training/clm_r4_mmap_launch_report.md",
+      "shared/config/r2_sync_watchers.json#clm1b_r4_pod2"
+    ]
+  },
+  "pod": {
+    "id": "16oxzm6py5xdss",
+    "name": "anima-clm1b-r4-pod2",
+    "gpu": "1x H100 SXM 80GB",
+    "host": "root@216.243.220.224",
+    "port": 10704,
+    "status": "RUNNING (idle, trainer dead)",
+    "fired_utc": "2026-04-18T12:46:00Z",
+    "trainer_started_utc": "2026-04-18T12:59:12Z",
+    "trainer_killed_utc": "2026-04-18T13:04:36Z",
+    "trainer_lifespan_seconds": 324,
+    "hourly_burn_usd": 2.99,
+    "idle_waste_usd_at_2210KST": 27.0
+  },
+  "symptoms": {
+    "gpu_utilization_pct": 0,
+    "gpu_memory_used_mib": 0,
+    "gpu_memory_free_mib": 81079,
+    "trainer_pid_1395": "SIGKILL (Killed in bash runner log line 109)",
+    "ckpt_files_produced": 0,
+    "train_r4_log_last_line": "[train] phase curriculum: P1(C) 0-150000, P2(CD) 150000-300000, P3(Hexad) 300000-750000",
+    "ckpt_dir_contents": ["train_r4.log (845 bytes)"],
+    "r2_synced_to_pod2_path": ["train_r4.log only (456 bytes at 22:00 KST)"]
+  },
+  "root_cause_hypothesis": {
+    "primary": "OOM at corpus load or optimizer init — 5.38 GB corpus fully loaded via mmap loader but train loop may have allocated 4.84 GB train_bytes + 538 MB eval_bytes as in-process byte slices before wrapping to mmap reads, pushing RSS toward container limit",
+    "evidence": [
+      "launch log shows '[corpus] 5380874900 bytes loaded' — suggests full-materialize before mmap window API",
+      "Killed 5 min 24 s after start — consistent with OOM during corpus prep or torch.compile warmup",
+      "mission briefing said 'RSS 147GB' before kill",
+      "No dmesg access inside container; host 2TiB RAM had 1.9TiB free when probed post-kill — OS-level OOM ruled out",
+      "Likely container cgroup memory limit or runpod volumeless pod's silent cgroup kill"
+    ],
+    "secondary": "torch.compile + 1.5B model on H100 can spike transient RSS during Inductor codegen; combined with corpus bytearray pushes over the cgroup ceiling"
+  },
+  "preserved_state": {
+    "r2_earlier_ckpt": "r2:anima-models/clm1b/r4/step_5000.hexackpt (3.54 GB, dated 2026-04-17 00:51 — from prior pod abx2uqoa7qbbh8)",
+    "corpus_local": "/Users/ghost/Dev/anima/training/corpus_clm_r4.txt (5.38 GB)",
+    "pod_corpus": "/workspace/corpus_clm_r4.txt (already on pod2, verified)"
+  },
+  "recommendations_for_user_b_path_compatible": [
+    {
+      "step": 1,
+      "action": "audit train_clm.hexa + clm_mmap_loader.hexa for in-memory corpus materialize",
+      "reason": "if `[corpus] N bytes loaded` means true read-all, mmap saves zero memory. Must confirm window_targets() actually streams without caching entire slices."
+    },
+    {
+      "step": 2,
+      "action": "lower torch.compile mode or disable temporarily",
+      "reason": "Inductor can transiently peak RSS 30-50 GB on 1.5B model; combined with corpus → kill"
+    },
+    {
+      "step": 3,
+      "action": "before relaunch, set container memory reservation/request explicitly; check RunPod pod overview for memory cap"
+    },
+    {
+      "step": 4,
+      "action": "IF user wants safe-path (b): keep pod2 stopped (not removed) + do nothing more until hexa-native GPU path arrives",
+      "reason": "per mission spec 'py 학습 완주 후 ckpt만 확보, 이후 재학습은 hexa-lang bootstrap 해제 후' — current run produced no ckpt, so nothing to preserve beyond the preexisting step_5000"
+    },
+    {
+      "step": 5,
+      "action": "consider removing pod2 if user decides the failed run is unrecoverable without code fix — continued $2.99/h idle is pure waste",
+      "blocked_by": "USER_CONFIRMATION per mission rule 5 (no teardown until user decision)"
+    }
+  ],
+  "agent_next_cycle_prompt": "User must decide: (a) fix train_clm RSS leak + relaunch, (b) remove pod2 and park until hexa-native GPU path, (c) reduce model/batch to fit memory. DO NOT auto-relaunch without code-path diagnosis."
+}

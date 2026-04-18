@@ -19,7 +19,120 @@
       "independent_of": [
         "CLM",
         "PHYSICS"
-      ]
+      ],
+      "alm_rounds": {
+        "r10": {
+          "status": "in_progress",
+          "scale": "14B",
+          "base": "Qwen/Qwen2.5-14B-Instruct",
+          "base_adapter": null,
+          "note": "fresh LoRA, B1 OFF, stripped corpus, LR 2e-6 constant, 2000 steps, sentinel cadence 200 steps",
+          "launcher": "training/launch_alm_14b_r10.hexa",
+          "ckpt_dir": "/workspace/ckpt_alm_14b_r10",
+          "eta_hours": 1.7,
+          "exit_metrics": [
+            "kr_gen sentinel outcome per checkpoint",
+            "eval_loss trajectory",
+            "persona Likert score",
+            "Φ_refl"
+          ]
+        },
+        "r11": {
+          "status": "prep_three_way_branch",
+          "depends_on": "r10 DONE + eval_report",
+          "design_doc": "training/alm_r11_design.md",
+          "branches": {
+            "A": {
+              "trigger": "r10 converged clean — sentinel PASS all ckpt AND Likert ≥ 3.3 AND Φ_refl > 0.3 AND eval_loss mono-descent",
+              "scale": "32B",
+              "base": "Qwen/Qwen2.5-32B-Instruct",
+              "base_adapter": null,
+              "note": "fresh-from-base, cross-scale LoRA transfer forbidden (feedback_no_resume_data_change)",
+              "launcher": "training/launch_alm_r11_a.hexa",
+              "ckpt_dir": "/workspace/ckpt_alm_r11_a",
+              "r2_prefix": "r2:anima-models/alm32b/r11_a/",
+              "budget_usd_target": 5,
+              "budget_usd_cap": 10,
+              "wall_hours": 1.7,
+              "config": {
+                "steps": 2000,
+                "lr": 2e-06,
+                "batch": 1,
+                "grad_accum": 8,
+                "seq": 1024,
+                "lora_r": 32,
+                "lora_alpha": 64,
+                "lora_dropout": 0.0,
+                "b1_consciousness_loss": false,
+                "seed": 3407
+              },
+              "gate_exit_to": "r12 = 70B FSDP FULL_SHARD (launch_alm_70b.hexa, requires USER_OK_4POD=1)"
+            },
+            "B": {
+              "trigger": "r10 partial — sentinel PASS ≥ 8/10 ckpt AND Likert ≥ 2.8 AND (loss stagnating OR Φ_refl 0.1-0.3)",
+              "scale": "14B",
+              "base": "Qwen/Qwen2.5-14B-Instruct",
+              "base_adapter": null,
+              "note": "fresh LoRA, same as r10 recipe + kowiki admix (15% bytes) + 2× steps",
+              "launcher": "training/launch_alm_r11_b.hexa",
+              "ckpt_dir": "/workspace/ckpt_alm_r11_b",
+              "r2_prefix": "r2:anima-models/alm14b/r11_b/",
+              "budget_usd_target": 6,
+              "budget_usd_cap": 12,
+              "wall_hours": 1.8,
+              "config": {
+                "steps": 4000,
+                "lr": 2e-06,
+                "batch": 8,
+                "grad_accum": 1,
+                "seq": 1024,
+                "lora_r": 32,
+                "lora_alpha": 64,
+                "lora_dropout": 0.0,
+                "b1_consciousness_loss": false,
+                "admix_ratio_bytes": 0.15,
+                "admix_source": "/workspace/kowiki_slice.txt",
+                "seed": 3407
+              },
+              "gate_exit_to": "retry branch A (32B) from cleaner 14B adapter lineage"
+            },
+            "C": {
+              "trigger": "r10 collapse — sentinel FAIL at any step ≤ 1000 OR Likert < 2.8 OR sub-1.0 loss before step 500",
+              "scale": "14B",
+              "base": "Qwen/Qwen2.5-14B-Instruct",
+              "base_adapter": null,
+              "note": "fresh LoRA seed-sweep [3407,42,1337], halved LR, reduced LoRA rank, tighter sentinel (every 100 steps, E7-OSS-03 step<800)",
+              "launcher": "training/launch_alm_r11_c.hexa",
+              "ckpt_dir_pattern": "/workspace/ckpt_alm_r11_c_s<SEED>",
+              "r2_prefix": "r2:anima-models/alm14b/r11_c/seed<SEED>/",
+              "budget_usd_target": 9,
+              "budget_usd_cap": 18,
+              "wall_hours": 3.0,
+              "config": {
+                "steps_per_seed": 2000,
+                "seeds": [3407, 42, 1337],
+                "lr": 1e-06,
+                "batch": 8,
+                "grad_accum": 1,
+                "seq": 1024,
+                "lora_r": 16,
+                "lora_alpha": 32,
+                "lora_dropout": 0.05,
+                "b1_consciousness_loss": false
+              },
+              "gate_exit_to": "adopt best-seed adapter → re-run branch B with best seed"
+            }
+          },
+          "invariants": [
+            "all branches fresh-from-base (no r9/r10/a2_tool adapter reuse — feedback_no_resume_data_change + project_r9_mode_collapse_20260418)",
+            "bf16 throughout, no quantization (feedback_no_quantization)",
+            "launcher is .hexa, python emitted to /tmp only (HEXA-FIRST total .py ban)",
+            "save_every ≥ 2000 + post-training rclone bulk upload (runpod_mfs_quota)",
+            "kr_gen_sentinel.hexa subprocess authoritative (E7-OSS-01)",
+            "naming: no version suffix (feedback_no_version_in_filename) — r11 is round id not version"
+          ]
+        }
+      }
     },
     "CLM": {
       "owner": "anima/serving",
