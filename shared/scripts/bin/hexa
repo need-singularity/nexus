@@ -15,8 +15,10 @@ SELF="$(realpath "$0" 2>/dev/null || echo "$0")"
 # Fallback: hexa_remote exits 64 if remote unreachable/unmappable → local path.
 remote_eligible() {
     [ "${HEXA_LOCAL:-0}" != "1" ] || return 1
+    # 2026-04-18: cc (self-hosted compile) 은 가장 heavy (stage0 → stage1) → 원격 eligibility 로 전환.
+    # 원격 실패 시 exit 64 → 로컬 fallback (safe_hexa_launchd RSS 4GB cap 으로 보호).
     case "${1:-}" in
-        ""|version|--version|-V|help|--help|-h|lsp|cc|status|gc) return 1 ;;
+        ""|version|--version|-V|help|--help|-h|lsp|status|gc) return 1 ;;
     esac
     if [ "${1:-}" = "run" ] && [ -n "${2:-}" ]; then
         case "$(basename "$2")" in

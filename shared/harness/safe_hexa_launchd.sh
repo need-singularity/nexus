@@ -65,6 +65,17 @@ ${ARGS_XML}
   <key>LowPriorityIO</key><true/>
   <key>Nice</key><integer>19</integer>
   <key>RunAtLoad</key><true/>
+  <!-- 2026-04-18 WindowServer panic 재발 방지: hexa_stage0 RSS 4GB 하드캡.
+       Mac 16GB 중 12GB 를 WindowServer/Terminal/user 에 보장. 초과 시 jetsam
+       이 해당 job(priority=40)부터 reclaim. -->
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>ResidentSetSize</key><integer>4294967296</integer>
+  </dict>
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>ResidentSetSize</key><integer>4294967296</integer>
+  </dict>
   <key>StandardOutPath</key><string>${OUT}</string>
   <key>StandardErrorPath</key><string>${ERR}</string>
   <key>EnvironmentVariables</key>
