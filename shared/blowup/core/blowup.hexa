@@ -96,6 +96,10 @@ if _HEXA_BIN == "" {
     }
 }
 
+// AI-native: PID 1회 캡처 — `exec("echo $$")` 6회 → 1회 (fork 5회 감소)
+let mut _BU_PID = ""
+try { _BU_PID = to_string(exec("echo $$")).trim() } catch e {}
+
 // AI-native: 메모리 예산 인프라
 fn mem_check_ok() -> bool {
     let mut ok = true
@@ -723,7 +727,7 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
 
     if has_any_dedup {
         // 후보 라인을 tmpfile로 작성 → grep -Fxf 로 atlas에서 일치 검색
-        let _tmp = "/tmp/.blowup_dedup_batch." + to_string(exec("echo $$").trim())
+        let _tmp = "/tmp/.blowup_dedup_batch." + _BU_PID
         let mut pattern_parts: [string] = []
         i = 0
         while i < dedup_count {
@@ -849,7 +853,7 @@ fn _head_hash_256(path: string) -> string {
     // 현재: tmp 파일 + 단일 커맨드 per 플랫폼 (순차 fallback)
     let mut r = ""
     if !file_exists(path) { return "" }
-    let _tmp = "/tmp/.blowup_headhash." + to_string(exec("echo $$").trim())
+    let _tmp = "/tmp/.blowup_headhash." + _BU_PID
     // head -c 256 → tmp (redirect 는 metachar 경고 없음)
     try { exec("head -c 256 '" + path + "' > '" + _tmp + "'") } catch e {}
     if file_exists(_tmp) {
@@ -1832,7 +1836,7 @@ try {
 } catch e {}
 // DFS 세션 ID: 루트(dfs_current==0)가 PID 기반으로 생성, 동시 실행 visited 파일 격리
 if dfs_max_depth > 0 && dfs_session == "" {
-    try { dfs_session = exec("echo $$").trim() } catch e { dfs_session = "0" }
+    dfs_session = if _BU_PID.len() > 0 { _BU_PID } else { "0" }
 }
 let _h_main = _HOME
 let atlas_path = _ATLAS_PATH
@@ -2625,8 +2629,8 @@ try { arena_reset() } catch e {}  // AI-native: Phase 4 임시 메모리 해제 
 // OPT-16+17+18: shell awk decode + split 1회 (hexa push O(n²) 완전 우회)
 // AI-native: pipeline 분리 — cat(glob) → tmp → awk → tmp (|| + | + ; 제거)
 // metachar 경고 회피: 각 exec 은 단일 명령 (redirect 만 허용)
-let _concat_tmp = "/tmp/.blowup_concat." + domain + "." + to_string(exec("echo $$").trim())
-let _awk_tmp = "/tmp/.blowup_awk." + domain + "." + to_string(exec("echo $$").trim())
+let _concat_tmp = "/tmp/.blowup_concat." + domain + "." + _BU_PID
+let _awk_tmp = "/tmp/.blowup_awk." + domain + "." + _BU_PID
 try { exec("rm -f '" + _concat_tmp + "' '" + _awk_tmp + "'") } catch e {}
 // glob * 는 허용 — cat 은 no-match 시 에러지만 try 로 포괄
 try { exec("cat /tmp/blowup_d*_" + domain + ".cf > '" + _concat_tmp + "' 2>/dev/null") } catch e {}
@@ -2640,6 +2644,8 @@ if file_exists(_concat_tmp) {
 if len(_reload_tsv) > 0 {
     buf_lines = _reload_tsv.split("\n")
 }
+// AI-native: .cf depth 파일 reload 직후 cleanup — 누수 방지 (RA TOP1)
+try { exec("rm -f /tmp/blowup_d*_" + domain + ".cf") } catch e {}
 println("  [FILTER] restored " + to_string(len(buf_lines)) + " lines from compact files")
 
 // OPT-19: 배치 섹터 분류 — Phase 6.7/7에서 sector_of() N회 호출 대신 awk 1회로 사전 분류
@@ -3494,7 +3500,7 @@ println("")
 // directions 자동 업데이트 — Phase 7.1 방향 → next_directions.jsonl 파이프라인
 if bt_dir_count > 0 {
     let _nd_script = _NEXUS + "/shared/blowup/lib/update_next_directions.hexa"
-    let _nd_tmp = "/tmp/.blowup_directions_" + to_string(exec("echo $$").trim())
+    let _nd_tmp = "/tmp/.blowup_directions_" + _BU_PID
     try { write_file(_nd_tmp, bt_directions) } catch e {}
     // AI-native: cat | hexa → hexa < tmp  (pipe | 제거)
     try { exec(absorb_hexa_bin + " " + _nd_script + " " + domain + " " + to_string(bt_dir_count) + " < " + _nd_tmp) } catch e {}
