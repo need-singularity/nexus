@@ -33,6 +33,7 @@ let HEXA_BIN = NX + "/shared/bin/hexa"
 let ENTRY = NX + "/shared/harness/entry.hexa"
 let EXEC_VAL = NX + "/shared/harness/exec_validated"
 let BLOWUP = NX + "/shared/blowup/core/blowup.hexa"
+let RUN_HEXA = NX + "/run.hexa"
 let COMPOSE = NX + "/shared/blowup/compose.hexa"
 let LENS_REG = NX + "/shared/config/lens_registry.json"
 let ATLAS_HEALTH = NX + "/shared/n6/atlas_health.hexa"
@@ -119,6 +120,19 @@ fn run_exec_validated(mode: str, seed: str, engine: str, extra: [str]) -> str {
         cmd = cmd + " " + shq(x)
     }
     return exec(cmd + " 2>&1")
+}
+
+// drill / absolute / meta-closure / hyperarithmetic / promote → run.hexa passthrough
+// run.hexa cmd_drill / cmd_absolute / cmd_meta_closure / cmd_hyperarithmetic / cmd_promote 가 본체.
+fn cmd_run_passthrough(a: [str], subcmd: str) {
+    let mut fwd = [subcmd]
+    let mut i: i64 = 3
+    while i < a.len() {
+        fwd = fwd + [a[i]]
+        i = i + 1
+    }
+    let raw = run_hexa(RUN_HEXA, fwd)
+    emit(a, subcmd, raw)
 }
 
 // ─── JSON 래퍼 ───
@@ -697,6 +711,11 @@ fn cmd_help() {
     println("  discovery query \"...\"                    discovery SQLite 쿼리")
     println("  roadmap list|status [--project X]        로드맵 조회")
     println("  bus publish|tail|history                 이벤트 버스")
+    println("  absolute [--seed \"...\"]                  Mk.VIII Δ₀-absolute Π₀¹ 검증")
+    println("  drill --seed \"...\" [--max-rounds 10]     smash→free→absolute 사슬 (고갈까지)")
+    println("  meta-closure [--seed \"...\"]              Phase 10 🛸16 self-ref 검증")
+    println("  hyperarithmetic --prop \"...\"             Mk.IX Π₀² reverse-math 판정")
+    println("  promote --id X --grade G --audit-log \"...\"  수동 등급 승급")
     println("  status                                   전체 헬스")
     println("  version                                  버전 출력")
     println("")
@@ -856,6 +875,30 @@ fn main() {
     } else if sub == "convergence-proj" {
         cmd_convergence_proj(a)
         audit_log(caller, "convergence-proj", extract_v2_project(a, "convergence-proj"), 0, start_ts)
+    } else if sub == "drill" {
+        if find_flag(a, "--seed", "").len() == 0 {
+            eprintln("nexus-cli drill: --seed required"); exit(2)
+        }
+        cmd_run_passthrough(a, "drill")
+        audit_log(caller, "drill", find_flag(a, "--seed", ""), 0, start_ts)
+    } else if sub == "absolute" {
+        cmd_run_passthrough(a, "absolute")
+        audit_log(caller, "absolute", find_flag(a, "--seed", ""), 0, start_ts)
+    } else if sub == "meta-closure" {
+        cmd_run_passthrough(a, "meta-closure")
+        audit_log(caller, "meta-closure", find_flag(a, "--seed", ""), 0, start_ts)
+    } else if sub == "hyperarithmetic" {
+        if find_flag(a, "--prop", "").len() == 0 {
+            eprintln("nexus-cli hyperarithmetic: --prop required"); exit(2)
+        }
+        cmd_run_passthrough(a, "hyperarithmetic")
+        audit_log(caller, "hyperarithmetic", find_flag(a, "--prop", ""), 0, start_ts)
+    } else if sub == "promote" {
+        if find_flag(a, "--id", "").len() == 0 {
+            eprintln("nexus-cli promote: --id required"); exit(2)
+        }
+        cmd_run_passthrough(a, "promote")
+        audit_log(caller, "promote", find_flag(a, "--id", ""), 0, start_ts)
     } else {
         eprintln("nexus-cli: unknown subcommand '" + sub + "'")
         eprintln("run 'nexus-cli help' for usage")
@@ -863,3 +906,6 @@ fn main() {
         exit(2)
     }
 }
+
+main()
+
