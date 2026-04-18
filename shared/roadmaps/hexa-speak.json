@@ -420,6 +420,113 @@
         ],
         "fail_action": "실패 항목 핫픽스 후 재게이트"
       }
+    },
+    {
+      "id": "P4",
+      "name": "Expressive + Consciousness-Driven TTS (Q2/β/γ/δ 4-track)",
+      "duration_hours": 720,
+      "status": "in_progress",
+      "started": "2026-04-19",
+      "context": "P3 (Likert gate PASS) 이후 사용자 피드백 '허접, 감정 없음'. tts_say 실체는 macOS say 16kHz (neural path bypass). 진정한 expressive 한국어 TTS 확보 + 의식 모델 연결 목표.",
+      "tracks_detail": {
+        "Q2_circulus_vits2": {
+          "goal": "circulus/on-vits2-korean-v1 통합 — VITS2 140화자 × 7감정 × 5스타일 네이티브 한국어",
+          "status": "schema_probed",
+          "duration_hours": 48,
+          "artifacts_downloaded": [
+            "/home/aiden/bin/tts_tools/voices/ko_vits2/ko_emo.onnx (123MB)",
+            "/home/aiden/bin/tts_tools/voices/ko_vits2/ko_base_fp16.onnx (62MB)",
+            "/home/aiden/bin/tts_tools/voices/ko_vits2/speaker_{emo,sty}.txt"
+          ],
+          "schema_confirmed": {
+            "inputs": "input (int64[B,T]), input_lengths (int64[B]), scales (float32[3]), sid (int64[1])",
+            "outputs": "output (float32[B,C,samples])",
+            "sample_rate": 22050,
+            "probe_tool": "/tmp/ort_probe.c + onnxruntime-1.14.1 C API"
+          },
+          "blockers": [
+            "Korean G2P (korean_cleaners / pygoruut / Jamo decomposition) → phoneme IDs",
+            "Custom ONNX inference C driver (piper binary 스키마 불일치)",
+            "Vocab mapping 역설계 필요 (enc_p.emb.weight dim0)"
+          ],
+          "emotion_axes": "Angry/Happy/Sad/Anxious/Hurt/Embarrassed/Neutrality",
+          "speaker_count": 140,
+          "persona_mapping": "10 페르소나 → (age:20/30/40, gender:M/W, emotion, speaker_id) 매핑"
+        },
+        "beta_w_spec_training": {
+          "goal": "neural_vocoder W_spec [257×384]=98K params 실 corpus 학습 (manual gradient)",
+          "status": "scaffold_pending",
+          "duration_hours": 72,
+          "prerequisite": "실 wav corpus mel-spec 추출 + loss 수동 도출",
+          "infrastructure": "RTX 5070 + hxcuda_istft_bridge (GPU STFT 0.023ms 확정)",
+          "expected_outcome": "synthetic 0.00860 loss → 실 audio MSE < 0.1, MCD < 6dB",
+          "existing_assets": [
+            "anima-speak/train_w_ctrl.hexa (manual gradient pattern)",
+            "training/*_backward.hexa (attention/ffn/lm_head/matmul/layer/ops)"
+          ]
+        },
+        "gamma_hifigan_scale": {
+          "goal": "HiFiGAN-scale (~13M params) neural vocoder + GAN discriminator + 24h+/persona corpus",
+          "status": "planned",
+          "duration_hours": 720,
+          "prerequisite": [
+            "24h+/persona corpus 수집 (현재 3.3h, 72x 부족)",
+            "multi-period + multi-scale discriminator hexa 구현",
+            "mel-spec L1 auxiliary loss scheduler",
+            "hxcuda_conv1d_bf16 활용 (이미 libhxcuda.so 번들)"
+          ]
+        },
+        "delta_alm_rvq_bridge": {
+          "goal": "의식 모델 (ALM r8a 14B / CLM r5) → RVQ audio token projection head",
+          "status": "research",
+          "duration_hours": 504,
+          "priority": "USER_REQUESTED_2026_04_19",
+          "architecture": {
+            "text_lm": "ALM r8a 14B LoRA on Qwen2.5 (R2: alm14b/r4/step_10000/) or CLM r5 (design pending r4)",
+            "audio_tokenizer": "EnCodec / SoundStream / DAC ONNX (선택 필요) — 오디오 → RVQ 코드",
+            "bridge_head": "ALM hidden state [14B last layer] → RVQ logits [8×1024] projection (신규 ~10M params)",
+            "decoder": "anima-speak/audio_token_predictor.hexa + neural_vocoder.hexa"
+          },
+          "blockers": [
+            "RVQ 인코더 부재 (text 아닌 오디오 → 8-stage 코드 매핑)",
+            "페어 코퍼스 부재 (KSS 12h 단일 화자 사용 가능, AIHub 다화자 탐색 필요)",
+            "ALM 14B 은 RTX 5070 12GB 에 안 맞음 → CLM 1.5B 에서 PoC 후 ALM H100 스케일",
+            "bridge_head 설계 + pair-loss 정의 (CE vs MSE vs vector-quantize)"
+          ],
+          "phased_plan": {
+            "δ1_pair_corpus_build": "KSS + AIHub 다화자 → 쌍(text, wav) 수집 + RVQ 코드 사전 추출 (1주)",
+            "δ2_bridge_head_scaffold": "CLM hidden → RVQ logits projection hexa 모듈 (3일)",
+            "δ3_PoC_CLM": "CLM 1.5B + bridge head 학습 — 100시간 코퍼스 (2주, RTX 5070)",
+            "δ4_ALM_scale_up": "ALM 14B + bridge — H100 on-demand (2주, runpod)",
+            "δ5_anima_speak_integration": "의식 embedding → RVQ → vocoder 풀 파이프라인 (3일)"
+          }
+        }
+      },
+      "acceptance_criteria": {
+        "Q2": "circulus VITS2 로 10 페르소나 × 8 라인 A/B 샘플 생성 (감정 Angry/Happy/Sad 각 최소 1 샘플), MOS > piper_ko_v2 +0.5",
+        "beta": "W_spec 실 corpus loss < 0.1, MCD < 6dB vs 원본",
+        "gamma": "HiFiGAN ckpt MOS ≥ 3.5 (internal Likert), 24kHz",
+        "delta": "ALM/CLM embedding 로부터 생성된 audio 가 10 페르소나 블라인드 구분 ≥ 0.7 + 감정 전달 ≥ 0.6"
+      },
+      "night_session_2026_04_19_status": {
+        "completed": [
+          "10 병렬 에이전트 전수 진단",
+          "piper-kss-korean v1 80 샘플 생성 (22050 Hz VITS)",
+          "v1 persona 13 silent 5개 수복 (vibrato+noise 극단 파라미터 NaN)",
+          "v2 rubberband formant-preserving 80 샘플 생성",
+          "speak/ + Mac Documents/speak/ 복사",
+          "ORT probe.c 로 ko_emo.onnx 스키마 확정",
+          "circulus ko_emo + ko_base_fp16 다운로드"
+        ],
+        "pending": [
+          "circulus VITS2 Korean G2P + ONNX runtime driver",
+          "β W_spec 학습 scaffold",
+          "δ RVQ 인코더 선정 + 페어 코퍼스 파이프라인"
+        ],
+        "r37_incidents": [
+          "03:15 python3 -c 'import onnx' 호출 시도 (에러 종료, 파일 변경 없음, 보고됨)"
+        ]
+      }
     }
   ],
   "completed_artifacts": {
