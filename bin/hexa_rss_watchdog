@@ -26,6 +26,36 @@ log_event() {
         "$ts" "$pid" "$rss" "$name" "$reason" "$CAP_KB" >> "$SINK" 2>/dev/null || true
 }
 
+# pid_tree <root> — BFS through descendants with 8 generation cap
+pid_tree() {
+    local root="$1" frontier next pid parent line
+    frontier="$root"
+    printf '%s\n' "$root"
+    for _ in 1 2 3 4 5 6 7 8; do
+        next=""
+        while IFS= read -r line; do
+            pid=$(printf '%s' "$line" | awk '{print $1}')
+            parent=$(printf '%s' "$line" | awk '{print $2}')
+            case " $frontier " in
+                *" $parent "*)
+                    printf '%s\n' "$pid"
+                    next="$next $pid" ;;
+            esac
+        done < <(ps -Ao pid=,ppid= 2>/dev/null)
+        [ -z "$next" ] && break
+        frontier="$next"
+    done
+}
+
+# sum_rss_kb <pid...> — csv aggregate RSS across pid list
+sum_rss_kb() {
+    local pids="$*"
+    [ -z "$pids" ] && { echo 0; return; }
+    local csv
+    csv=$(printf '%s' "$pids" | tr ' \n' ',,' | sed 's/,,*/,/g; s/^,//; s/,$//')
+    ps -o rss= -p "$csv" 2>/dev/null | awk '{s+=$1} END {print s+0}'
+}
+
 # pattern: hexa_stage0.real, hexa_v2 (exact end), hexa_full (exact end)
 PATTERN='hexa_stage0\.real|hexa_v2($|[[:space:]])|hexa_full($|[[:space:]])'
 
@@ -34,21 +64,24 @@ while true; do
     pids="$(pgrep -f "$PATTERN" 2>/dev/null || true)"
     if [ -n "$pids" ]; then
         for pid in $pids; do
-            # ps -o rss=,comm= : RSS(KB) and command basename
-            line="$(ps -o rss=,comm= -p "$pid" 2>/dev/null || true)"
-            [ -z "$line" ] && continue
-            rss_kb="$(printf '%s\n' "$line" | awk '{print $1}')"
-            name="$(printf '%s\n' "$line" | awk '{$1=""; sub(/^ /,""); print}')"
+            # Descendant aggregation: sum RSS across full process tree
+            tree="$(pid_tree "$pid" | tr '\n' ' ')"
+            rss_kb="$(sum_rss_kb $tree)"
             [ -z "$rss_kb" ] && continue
             case "$rss_kb" in
                 ''|*[!0-9]*) continue ;;
             esac
+            # Protection check on root process name
+            name="$(ps -o comm= -p "$pid" 2>/dev/null | awk '{sub(/^ +/,""); print}')"
             if protected_name "$name"; then
                 continue
             fi
             if [ "$rss_kb" -gt "$CAP_KB" ]; then
-                log_event "$pid" "$rss_kb" "$name" "rss>cap"
-                kill -KILL "$pid" 2>/dev/null || true
+                log_event "$pid" "$rss_kb" "$name" "tree_rss>cap tree=$tree"
+                # Kill descendants first, then root, to prevent respawn
+                for p in $tree; do
+                    kill -KILL "$p" 2>/dev/null || true
+                done
             fi
         done
     fi
