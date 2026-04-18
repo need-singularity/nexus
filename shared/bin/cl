@@ -553,21 +553,8 @@ cmd_interactive() {
     # @convergence state=ossified id=EXEC_HANDOFF_CLEAN ossified_at=2026-04-18 value="exec 직전 tty 정리 — stty sane + 화면 클리어(\\033[2J\\033[H) + scrollback 클리어(\\033[3J)" rationale="cl picker 의 raw-mode read + cursor-hide 가 tty 모드 누수 → claude 입력 먹통. dashboard 잔재가 claude-code init TUI 와 overlap → 화면 엉망진창. LAUNCH_SPINNER 제거 후 더 뚜렷해진 증상"
     stty sane 2>/dev/null
     printf '\033[?25h\033[3J\033[2J\033[H'
-    # row 1 을 스피너 전용으로 확보, cursor 를 row 3 으로 이동 — 이후 cx stderr/ssh 출력은 row 3+ 에
-    printf '\n\n'
-    # @convergence state=ossified id=LAUNCH_SPINNER_ASYNC ossified_at=2026-04-18 value="async 스피너 — 절대좌표 row 1 고정 paint, 5s 타임아웃. cursor save/restore 로 cx/ssh 출력 라인과 분리. claude TUI 의 alt-screen 진입 시 normal 버퍼 spinner 자동 가려짐" rationale="사용자 요청 'claude 화면뜨기전까지 진행'. sync 360ms 는 cx/ssh 초기화 구간 덮지 못함. async 는 exec 후에도 독립 process 로 paint 지속 → 시각 피드백 유지"
-    (
-        __s=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-        __end=$(($(date +%s) + 5))
-        __i=0
-        while [ "$(date +%s)" -lt "$__end" ]; do
-            printf '\033[s\033[1;1H\033[2K%s → %s (%s)\033[u' "${__s[__i % 10]}" "$selected" "$dir"
-            __i=$((__i+1))
-            sleep 0.08 2>/dev/null || :
-        done
-        printf '\033[s\033[1;1H\033[2K→ %s (%s)\033[u' "$selected" "$dir"
-    ) &
-    disown 2>/dev/null || true
+    # @convergence state=removed id=LAUNCH_SPINNER_ASYNC removed_at=2026-04-19 reason_kr="5s async 서브셸이 row 1 로 cursor save/restore paint 반복 → 원격 claude alt-screen 진입 후에도 같은 tty 에 write → TUI 버퍼 corruption (claude 헤더 'xt) · Claude Max' 잔재, 푸터 bypass permissions 중복 draw, 한글 IME composition 도중 cursor 이동 충돌로 자모 분해). disown 돼도 exec 후 독립 process 로 잔존 → Ctrl+C 로 claude 종료 뒤에도 잔여 시간 tty 에 write → 'Cmd+C 이상' 증상. 시각 피드백은 아래 stderr 1줄 + cx 의 'cx → host' 1줄로 충분." rollback_kr="복구 금지 — alt-screen 과의 tty 공유 근본 문제는 해결 불가"
+    echo "cl: → $selected ($dir)" >&2
     export CLAUDE_CONFIG_DIR="$dir"
     # FOCUSED_BG_REFRESH — 선택 계정 1건만 bg kick (ccmon 스타일)
     ( "$(dirname "$0")/cl-refresh" "$selected" >/dev/null 2>&1 ) &
