@@ -3876,6 +3876,26 @@ if wave_round < wave_max_rounds {
     }
     // fallback: 빈공간 없으면 auto_select_domain
     if next_domain == "" { next_domain = auto_select_domain() }
+    // next_domain 정제 — 공백/특수문자/빈 문자열/emoji 제거 (W3 division-by-zero 방어)
+    next_domain = next_domain.trim()
+    let _nd_alnum = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    let mut _nd_safe = true
+    if len(next_domain) == 0 || len(next_domain) > 32 { _nd_safe = false }
+    let mut _nd_ci: i64 = 0
+    while _nd_ci < len(next_domain) && _nd_safe {
+        let _nd_ch = next_domain[_nd_ci..(_nd_ci + 1)]
+        if !_nd_alnum.contains(_nd_ch) { _nd_safe = false }
+        _nd_ci = _nd_ci + 1
+    }
+    if !_nd_safe {
+        let _nd_fb_pool = ["physics", "math", "energy", "materials", "bio", "info"]
+        let _nd_fb_idx = wave_round % 6
+        let mut _nd_fbi: i64 = 0
+        for _fb in _nd_fb_pool {
+            if _nd_fbi == _nd_fb_idx { next_domain = _fb }
+            _nd_fbi = _nd_fbi + 1
+        }
+    }
     // 같은 도메인 반복 방지
     if next_domain == domain {
         let fb_pool = ["physics", "chemistry", "biology", "math", "computing", "materials"]
