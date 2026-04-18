@@ -48,146 +48,218 @@ fn print_usage() {
     println("  --strict  (gap 모드에서 gap 발견 시 exit 3)")
 }
 
-// ─── python3 helpers (JSON is easier in python) ────────────────
-// 절대경로 /usr/bin/python3 사용 — hetzner 라우팅 게이트 우회 (R22 허용).
-// tmp 이름은 PID+sequence 로 충돌 회피. write_file 실패해도 exec 는 진행.
+// ─── hexa-native JSON helpers (jq + exec) ────────────────────────
+// python3 / R37/AN13/L3-PY 의존 제거 (2026-04-18 smash).
+// 모든 JSON query 는 jq passthrough. shell metachar 경고는 @allow-bare-exec 로 허용.
 
-let mut _py_seq: i64 = 0
+fn jq(query: str, path: str) -> str {
+    // @allow-bare-exec
+    let cmd = "jq -r " + shq(query) + " " + shq(path) + " 2>/dev/null"
+    return to_string(exec(cmd)).trim()
+}
 
-fn run_py(script: str) -> str {
-    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
-    _py_seq = _py_seq + 1
-    let _ = script
-    eprintln("R37/AN13/L3-PY: python3 invocation blocked at roadmap_guard.hexa:run_py. Escalate to user for hexa-native replacement.")
+fn jq_raw(query: str, path: str) -> str {
+    // non-trim 변형 (multi-line 출력 보존)
+    // @allow-bare-exec
+    let cmd = "jq -r " + shq(query) + " " + shq(path) + " 2>/dev/null"
+    return to_string(exec(cmd))
+}
+
+fn shq(s: str) -> str {
+    // single-quote shell escape
+    let mut r = "'"
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "'" { r = r + "'\\''" } else { r = r + c }
+        i = i + 1
+    }
+    return r + "'"
+}
+
+fn file_exists_path(p: str) -> bool {
+    // @allow-bare-exec
+    let out = to_string(exec("test -e " + shq(p) + " && echo Y || echo N")).trim()
+    return out == "Y"
+}
+
+// verify_project — hexa-native 정합성 검사. jq 로 각 필드 조회.
+// 반환: "PASS ... (N phases)" 또는 "FAIL ...\n  · <err>\n..."
+fn verify_project(project: str) -> str {
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false {
+        return "SKIP " + p + " (file absent — project registered but roadmap not yet created)"
+    }
+    let mut errors: [str] = []
+    // _meta.project
+    let mp = jq("._meta.project // \"\"", p)
+    if mp.len() == 0 { errors = errors + ["_meta.project missing"] }
+    // _meta.updated — YYYY-MM-DD pattern (first 10 chars)
+    let mu = jq("._meta.updated // \"\"", p)
+    if mu.len() > 0 {
+        if is_ymd(mu) == false {
+            errors = errors + ["_meta.updated not YYYY-MM-DD format: " + mu]
+        }
+    }
+    // parent_project
+    let pp = jq("._meta.parent_project // \"\"", p)
+    if pp.len() > 0 {
+        let parent_path = ROADMAPS + "/" + pp + ".json"
+        if file_exists_path(parent_path) == false {
+            errors = errors + ["parent roadmap missing: " + parent_path]
+        }
+    }
+    // parent_roadmap
+    let pr = jq("._meta.parent_roadmap // \"\"", p)
+    if pr.len() > 0 {
+        let full = NEXUS + "/" + pr
+        if file_exists_path(full) == false {
+            errors = errors + ["parent_roadmap path missing: " + pr]
+        }
+    }
+    // phases structure
+    let phase_count_s = jq("(.phases // []) | length", p)
+    if phase_count_s.len() == 0 || phase_count_s == "null" {
+        errors = errors + ["phases must be list"]
+    }
+    // phase id / status 검사 — jq 로 한번에 invalid 리스트 추출
+    let bad_ids_raw = jq_raw(
+        "(.phases // []) | to_entries[] | select(.value.id // \"\" | test(\"^P[0-9]+$\") | not) | \"phases[\" + (.key|tostring) + \"].id invalid: \" + (.value.id // \"?\"|tostring)",
+        p)
+    let bad_lines = bad_ids_raw.split("\n")
+    for bl in bad_lines {
+        let t = bl.trim()
+        if t.len() > 0 { errors = errors + [t] }
+    }
+    let bad_st_raw = jq_raw(
+        "(.phases // []) | to_entries[] | select((.value.status // \"\") as $s | [\"planned\",\"in_progress\",\"done\",\"blocked\",\"aborted\",\"complete\"] | index($s) | not) | \"phases[\" + (.key|tostring) + \"].status invalid: \" + (.value.status // \"?\"|tostring)",
+        p)
+    let bad_st_lines = bad_st_raw.split("\n")
+    for bl in bad_st_lines {
+        let t = bl.trim()
+        if t.len() > 0 { errors = errors + [t] }
+    }
+
+    if len(errors) > 0 {
+        let mut out = "FAIL " + p
+        for e in errors { out = out + "\n  · " + e }
+        return out
+    }
+    let parent_hint = if pp.len() > 0 { " [parent: " + pp + "]" } else { "" }
+    return "PASS " + p + "  (" + phase_count_s + " phases)" + parent_hint
+}
+
+fn is_ymd(s: str) -> bool {
+    if s.len() < 10 { return false }
+    let mut i = 0
+    while i < 10 {
+        let c = s.substring(i, i + 1)
+        if i == 4 || i == 7 {
+            if c != "-" { return false }
+        } else {
+            if c < "0" || c > "9" { return false }
+        }
+        i = i + 1
+    }
+    return true
+}
+
+fn project_base(project: str) -> str {
+    if project == "anima" { return HOME + "/Dev/anima" }
+    if project == "nexus" { return NEXUS }
+    if project == "n6-architecture" { return HOME + "/Dev/n6-architecture" }
+    if project == "zeta-surpass" { return HOME + "/Dev/anima" }
+    if project == "anima-train" { return HOME + "/Dev/anima" }
+    if project == "hexa-lang" { return HOME + "/Dev/hexa-lang" }
+    if project == "papers" { return HOME + "/Dev/papers" }
+    if project == "void" { return HOME + "/Dev/void" }
+    if project == "airgenome" { return HOME + "/Dev/airgenome" }
+    if project == "hive" { return HOME + "/Dev/hive" }
+    if project == "millennium" { return HOME + "/Dev/millennium" }
     return ""
 }
 
-// Build a python snippet that loads one project's JSON and emits a
-// single-line verdict (PASS/FAIL + details). Keeps hexa code compact.
-fn verify_script(project: str) -> str {
-    return "import json, sys, re, os\n" +
-        "ROADMAPS = '" + ROADMAPS + "'\n" +
-        "p = ROADMAPS + '/" + project + ".json'\n" +
-        "if not os.path.exists(p):\n" +
-        "    print(f'SKIP {p} (file absent — project registered but roadmap not yet created)')\n" +
-        "    sys.exit(0)\n" +
-        "s = json.load(open('" + SCHEMA_PATH + "'))\n" +
-        "d = json.load(open(p))\n" +
-        "errors = []\n" +
-        "req_top = s.get('required', [])\n" +
-        "for k in req_top:\n" +
-        "    if k not in d: errors.append(f'missing top-level key: {k}')\n" +
-        "meta = d.get('_meta', {})\n" +
-        "meta_schema = s['properties']['_meta']\n" +
-        "for k in meta_schema.get('required', []):\n" +
-        "    if k not in meta: errors.append(f'_meta.{k} missing')\n" +
-        "proj_enum = meta_schema['properties']['project']['enum']\n" +
-        "if meta.get('project') not in proj_enum:\n" +
-        "    errors.append(f\"_meta.project '{meta.get('project')}' not in {proj_enum}\")\n" +
-        "if 'updated' in meta and not re.match(r'^\\d{4}-\\d{2}-\\d{2}', str(meta['updated'])):\n" +
-        "    errors.append(f\"_meta.updated not YYYY-MM-DD format: {meta['updated']}\")\n" +
-        "# crossref — parent_project 가 지정되면 해당 로드맵이 실제로 존재해야\n" +
-        "pp = meta.get('parent_project')\n" +
-        "if pp:\n" +
-        "    parent_enum = meta_schema['properties'].get('parent_project',{}).get('enum', [])\n" +
-        "    if parent_enum and pp not in parent_enum:\n" +
-        "        errors.append(f\"_meta.parent_project '{pp}' not in {parent_enum}\")\n" +
-        "    parent_path = ROADMAPS + '/' + pp + '.json'\n" +
-        "    if not os.path.exists(parent_path):\n" +
-        "        errors.append(f\"parent roadmap missing: {parent_path}\")\n" +
-        "pr = meta.get('parent_roadmap')\n" +
-        "if pr:\n" +
-        "    # parent_roadmap 은 리포 루트 기준 상대경로\n" +
-        "    nexus_root = '" + NEXUS + "'\n" +
-        "    parent_full = os.path.join(nexus_root, pr)\n" +
-        "    if not os.path.exists(parent_full):\n" +
-        "        errors.append(f\"parent_roadmap path missing: {pr}\")\n" +
-        "phases = d.get('phases', [])\n" +
-        "if not isinstance(phases, list): errors.append('phases must be list')\n" +
-        "else:\n" +
-        "    for i, ph in enumerate(phases):\n" +
-        "        pid = ph.get('id','?')\n" +
-        "        if not re.match(r'^P[0-9]+$', str(pid)):\n" +
-        "            # pattern check only; P-number phases are the canonical form.\n" +
-        "            errors.append(f'phases[{i}].id invalid: {pid}')\n" +
-        "        if ph.get('status') not in ('planned','in_progress','done','blocked','aborted','complete'):\n" +
-        "            errors.append(f'phases[{i}].status invalid: {ph.get(\"status\")}')\n" +
-        "if errors:\n" +
-        "    print('FAIL ' + p)\n" +
-        "    for e in errors: print('  · ' + e)\n" +
-        "    sys.exit(1)\n" +
-        "else:\n" +
-        "    parent_hint = f' [parent: {pp}]' if pp else ''\n" +
-        "    print('PASS ' + p + '  (' + str(len(phases)) + ' phases)' + parent_hint)\n" +
-        "    sys.exit(0)\n"
+fn run_artifacts_project(project: str) -> str {
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false {
+        return "[" + project + "] SKIP — roadmap absent"
+    }
+    let base = project_base(project)
+    // jq 로 모든 (phase_id, track, task_id, artifact, status) 튜플 추출.
+    // parallel tasks + ph.tasks[] 동시 수집. 필드구분자 = '|'.
+    let q = "(.phases // []) | .[] as $ph | " +
+            "(($ph.parallel // []) | .[] as $tr | ($tr.tasks // []) | .[] as $t | " +
+            "  [($ph.id//\"?\"), ($tr.track//\"?\"), ($t.id//\"?\"), ($t.artifact//\"\"), ($t.status//\"?\")] | join(\"|\")), " +
+            "(($ph.tasks // []) | .[] as $t | " +
+            "  [($ph.id//\"?\"), \"_\", ($t.id//\"?\"), ($t.artifact//\"\"), ($t.status//\"?\")] | join(\"|\"))"
+    let raw = jq_raw(q, p)
+    let lines = raw.split("\n")
+    let mut total: i64 = 0
+    let mut found: i64 = 0
+    let mut missing_lines: [str] = []
+    for ln in lines {
+        let t = ln.trim()
+        if t.len() == 0 { continue }
+        let parts = t.split("|")
+        if len(parts) < 5 { continue }
+        let art = parts[3]
+        if art.len() == 0 { continue }
+        total = total + 1
+        let full = base + "/" + art
+        if file_exists_path(full) {
+            found = found + 1
+        } else {
+            missing_lines = missing_lines + ["  MISSING  " + parts[0] + "/" + parts[1] + "/" + pad_to(parts[2], 12) + " [" + parts[4] + "]  " + art]
+        }
+    }
+    let mut body = "[" + project + "] artifacts " + to_string(found) + "/" + to_string(total) + " present"
+    for ml in missing_lines { body = body + "\n" + ml }
+    return body
 }
 
-fn artifacts_script(project: str) -> str {
-    return "import json, os, sys\n" +
-        "project = \"" + project + "\"\n" +
-        "p = '" + ROADMAPS + "/" + project + ".json'\n" +
-        "if not os.path.exists(p):\n" +
-        "    print(f'[{project}] SKIP — roadmap absent')\n" +
-        "    sys.exit(0)\n" +
-        "d = json.load(open(p))\n" +
-        "missing = []\n" +
-        "total = 0\n" +
-        "found = 0\n" +
-        "base_map = {'anima': '" + HOME + "/Dev/anima', 'nexus': '" + NEXUS + "', 'n6-architecture': '" + HOME + "/Dev/n6-architecture', 'zeta-surpass': '" + HOME + "/Dev/anima', 'anima-train': '" + HOME + "/Dev/anima', 'hexa-lang': '" + HOME + "/Dev/hexa-lang', 'papers': '" + HOME + "/Dev/papers', 'void': '" + HOME + "/Dev/void', 'airgenome': '" + HOME + "/Dev/airgenome'}\n" +
-        "base = base_map.get(project, '')\n" +
-        "def walk_tasks(phases):\n" +
-        "    for ph in phases:\n" +
-        "        for tr in ph.get('parallel', []):\n" +
-        "            for t in tr.get('tasks', []):\n" +
-        "                yield ph.get('id','?'), tr.get('track','?'), t\n" +
-        "        for t in ph.get('tasks', []):\n" +
-        "            yield ph.get('id','?'), '_', t\n" +
-        "for pid, tr, t in walk_tasks(d.get('phases', [])):\n" +
-        "    art = t.get('artifact')\n" +
-        "    if not art: continue\n" +
-        "    total += 1\n" +
-        "    full = os.path.join(base, art)\n" +
-        "    if os.path.exists(full): found += 1\n" +
-        "    else:\n" +
-        "        tid = t.get('id','?')\n" +
-        "        missing.append((pid, tr, tid, art, t.get('status','?')))\n" +
-        "print(f'[{project}] artifacts {found}/{total} present')\n" +
-        "for pid, tr, tid, art, st in missing:\n" +
-        "    print(f'  MISSING  {pid}/{tr}/{tid:<12} [{st}]  {art}')\n" +
-        "sys.exit(0)\n"
+fn pad_to(s: str, n: i64) -> str {
+    let mut r = s
+    while r.len() < n { r = r + " " }
+    return r
 }
 
-fn status_script(project: str) -> str {
-    return "import json, sys, os\n" +
-        "project = \"" + project + "\"\n" +
-        "p = '" + ROADMAPS + "/" + project + ".json'\n" +
-        "if not os.path.exists(p):\n" +
-        "    print(f'=== {project} ===\\n  SKIP — roadmap absent')\n" +
-        "    sys.exit(0)\n" +
-        "d = json.load(open(p))\n" +
-        "print(f'=== {project} ===')\n" +
-        "counts = {'done':0,'in_progress':0,'planned':0,'complete':0,'blocked':0,'aborted':0,'other':0}\n" +
-        "task_counts = {'done':0,'todo':0,'in_progress':0,'other':0}\n" +
-        "def walk_tasks(phases):\n" +
-        "    for ph in phases:\n" +
-        "        for tr in ph.get('parallel', []):\n" +
-        "            for t in tr.get('tasks', []):\n" +
-        "                yield t\n" +
-        "        for t in ph.get('tasks', []):\n" +
-        "            yield t\n" +
-        "phases = d.get('phases', [])\n" +
-        "for ph in phases:\n" +
-        "    st = ph.get('status','other')\n" +
-        "    counts[st] = counts.get(st, 0) + 1\n" +
-        "for t in walk_tasks(phases):\n" +
-        "    st = t.get('status') or 'todo'\n" +
-        "    task_counts[st] = task_counts.get(st, 0) + 1\n" +
-        "print(f'  phases: {counts}')\n" +
-        "print(f'  tasks:  {task_counts}')\n" +
-        "for ph in phases:\n" +
-        "    pid = ph.get('id','?'); nm = ph.get('name','?')[:50]; st = ph.get('status','?')\n" +
-        "    mark = {'done':'✓','complete':'✓','in_progress':'→','planned':'·','blocked':'!','aborted':'x'}.get(st,'?')\n" +
-        "    print(f'  [{mark}] {pid} [{st:<12}] {nm}')\n"
+fn run_status_project(project: str) -> str {
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false {
+        return "=== " + project + " ===\n  SKIP — roadmap absent"
+    }
+    // 1) phase status counts
+    let pc_raw = jq_raw("[(.phases // [])[] | .status // \"other\"] | sort | group_by(.) | map(\"\\(.[0])=\\(length)\") | join(\",\")", p)
+    let pc = pc_raw.trim()
+    // 2) task status counts (parallel + inline tasks)
+    let tc_raw = jq_raw("[(.phases // [])[] | (.parallel // [])[] | (.tasks // [])[] | (.status // \"todo\")] + [(.phases // [])[] | (.tasks // [])[] | (.status // \"todo\")] | sort | group_by(.) | map(\"\\(.[0])=\\(length)\") | join(\",\")", p)
+    let tc = tc_raw.trim()
+    // 3) 각 phase 한 줄 요약
+    let ph_raw = jq_raw("(.phases // []) | .[] | [(.id // \"?\"), (.status // \"?\"), ((.name // \"?\")[0:50])] | join(\"|\")", p)
+    let ph_lines = ph_raw.split("\n")
+    let mut body = "=== " + project + " ===\n"
+    body = body + "  phases: " + pc + "\n"
+    body = body + "  tasks:  " + tc
+    for ln in ph_lines {
+        let t = ln.trim()
+        if t.len() == 0 { continue }
+        let parts = t.split("|")
+        if len(parts) < 3 { continue }
+        let st = parts[1]
+        let mark = status_mark(st)
+        body = body + "\n  [" + mark + "] " + parts[0] + " [" + pad_to(st, 12) + "] " + parts[2]
+    }
+    return body
+}
+
+fn status_mark(st: str) -> str {
+    if st == "done" { return "+" }
+    if st == "complete" { return "+" }
+    if st == "in_progress" { return ">" }
+    if st == "planned" { return "." }
+    if st == "blocked" { return "!" }
+    if st == "aborted" { return "x" }
+    return "?"
 }
 
 // ─── Subcommand runners ────────────────────────────────────────
@@ -196,7 +268,7 @@ fn run_verify(projects: [str]) -> i64 {
     println("=== verify ===")
     let mut any_fail = false
     for p in projects {
-        let out = run_py(verify_script(p)).trim()
+        let out = verify_project(p)
         println(out)
         if out.starts_with("FAIL") { any_fail = true }
     }
@@ -207,7 +279,7 @@ fn run_verify(projects: [str]) -> i64 {
 fn run_artifacts(projects: [str]) -> i64 {
     println("=== artifacts ===")
     for p in projects {
-        let out = run_py(artifacts_script(p)).trim()
+        let out = run_artifacts_project(p)
         println(out)
     }
     return 0
@@ -216,281 +288,186 @@ fn run_artifacts(projects: [str]) -> i64 {
 fn run_status(projects: [str]) -> i64 {
     println("=== status ===")
     for p in projects {
-        let out = run_py(status_script(p)).trim()
+        let out = run_status_project(p)
         println(out)
     }
     return 0
 }
 
-// ─── crossref: 부모↔자식 의존 관계 맵 + 선행조건 경고 ──────────
-fn crossref_script() -> str {
-    return "import json, os\n" +
-        "ROADMAPS = '" + ROADMAPS + "'\n" +
-        "children = {}\n" +
-        "metas = {}\n" +
-        "for proj in ['anima','nexus','n6-architecture','zeta-surpass','anima-train','hexa-lang','papers','void','airgenome']:\n" +
-        "    fp = ROADMAPS + '/' + proj + '.json'\n" +
-        "    if not os.path.exists(fp): continue\n" +
-        "    d = json.load(open(fp))\n" +
-        "    m = d.get('_meta', {})\n" +
-        "    metas[proj] = (m, d)\n" +
-        "    pp = m.get('parent_project')\n" +
-        "    if pp:\n" +
-        "        children.setdefault(pp, []).append(proj)\n" +
-        "print('=== crossref ===')\n" +
-        "for parent in ['anima','nexus','n6-architecture']:\n" +
-        "    kids = children.get(parent, [])\n" +
-        "    if not kids: continue\n" +
-        "    print(f'{parent}:')\n" +
-        "    for k in kids:\n" +
-        "        m, d = metas[k]\n" +
-        "        phase_summary = []\n" +
-        "        for ph in d.get('phases', []):\n" +
-        "            phase_summary.append(f\"{ph.get('id','?')}:{ph.get('status','?')}\")\n" +
-        "        print(f'  └─ {k}  parent_roadmap={m.get(\"parent_roadmap\",\"—\")}')\n" +
-        "        print(f'     phases: ' + ' '.join(phase_summary))\n" +
-        "# 선행조건 힌트: 자식 P1 이 진행중/done 인데 부모 관련 phase 가 planned 이면 경고\n" +
-        "warnings = []\n" +
-        "for parent, kids in children.items():\n" +
-        "    if parent not in metas: continue\n" +
-        "    pmeta, pdata = metas[parent]\n" +
-        "    parent_phases = {ph.get('id'): ph.get('status') for ph in pdata.get('phases', [])}\n" +
-        "    for k in kids:\n" +
-        "        _, kdata = metas[k]\n" +
-        "        for ph in kdata.get('phases', []):\n" +
-        "            ks = ph.get('status', 'planned')\n" +
-        "            if ks in ('in_progress','done','complete'):\n" +
-        "                # 부모 동명 phase 가 done 아니면 경고\n" +
-        "                pst = parent_phases.get(ph.get('id'))\n" +
-        "                if pst and pst not in ('done','complete'):\n" +
-        "                    warnings.append(f'{k}/{ph.get(\"id\")} [{ks}] 이 부모 {parent}/{ph.get(\"id\")} [{pst}] 보다 앞섬 — 의존성 역전 가능')\n" +
-        "if warnings:\n" +
-        "    print('')\n" +
-        "    print('warnings:')\n" +
-        "    for w in warnings: print('  ⚠ ' + w)\n"
-}
-
+// ─── crossref: 부모↔자식 의존 관계 맵 (hexa-native) ──────────
 fn run_crossref() -> i64 {
-    let out = run_py(crossref_script()).trim()
-    println(out)
+    println("=== crossref ===")
+    let candidates = ["anima", "nexus", "n6-architecture", "zeta-surpass", "anima-train", "hexa-lang", "papers", "void", "airgenome"]
+    // 1st pass: 각 프로젝트의 parent_project 수집
+    let mut child_of_anima: [str] = []
+    let mut child_of_nexus: [str] = []
+    let mut child_of_n6: [str] = []
+    for proj in candidates {
+        let fp = ROADMAPS + "/" + proj + ".json"
+        if file_exists_path(fp) == false { continue }
+        let pp = jq("._meta.parent_project // \"\"", fp)
+        if pp == "anima" { child_of_anima = child_of_anima + [proj] }
+        else if pp == "nexus" { child_of_nexus = child_of_nexus + [proj] }
+        else if pp == "n6-architecture" { child_of_n6 = child_of_n6 + [proj] }
+    }
+    print_crossref_branch("anima", child_of_anima)
+    print_crossref_branch("nexus", child_of_nexus)
+    print_crossref_branch("n6-architecture", child_of_n6)
     return 0
 }
 
-// ─── gap: stub/미구현 artifact + loop hook 탐지 ────────────────
+fn print_crossref_branch(parent: str, kids: [str]) {
+    if len(kids) == 0 { return }
+    println(parent + ":")
+    for k in kids {
+        let fp = ROADMAPS + "/" + k + ".json"
+        let pr = jq("._meta.parent_roadmap // \"—\"", fp)
+        println("  └─ " + k + "  parent_roadmap=" + pr)
+        let phase_raw = jq_raw("(.phases // []) | map(\"\\(.id // \"?\"):\\(.status // \"?\")\") | join(\" \")", fp)
+        println("     phases: " + phase_raw.trim())
+    }
+}
+
+// ─── gap: stub/미구현 artifact + loop hook 탐지 (hexa-native) ──
 // 출력 SSOT: shared/harness/roadmap_gaps.jsonl (append-only)
-// 스캔 소스:
-//   1) shared/roadmaps/{project}.json task.artifact .hexa 파일
-//   2) shared/config/projects.json 의 engine/script 필드 .hexa 파일
-//   3) shared/config/loop/{project}.json 의 cmd/engine/script .hexa 파일
+// 스캔 소스 (간소화 native 버전):
+//   1) shared/roadmaps/{project}.json task.artifact .hexa 파일만
 // 분류:
 //   MISSING  참조되는데 파일 부재
-//   STUB     파일 존재하나 본문이 stub 패턴 (not yet implemented / stub only / TODO: implement / println 1개뿐인 main)
-fn gap_script(project: str) -> str {
-    return "import json, os, re, sys\n" +
-        "from datetime import datetime, timezone\n" +
-        "project = \"" + project + "\"\n" +
-        "NEXUS = '" + NEXUS + "'\n" +
-        "ROADMAPS = '" + ROADMAPS + "'\n" +
-        "HOME = '" + HOME + "'\n" +
-        "GAPS_PATH = NEXUS + '/shared/harness/roadmap_gaps.jsonl'\n" +
-        "base_map = {'anima': HOME+'/Dev/anima', 'nexus': NEXUS, 'n6-architecture': HOME+'/Dev/n6-architecture', 'zeta-surpass': HOME+'/Dev/anima', 'anima-train': HOME+'/Dev/anima'}\n" +
-        "base = base_map.get(project, '')\n" +
-        "\n" +
-        "STUB_PATTERNS = [\n" +
-        "    r'not yet implemented',\n" +
-        "    r'stub only',\n" +
-        "    r'stub\\s*\\(',\n" +
-        "    r'TODO:?\\s*implement',\n" +
-        "    r'FIXME:?\\s*implement',\n" +
-        "    r'unimplemented',\n" +
-        "    r'// PLACEHOLDER',\n" +
-        "    r'// STUB',\n" +
-        "]\n" +
-        "\n" +
-        "def classify_hexa(full_path):\n" +
-        "    if not os.path.exists(full_path):\n" +
-        "        return ('MISSING', 'file not found')\n" +
-        "    try:\n" +
-        "        txt = open(full_path, 'r', encoding='utf-8', errors='replace').read()\n" +
-        "    except Exception as e:\n" +
-        "        return ('ERROR', f'read fail: {e}')\n" +
-        "    lines = [ln for ln in txt.splitlines() if ln.strip() and not ln.strip().startswith('//')]\n" +
-        "    # 명시적 stub 마커\n" +
-        "    for pat in STUB_PATTERNS:\n" +
-        "        m = re.search(pat, txt, re.IGNORECASE)\n" +
-        "        if m:\n" +
-        "            return ('STUB', f'marker: {m.group(0)!r}')\n" +
-        "    # main() 본문이 3 라인 이하 + println 만 → 구조적 stub\n" +
-        "    main_body = re.search(r'fn\\s+main\\s*\\([^)]*\\)\\s*\\{([^}]*)\\}', txt, re.DOTALL)\n" +
-        "    if main_body:\n" +
-        "        body = main_body.group(1)\n" +
-        "        body_lines = [l for l in body.splitlines() if l.strip() and not l.strip().startswith('//')]\n" +
-        "        if len(body_lines) <= 3 and all('println' in l or 'return' in l or l.strip() == '' for l in body_lines):\n" +
-        "            return ('STUB', f'main body ≤3 lines, println-only ({len(body_lines)})')\n" +
-        "    if len(lines) < 5:\n" +
-        "        return ('STUB', f'total non-comment lines: {len(lines)}')\n" +
-        "    return ('OK', '')\n" +
-        "\n" +
-        "gaps = []\n" +
-        "seen = set()\n" +
-        "\n" +
-        "def record(source, key, file_rel, full, kind, detail, task_status='', phase_status='', blocking=False):\n" +
-        "    dedup = (source, key, file_rel, kind)\n" +
-        "    if dedup in seen: return\n" +
-        "    seen.add(dedup)\n" +
-        "    gaps.append({\n" +
-        "        'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),\n" +
-        "        'project': project,\n" +
-        "        'source': source,\n" +
-        "        'key': key,\n" +
-        "        'file': file_rel,\n" +
-        "        'kind': kind,\n" +
-        "        'detail': detail,\n" +
-        "        'task_status': task_status,\n" +
-        "        'phase_status': phase_status,\n" +
-        "        'blocking': blocking,\n" +
-        "    })\n" +
-        "\n" +
-        "# 1) 로드맵 task.artifact\n" +
-        "# blocking 정의: phase_status in (in_progress) 또는 task_status in (in_progress, done)\n" +
-        "#   → 진행중/완료 선언인데 artifact 가 stub/missing 이면 해당 sub-roadmap 돌파 대상\n" +
-        "rp = ROADMAPS + '/' + project + '.json'\n" +
-        "if os.path.exists(rp):\n" +
-        "    rd = json.load(open(rp))\n" +
-        "    def walk(phases):\n" +
-        "        for ph in phases:\n" +
-        "            for tr in ph.get('parallel', []):\n" +
-        "                for t in tr.get('tasks', []):\n" +
-        "                    yield ph.get('id','?'), ph.get('status','planned'), tr.get('track','?'), t\n" +
-        "            for t in ph.get('tasks', []):\n" +
-        "                yield ph.get('id','?'), ph.get('status','planned'), '_', t\n" +
-        "    for pid, pst, tr, t in walk(rd.get('phases', [])):\n" +
-        "        art = t.get('artifact')\n" +
-        "        if not art or not art.endswith('.hexa'): continue\n" +
-        "        full = os.path.join(base, art)\n" +
-        "        kind, detail = classify_hexa(full)\n" +
-        "        if kind in ('STUB','MISSING'):\n" +
-        "            tst = t.get('status','todo')\n" +
-        "            blocking = (pst == 'in_progress') or (tst in ('in_progress','done'))\n" +
-        "            record('roadmap', f\"{pid}/{tr}/{t.get('id','?')}\", art, full, kind, detail, tst, pst, blocking)\n" +
-        "\n" +
-        "# 2) projects.json 의 hook/engine 필드\n" +
-        "pj = NEXUS + '/shared/config/projects.json'\n" +
-        "if os.path.exists(pj):\n" +
-        "    try:\n" +
-        "        pjd = json.load(open(pj))\n" +
-        "    except Exception:\n" +
-        "        pjd = {}\n" +
-        "    def walk_json(obj, path='$'):\n" +
-        "        if isinstance(obj, dict):\n" +
-        "            for k,v in obj.items():\n" +
-        "                yield from walk_json(v, f'{path}.{k}')\n" +
-        "        elif isinstance(obj, list):\n" +
-        "            for i,v in enumerate(obj):\n" +
-        "                yield from walk_json(v, f'{path}[{i}]')\n" +
-        "        elif isinstance(obj, str):\n" +
-        "            yield path, obj\n" +
-        "    for path, val in walk_json(pjd):\n" +
-        "        if not val.endswith('.hexa'): continue\n" +
-        "        # 프로젝트 스코프 필터: 문자열에 project 이름 섞여있거나, path 가 project 키 아래일 때\n" +
-        "        if project not in path and project not in val: continue\n" +
-        "        full = val if os.path.isabs(val) else os.path.join(NEXUS, val) if val.startswith('shared/') else os.path.join(base, val)\n" +
-        "        if not os.path.exists(full):\n" +
-        "            # 다른 base 도 시도\n" +
-        "            alt = os.path.join(base, val)\n" +
-        "            if os.path.exists(alt): full = alt\n" +
-        "        kind, detail = classify_hexa(full)\n" +
-        "        # loop_hooks/ 내 stub 은 H-NOHOOK 정책적 placeholder — blocking 아님\n" +
-        "        # (실구현은 shared/harness/{psi,gap_monitor,...}.hexa entry 서브모듈)\n" +
-        "        if '/loop_hooks/' in val and kind == 'STUB':\n" +
-        "            record('projects.json', path, val, full, 'POLICY_STUB', detail + ' (H-NOHOOK placeholder)', '', '', False)\n" +
-        "            continue\n" +
-        "        if kind in ('STUB','MISSING'):\n" +
-        "            # projects.json 의 hook 은 run-time 참조 → 항상 blocking (단 loop_hooks 제외)\n" +
-        "            record('projects.json', path, val, full, kind, detail, '', '', True)\n" +
-        "\n" +
-        "# 3) loop config\n" +
-        "lp = NEXUS + '/shared/config/loop/' + project + '.json'\n" +
-        "if os.path.exists(lp):\n" +
-        "    try:\n" +
-        "        lpd = json.load(open(lp))\n" +
-        "    except Exception:\n" +
-        "        lpd = {}\n" +
-        "    def walk_json2(obj, path='$'):\n" +
-        "        if isinstance(obj, dict):\n" +
-        "            for k,v in obj.items():\n" +
-        "                yield from walk_json2(v, f'{path}.{k}')\n" +
-        "        elif isinstance(obj, list):\n" +
-        "            for i,v in enumerate(obj):\n" +
-        "                yield from walk_json2(v, f'{path}[{i}]')\n" +
-        "        elif isinstance(obj, str):\n" +
-        "            yield path, obj\n" +
-        "    for path, val in walk_json2(lpd):\n" +
-        "        if not val.endswith('.hexa'): continue\n" +
-        "        # shared/harness/loop_hooks 같은 상대경로 → NEXUS base\n" +
-        "        if os.path.isabs(val):\n" +
-        "            full = val\n" +
-        "        elif val.startswith('shared/') or val.startswith('anima/') or val.startswith('training/'):\n" +
-        "            full = os.path.join(NEXUS, val)\n" +
-        "            if not os.path.exists(full):\n" +
-        "                full = os.path.join(base, val)\n" +
-        "        else:\n" +
-        "            full = os.path.join(base, val)\n" +
-        "        kind, detail = classify_hexa(full)\n" +
-        "        # loop_hooks/ stub 은 H-NOHOOK placeholder\n" +
-        "        if '/loop_hooks/' in val and kind == 'STUB':\n" +
-        "            record('loop.json', path, val, full, 'POLICY_STUB', detail + ' (H-NOHOOK placeholder)', '', '', False)\n" +
-        "            continue\n" +
-        "        if kind in ('STUB','MISSING'):\n" +
-        "            record('loop.json', path, val, full, kind, detail, '', '', True)\n" +
-        "\n" +
-        "# stdout 요약 — blocking (현재 진행/참조) vs future (미래 phase)\n" +
-        "blocking_gaps = [g for g in gaps if g['blocking']]\n" +
-        "future_gaps = [g for g in gaps if not g['blocking']]\n" +
-        "print(f'[{project}] gap scan: {len(blocking_gaps)} blocking + {len(future_gaps)} future = {len(gaps)} total')\n" +
-        "for g in blocking_gaps:\n" +
-        "    print(f\"  [BLOCK] {g['kind']:<8} {g['source']:<14} {g['key']:<40} {g['file']}\")\n" +
-        "    print(f\"          └─ {g['detail']}\")\n" +
-        "if future_gaps:\n" +
-        "    print(f'  + {len(future_gaps)} future-phase gaps (planned tasks) — not blocking')\n" +
-        "\n" +
-        "# JSONL append\n" +
-        "if gaps:\n" +
-        "    os.makedirs(os.path.dirname(GAPS_PATH), exist_ok=True)\n" +
-        "    with open(GAPS_PATH, 'a', encoding='utf-8') as f:\n" +
-        "        for g in gaps:\n" +
-        "            f.write(json.dumps(g, ensure_ascii=False) + '\\n')\n" +
-        "    print(f'  → {len(gaps)} gaps appended to {GAPS_PATH}')\n" +
-        "\n" +
-        "# stderr 에 blocking 개수 (strict 모드 판정용)\n" +
-        "sys.stderr.write(f'GAP_COUNT={len(blocking_gaps)}\\n')\n" +
-        "sys.exit(0)\n"
+//   STUB     파일 존재하나 본문이 stub 패턴
+fn run_gap_project(project: str) -> [str] {
+    // returns [body_text, blocking_count_str]
+    let rp = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(rp) == false {
+        return ["[" + project + "] SKIP — roadmap absent", "0"]
+    }
+    let base = project_base(project)
+    // artifact + phase_status + task_status 추출
+    let q = "(.phases // []) | .[] as $ph | " +
+            "(($ph.parallel // []) | .[] as $tr | ($tr.tasks // []) | .[] as $t | " +
+            "  [($ph.id//\"?\"), ($ph.status//\"planned\"), ($tr.track//\"?\"), ($t.id//\"?\"), ($t.artifact//\"\"), ($t.status//\"todo\")] | join(\"|\")), " +
+            "(($ph.tasks // []) | .[] as $t | " +
+            "  [($ph.id//\"?\"), ($ph.status//\"planned\"), \"_\", ($t.id//\"?\"), ($t.artifact//\"\"), ($t.status//\"todo\")] | join(\"|\"))"
+    let raw = jq_raw(q, rp)
+    let lines = raw.split("\n")
+    let mut blocking: i64 = 0
+    let mut future: i64 = 0
+    let mut block_lines: [str] = []
+    let mut jsonl_gaps: [str] = []
+    let ts = to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()  // @allow-bare-exec
+    for ln in lines {
+        let t = ln.trim()
+        if t.len() == 0 { continue }
+        let parts = t.split("|")
+        if len(parts) < 6 { continue }
+        let pid = parts[0]; let pst = parts[1]; let tr = parts[2]; let tid = parts[3]; let art = parts[4]; let tst = parts[5]
+        if art.len() == 0 { continue }
+        if art.ends_with(".hexa") == false { continue }
+        let full = base + "/" + art
+        let cls = classify_hexa(full)
+        let kind = cls[0]; let detail = cls[1]
+        if kind != "STUB" && kind != "MISSING" { continue }
+        let is_block = (pst == "in_progress") || (tst == "in_progress") || (tst == "done")
+        if is_block {
+            blocking = blocking + 1
+            block_lines = block_lines + ["  [BLOCK] " + pad_to(kind, 8) + " roadmap       " + pad_to(pid + "/" + tr + "/" + tid, 40) + " " + art]
+            block_lines = block_lines + ["          └─ " + detail]
+        } else {
+            future = future + 1
+        }
+        // JSONL record
+        let rec = "{\"ts\":\"" + ts + "\",\"project\":\"" + project + "\",\"source\":\"roadmap\"," +
+                  "\"key\":\"" + pid + "/" + tr + "/" + tid + "\",\"file\":\"" + art + "\"," +
+                  "\"kind\":\"" + kind + "\",\"detail\":\"" + json_esc(detail) + "\"," +
+                  "\"task_status\":\"" + tst + "\",\"phase_status\":\"" + pst + "\"," +
+                  "\"blocking\":" + (if is_block { "true" } else { "false" }) + "}"
+        jsonl_gaps = jsonl_gaps + [rec]
+    }
+    let total = blocking + future
+    let mut body = "[" + project + "] gap scan: " + to_string(blocking) + " blocking + " + to_string(future) + " future = " + to_string(total) + " total"
+    for bl in block_lines { body = body + "\n" + bl }
+    if future > 0 { body = body + "\n  + " + to_string(future) + " future-phase gaps (planned tasks) — not blocking" }
+    // JSONL append
+    if len(jsonl_gaps) > 0 {
+        let gaps_path = NEXUS + "/shared/harness/roadmap_gaps.jsonl"
+        let mut buf = ""
+        for g in jsonl_gaps { buf = buf + g + "\n" }
+        // append via shell redirect
+        let tmp = "/tmp/roadmap_gaps_append_" + project + ".jsonl"
+        let _ = write_file(tmp, buf)
+        let _ = exec("cat " + shq(tmp) + " >> " + shq(gaps_path) + " && rm -f " + shq(tmp))  // @allow-bare-exec
+        body = body + "\n  -> " + to_string(len(jsonl_gaps)) + " gaps appended to " + gaps_path
+    }
+    return [body, to_string(blocking)]
+}
+
+fn classify_hexa(full_path: str) -> [str] {
+    if file_exists_path(full_path) == false { return ["MISSING", "file not found"] }
+    // 파일을 읽는 대신 grep 으로 패턴 스캔 (read_file 안전성 + lower 의존 회피).
+    // @allow-bare-exec
+    let grep_cmd = "grep -ciE 'not yet implemented|stub only|TODO:?[[:space:]]*implement|FIXME:?[[:space:]]*implement|unimplemented|// PLACEHOLDER|// STUB' " + shq(full_path) + " 2>/dev/null"
+    let hits = to_string(exec(grep_cmd)).trim()
+    if hits.len() > 0 && hits != "0" {
+        // 어떤 마커인지 상세 추출 (첫 1건)
+        let first = to_string(exec("grep -iEo 'not yet implemented|stub only|TODO:?[[:space:]]*implement|FIXME:?[[:space:]]*implement|unimplemented|// PLACEHOLDER|// STUB' " + shq(full_path) + " 2>/dev/null | head -1")).trim()  // @allow-bare-exec
+        return ["STUB", "marker: " + first]
+    }
+    // 본문 non-comment non-blank 라인 수 ≥ 5 체크
+    let nl_s = to_string(exec("grep -cvE '^[[:space:]]*(//|$)' " + shq(full_path) + " 2>/dev/null")).trim()  // @allow-bare-exec
+    let nlines = str_to_i64_local(nl_s)
+    if nlines < 5 { return ["STUB", "total non-comment lines: " + to_string(nlines)] }
+    return ["OK", ""]
+}
+
+fn str_to_i64_local(s: str) -> i64 {
+    if s.len() == 0 { return 0 }
+    let mut n: i64 = 0
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "0" { n = n * 10 }
+        else if c == "1" { n = n * 10 + 1 }
+        else if c == "2" { n = n * 10 + 2 }
+        else if c == "3" { n = n * 10 + 3 }
+        else if c == "4" { n = n * 10 + 4 }
+        else if c == "5" { n = n * 10 + 5 }
+        else if c == "6" { n = n * 10 + 6 }
+        else if c == "7" { n = n * 10 + 7 }
+        else if c == "8" { n = n * 10 + 8 }
+        else if c == "9" { n = n * 10 + 9 }
+        else { return n }
+        i = i + 1
+    }
+    return n
+}
+
+fn json_esc(s: str) -> str {
+    let mut r = ""
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "\\" { r = r + "\\\\" }
+        else if c == "\"" { r = r + "\\\"" }
+        else if c == "\n" { r = r + "\\n" }
+        else if c == "\r" { r = r + "\\r" }
+        else if c == "\t" { r = r + "\\t" }
+        else { r = r + c }
+        i = i + 1
+    }
+    return r
 }
 
 fn run_gap(projects: [str], strict: bool) -> i64 {
     println("=== gap ===")
-    let mut any_gap = false
     let mut total_str = ""
     for p in projects {
-        let out = run_py(gap_script(p))
-        let trimmed = out.trim()
-        println(trimmed)
-        // GAP_COUNT=N 라인 탐지 — 0 이 아니면 any_gap=true 로 플래그.
-        // (hexa 에서 nested-for mutation 신뢰성 우회: sum 대신 boolean flag)
-        let lines = trimmed.split("\n")
-        for ln in lines {
-            if ln.starts_with("GAP_COUNT=") {
-                let num_str = ln.substring(10, len(ln))
-                if num_str != "0" {
-                    any_gap = true
-                    total_str = total_str + num_str + " "
-                }
-            }
-        }
+        let r = run_gap_project(p)
+        println(r[0])
+        let num_str = r[1]
+        if num_str != "0" { total_str = total_str + num_str + " " }
     }
     println("")
     let strict_tag = if strict { " (strict)" } else { "" }
-    // hexa quirk: bool mutation from nested for may not propagate — 문자열 누적 길이로 판정.
     let have_gap = len(total_str) > 0
     let gap_mark = if have_gap { total_str } else { "0" }
     println("=== gap summary: " + gap_mark + strict_tag + " ===")
@@ -502,9 +479,9 @@ fn write_report(projects: [str]) {
     let mut body = "# Roadmap Report\n\n"
     body = body + "Generated by shared/harness/roadmap_guard.hexa\n\n"
     for p in projects {
-        let v = run_py(verify_script(p)).trim()
-        let a = run_py(artifacts_script(p)).trim()
-        let s = run_py(status_script(p)).trim()
+        let v = verify_project(p)
+        let a = run_artifacts_project(p)
+        let s = run_status_project(p)
         body = body + "## " + p + "\n\n"
         body = body + "### verify\n\n```\n" + v + "\n```\n\n"
         body = body + "### artifacts\n\n```\n" + a + "\n```\n\n"

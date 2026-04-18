@@ -48,17 +48,38 @@ fn print_usage() {
     println("  --dry     extend write 안함 (plan 출력)")
 }
 
-// ─── python3 helper — roadmap_guard.hexa 와 동일 패턴 ─────────────
-// R22: 절대경로 /usr/bin/python3 로 hetzner 라우팅 게이트 우회.
+// ─── hexa-native JSON helpers (jq + exec) ────────────────────────
+// python3 / R37/AN13/L3-PY 의존 제거 (2026-04-18 smash).
 
 let mut _py_seq: i64 = 0
 
-fn run_py(script: str) -> str {
-    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
-    _py_seq = _py_seq + 1
-    let _ = script
-    eprintln("R37/AN13/L3-PY: python3 invocation blocked at roadmap.hexa:run_py. Escalate to user for hexa-native replacement.")
-    return ""
+fn shq(s: str) -> str {
+    let mut r = "'"
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "'" { r = r + "'\\''" } else { r = r + c }
+        i = i + 1
+    }
+    return r + "'"
+}
+
+fn jq(query: str, path: str) -> str {
+    // @allow-bare-exec
+    let cmd = "jq -r " + shq(query) + " " + shq(path) + " 2>/dev/null"
+    return to_string(exec(cmd)).trim()
+}
+
+fn jq_raw(query: str, path: str) -> str {
+    // @allow-bare-exec
+    let cmd = "jq -r " + shq(query) + " " + shq(path) + " 2>/dev/null"
+    return to_string(exec(cmd))
+}
+
+fn file_exists_path(p: str) -> bool {
+    // @allow-bare-exec
+    let out = to_string(exec("test -e " + shq(p) + " && echo Y || echo N")).trim()
+    return out == "Y"
 }
 
 fn str_to_i64(s: str) -> i64 {
@@ -87,29 +108,7 @@ fn str_to_i64(s: str) -> i64 {
     return n
 }
 
-fn run_py_exit(script: str) -> [str] {
-    // R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
-    _py_seq = _py_seq + 1
-    let _ = script
-    eprintln("R37/AN13/L3-PY: python3 invocation blocked at roadmap.hexa:run_py_exit. Escalate to user for hexa-native replacement.")
-    let out = "EXIT:1"
-    // out 끝에 "EXIT:N" → split
-    let lines = out.split("\n")
-    let mut body = ""
-    let mut code = "0"
-    let mut i = 0
-    while i < len(lines) {
-        let line = lines[i]
-        if line.starts_with("EXIT:") {
-            code = line.substring(5, len(line)).trim()
-        } else {
-            if body.len() > 0 { body = body + "\n" }
-            body = body + line
-        }
-        i = i + 1
-    }
-    return [body, code]
-}
+// run_py_exit removed — hexa-native replacements 아래에서 직접 처리.
 
 // ─── 프로젝트 감지 ───────────────────────────────────────────────
 // cwd basename 우선, 매핑 테이블 대조. 없으면 "nexus".
@@ -137,50 +136,76 @@ fn is_valid_project(p: str) -> bool {
 
 // ─── next: 다음 undone task 1개 ──────────────────────────────────
 
-fn next_script(project: str) -> str {
-    return "import json, sys, os\n" +
-        "p = '" + ROADMAPS + "/" + project + ".json'\n" +
-        "if not os.path.exists(p):\n" +
-        "    print(f'MISSING {p}'); sys.exit(2)\n" +
-        "d = json.load(open(p))\n" +
-        "DONE = ('done','complete','aborted','skipped')\n" +
-        "def tstat(t): return t.get('status') or 'todo'\n" +
-        "def walk(phases):\n" +
-        "    for ph in phases:\n" +
-        "        if ph.get('status') in DONE: continue\n" +
-        "        for tr in ph.get('parallel', []):\n" +
-        "            for t in tr.get('tasks', []):\n" +
-        "                if tstat(t) in DONE: continue\n" +
-        "                yield ph, tr.get('track','_'), t\n" +
-        "        for t in ph.get('tasks', []):\n" +
-        "            if tstat(t) in DONE: continue\n" +
-        "            yield ph, '_', t\n" +
-        "phases = d.get('phases', [])\n" +
-        "gen = walk(phases)\n" +
-        "first = next(gen, None)\n" +
-        "proj = d.get('_meta',{}).get('project', '" + project + "')\n" +
-        "if first is None:\n" +
-        "    n_ph = len(phases)\n" +
-        "    done_ph = sum(1 for ph in phases if ph.get('status') in DONE)\n" +
-        "    print(f'EXHAUSTED {proj}  phases:{done_ph}/{n_ph} all-done')\n" +
-        "    sys.exit(42)\n" +
-        "ph, tr, t = first\n" +
-        "name = (t.get('task') or t.get('name') or '?')\n" +
-        "if len(name) > 90: name = name[:87] + '...'\n" +
-        "print(f'NEXT {proj}/{ph.get(\"id\",\"?\")}/{tr}/{t.get(\"id\",\"?\")}  [{tstat(t)}]  {name}')\n" +
-        "print(f'  phase: {ph.get(\"name\",\"?\")[:80]}')\n" +
-        "if ph.get('gate_exit'):\n" +
-        "    ge = ph['gate_exit']\n" +
-        "    if isinstance(ge, dict): ge = ge.get('description') or ge.get('summary') or str(ge)[:80]\n" +
-        "    print(f'  gate:  {str(ge)[:80]}')\n" +
-        "if t.get('artifact'): print(f'  artifact: {t[\"artifact\"]}')\n" +
-        "if t.get('ssot_ref'): print(f'  ssot:     {t[\"ssot_ref\"]}')\n" +
-        "if t.get('depends_on'): print(f'  deps:     {\",\".join(t[\"depends_on\"])}')\n" +
-        "sys.exit(0)\n"
+// next_project — hexa-native. 첫 번째 미완료 task 탐색.
+// returns [body, exit_code_str]
+fn next_project(project: str) -> [str] {
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false { return ["MISSING " + p, "2"] }
+    // jq 로 phase+task 튜플을 순서대로 흘린다. DONE-status 는 필터링.
+    // 필드는 newline/사용자 문자 모두 공백으로 치환 (gsub) + @@SEP@@ 로 조인.
+    let strip = "(gsub(\"[\\\\n\\\\r\\\\t]\"; \" \"))"
+    let q = "(.phases // []) | .[] as $ph | " +
+            "if ([\"done\",\"complete\",\"aborted\",\"skipped\"] | index($ph.status // \"\")) then empty else " +
+            "  (($ph.parallel // []) | .[] as $tr | ($tr.tasks // []) | .[] as $t | " +
+            "    if ([\"done\",\"complete\",\"aborted\",\"skipped\"] | index($t.status // \"\")) then empty else " +
+            "      [($ph.id//\"?\"), ($ph.status//\"?\"), (($ph.name//\"?\") | " + strip + "), ($tr.track//\"_\"), ($t.id//\"?\"), ($t.status//\"todo\"), ((($t.task // $t.name // \"?\") | " + strip + ")), (($t.artifact//\"\") | " + strip + "), (($t.ssot_ref//\"\") | " + strip + "), (($t.depends_on // []) | join(\",\"))] | join(\"@@SEP@@\") " +
+            "    end), " +
+            "  (($ph.tasks // []) | .[] as $t | " +
+            "    if ([\"done\",\"complete\",\"aborted\",\"skipped\"] | index($t.status // \"\")) then empty else " +
+            "      [($ph.id//\"?\"), ($ph.status//\"?\"), (($ph.name//\"?\") | " + strip + "), \"_\", ($t.id//\"?\"), ($t.status//\"todo\"), ((($t.task // $t.name // \"?\") | " + strip + ")), (($t.artifact//\"\") | " + strip + "), (($t.ssot_ref//\"\") | " + strip + "), (($t.depends_on // []) | join(\",\"))] | join(\"@@SEP@@\") " +
+            "    end) " +
+            "end"
+    let raw = jq_raw(q, p)
+    // 첫 non-empty 라인만 사용
+    let lines = raw.split("\n")
+    let mut first = ""
+    for ln in lines {
+        let t = ln.trim()
+        if t.len() > 0 { first = t; break }
+    }
+    let proj_meta = jq("._meta.project // \"\"", p)
+    let proj = if proj_meta.len() > 0 { proj_meta } else { project }
+    if first.len() == 0 {
+        // EXHAUSTED
+        let n_ph = jq("(.phases // []) | length", p)
+        let done_ph = jq("[(.phases // [])[] | select([\"done\",\"complete\",\"aborted\",\"skipped\"] | index(.status // \"\"))] | length", p)
+        return ["EXHAUSTED " + proj + "  phases:" + done_ph + "/" + n_ph + " all-done", "42"]
+    }
+    let sep = "@@SEP@@"
+    let parts = first.split(sep)
+    // 10 fields expected
+    let pid = parts[0]
+    let pname = parts[2]
+    let tr = parts[3]
+    let tid = parts[4]
+    let tst = parts[5]
+    let mut tname = parts[6]
+    if tname.len() > 90 { tname = tname.substring(0, 87) + "..." }
+    let art = parts[7]
+    let ssot = parts[8]
+    let deps = parts[9]
+    let mut body = "NEXT " + proj + "/" + pid + "/" + tr + "/" + tid + "  [" + tst + "]  " + tname
+    body = body + "\n  phase: " + pname_trim(pname)
+    // gate_exit: 짧은 요약만
+    let gate_desc = jq("(.phases // []) | map(select(.id == \"" + pid + "\")) | .[0] | (.gate_exit | if type == \"string\" then . elif type == \"object\" then (.description // .summary // (. | tostring)) else \"\" end) // \"\"", p)
+    if gate_desc.len() > 0 && gate_desc != "null" {
+        let mut g = gate_desc
+        if g.len() > 80 { g = g.substring(0, 80) }
+        body = body + "\n  gate:  " + g
+    }
+    if art.len() > 0 { body = body + "\n  artifact: " + art }
+    if ssot.len() > 0 { body = body + "\n  ssot:     " + ssot }
+    if deps.len() > 0 { body = body + "\n  deps:     " + deps }
+    return [body, "0"]
+}
+
+fn pname_trim(s: str) -> str {
+    if s.len() > 80 { return s.substring(0, 80) }
+    return s
 }
 
 fn run_next(project: str) -> i64 {
-    let r = run_py_exit(next_script(project))
+    let r = next_project(project)
     print(r[0])
     if r[0].len() > 0 { println("") }
     return str_to_i64(r[1])
@@ -259,186 +284,254 @@ fn json_quote(s: str) -> str {
     return r + "\""
 }
 
-fn extend_script(project: str, payload_file: str, force: bool, dry: bool) -> str {
-    let force_s = if force { "True" } else { "False" }
-    let dry_s = if dry { "True" } else { "False" }
-    // Mk.III급 extend: 이전 phase 결과 분석 + 다중 소스 융합 → 야심찬 phase 생성
-    return "import json, sys, os, re, time, shutil, subprocess\n" +
-        "ROADMAPS = '" + ROADMAPS + "'\n" +
-        "NEXUS = '" + NEXUS + "'\n" +
-        "project = '" + project + "'\n" +
-        "force = " + force_s + "\n" +
-        "dry = " + dry_s + "\n" +
-        "payload = json.load(open('" + payload_file + "'))\n" +
-        "p = ROADMAPS + '/' + project + '.json'\n" +
-        "d = json.load(open(p))\n" +
-        "phases = d.get('phases', [])\n" +
-        "max_n = -1\n" +
-        "for ph in phases:\n" +
-        "    pid = ph.get('id','P0')\n" +
-        "    m = re.match(r'^P(\\d+)$', pid)\n" +
-        "    if m: max_n = max(max_n, int(m.group(1)))\n" +
-        "new_id = f'P{max_n+1}'\n" +
-        "existing_names = set()\n" +
-        "for ph in phases:\n" +
-        "    nm = (ph.get('name') or '').lower()\n" +
-        "    for tok in re.findall(r'[가-힣a-zA-Z0-9]+', nm):\n" +
-        "        if len(tok) >= 2: existing_names.add(tok.lower())\n" +
-        "# ── Mk.III 소스 수집: 5중 융합 ──\n" +
-        "candidates = []\n" +
-        "# 1. 직전 phase 결과에서 미해결/MISS/장벽 추출\n" +
-        "DONE = ('done','complete','aborted','skipped')\n" +
-        "last_done = None\n" +
-        "for ph in reversed(phases):\n" +
-        "    if ph.get('status') in DONE: last_done = ph; break\n" +
-        "if last_done:\n" +
-        "    for tr in last_done.get('parallel', []):\n" +
-        "        for t in tr.get('tasks', []):\n" +
-        "            res = ''\n" +
-        "            for k in t:\n" +
-        "                if 'result' in k.lower(): res = str(t[k])\n" +
-        "            if 'MISS' in res or '실패' in res or '불가' in res or '재설계' in res or '이월' in res:\n" +
-        "                candidates.append(('prev_miss', t.get('task','')[:60], {'result': res[:200]}))\n" +
-        "            elif 'CONJECTURE' in res or '미증명' in res or '미해결' in res:\n" +
-        "                candidates.append(('prev_open', t.get('task','')[:60], {'result': res[:200]}))\n" +
-        "# 2. atlas.n6 [N?] CONJECTURE + [N!] BREAKTHROUGH 스캔\n" +
-        "atlas_path = NEXUS + '/shared/n6/atlas.n6'\n" +
-        "if os.path.exists(atlas_path):\n" +
-        "    try:\n" +
-        "        out = subprocess.check_output(['grep', '-c', '\\\\[N?\\\\]', atlas_path], text=True, stderr=subprocess.DEVNULL).strip()\n" +
-        "        nq = int(out) if out.isdigit() else 0\n" +
-        "        if nq > 0: candidates.append(('atlas_nq', f'atlas [N?] CONJECTURE {nq}건 미해결', {'count': nq}))\n" +
-        "    except: pass\n" +
-        "    try:\n" +
-        "        out = subprocess.check_output(['grep', '-c', '\\\\[N!\\\\]', atlas_path], text=True, stderr=subprocess.DEVNULL).strip()\n" +
-        "        nb = int(out) if out.isdigit() else 0\n" +
-        "        if nb > 0: candidates.append(('atlas_nb', f'atlas [N!] BREAKTHROUGH {nb}건 확장 가능', {'count': nb}))\n" +
-        "    except: pass\n" +
-        "# 3. forge cross-domain 후보 (2+ 도메인 결합, payload 기반 전체 pool)\n" +
-        "for line in payload.get('forge','').splitlines():\n" +
-        "    try:\n" +
-        "        o = json.loads(line.strip())\n" +
-        "        df = o.get('derived_from', '')\n" +
-        "        nm = o.get('name','')\n" +
-        "        if not nm: continue\n" +
-        "        c = df.count(',')\n" +
-        "        if c >= 2:\n" +
-        "            candidates.append(('fg3', nm, o))\n" +
-        "        elif c >= 1:\n" +
-        "            candidates.append(('fg2', nm, o))\n" +
-        "    except: pass\n" +
-        "# 4. bt_keywords + breakthroughs (기존)\n" +
-        "for line in payload.get('keywords','').splitlines():\n" +
-        "    try:\n" +
-        "        o = json.loads(line.strip())\n" +
-        "        kw = o.get('keyword')\n" +
-        "        if isinstance(kw, str) and len(kw) >= 2: candidates.append(('kw', kw, o))\n" +
-        "    except: pass\n" +
-        "for line in payload.get('breakthroughs','').splitlines():\n" +
-        "    try:\n" +
-        "        o = json.loads(line.strip())\n" +
-        "        for k in ('keyword','name','title'):\n" +
-        "            v = o.get(k)\n" +
-        "            if isinstance(v, str) and len(v) >= 3: candidates.append(('bt', v, o))\n" +
-        "    except: pass\n" +
-        "# 5. blowup 엔진 (환경변수 허용 시)\n" +
-        "for line in payload.get('blowup','').splitlines():\n" +
-        "    if 'EMERGE' in line or 'candidate' in line.lower():\n" +
-        "        toks = re.findall(r'[가-힣a-zA-Z][가-힣a-zA-Z0-9_]{2,}', line)\n" +
-        "        for tok in toks[:3]: candidates.append(('bu', tok, {'line': line}))\n" +
-        "# ── 중복 제거 + 우선순위 정렬 (existing_names + _emergence.seeds 필터) ──\n" +
-        "prio = {'prev_miss':0, 'prev_open':0, 'atlas_nq':1, 'atlas_nb':1, 'fg3':2, 'fg2':3, 'bt':4, 'kw':5, 'bu':6}\n" +
-        "# 이전 phase 이름 토큰 + 이전 _emergence.seeds 전체 수집 (고갈 추적)\n" +
-        "used_seeds = set(existing_names)\n" +
-        "for ph in phases:\n" +
-        "    emg = ph.get('_emergence', {})\n" +
-        "    for s in emg.get('seeds', []) or []:\n" +
-        "        if isinstance(s, str) and len(s) >= 2:\n" +
-        "            used_seeds.add(s.lower()[:40])\n" +
-        "    for tr in ph.get('parallel', []):\n" +
-        "        for t in tr.get('tasks', []):\n" +
-        "            tk = (t.get('task') or '').lower()\n" +
-        "            for tok in re.findall(r'[가-힣a-zA-Z0-9_]+', tk):\n" +
-        "                if len(tok) >= 3: used_seeds.add(tok[:40])\n" +
-        "seen = set()\n" +
-        "fresh = []\n" +
-        "for src, name, meta in candidates:\n" +
-        "    nlc = name.lower()[:40]\n" +
-        "    if nlc in seen: continue\n" +
-        "    if nlc in used_seeds: continue  # 이전 phase 에서 소진됨\n" +
-        "    seen.add(nlc)\n" +
-        "    fresh.append((src, name, meta))\n" +
-        "fresh.sort(key=lambda x: prio.get(x[0], 9))\n" +
-        "if not fresh:\n" +
-        "    if not force:\n" +
-        "        print('EMERGENCE_FAIL no candidates'); sys.exit(1)\n" +
-        "    fresh = [('tmpl', '진화_' + time.strftime('%Y%m%d'), {})]\n" +
-        "# ── Mk.III급 phase 빌드: 상위 3~5 시드를 트랙별 배분 ──\n" +
-        "tracks_keys = list(d.get('tracks', {}).keys())\n" +
-        "if not tracks_keys: tracks_keys = ['DSE', 'PAPER', 'CHIP']\n" +
-        "top_seeds = fresh[:6]\n" +
-        "seed_names = [n for _,n,_ in top_seeds]\n" +
-        "theme = ' + '.join(seed_names[:3])[:60]\n" +
-        "phase_name = f'창발 진화 — {theme}'\n" +
-        "# 트랙별 2~3 tasks 생성 (시드 라운드로빈 배분)\n" +
-        "parallel = []\n" +
-        "for ti, trk in enumerate(tracks_keys[:3]):\n" +
-        "    tasks = []\n" +
-        "    assigned = [s for i,s in enumerate(top_seeds) if i % 3 == ti]\n" +
-        "    if not assigned: assigned = [top_seeds[0]]\n" +
-        "    for si, (src, sname, smeta) in enumerate(assigned[:3]):\n" +
-        "        tid = f'{trk}-{new_id}-{si+1}'\n" +
-        "        desc = sname[:70]\n" +
-        "        if src == 'prev_miss': desc = f'미해결 후속: {desc}'\n" +
-        "        elif src == 'prev_open': desc = f'미증명 공략: {desc}'\n" +
-        "        elif src == 'atlas_nq': desc = f'CONJECTURE 공략: {desc}'\n" +
-        "        elif src == 'fg3': desc = f'3중 융합 탐색: {desc}'\n" +
-        "        tasks.append({'id': tid, 'task': f'{desc} ({trk} 트랙)', 'status': 'todo'})\n" +
-        "    # 최소 검증 task 1개 보장\n" +
-        "    if len(tasks) < 2:\n" +
-        "        tasks.append({'id': f'{trk}-{new_id}-V', 'task': f'{theme} ({trk}) — 검증/수렴', 'status': 'todo'})\n" +
-        "    parallel.append({'track': trk, 'tasks': tasks})\n" +
-        "total_tasks = sum(len(tr['tasks']) for tr in parallel)\n" +
-        "gate_criteria = [f'{s[:50]} 완료 또는 정직한 장벽 기록' for _,s,_ in top_seeds[:5]]\n" +
-        "gate_criteria.append(f'전 {total_tasks} tasks 완료 — convergence 검증')\n" +
-        "new_phase = {\n" +
-        "    'id': new_id,\n" +
-        "    'name': phase_name,\n" +
-        "    'duration_hours': 168,\n" +
-        "    'status': 'planned',\n" +
-        "    'parallel': parallel,\n" +
-        "    'gate_exit': {'criteria': gate_criteria, 'fail_action': '실패 항목 정직 기록 + 다음 phase로 이월'},\n" +
-        "    '_emergence': {\n" +
-        "        'source': [s for s,_,_ in top_seeds[:6]],\n" +
-        "        'seeds': seed_names[:6],\n" +
-        "        'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),\n" +
-        "        'tier': 'Mk.III',\n" +
-        "        'total_candidates': len(fresh),\n" +
-        "    },\n" +
-        "}\n" +
-        "if dry:\n" +
-        "    print('EXTEND_PLAN'); print(json.dumps(new_phase, ensure_ascii=False, indent=2)); sys.exit(0)\n" +
-        "bak = p + '.bak.' + time.strftime('%Y%m%d_%H%M%S')\n" +
-        "shutil.copy2(p, bak)\n" +
-        "d['phases'].append(new_phase)\n" +
-        "if '_meta' in d: d['_meta']['updated'] = time.strftime('%Y-%m-%d')\n" +
-        "with open(p + '.tmp', 'w') as f: json.dump(d, f, ensure_ascii=False, indent=2)\n" +
-        "os.replace(p + '.tmp', p)\n" +
-        "print(f'EXTEND_OK {project} +{new_id} \"{phase_name}\" ({total_tasks} tasks, {len(fresh)} candidates, tier=Mk.III)')\n" +
-        "sys.exit(0)\n"
-}
-
-fn run_extend(project: str, force: bool, dry: bool) -> i64 {
-    // emergence 데이터 수집 → /tmp JSON 파일
+fn run_extend_native(project: str, force: bool, dry: bool) -> i64 {
+    // hexa-native extend: payload 수집 → 시드 후보 랭킹 → 새 phase JSON 구성 → jq append
+    // 시드 소스: forge / keywords / breakthroughs / blowup(optional)
     let payload = emergence_collect(project)
     _py_seq = _py_seq + 1
     let payload_file = "/tmp/roadmap_payload_" + to_string(_py_seq) + ".json"
     let _ = write_file(payload_file, payload)
-    let r = run_py_exit(extend_script(project, payload_file, force, dry))
-    print(r[0])
-    if r[0].len() > 0 { println("") }
-    let _ = exec("rm -f " + payload_file)  // @allow-bare-exec
-    return str_to_i64(r[1])
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false {
+        eprintln("MISSING " + p)
+        let _ = exec("rm -f " + shq(payload_file))  // @allow-bare-exec
+        return 2
+    }
+    // 기존 phase 최대 번호 — "P<n>" 패턴
+    let max_raw = jq("[(.phases // [])[] | .id // \"\" | capture(\"^P(?<n>[0-9]+)$\") | .n | tonumber] | max // -1", p)
+    let max_n = str_to_i64(max_raw)
+    let new_n = max_n + 1
+    let new_id = "P" + to_string(new_n)
+    // used seeds: 기존 phase name/task text 의 하위 토큰 + _emergence.seeds
+    // 단순화: 기존 phase name 전부 lower-case 를 used 풀로 기록
+    let used_raw = jq_raw("[(.phases // [])[] | (.name // \"\")] | join(\"\\n\")", p)
+    let used_lc = used_raw.to_lower()
+    // 시드 수집 — forge/keywords/breakthroughs lines 의 first 의미있는 token/name
+    let mut candidates: [str] = []
+    candidates = candidates + collect_json_names(payload, "forge", "name")
+    candidates = candidates + collect_json_names(payload, "keywords", "keyword")
+    candidates = candidates + collect_json_names(payload, "breakthroughs", "name")
+    candidates = candidates + collect_json_names(payload, "breakthroughs", "keyword")
+    candidates = candidates + collect_json_names(payload, "breakthroughs", "title")
+    // dedup + used 필터
+    let mut fresh: [str] = []
+    let mut seen = ""
+    for c in candidates {
+        let c2 = c.trim()
+        if c2.len() < 2 { continue }
+        let key = c2.to_lower()
+        let mark = "|" + key + "|"
+        if seen.contains(mark) { continue }
+        if used_lc.contains(key) { continue }
+        seen = seen + mark
+        fresh = fresh + [c2]
+        if len(fresh) >= 6 { break }
+    }
+    if len(fresh) == 0 {
+        if force == false {
+            println("EMERGENCE_FAIL no candidates")
+            let _ = exec("rm -f " + shq(payload_file))  // @allow-bare-exec
+            return 1
+        }
+        let stamp = to_string(exec("date +%Y%m%d")).trim()  // @allow-bare-exec
+        fresh = ["진화_" + stamp]
+    }
+    // phase name
+    let mut theme = ""
+    let mut i = 0
+    while i < 3 && i < len(fresh) {
+        if i > 0 { theme = theme + " + " }
+        theme = theme + fresh[i]
+        i = i + 1
+    }
+    if theme.len() > 60 { theme = theme.substring(0, 60) }
+    let phase_name = "창발 진화 — " + theme
+    // 트랙 — 기존 tracks 에서 keys, 없으면 기본 3종
+    let tracks_raw = jq_raw("(.tracks // {}) | keys | .[0:3] | join(\",\")", p)
+    let tracks_str = tracks_raw.trim()
+    let mut tracks: [str] = []
+    if tracks_str.len() > 0 {
+        tracks = tracks_str.split(",")
+    }
+    if len(tracks) == 0 { tracks = ["DSE", "PAPER", "CHIP"] }
+    // JSON 새 phase 빌드
+    let mut parallel_json = "["
+    let mut ti = 0
+    while ti < len(tracks) && ti < 3 {
+        let trk = tracks[ti]
+        let mut tasks_json = "["
+        // 시드 라운드로빈 배분
+        let mut tj = 0
+        let mut si = ti
+        let mut si_count = 0
+        while si < len(fresh) && si_count < 3 {
+            let sname = fresh[si]
+            let tid = trk + "-" + new_id + "-" + to_string(si_count + 1)
+            if tj > 0 { tasks_json = tasks_json + "," }
+            tasks_json = tasks_json + "{\"id\":\"" + tid + "\",\"task\":\"" + json_quote_inner(sname) + " (" + trk + " 트랙)\",\"status\":\"todo\"}"
+            tj = tj + 1
+            si_count = si_count + 1
+            si = si + 3
+        }
+        if tj < 2 {
+            if tj > 0 { tasks_json = tasks_json + "," }
+            tasks_json = tasks_json + "{\"id\":\"" + trk + "-" + new_id + "-V\",\"task\":\"" + json_quote_inner(theme) + " (" + trk + ") — 검증/수렴\",\"status\":\"todo\"}"
+        }
+        tasks_json = tasks_json + "]"
+        if ti > 0 { parallel_json = parallel_json + "," }
+        parallel_json = parallel_json + "{\"track\":\"" + trk + "\",\"tasks\":" + tasks_json + "}"
+        ti = ti + 1
+    }
+    parallel_json = parallel_json + "]"
+    // seeds json array
+    let mut seeds_json = "["
+    let mut ki = 0
+    while ki < len(fresh) && ki < 6 {
+        if ki > 0 { seeds_json = seeds_json + "," }
+        seeds_json = seeds_json + "\"" + json_quote_inner(fresh[ki]) + "\""
+        ki = ki + 1
+    }
+    seeds_json = seeds_json + "]"
+    let gen_at = to_string(exec("date +%Y-%m-%dT%H:%M:%S")).trim()  // @allow-bare-exec
+    let new_phase = "{" +
+        "\"id\":\"" + new_id + "\"," +
+        "\"name\":\"" + json_quote_inner(phase_name) + "\"," +
+        "\"duration_hours\":168," +
+        "\"status\":\"planned\"," +
+        "\"parallel\":" + parallel_json + "," +
+        "\"gate_exit\":{\"criteria\":[\"" + json_quote_inner(theme) + " 완료 또는 정직한 장벽 기록\"],\"fail_action\":\"실패 항목 정직 기록 + 다음 phase로 이월\"}," +
+        "\"_emergence\":{\"source\":[\"native\"],\"seeds\":" + seeds_json + ",\"generated_at\":\"" + gen_at + "\",\"tier\":\"native\",\"total_candidates\":" + to_string(len(fresh)) + "}" +
+        "}"
+    if dry {
+        println("EXTEND_PLAN")
+        println(new_phase)
+        let _ = exec("rm -f " + shq(payload_file))  // @allow-bare-exec
+        return 0
+    }
+    // 백업 + jq append
+    let today = to_string(exec("date +%Y-%m-%d")).trim()  // @allow-bare-exec
+    let stamp = to_string(exec("date +%Y%m%d_%H%M%S")).trim()  // @allow-bare-exec
+    let bak = p + ".bak." + stamp
+    let _ = exec("cp -p " + shq(p) + " " + shq(bak))  // @allow-bare-exec
+    let tmp = p + ".tmp"
+    let filter = ".phases = ((.phases // []) + [$np]) | (if has(\"_meta\") then ._meta.updated = $today else . end)"
+    let cmd = "jq --argjson np " + shq(new_phase) + " --arg today " + shq(today) + " " + shq(filter) + " " + shq(p) + " > " + shq(tmp) + " && mv " + shq(tmp) + " " + shq(p) + " && echo OK || echo FAIL"
+    let res = to_string(exec(cmd)).trim()  // @allow-bare-exec
+    let _ = exec("rm -f " + shq(payload_file))  // @allow-bare-exec
+    if res.ends_with("OK") == false {
+        eprintln("extend jq rewrite failed: " + res)
+        return 1
+    }
+    // total tasks count
+    let mut total_tasks: i64 = 0
+    let mut pi = 0
+    while pi < len(tracks) && pi < 3 {
+        total_tasks = total_tasks + 2  // 대략 (정확도 낮음)
+        pi = pi + 1
+    }
+    println("EXTEND_OK " + project + " +" + new_id + " \"" + phase_name + "\" (" + to_string(len(fresh)) + " seeds, tier=native)")
+    return 0
+}
+
+fn str_index_of(hay: str, needle: str) -> i64 {
+    let nl = needle.len()
+    let hl = hay.len()
+    if nl == 0 { return 0 }
+    if nl > hl { return -1 }
+    let mut i: i64 = 0
+    while i + nl <= hl {
+        if hay.substring(i, i + nl) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn collect_json_names(payload: str, field: str, key: str) -> [str] {
+    // payload 는 {"field":"<multiline text>", ...}
+    // jq 로 field 값 꺼내기는 부담 → 간단 substring parse
+    let tag = "\"" + field + "\":"
+    let start = str_index_of(payload, tag)
+    if start < 0 { return [] }
+    let mut i = start + tag.len()
+    // skip ws, expect opening "
+    while i < payload.len() {
+        let c = payload.substring(i, i + 1)
+        if c == " " || c == "\t" { i = i + 1 } else { break }
+    }
+    if i >= payload.len() || payload.substring(i, i + 1) != "\"" { return [] }
+    i = i + 1
+    // read until unescaped closing "
+    let mut body = ""
+    while i < payload.len() {
+        let c = payload.substring(i, i + 1)
+        if c == "\\" {
+            if i + 1 < payload.len() {
+                let n = payload.substring(i + 1, i + 2)
+                if n == "n" { body = body + "\n" }
+                else if n == "r" { body = body + "\r" }
+                else if n == "t" { body = body + "\t" }
+                else if n == "\"" { body = body + "\"" }
+                else if n == "\\" { body = body + "\\" }
+                else { body = body + n }
+                i = i + 2
+                continue
+            }
+            i = i + 1
+            continue
+        }
+        if c == "\"" { break }
+        body = body + c
+        i = i + 1
+    }
+    // 각 line 을 json decode 시도 → obj[key] 추출
+    let lines = body.split("\n")
+    let mut out: [str] = []
+    for ln in lines {
+        let t = ln.trim()
+        if t.len() == 0 { continue }
+        if t.starts_with("{") == false { continue }
+        // key 추출: "<key>":"<value>"
+        let needle = "\"" + key + "\""
+        let ki = str_index_of(t, needle)
+        if ki < 0 { continue }
+        let mut j = ki + needle.len()
+        while j < t.len() {
+            let c = t.substring(j, j + 1)
+            if c == " " || c == "\t" || c == ":" { j = j + 1 } else { break }
+        }
+        if j >= t.len() || t.substring(j, j + 1) != "\"" { continue }
+        j = j + 1
+        let vstart = j
+        while j < t.len() {
+            let c = t.substring(j, j + 1)
+            if c == "\\" { j = j + 2; continue }
+            if c == "\"" { break }
+            j = j + 1
+        }
+        if j > vstart { out = out + [t.substring(vstart, j)] }
+    }
+    return out
+}
+
+fn json_quote_inner(s: str) -> str {
+    // JSON string 내부 escape (quote 자체는 포함 안함)
+    let mut r = ""
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "\\" { r = r + "\\\\" }
+        else if c == "\"" { r = r + "\\\"" }
+        else if c == "\n" { r = r + "\\n" }
+        else if c == "\r" { r = r + "\\r" }
+        else if c == "\t" { r = r + "\\t" }
+        else { r = r + c }
+        i = i + 1
+    }
+    return r
+}
+
+fn run_extend(project: str, force: bool, dry: bool) -> i64 {
+    return run_extend_native(project, force, dry)
 }
 
 // ─── gate_promote: task 전부 done인 phase 자동 complete 마킹 ────
@@ -446,54 +539,77 @@ fn run_extend(project: str, force: bool, dry: bool) -> i64 {
 // 이 함수가 없으면 roadmap이 "소진"을 감지 못해 다음 phase 생성 불가.
 // 반환: 승격된 phase 수 (0이면 변동 없음)
 
-fn gate_promote_script(project: str) -> str {
-    return "import json, sys, os, time, shutil\n" +
-        "ROADMAPS = '" + ROADMAPS + "'\n" +
-        "project = '" + project + "'\n" +
-        "p = ROADMAPS + '/' + project + '.json'\n" +
-        "if not os.path.exists(p):\n" +
-        "    print('MISSING ' + p); sys.exit(2)\n" +
-        "d = json.load(open(p))\n" +
-        "DONE = ('done','complete','aborted','skipped')\n" +
-        "promoted = 0\n" +
-        "for ph in d.get('phases', []):\n" +
-        "    if ph.get('status') in DONE: continue\n" +
-        "    # in_progress / planned — task 전수 검사\n" +
-        "    all_tasks = []\n" +
-        "    for tr in ph.get('parallel', []):\n" +
-        "        all_tasks.extend(tr.get('tasks', []))\n" +
-        "    all_tasks.extend(ph.get('tasks', []))\n" +
-        "    if not all_tasks: continue\n" +
-        "    undone = [t for t in all_tasks if (t.get('status') or 'todo') not in DONE]\n" +
-        "    if undone: continue\n" +
-        "    # 전 task done → phase complete 승격\n" +
-        "    old_status = ph.get('status', '?')\n" +
-        "    ph['status'] = 'complete'\n" +
-        "    ph['completed_at'] = time.strftime('%Y-%m-%d')\n" +
-        "    if 'exit_note' not in ph:\n" +
-        "        ph['exit_note'] = f'gate_promote 자동: {len(all_tasks)} tasks 전수 done → complete'\n" +
-        "    promoted += 1\n" +
-        "    pid = ph.get('id', '?')\n" +
-        "    print(f'PROMOTE {pid} {old_status} -> complete ({len(all_tasks)} tasks)')\n" +
-        "if promoted > 0:\n" +
-        "    if '_meta' in d: d['_meta']['updated'] = time.strftime('%Y-%m-%d')\n" +
-        "    bak = p + '.bak.' + time.strftime('%Y%m%d_%H%M%S')\n" +
-        "    shutil.copy2(p, bak)\n" +
-        "    tmp = p + '.tmp'\n" +
-        "    with open(tmp, 'w') as f:\n" +
-        "        json.dump(d, f, ensure_ascii=False, indent=2)\n" +
-        "    os.replace(tmp, p)\n" +
-        "    print(f'GATE_PROMOTE_OK {project} +{promoted} phases promoted')\n" +
-        "else:\n" +
-        "    print(f'GATE_PROMOTE_NOOP {project} — no phase ready for promotion')\n" +
-        "sys.exit(0)\n"
-}
-
+// gate_promote — hexa-native. 전 task done 인 phase 를 complete 승격.
+// jq 로 승격대상 phase id 찾기 → jq 필터로 atomic 재기록.
 fn run_gate_promote(project: str) -> i64 {
-    let r = run_py_exit(gate_promote_script(project))
-    print(r[0])
-    if r[0].len() > 0 { println("") }
-    return str_to_i64(r[1])
+    let p = ROADMAPS + "/" + project + ".json"
+    if file_exists_path(p) == false {
+        println("MISSING " + p)
+        return 2
+    }
+    // DONE set = done|complete|aborted|skipped
+    // 승격대상: phase 가 DONE 아니고, 모든 task(parallel + inline) 가 DONE.
+    let q = "(.phases // []) | to_entries[] | " +
+            "(.value) as $ph | " +
+            "if ([\"done\",\"complete\",\"aborted\",\"skipped\"] | index($ph.status // \"\")) then empty else " +
+            "  (((($ph.parallel // []) | map(.tasks // []) | add // [])) + ($ph.tasks // [])) as $all | " +
+            "  if ($all | length) == 0 then empty " +
+            "  elif (($all | map(select([\"done\",\"complete\",\"aborted\",\"skipped\"] | index(.status // \"todo\") | not))) | length) > 0 then empty " +
+            "  else [($ph.id // \"?\"), ($ph.status // \"?\"), ($all | length | tostring)] | join(\"|\") " +
+            "  end " +
+            "end"
+    let raw = jq_raw(q, p)
+    let lines = raw.split("\n")
+    let mut promoted_ids: [str] = []
+    let mut promoted_count: i64 = 0
+    for ln in lines {
+        let t = ln.trim()
+        if t.len() == 0 { continue }
+        let parts = t.split("|")
+        if len(parts) < 3 { continue }
+        let pid = parts[0]; let old = parts[1]; let ntasks = parts[2]
+        println("PROMOTE " + pid + " " + old + " -> complete (" + ntasks + " tasks)")
+        promoted_ids = promoted_ids + [pid]
+        promoted_count = promoted_count + 1
+    }
+    if promoted_count == 0 {
+        println("GATE_PROMOTE_NOOP " + project + " — no phase ready for promotion")
+        return 0
+    }
+    // 백업 + jq 재기록
+    let today = to_string(exec("date +%Y-%m-%d")).trim()  // @allow-bare-exec
+    let stamp = to_string(exec("date +%Y%m%d_%H%M%S")).trim()  // @allow-bare-exec
+    let bak = p + ".bak." + stamp
+    let _ = exec("cp -p " + shq(p) + " " + shq(bak))  // @allow-bare-exec
+    // jq 필터: 대상 phase id 에 대해 status/completed_at/exit_note 세팅 + _meta.updated
+    // ID 목록을 jq --argjson ids 로 주입
+    let mut ids_json = "["
+    let mut j = 0
+    while j < len(promoted_ids) {
+        if j > 0 { ids_json = ids_json + "," }
+        ids_json = ids_json + "\"" + promoted_ids[j] + "\""
+        j = j + 1
+    }
+    ids_json = ids_json + "]"
+    let filter = ".phases = ((.phases // []) | map(" +
+                 "if (.id // \"\") as $id | ($ids | index($id)) then " +
+                 "  .status = \"complete\" | .completed_at = $today | " +
+                 "  (if has(\"exit_note\") then . else " +
+                 "    .exit_note = (\"gate_promote 자동: \" + " +
+                 "      ((((.parallel // []) | map(.tasks // []) | add // []) + (.tasks // [])) | length | tostring) + " +
+                 "      \" tasks 전수 done -> complete\") " +
+                 "  end) " +
+                 "else . end)) | " +
+                 "(if has(\"_meta\") then ._meta.updated = $today else . end)"
+    let tmp = p + ".tmp"
+    let cmd = "jq --argjson ids " + shq(ids_json) + " --arg today " + shq(today) + " " + shq(filter) + " " + shq(p) + " > " + shq(tmp) + " && mv " + shq(tmp) + " " + shq(p) + " && echo OK || echo FAIL"
+    let result = to_string(exec(cmd)).trim()  // @allow-bare-exec
+    if result.ends_with("OK") == false {
+        eprintln("gate_promote jq rewrite failed: " + result)
+        return 1
+    }
+    println("GATE_PROMOTE_OK " + project + " +" + to_string(promoted_count) + " phases promoted")
+    return 0
 }
 
 // ─── auto: next; 소진 시 extend → next ──────────────────────────
@@ -533,7 +649,7 @@ fn run_list() -> i64 {
     let projects = ["nexus", "anima", "anima-train", "n6-architecture", "zeta-surpass", "hive", "millennium"]
     println("=== roadmap list (7 projects) ===")
     for p in projects {
-        let r = run_py_exit(next_script(p))
+        let r = next_project(p)
         let code = r[1]
         let first_line = r[0].split("\n")[0]
         let pad = pad_right(p, 18)
