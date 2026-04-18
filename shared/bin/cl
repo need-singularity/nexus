@@ -553,7 +553,14 @@ cmd_interactive() {
     # @convergence state=ossified id=EXEC_HANDOFF_CLEAN ossified_at=2026-04-18 value="exec 직전 tty 정리 — stty sane + 화면 클리어(\\033[2J\\033[H) + scrollback 클리어(\\033[3J)" rationale="cl picker 의 raw-mode read + cursor-hide 가 tty 모드 누수 → claude 입력 먹통. dashboard 잔재가 claude-code init TUI 와 overlap → 화면 엉망진창. LAUNCH_SPINNER 제거 후 더 뚜렷해진 증상"
     stty sane 2>/dev/null
     printf '\033[?25h\033[3J\033[2J\033[H'
-    printf '→ %s (%s)\n\n' "$selected" "$dir"
+    # @convergence state=stable id=LAUNCH_SPINNER_SHORT value="브라유 스피너 6 프레임 × 60ms = 360ms — 이전 18×80ms 대비 1/4 지속" rationale="사용자 요청 — 정보 한 줄만 나오니 접속 진행감 없음. 최소 애니메이션으로 시각 피드백 유지"
+    local __s=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴')
+    local __i
+    for __i in 0 1 2 3 4 5; do
+        printf '\r\033[2K%s → %s (%s)' "${__s[$__i]}" "$selected" "$dir"
+        sleep 0.06 2>/dev/null || :
+    done
+    printf '\r\033[2K→ %s (%s)\n\n' "$selected" "$dir"
     export CLAUDE_CONFIG_DIR="$dir"
     # FOCUSED_BG_REFRESH — 선택 계정 1건만 bg kick (ccmon 스타일)
     ( "$(dirname "$0")/cl-refresh" "$selected" >/dev/null 2>&1 ) &
