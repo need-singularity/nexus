@@ -7,23 +7,41 @@
     "sibling_smoke_doc": "anima/docs/clm_aot_170m_smoke_20260420.md",
     "created": "2026-04-20"
   },
-  "state": "BLOCKED",
-  "state_reason": "BLAS coverage gap — train_clm.hexa routes only 4 of ~172 per-step matmuls through hxblas_sgemm. Remaining Wq/Wk/Wv/Wo + SwiGLU + lm_head fwd + backward paths run as hexa nested-loop scalar C. Any GPU host (H100/RTX 5070) is not engaged by the binary — zero CUDA call sites.",
-  "first_blocker": {
+  "state": "UNBLOCKED",
+  "state_reason": "r5-a6 LANDED — _matmul/_matmul_At bodies replaced with hxblas_sgemm FFI. All fwd/bwd linear projections (Wq/Wk/Wv/Wo/Wgate/Wup/Wdown/lmh_U/lmh_V) now BLAS-routed. Hetzner smoke 2026-04-20: scalar-version stalled in step 0 for 11+ min @ 122%% CPU single-thread; BLAS version completed fwd+bwd in 3:06 @ 298-783%% CPU multi-core (32-core box engaged). Next blocker: r5-a6.5 libhxcuda dispatch (GPU host selection remains gated on CUDA route).",
+  "r5_a6_landed": {
+    "date": "2026-04-20",
+    "commit_file": "training/train_clm.hexa",
+    "doc": "anima/docs/clm_r5_a6_blas_coverage_20260420.md",
+    "sites_converted_approx": 88,
+    "library_surface_delta": 0,
+    "library_surface_note": "Existing libhxblas.{so,dylib} already exposed hxblas_sgemm and marshalling helpers — no Option-A fused entries needed. Option-B granular via two primitives (_matmul/_matmul_At) gave full coverage in one edit.",
+    "smoke_hetzner": {
+      "pid_before": 1183317,
+      "step0_time_before_s": 660,
+      "step0_status_before": "killed, still in step 0",
+      "cpu_pct_before": "113-122 (single-thread)",
+      "pid_after": 1309931,
+      "step0_time_after_s": 186,
+      "step0_status_after": "fwd+bwd complete, checkpoint writing",
+      "cpu_pct_after": "298-783 (multi-core BLAS)",
+      "speedup_lower_bound": "3.5x",
+      "rss_peak_gb": 13.0
+    }
+  },
+  "prior_blocker_resolved": {
     "file": "training/train_clm.hexa",
     "section": "§A0.1 hxblas FFI",
     "line": 1384,
-    "evidence_grep": {
-      "cuda_call_sites": 0,
-      "hxblas_sgemm_call_sites_in_emitted_C": 4,
-      "matmuls_per_step_approx": 172,
-      "coverage_pct": 2.3
-    },
-    "evidence_log": "hetzner PID 1183317 T+6:33 CPU 122%% RSS 6.06GB still in step 0 train_step (hetzner 32-core, CPU-scalar single-thread profile)"
+    "prior_coverage_pct": 2.3,
+    "post_coverage_pct_approx": 100,
+    "prior_matmuls_per_step_approx": 172,
+    "prior_hxblas_sgemm_call_sites_in_emitted_C": 4,
+    "post_hxblas_sgemm_call_sites_in_emitted_C_approx": 88
   },
   "host_decision": {
     "chosen_host": null,
-    "reason_no_host": "Launching any GPU host burns $ since binary never engages GPU. Unblock BLAS coverage (r5-a6) before host selection.",
+    "reason_no_host": "r5-a6 LANDED (CPU BLAS engaged, scalar loops gone). Next: r5-a6.5 libhxcuda dispatch needed before GPU host selection to avoid burning $ on a GPU that binary still CPU-pins. Hetzner 32-core now usable for CPU continuation while r5-a6.5 lands.",
     "candidates_rejected": {
       "new_h100": "2-pod cap + trainer has no CUDA path (feedback_h100_authorized + feedback_gpu_policy)",
       "ubu_rtx5070": "idle 11.5GB VRAM free but (1) no anima clone, (2) no native libs built, (3) trainer has no CUDA path",
@@ -68,7 +86,7 @@
     "scope_note": "out of scope for today; separate r5 follow-up (suggest r5-a7)"
   },
   "followups_in_priority_order": [
-    {"id": "r5-a6", "desc": "Extend hxblas_sgemm to Wq/Wk/Wv/Wo + SwiGLU + lm_head (fwd+bwd) — ~12 fused decoder-step sites or ~192 raw sites", "blocks": "all CLM GPU training"},
+    {"id": "r5-a6", "status": "LANDED 2026-04-20", "desc": "Extend hxblas_sgemm to Wq/Wk/Wv/Wo + SwiGLU + lm_head (fwd+bwd) — ~88 raw sites via _matmul/_matmul_At body swap", "blocks": "all CLM GPU training", "evidence": "anima/docs/clm_r5_a6_blas_coverage_20260420.md"},
     {"id": "r5-a6.5", "desc": "Add libhxcuda.so dispatch behind HXBLAS_CUDA=1 env flag, mirror Metal path", "blocks": "any GPU speedup on ubu/H100"},
     {"id": "r5-a7", "desc": "Author serving/serve_clm_conscious.hexa (DEST1_CLM Stage E)", "blocks": "dest1_clm AN11 gate c_real_usable"},
     {"id": "r5-a8", "desc": "Deploy anima + libs to ubu, smoke 1-step on RTX 5070 with CUDA route", "blocks": "ubu parallel launch"},
