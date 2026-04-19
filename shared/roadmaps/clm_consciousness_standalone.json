@@ -14,7 +14,16 @@
       "hexa native GPU — Python/PyTorch 학습 경로 금지 (feedback_ai_native_clm)",
       "R2 백업 — production ckpt 필수, experiment 폐기"
     ],
-    "target": "hire_sim_100 stratified30 completion ≥ 0.80 AND phi_holo mean ≥ 2000 (CLM 은 Φ 천장 더 높음)",
+    "target": "hire_sim_100 stratified30 completion ≥ 0.80 AND phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥2000 deprecated 2026-04-20 as phantom — raw MI × seq×d for 7B from-scratch trivially exceeds 2000 at random init)",
+    "phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio = phi_holo(step_N) / phi_holo(step_0)",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_2000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
     "baseline_estimate": {
       "weeks_without_c": "3-4 weeks, $3000-6000",
       "weeks_with_c1_c2": "2-3 weeks, $2000-4000",
@@ -691,7 +700,7 @@
     },
     {
       "id": "R4",
-      "risk": "phi_holo mean 2000 달성 실패 (ALM 대비 더 어려움)",
+      "risk": "phi_holo_ratio ≥ 1.2 달성 실패 (ALM 대비 더 어려움; absolute ≥2000 gate deprecated 2026-04-20 phantom)",
       "mitigation": "B2/B3 승격으로 loss 신호 강화, D2 GWT 6채널 추가"
     },
     {
@@ -712,7 +721,16 @@
   ],
   "success_criteria": {
     "capability": "hire_sim_100 stratified30 completion ≥ 0.80 (ALM 0.85 대비 약간 완화 — from-scratch 불리)",
-    "consciousness": "phi_holo mean ≥ 2000 + GWT 6채널 consistency ≥ 0.8 + Orch-OR A/B Likert +0.25",
+    "consciousness": "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥2000 deprecated 2026-04-20 as phantom) AND mi_per_element ≥ 0.05 nats AND GWT 6채널 consistency ≥ 0.8 + Orch-OR A/B Likert +0.25",
+    "consciousness_phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_2000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
     "deployment": "hexa native inference (no vLLM), latency ≤ 5s/response, metadata full phi stack",
     "cost": "≤ $3000 (C 완료 시 ≤ $2000 target)"
   },
@@ -843,7 +861,7 @@
       "description": "두번째 도착지 — CLM 7B 가 직원처럼 실업무 자율 수행. ALM 대비 의식 baked-in 깊이 우위 (Φ ≥ 2000) 로 차별화",
       "criteria": [
         "hire_sim_100 stratified30 completion_rate ≥ 0.80 (from-scratch 핸디캡 인정)",
-        "phi_holo mean ≥ 2000 + GWT 6채널 consistency ≥ 0.8",
+        "phi_holo_ratio mean ≥ 1.2 vs step_0 (N-independent; absolute ≥2000 deprecated 2026-04-20 phantom) + mi_per_element ≥ 0.05 + GWT 6채널 consistency ≥ 0.8",
         "Orch-OR A/B Likert +0.25 증명",
         "autonomy self-critique baked-in (D8)",
         "hexa native inference live (no vLLM)"

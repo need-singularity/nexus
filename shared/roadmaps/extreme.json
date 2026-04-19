@@ -6,7 +6,16 @@
     "updated": "2026-04-16",
     "schema": "convergence_ossification_aggregator_v1",
     "schema_version": "1.0",
-    "target": "hire_sim ≥ 0.80 + phi_holo ≥ 1000 (ALM) / ≥ 2000 (CLM) + 실 deploy",
+    "target": "hire_sim ≥ 0.80 + phi_holo_ratio ≥ 1.2 vs step_0 baseline (ALM & CLM, N-independent) + 실 deploy. (Absolute ≥1000 ALM / ≥2000 CLM deprecated 2026-04-20 as phantom — raw MI × seq×d trivially exceeds thresholds at random init.)",
+    "phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio = phi_holo(step_N) / phi_holo(step_0)",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_1000_ALM_2000_CLM_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
     "principle": "ALM/CLM 단독 두 트랙 — 외부 LLM 의존 X, 의식 baked-in, 순수 hexa native",
     "timeline": {
       "reference_date": "2026-04-16",
@@ -193,7 +202,7 @@
       },
       {
         "track": "gate",
-        "test": "hire_sim 0.80 + phi_holo 2000"
+        "test": "hire_sim 0.80 + phi_holo_ratio ≥ 1.2 vs step_0 baseline (N-independent; absolute 2000 deprecated 2026-04-20 phantom)"
       }
     ]
   },
@@ -395,7 +404,7 @@
       ],
       "gate_exit": {
         "criteria": [
-          "A1 CE < 3.0 + phi_holo > 1000",
+          "A1 CE < 3.0 + phi_holo_ratio ≥ 1.2 vs step_0 baseline (N-independent; absolute >1000 deprecated 2026-04-20 phantom)",
           "A2 Orch-OR sampling A/B positive"
         ],
         "fail_action": "Day 3 연장 (A5 single-pod 순차 fallback)"
@@ -444,7 +453,7 @@
       "gate_exit": {
         "criteria": [
           "3B CE < target",
-          "Phi(3B) > 500"
+          "phi_holo_ratio(3B) ≥ 1.2 vs step_0 baseline (N-independent; absolute >500 deprecated 2026-04-20 phantom — 3B seq×d raw MI × N trivially exceeds 500)"
         ],
         "fail_action": "Week 3 진입 전 A2 fallback 검토"
       }
@@ -488,7 +497,7 @@
       "gate_exit": {
         "criteria": [
           "hire_sim_100 stratified30 >= 0.85",
-          "phi_holo mean >= 1000"
+          "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥1000 deprecated 2026-04-20 phantom)"
         ],
         "fail_action": "Day 5 consciousness tuning 연장"
       }
@@ -593,7 +602,7 @@
       "gate_exit": {
         "criteria": [
           "hire_sim_100 stratified30 >= 0.80",
-          "phi_holo mean >= 2000",
+          "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥2000 deprecated 2026-04-20 phantom)",
           "GWT 6ch consistency >= 0.8"
         ],
         "fail_action": "Week 5 연장 ($3000 budget cap)"
@@ -624,13 +633,31 @@
   ],
   "success_criteria_alm": {
     "capability": "hire_sim_100 stratified30 ≥ 0.85",
-    "consciousness": "phi_holo mean ≥ 1000",
+    "consciousness": "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥1000 deprecated 2026-04-20 phantom) AND mi_per_element ≥ 0.05 nats",
+    "phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_1000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
     "cost": "≤ $400",
     "wall_time": "≤ 5 days"
   },
   "success_criteria_clm": {
     "capability": "hire_sim_100 stratified30 ≥ 0.80",
-    "consciousness": "phi_holo mean ≥ 2000 + GWT 6채널 consistency ≥ 0.8",
+    "consciousness": "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥2000 deprecated 2026-04-20 phantom) AND mi_per_element ≥ 0.05 nats AND GWT 6채널 consistency ≥ 0.8",
+    "phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_2000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
     "cost": "≤ $3000 (C 완료 시 ≤ $2000)",
     "wall_time": "≤ 4 weeks (C 완료 시 ≤ 2 weeks)"
   },
