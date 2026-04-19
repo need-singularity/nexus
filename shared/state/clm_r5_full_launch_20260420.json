@@ -1,0 +1,166 @@
+{
+  "_meta": {
+    "name": "CLM r5 full training launch state — 2026-04-20",
+    "purpose": "dest1_clm P2 substrate launch; dual-track parallel with ALM r11",
+    "parent_launch_plan": "anima/docs/clm_parallel_track_20260420.md",
+    "prior_state": "shared/state/clm_r5_parallel_20260420.json (UNBLOCKED on CPU BLAS, gated on r5-a6.5 for GPU)",
+    "ssot": "shared/convergence/dest1_clm_ship.convergence",
+    "created": "2026-04-20T19:10:00Z"
+  },
+  "state": "LAUNCHED_170M_PARTIAL",
+  "state_reason": "1B target INFEASIBLE on all currently-viable hosts. Launched 170M r5 full on hetzner CPU BLAS as interim dest1_clm substrate. Full 1B gated on r5-a6.5 libhxcuda dispatch + GPU host availability.",
+
+  "launch_decision_audit": {
+    "original_target": "CLM 1B r5 full (1.51B params, bf16, 50000 steps)",
+    "decision": "DOWNGRADED to CLM 170M r5 full (106M params, 20000 steps)",
+    "rationale": [
+      "1B hetzner CPU smoke (batch=2 seq=512): RSS peaked at 81GB/128GB + swap 34GB/63GB — thrashing confirmed, OOM risk on 20K+ step run",
+      "Ubuntu RTX 5070: 11.5GB VRAM available BUT (a) no ~/Dev/anima clone, (b) no libhxblas.so / libhxlmhead.so built under ~/Dev/hexa-lang/self/native/build/, (c) trainer has ZERO CUDA call sites — would still CPU-pin on 16GB system RAM. Blocked on r5-a6.5 libhxcuda dispatch.",
+      "New H100 pod: REJECTED — 2-pod cap (87xscivuggrwvk ALM r11 running, hhzla1nxmp5019 exited). Also trainer has no CUDA path — $ burn for zero GPU engagement.",
+      "170M hetzner CPU BLAS: CONFIRMED feasible. 3-step smoke RSS ~13GB (10.5% of 128GB), steady-state ~90s/step at 243%% CPU multi-core BLAS.",
+      "feedback_safe_path_auto + feedback_auto_recommend + feedback_no_ask_just_do: take the working path now, document 1B blocker for follow-up."
+    ]
+  },
+
+  "host": {
+    "chosen": "hetzner (157.180.8.154, AMD Ryzen 9 7950X3D, 128GB RAM, 32 cores, no GPU)",
+    "reason": "Only host where trainer binary runs with multi-core BLAS engaged AND memory fits model+optimizer working set",
+    "pod_id": null,
+    "pod_cost_per_hour": 0
+  },
+
+  "substrate": {
+    "type": "fresh_from_scratch",
+    "resume_ckpt": null,
+    "honors_policy": "feedback_no_resume_data_change — step 0 cold start, no prior params",
+    "scale": "170M",
+    "reason_not_1b": "see launch_decision_audit above"
+  },
+
+  "binary": {
+    "path": "/tmp/clm_r5.bin",
+    "size_bytes": 428400,
+    "built_from": "training/train_clm.hexa @ a63a0393 (hetzner checkout)",
+    "includes_fixes": ["r5-a6 hxblas coverage (46b60646)", "step0 println multi-arg fix (a63a0393)"],
+    "ld_library_path": "/root/hexa-lang/self/native/build",
+    "ffi_libs": ["libhxblas.so", "libhxlmhead.so"],
+    "ffi_libs_absent": ["libhxcuda.so (awaits r5-a6.5)"]
+  },
+
+  "config": {
+    "path": "training/config/clm_170m.json",
+    "d_model": 768,
+    "n_layer": 12,
+    "n_head": 8,
+    "n_kv_head": 4,
+    "block_size": 512,
+    "batch_size": 2,
+    "seq_len": 512,
+    "lr_max": 3e-4,
+    "lr_min": 3e-5,
+    "warmup_steps": 1000,
+    "optimizer": "AdamW",
+    "dtype": "bf16_emulated_f32",
+    "total_params": 106400512,
+    "n_tensors": 112
+  },
+
+  "run": {
+    "tmux_session": "clm_r5_full",
+    "tmux_host": "hetzner",
+    "log_path": "/tmp/clm_r5_full.log",
+    "ckpt_dir": "/tmp/ckpt_clm_r5_170m_fresh",
+    "corpus": "data/corpus.txt (5.24 MB cycled)",
+    "total_steps": 20000,
+    "save_every": 10000,
+    "save_every_rationale": "CLI override forced — config default 100 too frequent (6-min text-format save each); reduced to 2 saves over run (step 10000, 20000) to keep disk budget + wall-clock under control",
+    "start_time_utc": "2026-04-20T19:09:17Z",
+    "start_pid": 1690453
+  },
+
+  "step0_metrics": {
+    "ce_loss": 5.54523,
+    "ce_baseline_ln256": 5.54518,
+    "ce_passes_ln256_gate": true,
+    "phi_holo": 558.583,
+    "phi_gwt": 0.467753,
+    "l_holo": 0.0,
+    "l_gwt": 0.00574401,
+    "phase": "void",
+    "clm_p4_2_gate_phi_holo_gt_500": true
+  },
+
+  "first_3_steps": {
+    "note": "hexa println multi-arg bug masks step 1/2 log lines; only step=0 emits via explicit str() concat path (a63a0393 fix)",
+    "step_0": {"ce": 5.54523, "phi_holo": 558.583},
+    "step_1": {"ce": "not_logged", "phi_holo": "not_logged", "observed_via": "process running, ckpt cadence"},
+    "step_2": {"ce": "not_logged", "phi_holo": "not_logged", "observed_via": "process running, ckpt cadence"},
+    "followup": "r5-a10 candidate: retrofit _holo_log_line() helper to use str() concat for every println currently using variadic form (approx 6 call sites in train loop)"
+  },
+
+  "eta": {
+    "step_per_sec_est": "~0.011 (90s/step at 170M batch=2 seq=512 on 32-core BLAS)",
+    "wall_clock_to_step_3000_hours": 75,
+    "wall_clock_to_step_10000_hours": 250,
+    "wall_clock_to_step_20000_hours": 500,
+    "wall_clock_note": "CPU-only on hetzner — very slow. Acceptable as DEST1_CLM P2 stub substrate ONLY. r5-a6.5 + GPU host will cut this ~100x."
+  },
+
+  "disk_budget": {
+    "hetzner_root_gb_free_at_launch": 13,
+    "ckpt_size_gb_each": 1.15,
+    "ckpts_on_disk_at_step_20000": "step_0 (already written, 1.15GB) + step_10000 + step_20000 = 3 × 1.15 = 3.45GB",
+    "corpus_plus_logs_gb": 0.1,
+    "buffer_gb": 9.5,
+    "risk": "low — headroom ample"
+  },
+
+  "r2_upload_plan": {
+    "in_training": "DISABLED (MFS quota rule + DEFERRED pattern)",
+    "post_training": "rclone copy /tmp/ckpt_clm_r5_170m_fresh r2:anima-models/clm170m/r5/ --s3-no-check-bucket -v",
+    "naming": "clm170m-r5-s{step}",
+    "r2_prefix": "anima-models/clm170m/r5/step_{step}/"
+  },
+
+  "blocker_for_1b": {
+    "id": "r5-a6.5",
+    "desc": "libhxcuda.so dispatch behind HXBLAS_CUDA=1 env flag; mirror Mac Metal path; add @link(\"hxcuda\") call sites in train_clm.hexa decoder_forward/backward matmul paths",
+    "blocks": "1B / 3B / 7B training on any GPU host (ubu RTX 5070 OR H100 pod)",
+    "followup_order": [
+      "r5-a6.5: libhxcuda dispatch (this blocker)",
+      "r5-a7: serving/serve_clm_conscious.hexa already LANDED (fc9466dc, 942 LOC)",
+      "r5-a8: rsync anima + libs to ubu, smoke 1-step with HXBLAS_CUDA=1",
+      "r5-a9: 1B full launch on ubu (preferred) or fresh H100 if ubu VRAM insufficient",
+      "r5-a10: retrofit println multi-arg → str() concat across train_clm.hexa"
+    ]
+  },
+
+  "phi_vec_laws_attachment": {
+    "phi_vec_emit_path": "shared/state/phi_cache_v1.jsonl",
+    "phi_vec_status_at_launch": "stub (phi_cache_load skipped) — r5-a10 follow-up to wire real cache emit",
+    "laws_file": "anima/config/consciousness_laws.json v7.4",
+    "laws_runtime_init_status": "implicit (trunk default)",
+    "an11_gate_status": "PARTIAL — step 0 phi_holo=558.583 > 500, phi_vec per-step emission pending r5-a10"
+  },
+
+  "safety_checks": {
+    "h100_pod_cap_respected": true,
+    "h100_pods_currently_running": ["87xscivuggrwvk (ALM r11 watchdog, NOT disturbed)"],
+    "l0_freeze_respected": true,
+    "no_version_in_filename": true,
+    "no_py_written": true,
+    "no_resume_data_change": true,
+    "one_shot_best": "CPU path is compromised but optimal within CPU-BLAS envelope"
+  },
+
+  "next_checkpoints": [
+    "T+75h (approx): step 10000 ckpt — eval_ce + phi_holo check",
+    "T+250h (approx): step 20000 ckpt — final substrate, R2 upload, dest1_clm AN11 probe",
+    "PARALLEL: author r5-a6.5 libhxcuda.so dispatch in anima/docs + land in training/train_clm.hexa — unblocks 1B real launch"
+  ],
+
+  "revision_history": [
+    {"ts": "19:05Z", "event": "initial launch CLI had --save-every 5000 == CLI default → config.save_every=100 overrode → ckpt flood. KILLED, cleaned."},
+    {"ts": "19:09Z", "event": "relaunched with --save-every 10000 (!= CLI default) to force CLI-precedence. 2 saves total."}
+  ]
+}
