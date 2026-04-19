@@ -910,6 +910,266 @@ fn _append_external_provenance(cite: string) {
     try { append_file(out_path, blk) } catch e {}
 }
 
+// ─── S4: FUSE-3CLASS (multimodal 8-slot feature vector) ───
+// 3-class fusion: numeric + text + CODATA(external) → [f64; 8]
+// Note: blowup.hexa::seed_to_features(str) 는 text-only 8슬롯 독립 경로.
+// 본 함수는 seed_engine 고유 multimodal 경로. 두 함수는 상호 불변.
+// 슬롯 구성:
+//   [0] numeric tanh(num/100)
+//   [1] log(|num|+1) / 10
+//   [2] CODATA tanh(codata/1e10)
+//   [3] CODATA vintage hash  (floor(codata*1e6) mod 1000 / 1000)
+//   [4] text shannon entropy (bits/char / 8)
+//   [5] text FNV-1a [0,1]
+//   [6] text SHA64-low [0,1]
+//   [7] fusion scalar (weighted sum → [0,1])
+
+// 로컬 ln (seed_engine 독립 — blowup.hexa::ln_f 복제, 15-term atanh 급수)
+fn _se_ln_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut sum = 0.0
+    let mut term = (x - 1.0) / (x + 1.0)
+    let t2 = term * term
+    let mut k: i64 = 1
+    while k <= 15 {
+        let contrib = term / to_float(k)
+        sum = sum + contrib
+        if abs_f(contrib) < 0.0000000001 { return 2.0 * sum }
+        term = term * t2
+        k = k + 2
+    }
+    return 2.0 * sum
+}
+
+// 로컬 clamp01
+fn _se_clamp01(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 }
+    if x > 1.0 { return 1.0 }
+    return x
+}
+
+// tanh(x) = (e^2x - 1) / (e^2x + 1), 입력 saturating ~ [-20,20]
+fn _se_tanh(x: f64) -> f64 {
+    let mut y = x
+    if y > 20.0 { return 1.0 }
+    if y < 0.0 - 20.0 { return 0.0 - 1.0 }
+    // e^y via Taylor 20 terms
+    let mut e2x = 1.0
+    let a2 = 2.0 * y
+    let mut term = 1.0
+    let mut k: i64 = 1
+    while k <= 20 {
+        term = term * a2 / to_float(k)
+        e2x = e2x + term
+        if abs_f(term) < 0.0000000001 { k = 21 }
+        k = k + 1
+    }
+    return (e2x - 1.0) / (e2x + 1.0)
+}
+
+// exp(x) approx for hash ops 미사용 — 생략
+
+// 문자 바이트코드 얻기 (hexa builtin char_code 의존)
+// hash: FNV-1a 32-bit-fold → [0,1]
+fn _se_fnv1a(s: string) -> f64 {
+    if s.len() == 0 { return 0.0 }
+    let mut h: i64 = 2166136261
+    let mut i: i64 = 0
+    let n = s.len()
+    while i < n {
+        let cc = char_code(s, i)
+        h = (h + cc) % 4294967296
+        h = (h * 16777619) % 4294967296
+        i = i + 1
+    }
+    if h < 0 { h = 0 - h }
+    return to_float(h % 1000000) / 1000000.0
+}
+
+// SHA64-low 시뮬 (blowup._sha64_low_norm 와 동일 알고리즘 독립 복제)
+fn _se_sha64_low(s: string) -> f64 {
+    if s.len() == 0 { return 0.0 }
+    let mut a: i64 = 1779033703
+    let mut b: i64 = 3144134277
+    let mut i: i64 = 0
+    let n = s.len()
+    while i < n {
+        let cc = char_code(s, i)
+        a = (a + cc * 2654435761) % 4294967296
+        b = (b * 31 + a) % 4294967296
+        i = i + 1
+    }
+    let mix = (a + b) % 4294967296
+    let mut mx: i64 = mix
+    if mx < 0 { mx = 0 - mx }
+    return to_float(mx % 1000000) / 1000000.0
+}
+
+// Shannon entropy (bits/char) → 정규화 [0,1]  (max log2(256)=8)
+// Note: 2-pass scan (append-only uniq list → per-unique count scan) — 인덱스 할당 비동작 우회.
+// 알려진 stage0 제약: char_code(s,i) 가 i 무시하여 항상 s[0] 반환 → 현재는 단일-글자 엔트로피로 축퇴.
+//   인터프리터 수정 후 자동 복구 (로직 보존).
+fn _se_entropy(s: string) -> f64 {
+    let n = s.len()
+    if n == 0 { return 0.0 }
+    // unique code 리스트 수집 (append-only, mutation 회피)
+    let mut uniq_cc: [i64] = []
+    let mut i: i64 = 0
+    while i < n {
+        let cc = char_code(s, i)
+        let mut dup = false
+        let mut ui: i64 = 0
+        let un = uniq_cc.len()
+        while ui < un {
+            if uniq_cc[ui] == cc { dup = true; ui = un }
+            ui = ui + 1
+        }
+        if !dup { uniq_cc = uniq_cc + [cc] }
+        i = i + 1
+    }
+    // 각 unique cc 에 대해 전체 스캔으로 count 계산
+    let mut H = 0.0
+    let kn = uniq_cc.len()
+    let mut ki: i64 = 0
+    let fn_total = to_float(n)
+    while ki < kn {
+        let target = uniq_cc[ki]
+        let mut c2: i64 = 0
+        let mut si: i64 = 0
+        while si < n {
+            if char_code(s, si) == target { c2 = c2 + 1 }
+            si = si + 1
+        }
+        let p = to_float(c2) / fn_total
+        if p > 0.0 {
+            let lnp = _se_ln_f(p)
+            let log2p = lnp / 0.6931471805599453
+            H = H - p * log2p
+        }
+        ki = ki + 1
+    }
+    return _se_clamp01(H / 8.0)
+}
+
+// 3-class fusion: numeric × text × CODATA → 8-slot feature vector
+fn fuse_3class(numeric: f64, text: string, external_CODATA: f64) -> list {
+    let mut feat = []
+    // [0] numeric tanh 정규화 (스케일 /100)
+    let s0 = _se_tanh(numeric / 100.0)
+    feat = feat + [s0]
+    // [1] log(|num|+1) / 10  → ~[0,1] for |num| up to e^10 ≈ 22026
+    let s1 = _se_clamp01(_se_ln_f(abs_f(numeric) + 1.0) / 10.0)
+    feat = feat + [s1]
+    // [2] CODATA tanh 정규화 (스케일 /1e10)
+    let s2 = _se_tanh(external_CODATA / 10000000000.0)
+    feat = feat + [s2]
+    // [3] CODATA vintage hash — floor(|codata|*1e6) mod 1000 / 1000
+    let abs_cd = abs_f(external_CODATA)
+    let scaled = abs_cd * 1000000.0
+    // floor via truncation: to_int 시도, overflow fallback modulo
+    let mut vh_int: i64 = 0
+    try { vh_int = to_int(to_string(scaled)) } catch e { vh_int = 0 }
+    if vh_int < 0 { vh_int = 0 - vh_int }
+    let s3 = to_float(vh_int % 1000) / 1000.0
+    feat = feat + [s3]
+    // [4] text shannon entropy (bits/char / 8)
+    let s4 = _se_entropy(text)
+    feat = feat + [s4]
+    // [5] text FNV-1a [0,1]
+    let s5 = _se_fnv1a(text)
+    feat = feat + [s5]
+    // [6] text SHA64-low [0,1]
+    let s6 = _se_sha64_low(text)
+    feat = feat + [s6]
+    // [7] fusion scalar — numeric(0.3) + CODATA(0.3) + text(0.4)
+    //   numeric part = (s0+s1)/2, codata part = (s2+s3)/2, text part = (s4+s5+s6)/3
+    let num_part = (s0 + s1) / 2.0
+    let cd_part = (s2 + s3) / 2.0
+    let tx_part = (s4 + s5 + s6) / 3.0
+    let s7 = _se_clamp01(num_part * 0.3 + cd_part * 0.3 + tx_part * 0.4)
+    feat = feat + [s7]
+    return feat
+}
+
+// 차등화 검증: 동일 입력 중 1 슬롯만 변경 시 해당 카테고리 슬롯만 차이가 나야 함.
+fn test_fuse_3class() {
+    println("========================================")
+    println("  S4 fuse_3class — differentiation test")
+    println("========================================")
+    // 6.022e23 ≈ 602200000000000000000000.0 (avogadro)
+    // 1.602e-19 ≈ 0.0000000000000000001602 (electron charge)
+    let avo = 602200000000000000000000.0
+    let echg = 0.0000000000000000001602
+    // Note: hexa-lang stage0 interpreter 의 char_code(s,i) 가 i 를 무시 (항상 s[0])
+    //   → 해시/엔트로피 차별화는 사실상 첫 글자에 의해 결정. 전체 문자열 활용은
+    //     인터프리터 수정 후. 본 테스트는 MVP 로 "첫 글자 차이" 로 충분.
+    let txtA = "alpha"
+    let txtB = "bravo"
+    let v1 = fuse_3class(1.0, txtA, avo)
+    let v2 = fuse_3class(2.0, txtA, avo)    // numeric 만 변경
+    let v3 = fuse_3class(1.0, txtB, avo)    // text 만 변경
+    let v4 = fuse_3class(1.0, txtA, echg)   // CODATA 만 변경
+
+    println("  slot | v1(1,A,avo) | v2(2,A,avo) | v3(1,B,avo) | v4(1,A,eC)  | Δ_num | Δ_txt | Δ_cd")
+    let mut i: i64 = 0
+    while i < 8 {
+        let f1 = to_float(v1[i])
+        let f2 = to_float(v2[i])
+        let f3 = to_float(v3[i])
+        let f4 = to_float(v4[i])
+        let d_num = abs_f(f2 - f1)
+        let d_txt = abs_f(f3 - f1)
+        let d_cd  = abs_f(f4 - f1)
+        println("  [" + to_string(i) + "]  | "
+            + to_string(f1) + " | "
+            + to_string(f2) + " | "
+            + to_string(f3) + " | "
+            + to_string(f4) + " | "
+            + to_string(d_num) + " | "
+            + to_string(d_txt) + " | "
+            + to_string(d_cd))
+        i = i + 1
+    }
+    // 기대:
+    //   slot[0],[1]: Δ_num > 0, Δ_txt=0, Δ_cd=0 (혹은 fusion 합산으로 [7] 제외)
+    //   slot[2],[3]: Δ_cd > 0, 나머지 0
+    //   slot[4],[5],[6]: Δ_txt > 0, 나머지 0
+    //   slot[7]: 모두 > 0 (fusion 결합)
+    println("========================================")
+    // pass/fail 판정 — 카테고리 대표 슬롯(강한 시그널)으로 체크
+    //   numeric 대표: [0] (tanh), text 대표: [5] (FNV, 1-char도 차별화), CODATA 대표: [2] (tanh)
+    let d0_num = abs_f(to_float(v2[0]) - to_float(v1[0]))
+    let d0_txt = abs_f(to_float(v3[0]) - to_float(v1[0]))
+    let d0_cd  = abs_f(to_float(v4[0]) - to_float(v1[0]))
+    let d5_num = abs_f(to_float(v2[5]) - to_float(v1[5]))
+    let d5_txt = abs_f(to_float(v3[5]) - to_float(v1[5]))
+    let d5_cd  = abs_f(to_float(v4[5]) - to_float(v1[5]))
+    let d2_num = abs_f(to_float(v2[2]) - to_float(v1[2]))
+    let d2_txt = abs_f(to_float(v3[2]) - to_float(v1[2]))
+    let d2_cd  = abs_f(to_float(v4[2]) - to_float(v1[2]))
+    let mut ok = true
+    // num slot [0]: num 변경 시만 차이
+    if d0_num <= 0.0 { ok = false }
+    if d0_txt > 0.0 { ok = false }
+    if d0_cd  > 0.0 { ok = false }
+    // text slot [5]: text 변경 시만 차이
+    if d5_num > 0.0 { ok = false }
+    if d5_txt <= 0.0 { ok = false }
+    if d5_cd  > 0.0 { ok = false }
+    // CODATA slot [2]: CODATA 변경 시만 차이
+    if d2_num > 0.0 { ok = false }
+    if d2_txt > 0.0 { ok = false }
+    if d2_cd  <= 0.0 { ok = false }
+    if ok {
+        println("  PASS — slot categories isolated (num[0]|cd[2]|txt[5] 상호 독립)")
+    } else {
+        println("  FAIL — cross-category leak detected")
+        println("    d0: num=" + to_string(d0_num) + " txt=" + to_string(d0_txt) + " cd=" + to_string(d0_cd))
+        println("    d2: num=" + to_string(d2_num) + " txt=" + to_string(d2_txt) + " cd=" + to_string(d2_cd))
+        println("    d5: num=" + to_string(d5_num) + " txt=" + to_string(d5_txt) + " cd=" + to_string(d5_cd))
+    }
+}
+
 // ─── MAIN ───
 
 let a = args()
@@ -1010,6 +1270,11 @@ if mode == "qpermute_info" {
     println("")
     println("  full shuffled (pipe-separated):")
     println("  " + shuffled)
+}
+
+if mode == "fuse_test" {
+    // S4: fuse_3class 슬롯 차별화 검증
+    test_fuse_3class()
 }
 
 if mode == "wave" {
