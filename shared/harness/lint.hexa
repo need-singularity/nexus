@@ -1307,7 +1307,7 @@ fn check_n6_dag_dangle(path: string) -> string {
     let to_list = _str(exec("jq -r '.edges[].to' '" + full + "' 2>/dev/null | sort -u")).trim()
     if to_list == "" { return "" }
     let targets = to_list.split("\n")
-    let mut dangling: [string] = []
+    let mut dangling = []
     for t in targets {
         let nm = _str(t).trim()
         if nm == "" { continue }
@@ -1480,6 +1480,53 @@ fn check_n61_v4(path: string) -> string {
     return ""
 }
 
+// ─── H-IF-NEST (공통) — `let x = if ... { ... } else { if ... }` 중첩 if-식 금지 ───
+// Why: hexa stage1 if-식 중첩이 transpile 회귀 유발 + 가독성 악화.
+//      `let mut x = ...` + flat `else if` chain 이 canonical.
+// Pattern: `let <name> = if <cond> { <single-expr> } else { if ...` 단일 라인 감지
+//          stage1-native: awk regex 사용 — hexa-lang 내장 regex 부재.
+// Severity:
+//   - warn (default)
+//   - error 승격: 변수명에 _idx|_val|_dim 포함 시 (tight loop / math 컨텍스트 — 런타임 회귀 리스크 높음)
+// 자기참조 skip: check_h_if_nest / H-IF-NEST 토큰 + lint.hexa/post_edit.hexa/pre_tool_guard.hexa
+// 우회: 파일 내 '@allow-if-nest' 토큰
+fn check_h_if_nest(path: string) -> string {
+    let e = ext_of(path)
+    if e != ".hexa" { return "" }
+    // 자기참조 + severity_map/registry 격리
+    if path.index_of("shared/harness/lint.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/post_edit.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/pre_tool_guard.hexa") >= 0 { return "" }
+    if path.index_of("shared/harness/severity_map.json") >= 0 { return "" }
+    if path.index_of("shared/harness/enforcement_registry.json") >= 0 { return "" }
+    let full = REPO_ROOT + "/" + path
+    if !file_exists(full) { return "" }
+    let mut content = ""
+    try { content = read_file(full) } catch e {}
+    if content == "" { return "" }
+    if content.index_of("@allow-if-nest") >= 0 { return "" }
+    if content.index_of("check_h_if_nest") >= 0 { return "" }
+    if content.index_of("H-IF-NEST") >= 0 { return "" }
+
+    // Pattern match: `^\s*let\s+\w+\s*=\s*if\b[^{]*\{[^}]*\}\s*else\s*\{\s*if\b`
+    // stage1-native: awk regex (hexa-lang regex 부재). warn pattern 을 먼저 count.
+    // NOTE: awk 명령 문자열을 single-line `let cmd_*` 로 분리 — stage1 토크나이저가
+    //       `exec(\n"..{..}..\" + var + ..")` 다행 concat 내 brace literal 혼동. H-IF-NEST 자신의 pitfall.
+    //       또한 charclass `[^{}]` 는 단일 `[^}]` 로 축약 (single-line 이라 {` 는 먼저 올 일 없음).
+    let cmd_total = "awk '/^[[:space:]]*let[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*if[[:space:]].*\\{[^}]*\\}[[:space:]]*else[[:space:]]*\\{[[:space:]]*if[[:space:]]/{c++} END{print c+0}' '" + full + "' 2>/dev/null"
+    let total_hits = _to_int0(_str(exec(cmd_total)).trim())
+    if total_hits == 0 { return "" }
+
+    // error 승격 감지: 변수명 suffix 가 _idx|_val|_dim
+    let cmd_err = "awk '/^[[:space:]]*let[[:space:]]+[A-Za-z_][A-Za-z0-9_]*(_idx|_val|_dim)[[:space:]]*=[[:space:]]*if[[:space:]].*\\{[^}]*\\}[[:space:]]*else[[:space:]]*\\{[[:space:]]*if[[:space:]]/{c++} END{print c+0}' '" + full + "' 2>/dev/null"
+    let err_hits = _to_int0(_str(exec(cmd_err)).trim())
+
+    if err_hits > 0 {
+        return "H-IF-NEST|error|중첩 if-식 " + to_string(total_hits) + "건 (그 중 tight-loop 변수 _idx|_val|_dim " + to_string(err_hits) + "건) — `let mut x + flat else-if chain` 으로 치환. 우회: '// @allow-if-nest'"
+    }
+    return "H-IF-NEST|warn|중첩 if-식 " + to_string(total_hits) + "건 — `let mut x + flat else-if chain` 권장. 우회: '// @allow-if-nest'"
+}
+
 // ─── H-GRC (공통) — `grep -c ... || echo 0` 안티패턴 금지 ───
 // Why: 매치 0건시 grep="0" + rc=1 → || echo 0 추가 → "0\n0" to_int 실패.
 // How: awk '/pat/{c++} END{print c+0}' 로 대체 — 항상 단일 숫자 출력.
@@ -1633,23 +1680,7 @@ fn check_h_noarchive(path: string) -> string {
 // 우회: 파일 내용 또는 path 에 '@allow-version-name' 토큰.
 fn _noname_v_match(s: string) -> string {
     if len(s) == 0 { return "" }
-    let suffixes = [
-        "_v1", "_v2", "_v3", "_v4", "_v5", "_v6", "_v7", "_v8", "_v9",
-        "_v10", "_v11", "_v12", "_v13", "_v14", "_v15",
-        "_V1", "_V2", "_V3", "_V4", "_V5",
-        "_mk1", "_mk2", "_mk3", "_mk4", "_mk5", "_mk6", "_mk7", "_mk8", "_mk9",
-        "_Mk1", "_Mk2", "_Mk3", "_Mk4", "_Mk5", "_Mk6", "_Mk7", "_Mk8", "_Mk9",
-        "_MK1", "_MK2", "_MK3",
-        ".v1", ".v2", ".v3", ".v4", ".v5", ".v6", ".v7", ".v8", ".v9",
-        ".V1", ".V2", ".V3",
-        ".mk1", ".mk2", ".mk3", ".mk4", ".mk5",
-        ".Mk1", ".Mk2", ".Mk3", ".Mk4", ".Mk5",
-        "_Mk.II", "_Mk.III", "_Mk.IV", "_Mk.V", "_Mk.VI", "_Mk.VII", "_Mk.VIII", "_Mk.IX", "_Mk.X",
-        "_mk.II", "_mk.III", "_mk.IV", "_mk.V", "_mk.VI", "_mk.VII",
-        "_new", "_final", "_copy", "-new", "-final", "-copy",
-        " copy", " (1)", " (2)", " (3)", " (4)", " (5)", " (6)", " (7)", " (8)", " (9)",
-        " copy 2", " copy 3", " copy 4", " copy 5"
-    ]
+    let suffixes = ["_v1", "_v2", "_v3", "_v4", "_v5", "_v6", "_v7", "_v8", "_v9", "_v10", "_v11", "_v12", "_v13", "_v14", "_v15", "_V1", "_V2", "_V3", "_V4", "_V5", "_mk1", "_mk2", "_mk3", "_mk4", "_mk5", "_mk6", "_mk7", "_mk8", "_mk9", "_Mk1", "_Mk2", "_Mk3", "_Mk4", "_Mk5", "_Mk6", "_Mk7", "_Mk8", "_Mk9", "_MK1", "_MK2", "_MK3", ".v1", ".v2", ".v3", ".v4", ".v5", ".v6", ".v7", ".v8", ".v9", ".V1", ".V2", ".V3", ".mk1", ".mk2", ".mk3", ".mk4", ".mk5", ".Mk1", ".Mk2", ".Mk3", ".Mk4", ".Mk5", "_Mk.II", "_Mk.III", "_Mk.IV", "_Mk.V", "_Mk.VI", "_Mk.VII", "_Mk.VIII", "_Mk.IX", "_Mk.X", "_mk.II", "_mk.III", "_mk.IV", "_mk.V", "_mk.VI", "_mk.VII", "_new", "_final", "_copy", "-new", "-final", "-copy", " copy", " (1)", " (2)", " (3)", " (4)", " (5)", " (6)", " (7)", " (8)", " (9)", " copy 2", " copy 3", " copy 4", " copy 5"]
     for sfx in suffixes {
         if s.ends_with(sfx) { return sfx }
     }
@@ -4005,6 +4036,10 @@ for f in files {
     // check_h_grc (공통): grep -c ... || echo 0 안티패턴 (hexa 파일만)
     let v20 = check_h_grc(path)
     if v20 != "" { violations = violations.push(path + "|" + v20) }
+
+    // check_h_if_nest (공통, H-IF-NEST): `let x = if {..} else { if ...` 중첩 if-식 금지 (hexa 파일만)
+    let v21 = check_h_if_nest(path)
+    if v21 != "" { violations = violations.push(path + "|" + v21) }
 
     // check_md2pdf (공통, H-MD2PDF): pandoc/xelatex/pdflatex/lualatex 호출 차단 (.hexa/.sh)
     let v22 = check_md2pdf(path)
