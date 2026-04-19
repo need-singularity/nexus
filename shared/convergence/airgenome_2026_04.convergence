@@ -1632,3 +1632,19 @@
 @status ossified
 @detail 신규 규칙: 원격(ubu/htz) 자원 가용 시 Mac compute 절대 금지. mac_compute_rule=remote_available_then_block. 원격 미접속 시에도 strict 모드에서는 작업 차단 (배터리/열 보호). Mac은 오케스트레이션/UI/모니터링만 허용
 @__raw__ {"ts":"2026-04-12T12:30:00Z","type":"rule","source":"airgenome/gate_config","action":"R-MAC-01","detail":"신규 규칙: 원격(ubu/htz) 자원 가용 시 Mac compute 절대 금지. mac_compute_rule=remote_available_then_block. 원격 미접속 시에도 strict 모드에서는 작업 차단 (배터리/열 보호). Mac은 오케스트레이션/UI/모니터링만 허용","status":"ossified"}
+
+@ts 2026-04-19T07:40:00Z
+@type ossification
+@source airgenome/slice_architecture
+@action AG-Q1 airgenome-claude/stress.slice
+@status ossified
+@detail docker-style user slice 격리 골화. airgenome-claude.slice(MemoryMin=4G, CPUWeight=1000) → TUI reservation. airgenome-stress.slice(MemoryMax=50%=16G, CPUWeight=10) → blowup/bench 자동 OOM 격리. bin/cx 의 systemd-run scope 에 --slice=airgenome-claude.slice. nexus/shared/harness/exec_validated 가 engine=blowup* 감지 시 systemd-run --slice=airgenome-stress.slice wrap + DBUS_SESSION_BUS_ADDRESS/XDG_RUNTIME_DIR 명시 주입 + cgroup.procs fallback. 계기: 2026-04-19 16:00 ubu load=64 RAM 30/30G 소진 → sshd 포화 → 17 claude CLI 전부 TUI 30초 먹통. 수정 후 load 64→7 (9×), RAM 244MB→7.6GB. ubu/ubu2/htz 전 호스트 slice 정의 배포. commit airgenome 094a8282 + nexus 0b06d353.
+@__raw__ {"ts":"2026-04-19T07:40:00Z","type":"ossification","source":"airgenome/slice_architecture","action":"AG-Q1 airgenome-claude/stress.slice","detail":"docker-style user slice 격리 골화. claude.slice(MemoryMin=4G, CPUWeight=1000) TUI reservation + stress.slice(MemoryMax=16G, CPUWeight=10) blowup 격리. cx + exec_validated 자동 placement (DBUS env 주입 + cgroup fallback). load 64→7 수렴","status":"ossified","metrics":{"load_before":64,"load_after":7,"ram_free_before_mb":244,"ram_free_after_gb":7.6},"commits":["airgenome 094a8282","airgenome 199e49ca","nexus 0b06d353"]}
+
+@ts 2026-04-19T07:40:30Z
+@type rule
+@source airgenome/exec_validated
+@action AG-Q2 DBUS env 명시 주입
+@status ossified
+@detail claude bash tool 환경에는 DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR 기본 누락 → systemd-run --user 가 조용히 실패 → slice 미적용 재현. exec_validated 가 run_hexa 진입부에서 `: ${XDG_RUNTIME_DIR:=/run/user/$(id -u)}; : ${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}; export` 명시. systemd-run 여전히 실패 시 cgroup.procs 직접 write fallback. 이 규칙 무시 시 slice 무력화 → OOM → sshd 포화 재발.
+@__raw__ {"ts":"2026-04-19T07:40:30Z","type":"rule","source":"airgenome/exec_validated","action":"AG-Q2 DBUS env 주입","detail":"claude bash tool env 에 DBUS/XDG_RUNTIME_DIR 누락 시 systemd-run slice 미적용. 명시 주입 + cgroup.procs fallback 강제.","status":"ossified"}
