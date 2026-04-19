@@ -106,7 +106,12 @@ fn mem_check_ok() -> bool {
     try {
         let budget = to_float(mem_budget())
         let used = to_float(mem_stats())
-        if budget > 0.0 && used / budget > 0.90 { ok = false }
+        // AI-native: budget>=1.0 가드 (0.0~1.0 미세값 division 회피)
+        // mem_budget()/mem_stats() 빌트인 미정의 빌드에서 0.0 반환 시 division 폭발 차단
+        if budget >= 1.0 {
+            let ratio = used / budget
+            if ratio > 0.90 { ok = false }
+        }
     } catch e {}
     return ok
 }
@@ -229,15 +234,16 @@ fn _is_numeric_seed(s: string) -> bool {
 
 fn text_seed_hash(s: string) -> f64 {
     if s.len() == 0 { return 1.0 }
-    // FNV-1a 32-bit: offset_basis=2166136261, prime=16777619
-    let mut h: i64 = 2166136261
+    // AI-native: DJB2 변형 (h*33 + cc) — hexa-lang interpreter `^` BitXor 미지원 우회
+    // ref: check_ssot_sync.hexa:98 동일 swap 선례. modular 32-bit 시뮬로 충돌 분포 유지.
+    // root cause: blowup.hexa Phase 4 직전 div0 의 진짜 원인 = `h ^ cc` 파싱 실패 →
+    //             text_seed_hash 폭주 → seed_to_float 0 반환 → 후단 분모 0 → div0.
+    let mut h: i64 = 5381
     let mut i: i64 = 0
     let n = s.len()
     while i < n {
         let cc = char_code(s, i)
-        h = h ^ cc
-        // 32-bit mask 시뮬: hexa-lang i64 → modular
-        h = (h * 16777619) % 4294967296
+        h = ((h * 33) + cc) % 4294967296
         i = i + 1
     }
     if h < 0 { h = 0 - h }
@@ -310,7 +316,14 @@ fn clamp01(x: f64) -> f64 {
 }
 
 fn hset_has(s: map, key: string) -> bool {
-    return has_key(s, key)
+    // AI-native: hexa-lang map 에 has_key 빌트인 미보장 → keys().contains() fallback
+    // (interpreter 빌드 차이로 has_key 미정의 시 stderr 노이즈 + 부산물 division 회피)
+    let mut found = false
+    try {
+        let ks = s.keys()
+        found = ks.contains(key)
+    } catch e {}
+    return found
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -834,13 +847,21 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     if len(clean) > 0 {
         // 불변식 강제: 말미 newline 보장 (없으면 추가)
         if !clean.ends_with("\n") { clean = clean + "\n" }
-        // 경합 방지: flock 으로 동시 쓰기 직렬화 (분할 발사 시 여러 프로세스 동시 absorb)
-        let _lock = path + ".lock"
-        try {
-            exec("(flock -w 30 200 && cat >> '" + path + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + clean + "__BLOWUP_EOF__")
-        } catch e {
-            // flock 미지원 환경 fallback
-            try { append_file(path, clean) } catch e2 {}
+        // DIAG-2026-04-19: heredoc/flock path 가 sh syntax error 로 silent drop 되는지 진단.
+        //   다라인 heredoc 가 hexa exec() 의 `\n` 처리 차이로 깨질 가능성 → append_file 우선화.
+        let _napp = len(clean_parts)
+        let mut _ok = false
+        try { append_file(path, clean); _ok = true } catch e {}
+        if !_ok {
+            // append_file 실패 시 flock fallback (구식 경로)
+            let _lock = path + ".lock"
+            try {
+                exec("(flock -w 30 200 && cat >> '" + path + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + clean + "__BLOWUP_EOF__")
+                _ok = true
+            } catch e {}
+        }
+        if !_ok {
+            println("  [atlas WRITE FAIL] " + to_string(_napp) + " lines NOT persisted -> " + path)
         }
     }
     return rejected
@@ -1317,7 +1338,7 @@ fn graph_node_exists(content: string, id: string) -> bool {
     if len(content) == 0 { return false }
     _build_node_id_set(content)
     let mut found = false
-    try { found = has_key(_node_id_set, id) } catch e {}
+    found = hset_has(_node_id_set, id)
     return found
 }
 
@@ -2872,7 +2893,7 @@ while li < len(buf_lines) {
                 let node_id = "blowup-" + parts[0]
                 // 두 단계 dedup: (1) 기존 atlas.n6 (2) 이번 배치에서 이미 추가된 것
                 let mut _already_in_batch = false
-                try { _already_in_batch = has_key(_batch_new_ids, node_id) } catch e {}
+                _already_in_batch = hset_has(_batch_new_ids, node_id)
                 if !_already_in_batch && !graph_node_exists(graph_content, node_id) {
                     let g_conf = min_f(new_conf + hub_bonus, 1.0)
                     let node_json = graph_append_node(node_id, "Discovery", domain, parts[2], g_conf)
@@ -3128,7 +3149,7 @@ while ci < len(recurse_all_corollaries) {
             let g_node_id = "recurse-" + cor_id
             // 세 단계 dedup: (1) 이번 배치 (2) 캐시 (3) grep cross-process
             let mut _absorb_in_batch = false
-            try { _absorb_in_batch = has_key(_absorb_new_ids, g_node_id) } catch e {}
+            _absorb_in_batch = hset_has(_absorb_new_ids, g_node_id)
             let mut _graph_dup = _absorb_in_batch
             if !_graph_dup { _graph_dup = graph_node_exists(absorb_graph_content, g_node_id) }
             if !_graph_dup {
