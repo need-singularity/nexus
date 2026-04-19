@@ -43,6 +43,53 @@ run_hexa() {
     local base
     base=$(basename "$engine" .hexa)
 
+    # ── blowup 자동 slice 배치 (always-on, NEXUS_NO_SLICE=1 로 비활성) ──
+    # blowup*.hexa 는 airgenome-stress.slice (MemoryMax=50%, CPUWeight=10) 안에서 실행.
+    # 목적: 다수 claude 동시 blowup → OOM/swap thrash 로 ubu 전체 먹통 방지.
+    # Mac (Darwin) 에서는 skip — slice 는 Linux systemd user 전제.
+    case "$engine" in
+        *blowup*)
+            if [ "$(uname)" = "Linux" ] && [ -z "${NEXUS_NO_SLICE:-}" ]; then
+                if command -v systemd-run >/dev/null 2>&1; then
+                    # claude bash tool env 에는 DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR 누락 →
+                    # systemd-run --user 가 조용히 실패 → slice 미적용 재현 경로. 명시 주입.
+                    : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+                    : "${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}"
+                    export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+                    # 적용 검증: 실패 시 cgroup.procs 직접 이관으로 fallback
+                    if systemd-run --user --scope --quiet \
+                        --slice=airgenome-stress.slice \
+                        "$HEXA" run "$engine" "$@" 2>/dev/null; then
+                        exit $?
+                    fi
+                    # fallback: cgroup.procs 직접 write + 그냥 exec
+                    CG=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/airgenome.slice/airgenome-stress.slice/cgroup.procs
+                    [ -w "$CG" ] && echo $$ > "$CG" 2>/dev/null
+                    exec "$HEXA" run "$engine" "$@"
+                fi
+            fi
+            ;;
+    esac
+
+    # ── enq routing (opt-in: NEXUS_ENQ_BLOWUP=1) — 중앙 slot_cap 직렬화 ──
+    if [ "${NEXUS_ENQ_BLOWUP:-0}" = "1" ]; then
+        case "$engine" in
+            *blowup*)
+                local enq_mac="/Users/ghost/Dev/airgenome/bin/enq"
+                if [ "$(uname)" = "Darwin" ] && [ -x "$enq_mac" ]; then
+                    exec "$enq_mac" heavy -- "$HEXA" run "$engine" "$@"
+                fi
+                if [ -x "$enq_mac" ]; then
+                    local qargs=""
+                    local a
+                    for a in "$@"; do qargs+=" $(printf '%q' "$a")"; done
+                    exec ssh -o ConnectTimeout=5 mac \
+                        "$enq_mac heavy -- /Users/ghost/.hx/bin/hexa run $(printf '%q' "$engine")$qargs"
+                fi
+                ;;
+        esac
+    fi
+
     if [ -n "$NEXUS_NO_TIMEOUT" ]; then
         exec "$HEXA" run "$engine" "$@"
     fi
