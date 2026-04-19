@@ -1771,7 +1771,13 @@ fn auto_select_domain() -> string {
     return "math"
 }
 
-let domain = if _raw_domain != "" { _raw_domain } else { auto_select_domain() }
+// AI-native: domain sanitize — shell metachar 제거 (공백/대괄호/별표/슬래시 → '_')
+// 원인: auto_select_domain() 이 atlas.n6 split("::")[1] → " n6atlas [10*]" 등 오염값 반환.
+// 영향: /tmp/blowup_d*_<domain>.cf 파일명에 `[`, `]`, `*`, 공백 포함 시 reload glob 실패 →
+//       buf_lines 빈 배열 → Phase 6 boost loop 0회 → post-boost 0/463 가짜 saturation.
+// 2026-04-19 Phase 6 deep audit 발견.
+let _raw_d = if _raw_domain != "" { _raw_domain } else { auto_select_domain() }
+let domain = _raw_d.trim().replace(" ", "_").replace("[", "").replace("]", "").replace("*", "").replace("/", "_").replace("\t", "_")
 // OPT-11: depth 상한 강제 (DIAG-01 fix) — 무제한 depth 방지
 let max_depth: i64 = if _raw_depth > 10 { 10 } else { _raw_depth }
 
