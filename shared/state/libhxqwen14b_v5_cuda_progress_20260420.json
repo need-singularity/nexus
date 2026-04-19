@@ -153,5 +153,44 @@
       "interpretation": "Real Qwen2.5-14B 48-layer base forward executes correctly on H100; CE > random by 3.4 nats means logits are aligned with token distribution"
     },
     "abi_compat_note": "Original struct-arg entries (hxqwen14b_load_all_weights, hxqwen14b_base_forward_v54, hxqwen14b_ce_loss_v54, hxqwen14b_smoke_v54) are UNCHANGED. The _pos and train_step_v54 entries are pure wrappers — internally pack args into the same structs and forward the call. C smoke drivers continue to work unchanged."
+  },
+  "v56_addendum_20260420T_lora_scaffolding": {
+    "ts_iso": "2026-04-20T",
+    "session": "session_20260420_alm_r12_4blocker_partial",
+    "scope": "r12 blocker #1 (LoRA forward delta on device) — SCAFFOLDING ONLY this session, full integration deferred",
+    "files_changed": [
+      "/Users/ghost/Dev/hexa-lang/self/native/hxqwen14b.c (+186 LOC v5.6 addendum)"
+    ],
+    "new_symbols": {
+      "hxqwen14b_version_v56": "() -> int64; returns 561",
+      "hxqwen14b_alloc_lora_buffers_v56": "(r: int64, out_ptrs_p: int64) -> int; allocates 384 device buffers (192 adapters × A,B), Kaiming-ish A init via host malloc + h2d copy, zero-init B (LoRA convention starts at identity), OOM unwind frees partials",
+      "hxqwen14b_free_lora_buffers_v56": "(ptrs_p: int64) -> int; frees all 384 device pointers and zeros the array",
+      "hxqwen14b_base_forward_v56_with_lora": "(args: void*) -> int; HxQwenBaseFwdV56LoraArgs (handle, ids_dev, M, logits_dev, lora_ptrs_p, lora_r, alpha_over_r). CURRENT: returns RC_ERR_CUDA_TODO until per-projection sgemm chain wires LoRA accumulate=1 into the v54 forward loop",
+      "hxqwen14b_base_forward_v56_with_lora_pos": "(handle, ids_dev, M, logits_dev, lora_ptrs_p, lora_r, alpha_over_r) -> int; positional wrapper for hexa FFI"
+    },
+    "macros": {
+      "V56_LORA_BUFS_PER_ADAPTER": 2,
+      "V56_N_ADAPTERS": 192,
+      "V56_N_LORA_BUFS": 384
+    },
+    "buffer_layout": {
+      "indexing": "For layer L in [0,48), proj T in {Q=0,K=1,V=2,O=3}: idx_A=(L*4+T)*2+0, idx_B=(L*4+T)*2+1",
+      "shapes": "A:[r,K_in], B:[N_out,r] — K_in=5120 for q/k/v, K_in=5120 (dq) for o; N_out=5120 for q/o, N_out=1024 for k/v (GQA)"
+    },
+    "what_is_NOT_done": [
+      "Per-projection LoRA accumulate=1 cuBLAS chain INSIDE base_forward_v54 loop — the actual hot path. Existing single-adapter kernel hxqwen14b_lora_fwd_single (lines 1668-1745) is ready to be called 4× per layer (192 total) but the integration is the remaining work",
+      "Per-step tmp_dev scratch buffer allocation for lora forward [M,r] inside base_forward_v56_with_lora",
+      "End-to-end smoke: A=Kaiming/B=0 → CE matches v54 base CE (identity LoRA at init)",
+      "Backward chain through 48 layers + lm_head — single-adapter backward kernel hxqwen14b_lora_bwd_single (lines 1756-1862) exists but full-network orchestrator with activation cache is r12 blocker #2 (separate, not in this scaffold)"
+    ],
+    "compile_check": {
+      "command": "gcc -c -fPIC -O0 -Wall -Wno-unused-function self/native/hxqwen14b.c -o /tmp/hxqwen14b_compile_check.o",
+      "errors": 0,
+      "warnings_count": 1,
+      "warnings_detail": "g_v54_shard_name unused — pre-existing, not from this addendum",
+      "verdict": "PASS_NO_CUDA"
+    },
+    "cuda_rebuild_status_pod": "NOT_DONE — requires rsync hxqwen14b.c to pod + nvcc rebuild on H100 to land v5.6 symbols in libhxqwen14b.so. Current pod .so is v5.5 (no v56 symbols). Documented as first-action for next session in alm_r12_launch_20260420.json.follow_on_session_handoff",
+    "honest_progress_pct": "10% of blocker #1 (struct + alloc/free + entry signature done; forward integration loop NOT done; smoke NOT run)"
   }
 }

@@ -1,0 +1,139 @@
+{
+  "_meta": {
+    "schema": "alm_r12_launch_v1",
+    "session": "session_20260420_alm_r12_4blocker_partial",
+    "started_at": "2026-04-20T",
+    "predecessor": "alm_r11_launch_20260420.json",
+    "phase4_predecessor_verdict": "ALL_4_BLOCKERS_RESOLVED_PHASE4_NO_GO_DEFERRED_TO_R12",
+    "this_session_outcome": "PHASE_1_BLOCKER_4_PASS_PHASE_2_3_4_5_NOT_LANDED_NO_LAUNCH"
+  },
+  "honest_status_summary": {
+    "blocker_3_real_qwen_bpe_tokenizer": "NOT_STARTED — 152064-vocab BPE port is genuine multi-day work; not feasible in remainder of overnight session without faking correctness. Documented as r12 follow-on with concrete next-action plan below.",
+    "blocker_4_hexackpt_v2_binary_format": "PASS — v2 helpers ported from train_clm.hexa fead4ea8 into train_alm_lora.hexa save_lora; gated on HEXACKPT_V2=1 env (default off keeps eval_alm.hexa text decoder backward compat). Bit-exact round-trip smoke PASS at training/hexackpt_v2_alm_lora_smoke.hexa: magic + version + meta + tensor data all match expected hex (76 bytes for [1..6] fp32 LE).",
+    "blocker_1_lora_forward_delta_cuda": "PARTIAL_SCAFFOLDING — single-adapter cuBLAS chain hxqwen14b_lora_fwd_single already exists in hxqwen14b.c (validated on device path 1668-1745). Added v5.6 scaffolding: HxQwenBaseFwdV56LoraArgs struct, hxqwen14b_alloc_lora_buffers_v56 (192 adapters × 2 = 384 device bufs, A=Kaiming-ish, B=zero), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora (returns RC_ERR_CUDA_TODO until per-projection sgemm chain lands), hxqwen14b_base_forward_v56_with_lora_pos. Compiles clean with gcc (no CUDA). Full integration of LoRA accumulate=1 into 192 sites of base_forward_v54 loop = remaining work.",
+    "blocker_2_lora_backward_kernels": "NOT_STARTED — single-adapter backward hxqwen14b_lora_bwd_single already exists (validated cuBLAS chain at lines 1756-1862). Full-network backward orchestrator through 48 layers + lm_head + softmax requires either activation cache (high memory) or recomputation pass — multi-day project, not honest to attempt overnight.",
+    "phase_4_100_step_smoke": "DID_NOT_RUN — would FAIL by design: trainer per-step forward still uses stub_vocab=16 + stub_logits = forward_qwen14b_with_lora (lines 588-612). Real-LoRA loss curve cannot be measured without #1 + #3 landed.",
+    "phase_5_500_step_full_launch": "NO_GO — strict adherence to feedback_one_shot_best ($12 H100 burn forbidden when stub forward still active) and 'Phase 4 smoke FAIL ⇒ no full launch' from prompt. Pod 87xscivuggrwvk left RUNNING with v5.5 .so + train_alm_lora ELF intact for next session.",
+    "phase_6_fsdp_2gpu": "DEFERRED — single-GPU r12 not yet stable; 2-GPU FSDP makes no sense before single-GPU LoRA training works."
+  },
+  "what_changed_this_session": {
+    "anima_files": [
+      {
+        "path": "training/train_alm_lora.hexa",
+        "delta_lines": "+139 (v2 helpers + save_lora dispatch)",
+        "summary": "Inlined HEXACKPT-v2 binary writer helpers (_v2lora_pack_le, _append_bytes/u8/u16/u32/u64, _append_str_bytes, _append_floats_chunked, _write_tensor, _enabled). save_lora now dispatches on HEXACKPT_V2=1 env: v2 path writes magic 'HXCKPT'+0x02+0x00, u32 version=2, u32 tensor_count=384, u64 step, u32 meta_len, meta_json, then 384 v2 tensor entries. v1 text path unchanged (default).",
+        "parse_check": "PASS"
+      },
+      {
+        "path": "training/hexackpt_v2_alm_lora_smoke.hexa",
+        "delta_lines": "+165 (new file)",
+        "summary": "Standalone round-trip smoke verifying v2 helpers produce bit-exact output. PASS: 76 bytes, magic 4858434b50540200, fp32 LE [1..6] hex 0000803f0000004000004040000080400000a0400000c040.",
+        "smoke_result": "PASS"
+      }
+    ],
+    "hexa_lang_files": [
+      {
+        "path": "self/native/hxqwen14b.c",
+        "delta_lines": "+186 (v5.6 scaffolding addendum)",
+        "summary": "Added v5.6 LoRA-fused forward scaffolding: hxqwen14b_version_v56 (returns 561), HxQwenBaseFwdV56LoraArgs struct, V56_N_ADAPTERS=192 / V56_N_LORA_BUFS=384 macros, v56_proj_n_out / v56_proj_k_in lookup helpers, hxqwen14b_alloc_lora_buffers_v56 (Kaiming-ish A init, zero B init via host malloc + h2d copy; OOM unwind frees partial allocations), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora (returns RC_ERR_CUDA_TODO until forward loop integration lands), hxqwen14b_base_forward_v56_with_lora_pos positional wrapper. gcc compile-check PASS (1 pre-existing unused-var warning).",
+        "compile_check": "PASS_NO_CUDA",
+        "cuda_compile_status": "DEFERRED — H100 nvcc rebuild not run this session. The scaffolding compiles but until base_forward_v56 is wired into per-projection sgemm chain it would only return CUDA_TODO at runtime."
+      }
+    ],
+    "nexus_files": []
+  },
+  "smoke_artifacts": {
+    "hexackpt_v2_alm_lora_smoke": {
+      "command": "/Users/ghost/Dev/nexus/shared/bin/hexa run /Users/ghost/Dev/anima/training/hexackpt_v2_alm_lora_smoke.hexa",
+      "result_stdout": "v2 lora smoke PASS — 76 bytes, magic + version + meta + tensor all bit-exact",
+      "expected_byte_count": 76,
+      "expected_magic_hex": "4858434b50540200",
+      "expected_data_hex": "0000803f0000004000004040000080400000a0400000c040",
+      "verdict": "PASS"
+    },
+    "trainer_parse_check": {
+      "command": "/Users/ghost/Dev/nexus/shared/bin/hexa parse /Users/ghost/Dev/anima/training/train_alm_lora.hexa",
+      "result_stdout": "OK: /Users/ghost/Dev/anima/training/train_alm_lora.hexa parses cleanly",
+      "verdict": "PASS"
+    },
+    "hxqwen14b_c_compile_check": {
+      "command": "gcc -c -fPIC -O0 -Wall -Wno-unused-function self/native/hxqwen14b.c -o /tmp/hxqwen14b_compile_check.o",
+      "warnings": "1 (g_v54_shard_name unused — pre-existing)",
+      "errors": 0,
+      "verdict": "PASS_CPU_ONLY"
+    }
+  },
+  "phase4_smoke_NOT_run_rationale": {
+    "explanation": "Per prompt: '100-step smoke FAIL (loss curve 변화 없음, RAM blowup, NaN 등) 시 풀 학습 발사 금지'. With only blocker #4 landed and #1/#2/#3 NOT done, the smoke would mathematically fail: train_loop's forward path is still forward_qwen14b_with_lora (stub_vocab=16 → loss=2.77=log(16) flat), and even if real Qwen forward were swapped in, no LoRA backward exists ⇒ A,B never update ⇒ loss curve flat = FAIL. Running 100 steps to confirm this would burn ~10min × $2.99/h = $0.50 for an a-priori FAIL. Did not run. The only honest decision is to defer the full-launch.",
+    "compliance": "feedback_safe_path_auto + feedback_one_shot_best + prompt 'Phase 4 smoke FAIL ⇒ no full launch'"
+  },
+  "r12_remaining_blockers_concrete_next_actions": [
+    {
+      "id": "B1_lora_forward_integration",
+      "scope_loc": "~120-180 LOC inside hxqwen14b_base_forward_v56_with_lora (replace the RC_ERR_CUDA_TODO stub)",
+      "concrete_steps": [
+        "Allocate device scratch tmp_dev = hxqwen14b_cu_malloc_bytes(M * lora_r * sizeof(float)) once per call",
+        "Inside the for(L=0..47) loop, after each cublasSgemm for q/k/v/o (existing line 3601-3608 / 3644-3645), call hxqwen14b_lora_fwd_single with accumulate=1, is_device=1, R=lora_r, alpha_over_r=alpha, x_p=ln (or attn for o_proj), A_p=lora_ptrs[adapter_idx*2+0], B_p=lora_ptrs[adapter_idx*2+1], y_p=q (or k_buf/v_buf/proj), tmp_p=tmp_dev",
+        "Adapter index for layer L: q→(L*4+0), k→(L*4+1), v→(L*4+2), o→(L*4+3)",
+        "Free tmp_dev at goto done",
+        "Smoke: A=Kaiming/B=0 → forward_v56 loss should match v54 base loss (identity LoRA at init) → CE≈8.5 on probe matches r11 baseline"
+      ],
+      "estimated_session_hours": 4
+    },
+    {
+      "id": "B2_lora_backward_orchestrator",
+      "scope_loc": "~400-600 LOC for full backward + activation cache",
+      "concrete_steps": [
+        "Forward must cache per-layer activations: ln (rmsnorm output for attn), q/k/v post-rope (for GQA backward), attn output (for o_proj), x_now after attn residual, ln2 (rmsnorm for ffn), gate/up (for swiglu backward), ffn_mid (for down_proj backward). Memory cost: 48 layers * (M*d*7 + M*Fn*3) ≈ 48 * (1024*5120*7 + 1024*13824*3) = 4.4 GB at M=1024 — fits H100 80GB",
+        "Add hxqwen14b_base_backward_v56(handle, dlogits_dev, lora_ptrs_dev, grad_lora_ptrs_dev) that walks backward: dlogits → d_ln_final via lm_head sgemm transpose → for L=47..0: rmsnorm_bwd, swiglu_bwd, gate/up sgemm_bwd, residual_split, gqa_bwd, rope_bwd, qkv sgemm_bwd, then call hxqwen14b_lora_bwd_single per (q,k,v,o) for grad_A, grad_B accumulation",
+        "Existing single-adapter backward hxqwen14b_lora_bwd_single (line 1756) handles the per-projection chain — it already computes dA, dB, dx in cuBLAS",
+        "Add cross-entropy backward kernel hxqwen14b_cu_launch_softmax_ce_bwd to produce dlogits from logits + targets",
+        "Smoke: 1-step forward + backward + Adam step → A, B norm should change (delta > 0)"
+      ],
+      "estimated_session_hours": 12
+    },
+    {
+      "id": "B3_qwen_bpe_tokenizer",
+      "scope_loc": "~800-1500 LOC pure-hexa tokenizer.json parser + UTF-8 BPE merge",
+      "concrete_steps": [
+        "Parse tokenizer.json: extract added_tokens (special), vocab dict (152064 entries), merges (BPE rules ~50K rules), pre_tokenizer pattern",
+        "Implement UTF-8 byte-level pre-tokenization (Qwen2.5 uses GPT-2-style byte-to-unicode escape table)",
+        "Implement BPE encode: greedy lowest-rank-merge loop on byte sequence, lookup vocab id",
+        "Smoke: tokenize '안녕' and 'hello world' → compare ids vs reference (Python tokenizers CLI for ground truth, but per feedback_py_ban_total cannot use Python — use Qwen vocab.txt + manual BPE walkthrough or accept the implementation IS the reference and bit-test against captured reference output)",
+        "Replace text_to_ids_stub call sites in train_alm_lora.hexa main() and train_loop"
+      ],
+      "estimated_session_hours": 16,
+      "alternative": "Could use a pre-trained Qwen tokenizer ELF callable via FFI (e.g., link against tokenizers-c shared lib if one exists). But that re-introduces a non-hexa dep — research needed."
+    }
+  ],
+  "follow_on_session_handoff": {
+    "session_state": "Pod 87xscivuggrwvk RUNNING with libhxqwen14b.so v5.5 (no v5.6 symbols yet — next session must rsync hxqwen14b.c + nvcc rebuild on pod). LD_LIBRARY_PATH unchanged: /workspace/anima/training/build:/workspace/hexa-lang/self/native:/usr/local/cuda/lib64",
+    "first_action_for_next_session": [
+      "rsync /Users/ghost/Dev/hexa-lang/self/native/hxqwen14b.c → pod:/workspace/hexa-lang/self/native/",
+      "On pod: cd /workspace/hexa-lang/self/native && nvcc -DHXQWEN14B_CUDA -shared -Xcompiler -fPIC hxqwen14b.c hxqwen14b_cuda.cu -o libhxqwen14b.so -lcublas (verify v5.6 symbols via nm -D | grep v56)",
+      "Verify hxqwen14b_alloc_lora_buffers_v56 + hxqwen14b_base_forward_v56_with_lora_pos symbols exported",
+      "Then proceed to Blocker #1 forward-integration TODO inside the C entry"
+    ],
+    "verify_artifacts_on_pod_unchanged": {
+      "libhxqwen14b_so": "/workspace/hexa-lang/self/native/libhxqwen14b.so (261000 B, v5.5 — needs rebuild for v5.6)",
+      "train_alm_lora_elf": "/workspace/build_alm/train_alm_lora (305744 B — needs rebuild after train_alm_lora.hexa edit but no FFI surface change for v2 path)",
+      "smoke_ckpt_dir": "/workspace/ckpt_alm14b_r11_smoke (intact, can reuse)"
+    }
+  },
+  "policy_compliance": {
+    "feedback_py_ban_total": "OK — no .py created/edited/run",
+    "feedback_no_quantization": "OK — bf16 only, no 4/8-bit",
+    "feedback_one_shot_best": "OK — did not waste $12 launching stub-forward training",
+    "feedback_safe_path_auto": "OK — chose to deliver verified incremental progress over fake-PASS rush",
+    "feedback_no_resume_data_change": "N/A — no training resumed",
+    "feedback_hexa_first_strict": "OK — new files .hexa, CUDA changes .c (allowed exception)",
+    "feedback_l0_freeze": "OK — no anima/core/{hub,laws,runtime/anima_runtime}.hexa edits",
+    "honest_reporting": "OK — phases NOT achieved are reported as NOT_STARTED / PARTIAL_SCAFFOLDING, not faked-PASS"
+  },
+  "git_commit_plan": {
+    "anima_subject": "feat(alm): r12 HEXACKPT-v2 binary save_lora + smoke — blocker #4 PASS",
+    "anima_body_summary": "Inlined HEXACKPT-v2 binary writer helpers ported from train_clm.hexa fead4ea8 into train_alm_lora.hexa save_lora. Gated on HEXACKPT_V2=1 env, default v1 text path preserves eval_alm.hexa decoder compat. Bit-exact round-trip smoke at training/hexackpt_v2_alm_lora_smoke.hexa PASSes. Phase 1 of r12 4-blocker resolution; #1 #2 #3 deferred per honest reporting (see shared/state/alm_r12_launch_20260420.json).",
+    "hexa_lang_subject": "feat(hxqwen14b): v5.6 LoRA-fused forward scaffolding + alloc/free buffers — r12 blocker #1 partial",
+    "hexa_lang_body_summary": "Added v5.6 LoRA scaffolding: HxQwenBaseFwdV56LoraArgs struct, hxqwen14b_alloc_lora_buffers_v56 (Kaiming A + zero B for 192 adapters × 2 = 384 device buffers), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora + _pos wrapper (returns RC_ERR_CUDA_TODO until per-projection sgemm chain lands inside the v54 forward loop). gcc compile-check PASS. Real cuBLAS integration for the 192 LoRA branches into base_forward = remaining r12 work."
+  }
+}
