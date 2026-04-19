@@ -1,0 +1,267 @@
+// ═══════════════════════════════════════════════════════════
+// discovery_rate.hexa — Mk.X axis 3 (포화 자동 감지)
+// 측정: lines_added_24h / 7day_avg / tier_promotions / new_hubs / cross_refs
+// 출력: shared/n6/discovery_rate.json + shared/n6/discovery_rate.jsonl (history) + stdout 표
+// 사용: hexa shared/n6/discovery_rate.hexa [--quiet] [--no-history]
+// ═══════════════════════════════════════════════════════════
+
+let a = args()
+let mut quiet = false
+let mut no_history = false
+let mut ai: i64 = 2
+while ai < len(a) {
+    let tok = a[ai]
+    if tok == "--quiet" || tok == "-q" { quiet = true }
+    else if tok == "--no-history" { no_history = true }
+    ai = ai + 1
+}
+
+let _HOME = env("HOME")
+let _NEXUS = _HOME + "/Dev/nexus"
+let _ATLAS = _NEXUS + "/shared/n6/atlas.n6"
+let _BLOWUP = _NEXUS + "/shared/n6/atlas.blowup.jsonl"
+let _DEG = _NEXUS + "/shared/n6/atlas.n6.deg"
+let _OUT_JSON = _NEXUS + "/shared/n6/discovery_rate.json"
+let _OUT_JSONL = _NEXUS + "/shared/n6/discovery_rate.jsonl"
+
+if !file_exists(_ATLAS) {
+    println("error: atlas.n6 not found: " + _ATLAS)
+    exit(1)
+}
+
+// ─── helpers ───
+fn _exec_int(cmd: string) -> i64 {
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec(cmd)).trim()
+        if raw != "" { r = to_int(raw) }
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+
+fn _exec_str(cmd: string) -> string {
+    let mut r = ""
+    try { r = to_string(exec(cmd)).trim() } catch e {}  // @allow-silent-catch
+    return r
+}
+
+let _now: i64 = _exec_int("date +%s")
+let _t24: i64 = _now - 86400
+let _t7d: i64 = _now - 86400 * 7
+
+// ─── 1. line_count current ───
+let _line_count: i64 = _exec_int("wc -l < '" + _ATLAS + "' 2>/dev/null")
+
+// ─── 2. git diff numstat — 24h / 7day ───
+//   atlas.n6 + atlas.blowup.jsonl 양쪽 합산 (raw exec — bash -c form 미동작)
+fn _git_added(nexus: string, since_epoch: i64) -> i64 {
+    let cmd = "git -C '" + nexus + "' log --since=" + to_string(since_epoch) + " --numstat --pretty=tformat: -- shared/n6/atlas.n6 shared/n6/atlas.blowup.jsonl 2>/dev/null | awk 'NF>=3{add+=$1} END{print add+0}'"
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec(cmd)).trim()
+        if raw != "" { r = to_int(raw) }
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+
+let _add_24h: i64 = _git_added(_NEXUS, _t24)
+let _add_7d: i64 = _git_added(_NEXUS, _t7d)
+let mut _avg_7d: i64 = 0
+if _add_7d > 0 { _avg_7d = _add_7d / 7 }
+
+// ─── 3. tier counts (current snapshot) ───
+//   [10*] / [11*] / [10**] / [12*] EOL anchored
+fn _tier_count(atlas: string, pattern: string) -> i64 {
+    let cmd = "grep -cE '" + pattern + "' '" + atlas + "' 2>/dev/null"
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec(cmd)).trim()
+        if raw != "" { r = to_int(raw) }
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+let _t10: i64 = _tier_count(_ATLAS, " \\[10\\*\\]$")
+let _t10s: i64 = _tier_count(_ATLAS, " \\[10\\*\\*\\]$")
+let _t11: i64 = _tier_count(_ATLAS, " \\[11\\*\\]$")
+let _t12: i64 = _tier_count(_ATLAS, " \\[12\\*\\]$")
+
+// ─── 3b. tier_promotions_24h — 직전 history 와 diff ───
+//   discovery_rate.jsonl 의 가장 최근 (>=24h 전) entry 와 비교
+let mut _prev_t10: i64 = -1
+let mut _prev_t10s: i64 = -1
+let mut _prev_t11: i64 = -1
+let mut _prev_t12: i64 = -1
+let mut _prev_lines: i64 = -1
+let mut _prev_hubs: i64 = -1
+let mut _prev_at: i64 = 0
+if file_exists(_OUT_JSONL) {
+    let cmd_prev = "awk -v cutoff=" + to_string(_t24) + " 'BEGIN{best=\"\"} { if(match($0,/\"at\":[0-9]+/)){ts=substr($0,RSTART+5,RLENGTH-5)+0; if(ts<=cutoff && ts>0){best=$0}}} END{print best}' '" + _OUT_JSONL + "' 2>/dev/null"
+    let prev_raw = _exec_str(cmd_prev)
+    if prev_raw != "" {
+        // 수동 JSON 정수 추출
+        fn _extract_int(s: string, key: string) -> i64 {
+            let marker = "\"" + key + "\":"
+            let idx = s.index_of(marker)
+            if idx < 0 { return -1 }
+            let after = s.substring(idx + len(marker), len(s))
+            let mut end = after.index_of(",")
+            let end2 = after.index_of("}")
+            if end < 0 || (end2 >= 0 && end2 < end) { end = end2 }
+            if end <= 0 { return -1 }
+            let mut v: i64 = -1
+            try { v = to_int(after.substring(0, end).trim()) } catch e {}  // @allow-silent-catch
+            return v
+        }
+        _prev_t10 = _extract_int(prev_raw, "tier_10")
+        _prev_t10s = _extract_int(prev_raw, "tier_10ss")
+        _prev_t11 = _extract_int(prev_raw, "tier_11")
+        _prev_t12 = _extract_int(prev_raw, "tier_12")
+        _prev_lines = _extract_int(prev_raw, "lines")
+        _prev_hubs = _extract_int(prev_raw, "hubs")
+        _prev_at = _extract_int(prev_raw, "at")
+    }
+}
+
+let mut _prom_24h: i64 = 0
+if _prev_t10 >= 0 { _prom_24h = _prom_24h + (_t10 - _prev_t10) }
+if _prev_t10s >= 0 { _prom_24h = _prom_24h + (_t10s - _prev_t10s) }
+if _prev_t11 >= 0 { _prom_24h = _prom_24h + (_t11 - _prev_t11) }
+if _prev_t12 >= 0 { _prom_24h = _prom_24h + (_t12 - _prev_t12) }
+
+// ─── 4. hubs (degree >= 100) current ───
+let mut _hubs: i64 = 0
+if file_exists(_DEG) {
+    _hubs = _exec_int("awk -F'\\t' '$2 >= 100' '" + _DEG + "' 2>/dev/null | wc -l")
+}
+let mut _new_hubs_24h: i64 = 0
+if _prev_hubs >= 0 { _new_hubs_24h = _hubs - _prev_hubs }
+
+// ─── 5. cross_ref edges (@E lines) — git log added @E lines 24h ───
+//   atlas.n6 의 @E 라인 추가 카운트 (raw exec — git -C 사용)
+let _xref_cmd = "git -C '" + _NEXUS + "' log --since=" + to_string(_t24) + " -p --pretty=tformat: -- shared/n6/atlas.n6 2>/dev/null | grep -cE '^\\+@E '"
+let mut _xref_24h: i64 = 0
+try {
+    let raw = to_string(exec(_xref_cmd)).trim()
+    if raw != "" { _xref_24h = to_int(raw) }
+} catch e {}  // @allow-silent-catch
+
+// ─── 6. plateau detection ───
+let mut _vert_sat = false
+let mut _horiz_sat = false
+let mut _iso_sat = false
+let mut _critical = false
+
+// vertical: 24h growth < 50% of 7day avg (둘 다 양수일 때만)
+if _avg_7d > 0 && _add_24h * 2 < _avg_7d {
+    _vert_sat = true
+}
+// horizontal: no new hubs AND no tier promotions
+if _new_hubs_24h <= 0 && _prom_24h <= 0 && _prev_hubs >= 0 {
+    _horiz_sat = true
+}
+// isolation: no @E added 24h
+if _xref_24h == 0 {
+    _iso_sat = true
+}
+if _vert_sat && _horiz_sat && _iso_sat { _critical = true }
+
+// ─── 7. suggested_axis ───
+let mut _suggestions = ""
+let mut _sugg_count: i64 = 0
+fn _add_sugg(cur: string, count: i64, msg: string) -> string {
+    let mut sep = ","
+    if count == 0 { sep = "" }
+    return cur + sep + "\"" + msg + "\""
+}
+if _vert_sat {
+    _suggestions = _add_sugg(_suggestions, _sugg_count, "Mk.X axis 2 - [12*] tier 활성화")
+    _sugg_count = _sugg_count + 1
+}
+if _horiz_sat {
+    _suggestions = _add_sugg(_suggestions, _sugg_count, "Mk.X axis 4 - 새 도메인 seed")
+    _sugg_count = _sugg_count + 1
+}
+if _iso_sat {
+    _suggestions = _add_sugg(_suggestions, _sugg_count, "Mk.X axis 5 - cross-engine bus")
+    _sugg_count = _sugg_count + 1
+}
+if _critical {
+    _suggestions = _add_sugg(_suggestions, _sugg_count, "CRITICAL - 모두 발사")
+    _sugg_count = _sugg_count + 1
+}
+
+// ─── 8. JSON 출력 ───
+fn _bool_str(b: bool) -> string { if b { return "true" } return "false" }
+
+let _json = "{"
+    + "\"schema\":1"
+    + ",\"at\":" + to_string(_now)
+    + ",\"lines\":" + to_string(_line_count)
+    + ",\"lines_added_24h\":" + to_string(_add_24h)
+    + ",\"lines_added_7day_total\":" + to_string(_add_7d)
+    + ",\"lines_added_7day_avg\":" + to_string(_avg_7d)
+    + ",\"tier_10\":" + to_string(_t10)
+    + ",\"tier_10ss\":" + to_string(_t10s)
+    + ",\"tier_11\":" + to_string(_t11)
+    + ",\"tier_12\":" + to_string(_t12)
+    + ",\"tier_promotions_24h\":" + to_string(_prom_24h)
+    + ",\"hubs\":" + to_string(_hubs)
+    + ",\"new_hubs_24h\":" + to_string(_new_hubs_24h)
+    + ",\"cross_ref_added_24h\":" + to_string(_xref_24h)
+    + ",\"vertical_saturation\":" + _bool_str(_vert_sat)
+    + ",\"horizontal_saturation\":" + _bool_str(_horiz_sat)
+    + ",\"isolation_saturation\":" + _bool_str(_iso_sat)
+    + ",\"critical_plateau\":" + _bool_str(_critical)
+    + ",\"prev_at\":" + to_string(_prev_at)
+    + ",\"suggested_axis\":[" + _suggestions + "]"
+    + "}"
+
+try { write_file(_OUT_JSON, _json + "\n") } catch e {}  // @allow-silent-catch
+
+// history append (jsonl) — --no-history 면 skip
+if !no_history {
+    try {
+        let mut prev = ""
+        if file_exists(_OUT_JSONL) {
+            try { prev = read_file(_OUT_JSONL) } catch e {}  // @allow-silent-catch
+        }
+        write_file(_OUT_JSONL, prev + _json + "\n")
+    } catch e {}  // @allow-silent-catch
+}
+
+// ─── 9. stdout 표 (quiet 면 skip) ───
+if !quiet {
+    fn _flag(b: bool) -> string { if b { return "TRIGGER" } return "ok" }
+    println("=== discovery rate (Mk.X axis 3) ===")
+    println("  at:                " + to_string(_now))
+    println("  lines (now):       " + to_string(_line_count))
+    println("  lines_added_24h:   " + to_string(_add_24h))
+    println("  7day_total:        " + to_string(_add_7d))
+    println("  7day_avg:          " + to_string(_avg_7d))
+    println("  tier [10*]:        " + to_string(_t10))
+    println("  tier [10**]:       " + to_string(_t10s))
+    println("  tier [11*]:        " + to_string(_t11))
+    println("  tier [12*]:        " + to_string(_t12))
+    println("  tier_promotions_24h: " + to_string(_prom_24h))
+    println("  hubs (deg>=100):   " + to_string(_hubs))
+    println("  new_hubs_24h:      " + to_string(_new_hubs_24h))
+    println("  cross_ref_added_24h: " + to_string(_xref_24h))
+    println("--- plateau ---")
+    println("  vertical:    " + _flag(_vert_sat))
+    println("  horizontal:  " + _flag(_horiz_sat))
+    println("  isolation:   " + _flag(_iso_sat))
+    println("  CRITICAL:    " + _flag(_critical))
+    if _sugg_count > 0 {
+        println("--- suggested_axis ---")
+        if _vert_sat { println("  - Mk.X axis 2 — [12*] tier 활성화") }
+        if _horiz_sat { println("  - Mk.X axis 4 — 새 도메인 seed") }
+        if _iso_sat { println("  - Mk.X axis 5 — cross-engine bus") }
+        if _critical { println("  - CRITICAL — 모두 발사") }
+    } else {
+        println("--- suggested_axis: (none — healthy growth) ---")
+    }
+    println("output: " + _OUT_JSON)
+}
+
+if _critical { exit(2) }
+exit(0)

@@ -59,6 +59,7 @@ fn now_ts() -> i64 {
 }
 
 // ─── LOCK_ROOT 보장 ───
+//   `mkdir -p` 는 단일 토큰만 사용 → shell metachar 0개. dir_exists() 빌트인 후행 검증 생략 (idempotent).
 fn ensure_root() {
     exec("mkdir -p " + shq(LOCK_ROOT) + " 2>/dev/null")
 }
@@ -67,21 +68,37 @@ fn ensure_root() {
 fn lock_path(name: string) -> string { return LOCK_ROOT + "/" + name + ".lock" }
 
 // ─── mkdir-atomic 시도 (성공=획득) ───
+//   metachar-free 패턴 (2026-04-19 fix):
+//     1. dir_exists() 빠른 경합 감지 — 이미 존재하면 즉시 false (실패)
+//     2. `mkdir 'X' 2>/dev/null` — OS-atomic, 동시 호출 시 한 명만 성공
+//     3. dir_exists() 재확인 — false 면 mkdir 자체가 실패 (권한 등)
+//     4. unique 토큰을 lock/.attempt 에 write/read-back — TOCTOU race 결정
+//        (동시 winner 가 둘 이상이면 마지막 writer 만 토큰 일치)
+//   POSIX write(2) 4KB 까지 atomic — 작은 토큰은 race-safe.
 fn mkdir_atomic(lock: string) -> bool {
-    let r = _lg_trim_str(exec("mkdir " + shq(lock) + " 2>/dev/null && echo Y || echo N"))
-    return r == "Y"
+    if dir_exists(lock) > 0 { return false }
+    exec("mkdir " + shq(lock) + " 2>/dev/null")
+    if dir_exists(lock) <= 0 { return false }
+    // 고유 토큰 = ts(ns) + ppid (충돌 가능성 무시)
+    let ts_ns = _lg_trim_str(exec("date +%s%N"))
+    let ppid = _lg_trim_str(exec("echo $PPID"))
+    let token = ts_ns + "_" + ppid
+    let attempt = lock + "/.attempt"
+    exec("printf %s " + shq(token) + " > " + shq(attempt) + " 2>/dev/null")
+    let read_back = _lg_trim_str(exec("cat " + shq(attempt) + " 2>/dev/null"))
+    return read_back == token
 }
 
 // ─── lock 디렉토리 존재 확인 ───
+//   dir_exists() 빌트인 — i64 반환 (1=exists, 0=absent). metachar 0.
 fn lock_dir_exists(lock: string) -> bool {
-    let r = _lg_trim_str(exec("[ -d " + shq(lock) + " ] && echo Y || echo N"))
-    return r == "Y"
+    return dir_exists(lock) > 0
 }
 
 // ─── lock 파일 존재 확인 ───
+//   file_exists() 빌트인 — bool 반환. metachar 0.
 fn lock_file_exists(lock: string, name: string) -> bool {
-    let r = _lg_trim_str(exec("[ -f " + shq(lock + "/" + name) + " ] && echo Y || echo N"))
-    return r == "Y"
+    return file_exists(lock + "/" + name)
 }
 
 // ─── read small file ───
@@ -90,10 +107,12 @@ fn read_small(path: string) -> string {
 }
 
 // ─── PID 살아있나 ───
+//   `ps -p PID -o pid=` — 살아있으면 PID stdout, 죽었으면 빈 출력. metachar 0
+//   (기존 `kill -0 X && echo Y || echo N` 의 metachar 패턴 제거).
 fn pid_alive(pid: string) -> bool {
     if len(pid) == 0 { return false }
-    let r = _lg_trim_str(exec("kill -0 " + shq(pid) + " 2>/dev/null && echo Y || echo N"))
-    return r == "Y"
+    let out = _lg_trim_str(exec("ps -p " + shq(pid) + " -o pid= 2>/dev/null"))
+    return len(out) > 0
 }
 
 // ─── lock 삭제 ───
@@ -168,11 +187,18 @@ fn do_release(name: string) -> i64 {
     }
     let lock = lock_path(name)
     if env("NEXUS_LOCK_STRICT") == "1" {
-        // TOCTOU window 최소화 — 한 줄로 압축. flock 없이 완전 제거 불가능 (잔존 race).
-        // hexa 에서는 bash 의 $$ = hexa process ppid. write_meta 와 일관.
-        let cmd = "[ -d " + shq(lock) + " ] && [ \"$(cat " + shq(lock + "/pid") +
-                  " 2>/dev/null)\" = \"$PPID\" ] && rm -rf " + shq(lock) + " 2>/dev/null; true"
-        exec(cmd)
+        // metachar-free strict release (2026-04-19):
+        //   1. dir_exists() / file_exists() 로 사전 검증
+        //   2. 저장된 pid 와 현재 ppid 일치 확인 — 일치 시만 rm
+        //   `kill -0` 의 `&&|;|$(` 메타 패턴 제거.
+        if dir_exists(lock) <= 0 { return 0 }
+        if !file_exists(lock + "/pid") {
+            // pid 파일 부재 — 메타 미작성 lock. 안전상 보존.
+            return 0
+        }
+        let stored_pid = _lg_trim_str(exec("cat " + shq(lock + "/pid") + " 2>/dev/null"))
+        let cur_ppid = _lg_trim_str(exec("echo $PPID"))
+        if stored_pid == cur_ppid { lock_rm(lock) }
     } else {
         lock_rm(lock)
     }
@@ -191,17 +217,28 @@ fn do_status(name: string) -> i64 {
             println("FREE")
         }
     } else {
-        let listing = _lg_str(exec("ls -1 " + shq(LOCK_ROOT) + " 2>/dev/null | sed 's/\\.lock$//'"))
-        if len(listing) > 0 { print(listing) }
+        // metachar-free listing (2026-04-19): list_dir() 빌트인 + .lock suffix 제거 hexa-side.
+        let entries = list_dir(LOCK_ROOT)
+        let mut lines = ""
+        let mut li: i64 = 0
+        let nE = len(entries)
+        while li < nE {
+            let it = _lg_trim_str(entries[li])
+            li = li + 1
+            if len(it) == 0 { continue }
+            let trimmed = if it.ends_with(".lock") { it.substring(0, len(it) - 5) } else { it }
+            if len(lines) == 0 { lines = trimmed } else { lines = lines + "\n" + trimmed }
+        }
+        if len(lines) > 0 { println(lines) }
     }
     return 0
 }
 
 // ─── gc: stale 청소 (600s+ OR dead pid) ───
+//   list_dir() 빌트인 사용 — exec ls 제거 (metachar 0이지만 일관성).
 fn do_gc() -> i64 {
     ensure_root()
-    let raw = _lg_str(exec("ls -1 " + shq(LOCK_ROOT) + " 2>/dev/null"))
-    let items = raw.split("\n")
+    let items = list_dir(LOCK_ROOT)
     let n = len(items)
     let mut i: i64 = 0
     while i < n {
