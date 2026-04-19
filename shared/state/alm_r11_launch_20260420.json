@@ -96,5 +96,26 @@
   ],
 
   "fsdp_halvening_plan_ref": "shared/state/alm_r11_fsdp_plan_20260420.json",
-  "fsdp_halvening_verdict": "DESIGN_COMPLETE_WIRE_BLOCKED — 2×H100 SXM topology chosen but blocked on libhxnccl.so (B1) + train_alm_lora.hexa FSDP integration (B2); py accelerate runner fallback forbidden by py_ban_total (B3). r11 rides single-GPU 4h wallclock as authorized; halvening deferred to r12."
+  "fsdp_halvening_verdict": "DESIGN_COMPLETE_WIRE_BLOCKED — 2×H100 SXM topology chosen but blocked on libhxnccl.so (B1) + train_alm_lora.hexa FSDP integration (B2); py accelerate runner fallback forbidden by py_ban_total (B3). r11 rides single-GPU 4h wallclock as authorized; halvening deferred to r12.",
+
+  "stage0_unblock_20260419T1630Z": {
+    "option": "A — build stage0 interpreter from hexa-lang source on pod",
+    "why_chosen": "hexa-lang source present at /workspace/hexa-lang with clean transpile+gcc path; total build time <90s; simpler than editing/redeploying watchdog SSOT while it's actively polling",
+    "root_cause": "Existing /workspace/hexa-lang/build/hexa_stage0 was a 6117-byte macOS bash shim (hexa_stage0.real watchdog) copied from Dev/hexa-lang, not a Linux binary — it delegated to /Users/ghost/.hx/packages/hexa/build/hexa_stage0.real which doesn't exist on the pod",
+    "steps_taken": [
+      "mv /workspace/hexa-lang/build/hexa_stage0 /workspace/hexa-lang/build/hexa_stage0.macshim.bak (preserve evidence)",
+      "/workspace/hexa-lang/build/hexa_v2_linux self/hexa_full.hexa /tmp/hexa_full_regen.c (transpile, 24942 LOC, OK)",
+      "cd /workspace/hexa-lang && gcc -D_GNU_SOURCE -std=gnu11 -O2 -I./self /tmp/hexa_full_regen.c -o build/hexa_stage0 -lm -ldl",
+      "mkdir -p /usr/local/bin/build && ln -sf /workspace/hexa-lang/build/hexa_stage0 /usr/local/bin/build/hexa_stage0",
+      "echo 'println(\"stage0_ok\")' > /tmp/_hx.hexa && /workspace/hexa-lang/build/hexa_stage0 /tmp/_hx.hexa → emits stage0_ok"
+    ],
+    "binary_path": "/workspace/hexa-lang/build/hexa_stage0 (1559856 bytes)",
+    "installed_symlink": "/usr/local/bin/build/hexa_stage0 -> /workspace/hexa-lang/build/hexa_stage0",
+    "verify": "self-test println PASS + live trainer process 3035 consuming 227GB RSS (Qwen2.5-14B weight load) confirms stage0 executing train_alm_lora.hexa",
+    "watchdog_transition": "RETRY trainer_exit (stage0 interpreter not found) → RETRY cuda_symbol_detected → spawn_trainer → hexa_stage0 /workspace/anima/training/train_alm_lora.hexa running (pid 3035 @ 16:30:19Z)",
+    "next_expected_blocker": "RC_ERR_CUDA_TODO from hxqwen14b_forward_with_lora — the original hard blocker that BG agent a48c754f6c52a490a is landing v5 CUDA kernels for; watchdog will re-loop BLOCKED_FFI until libhxqwen14b.so has cuLaunchKernel refs",
+    "watchdog_touched": false,
+    "trainer_touched": false,
+    "unblock_wallclock_min": 5
+  }
 }
