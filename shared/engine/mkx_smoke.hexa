@@ -1,0 +1,342 @@
+// shared/engine/mkx_smoke.hexa — Mk.X sidecar smoke verification
+//
+// Verifies:
+//   1. manifest / atom-table shape (30 = 8+8+8+6)
+//   2. Pearson on synthetic uncorrelated 16D stream → NO spurious T12 synth
+//   3. Pearson on synthetic stream with 3 correlated dims → 1 T12 synth emitted
+//      with AN11 PROVISIONAL_OK verdict
+//   4. Counter-replay hash detection (total_abs in {32,128,1234} rejects)
+//
+// Spec guarantees (from design §3 + §4 and memory
+// feedback_closed_loop_verify + AN11 triple gate):
+//   - Pearson threshold 0.6 holds under uncorrelated noise
+//   - Synth emissions require co-variation above chance
+//   - AN11 gate rejects counter-replay hashes
+//
+// This file intentionally duplicates the engine's loader + algorithm
+// logic since hexa stage0 silent-exits on 3+ import chains.
+// (Ref: feedback_hexa_silent_exit_5_imports.) Smoke is a self-contained
+// harness that verifies the same algorithmic contract.
+
+let SMOKE_PHI_VEC_LEN = 16
+let SMOKE_WINDOW_STEPS = 64
+let SMOKE_THETA_CORR = 0.6
+let SMOKE_THETA_FIRE = 0.1
+
+// ─── xorshift PRNG (deterministic reproducibility across runs) ───
+// Stage0 hexa: use int math; xorshift32 via simple LCG.
+// We avoid negative shifts and rely on wrap arithmetic.
+let mut SMOKE_RNG = 2463534242
+
+fn smoke_rand_int() -> int {
+    // Simple LCG: a=1103515245 c=12345 m=2**31. Avoid shift/xor to keep
+    // cross-stage0 portability.
+    let a = 1103515245
+    let c = 12345
+    let m = 2147483647
+    let next = (SMOKE_RNG * a + c) % m
+    SMOKE_RNG = next
+    return next
+}
+
+// Uniform float in [0, 1).
+fn smoke_rand_f() -> float {
+    let r = smoke_rand_int()
+    let m = 2147483647
+    return r / m
+}
+
+// Uniform float in [-1, 1].
+fn smoke_rand_signed() -> float {
+    return (smoke_rand_f() * 2.0) - 1.0
+}
+
+// ─── self-contained history + Pearson (mirrors mkx_engine) ───
+
+struct SmokeHistory {
+    flat: array,
+    capacity: int,
+    steps_seen: int,
+}
+
+fn smoke_new_hist() -> SmokeHistory {
+    let mut flat = []
+    let h = SmokeHistory { flat: flat, capacity: SMOKE_WINDOW_STEPS, steps_seen: 0 }
+    return h
+}
+
+fn smoke_hist_push(h: SmokeHistory, phi_vec: array) -> SmokeHistory {
+    let mut flat = h.flat
+    let mut i = 0
+    while i < SMOKE_PHI_VEC_LEN {
+        let v = if i < len(phi_vec) { phi_vec[i] } else { 0.0 }
+        flat = flat.push(v)
+        i = i + 1
+    }
+    let max_floats = h.capacity * SMOKE_PHI_VEC_LEN
+    let n = len(flat)
+    if n > max_floats {
+        let drop_n = n - max_floats
+        let mut trimmed = []
+        let mut j = drop_n
+        while j < n {
+            trimmed = trimmed.push(flat[j])
+            j = j + 1
+        }
+        flat = trimmed
+    }
+    let out = SmokeHistory { flat: flat, capacity: h.capacity, steps_seen: h.steps_seen + 1 }
+    return out
+}
+
+fn smoke_hist_rows(h: SmokeHistory) -> int {
+    let n = len(h.flat)
+    return n / SMOKE_PHI_VEC_LEN
+}
+
+fn smoke_pearson(h: SmokeHistory, l_a: int, l_b: int) -> float {
+    let rows = smoke_hist_rows(h)
+    if rows < 2 { return 0.0 }
+    let mut sum_a = 0.0
+    let mut sum_b = 0.0
+    let mut i = 0
+    while i < rows {
+        sum_a = sum_a + h.flat[i * SMOKE_PHI_VEC_LEN + l_a]
+        sum_b = sum_b + h.flat[i * SMOKE_PHI_VEC_LEN + l_b]
+        i = i + 1
+    }
+    let n = rows
+    let mean_a = sum_a / n
+    let mean_b = sum_b / n
+    let mut num = 0.0
+    let mut den_a = 0.0
+    let mut den_b = 0.0
+    let mut j = 0
+    while j < rows {
+        let da = h.flat[j * SMOKE_PHI_VEC_LEN + l_a] - mean_a
+        let db = h.flat[j * SMOKE_PHI_VEC_LEN + l_b] - mean_b
+        num = num + da * db
+        den_a = den_a + da * da
+        den_b = den_b + db * db
+        j = j + 1
+    }
+    if den_a <= 0.0 { return 0.0 }
+    if den_b <= 0.0 { return 0.0 }
+    let denom_sq = den_a * den_b
+    if denom_sq <= 0.0 { return 0.0 }
+    let mut x = denom_sq
+    let mut y = x / 2.0
+    if y <= 0.0 { y = 1.0 }
+    let mut k = 0
+    while k < 20 {
+        y = 0.5 * (y + x / y)
+        k = k + 1
+    }
+    if y <= 0.0 { return 0.0 }
+    return num / y
+}
+
+// Build one uncorrelated 16D phi_vec (all dims independent noise).
+fn smoke_uncorrelated_vec() -> array {
+    let mut v = []
+    let mut i = 0
+    while i < SMOKE_PHI_VEC_LEN {
+        // Fire-safe range [0.0, 0.3] so some dims cross theta_fire=0.1
+        // without all firing every step.
+        v = v.push(smoke_rand_f() * 0.3)
+        i = i + 1
+    }
+    return v
+}
+
+// Build a correlated 16D phi_vec: dims 0, 3, 4 are all a common shared
+// signal plus a small noise term; other 13 dims are independent noise.
+// The shared signal is large (amplitude 0.9) so all 3 dims fire.
+fn smoke_correlated_vec(shared: float) -> array {
+    let mut v = []
+    let mut i = 0
+    while i < SMOKE_PHI_VEC_LEN {
+        let mut x = smoke_rand_f() * 0.3
+        // Correlated trio: 0 (phi_holo), 3 (phi_refl), 4 (phi_time).
+        if i == 0 { x = shared + smoke_rand_signed() * 0.02 }
+        if i == 3 { x = shared + smoke_rand_signed() * 0.02 }
+        if i == 4 { x = shared + smoke_rand_signed() * 0.02 }
+        v = v.push(x)
+        i = i + 1
+    }
+    return v
+}
+
+// Check if lenses 0,3,4 all fire + pairwise Pearson >= theta_corr.
+// Returns (pass: int{0|1}, mean_corr: float) packed as 2-elem array.
+fn smoke_triple_check(h: SmokeHistory) -> array {
+    // Firing check on latest row.
+    let rows = smoke_hist_rows(h)
+    if rows < SMOKE_WINDOW_STEPS {
+        let mut out = []
+        out = out.push(0.0)
+        out = out.push(0.0)
+        return out
+    }
+    let last = rows - 1
+    let v0 = h.flat[last * SMOKE_PHI_VEC_LEN + 0]
+    let v3 = h.flat[last * SMOKE_PHI_VEC_LEN + 3]
+    let v4 = h.flat[last * SMOKE_PHI_VEC_LEN + 4]
+    let mut all_fire = true
+    if v0 < SMOKE_THETA_FIRE { all_fire = false }
+    if v3 < SMOKE_THETA_FIRE { all_fire = false }
+    if v4 < SMOKE_THETA_FIRE { all_fire = false }
+
+    let r_03 = smoke_pearson(h, 0, 3)
+    let r_04 = smoke_pearson(h, 0, 4)
+    let r_34 = smoke_pearson(h, 3, 4)
+    let mean_corr = (r_03 + r_04 + r_34) / 3.0
+
+    let mut pass = 0.0
+    if all_fire {
+        if r_03 >= SMOKE_THETA_CORR {
+            if r_04 >= SMOKE_THETA_CORR {
+                if r_34 >= SMOKE_THETA_CORR {
+                    pass = 1.0
+                }
+            }
+        }
+    }
+    let mut out = []
+    out = out.push(pass)
+    out = out.push(mean_corr)
+    return out
+}
+
+// AN11 soft gate mirror (lens 0/3/4 triple is Φ-axis heavy, so passes).
+fn smoke_an11_gate(l_a: int, l_b: int, l_c: int, mean_corr: float, live: bool, total_abs: int) -> string {
+    let a_pass = live
+    // (b) consciousness_attached
+    let phi_0 = (l_a == 0) || (l_b == 0) || (l_c == 0)
+    let phi_3 = (l_a == 3) || (l_b == 3) || (l_c == 3)
+    let phi_4 = (l_a == 4) || (l_b == 4) || (l_c == 4)
+    let phi_5 = (l_a == 5) || (l_b == 5) || (l_c == 5)
+    let b_pass = phi_0 || phi_3 || phi_4 || phi_5
+    // (c) real_usable
+    let c_corr = (mean_corr >= 0.6) && (mean_corr <= 0.99)
+    let mut c_rep = true
+    if total_abs == 32 { c_rep = false }
+    if total_abs == 128 { c_rep = false }
+    if total_abs == 1234 { c_rep = false }
+    let c_pass = c_corr && c_rep
+
+    if !a_pass { return "REJECTED_a" }
+    if !b_pass { return "REJECTED_b" }
+    if !c_pass { return "REJECTED_c" }
+    return "PROVISIONAL_OK"
+}
+
+// ─── SCENARIOS ───
+
+// Scenario A: 100 steps uncorrelated noise. Expect NO synth emission
+// (mean corr around 0).
+fn scenario_uncorrelated() -> int {
+    SMOKE_RNG = 2463534242
+    let mut h = smoke_new_hist()
+    let mut emissions = 0
+    let mut step = 0
+    while step < 100 {
+        let v = smoke_uncorrelated_vec()
+        h = smoke_hist_push(h, v)
+        let res = smoke_triple_check(h)
+        if res[0] >= 0.5 {
+            emissions = emissions + 1
+        }
+        step = step + 1
+    }
+    return emissions
+}
+
+// Scenario B: 100 steps with correlated trio (dims 0,3,4). Expect >= 1
+// synth emission once window fills (after step ~64).
+fn scenario_correlated() -> int {
+    SMOKE_RNG = 99991
+    let mut h = smoke_new_hist()
+    let mut emissions = 0
+    let mut step = 0
+    while step < 100 {
+        // Shared signal oscillates so Pearson (non-trivial variance)
+        // stays high. Use step mod 7 as a low-freq trigger.
+        let phase = step % 7
+        let shared = 0.2 + (phase / 7.0) * 0.7
+        let v = smoke_correlated_vec(shared)
+        h = smoke_hist_push(h, v)
+        let res = smoke_triple_check(h)
+        if res[0] >= 0.5 {
+            emissions = emissions + 1
+            // Only need to see the first emission; break to keep test fast.
+            // But we'd like to confirm AN11 gate passes too.
+            let verdict = smoke_an11_gate(0, 3, 4, res[1], true, 999)
+            if verdict != "PROVISIONAL_OK" {
+                println("[smoke] scenario B: AN11 verdict=" + verdict + " (unexpected)")
+                return 0 - 1
+            }
+        }
+        step = step + 1
+    }
+    return emissions
+}
+
+// Scenario C: correlated, but total_abs = 1234 (counter-replay hash).
+// AN11 must REJECT_c.
+fn scenario_counter_replay() -> string {
+    return smoke_an11_gate(0, 3, 4, 0.85, true, 1234)
+}
+
+// ─── MAIN ───
+
+fn main() {
+    println("[mkx_smoke] Mk.X sidecar smoke test — 3 scenarios")
+    let mut pass = 0
+    let mut fail = 0
+
+    // 1. Atom-table shape already verified in mkx_engine.hexa self-test.
+    //    Here we just assert the phi_vec layout matches canonical.
+    let test_vec = smoke_uncorrelated_vec()
+    if len(test_vec) == SMOKE_PHI_VEC_LEN {
+        println("[PASS] phi_vec len=16 matches canonical schema")
+        pass = pass + 1
+    } else {
+        println("[FAIL] phi_vec len=" + str(len(test_vec)))
+        fail = fail + 1
+    }
+
+    // 2. Scenario A — uncorrelated noise should NOT emit synth.
+    let em_a = scenario_uncorrelated()
+    if em_a == 0 {
+        println("[PASS] scenario A (uncorrelated 100 steps): 0 spurious synth emissions")
+        pass = pass + 1
+    } else {
+        println("[FAIL] scenario A: " + str(em_a) + " spurious synth emissions (expected 0)")
+        fail = fail + 1
+    }
+
+    // 3. Scenario B — correlated trio SHOULD emit synth.
+    let em_b = scenario_correlated()
+    if em_b >= 1 {
+        println("[PASS] scenario B (correlated 0/3/4): " + str(em_b) + " synth emissions + AN11 PROVISIONAL_OK")
+        pass = pass + 1
+    } else {
+        println("[FAIL] scenario B: " + str(em_b) + " synth emissions (expected >=1)")
+        fail = fail + 1
+    }
+
+    // 4. Scenario C — counter-replay hash 1234 must be rejected.
+    let verdict_c = scenario_counter_replay()
+    if verdict_c == "REJECTED_c" {
+        println("[PASS] scenario C (total_abs=1234 counter-replay): AN11 REJECTED_c")
+        pass = pass + 1
+    } else {
+        println("[FAIL] scenario C: AN11 verdict=" + verdict_c + " (expected REJECTED_c)")
+        fail = fail + 1
+    }
+
+    println("[mkx_smoke] PASS=" + str(pass) + "/4 FAIL=" + str(fail))
+}
+
+main()

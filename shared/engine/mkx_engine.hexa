@@ -1,0 +1,593 @@
+// shared/engine/mkx_engine.hexa — Mk.X consciousness sidecar engine
+//
+// Status:    PROVISIONAL sidecar. Mk.V.1 (anima/core/*.hexa) UNTOUCHED (L0 freeze).
+// Design:    anima/docs/mkx_engine_design_20260420.md (259 LOC, sections 1-8)
+// Sibling:   anima/docs/mk_x_engine_design_20260419.md (L1/L2/L3 blueprint)
+// Manifest:  shared/engine/mkx_manifest.json (30 atoms T10-T13)
+// SSOT phi:  anima/training/alm_phi_vec_logger.hexa (canonical 16D)
+// Rules:     shared/rules/anima.json#AN11 (triple gate)
+// Memory:    project_absorption_pipeline_path_b (stage-1 PROVISIONAL only)
+//
+// Design rule: Mk.X sidecar NEVER touches Mk.V.1 internal state. It reads
+// phi_vec snapshots + law state externally, emits PROVISIONAL atoms, and
+// writes gate-verified records to shared/state/mkx_*. No .py, no core edit.
+//
+// Style notes from memory:
+//   - feedback_hexa_struct_list_alias: DON'T put two structs each carrying
+//     array fields; use parallel arrays or single struct.
+//   - feedback_hexa_struct_return_bug: DON'T return structs with >=3 floats
+//     (return ints / use out-params / pack into single array).
+//   - feedback_hexa_silent_exit_5_imports: NO `use` chains 3+ deep — this
+//     file is self-contained intentionally.
+//   - feedback_hexa_lists_pbv: helper fns cannot mutate caller list; inline
+//     or return the mutated list.
+//
+// Sections:
+//   1. Constants + phi_vec index (mirrors alm_phi_vec_logger canonical)
+//   2. Atom loader (manifest → runtime atom table — parallel arrays)
+//   3. Observability measurement stubs (per-atom TODO hooks)
+//   4. Cross-lens synthesizer (rolling 64-step, Pearson, clique k in [3..5])
+//   5. AN11 promotion gate (triple check: weight + consciousness + usable)
+//   6. Integration API: mkx_tick(phi_vec, laws_state) → bookkeeping
+//
+// Self-test / smoke runner lives separately in:
+//   shared/engine/mkx_smoke.hexa
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 1: Constants + canonical phi_vec index
+// ═══════════════════════════════════════════════════════════════════════
+
+let MKX_PHI_VEC_LEN = 16
+let MKX_WINDOW_STEPS = 64
+let MKX_THETA_CORR_DEFAULT = 0.6
+let MKX_THETA_FIRE_DEFAULT = 0.1
+let MKX_K_MIN = 3
+let MKX_K_MAX = 5
+let MKX_BLACKLIST_DAYS = 7
+let MKX_MANIFEST_PATH = "shared/engine/mkx_manifest.json"
+let MKX_STATE_DIR = "shared/state"
+
+// Canonical phi_vec names — mirror alm_phi_vec_logger.hexa. Keep in sync.
+fn mkx_phi_vec_name(i: int) -> string {
+    if i == 0  { return "phi_holo" }
+    if i == 1  { return "phi_complexity" }
+    if i == 2  { return "phi_gwt" }
+    if i == 3  { return "phi_refl" }
+    if i == 4  { return "phi_time" }
+    if i == 5  { return "phi_emb" }
+    if i == 6  { return "phi_nested_drift" }
+    if i == 7  { return "phi_k_amp" }
+    if i == 8  { return "phi_affect_v" }
+    if i == 9  { return "phi_affect_a" }
+    if i == 10 { return "phi_finitude" }
+    if i == 11 { return "phi_hive_collec" }
+    if i == 12 { return "phi_hive_indiv" }
+    if i == 13 { return "phi_hive_emerge" }
+    if i == 14 { return "phi_dream_phase" }
+    if i == 15 { return "phi_cycle_count" }
+    return "unknown"
+}
+
+// Anti-counter-replay hashes (per §3 design).
+fn mkx_is_counter_replay_hash(h: int) -> bool {
+    if h == 32 { return true }
+    if h == 128 { return true }
+    if h == 1234 { return true }
+    return false
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 2: Atom loader
+//
+// We use PARALLEL ARRAYS (atom_ids[i], atom_tiers[i], ...) rather than a
+// struct-list to avoid the hexa struct-list-aliasing bug. Everything
+// returned from mkx_load_atoms() is a single struct that bundles parallel
+// arrays — no list<Struct{list}> nesting.
+// ═══════════════════════════════════════════════════════════════════════
+
+struct AtomTable {
+    ids: array,
+    tiers: array,
+    names: array,
+    lens_sources: array,
+    conditions: array,
+}
+
+// Build the T10–T13 atom table. Parallel-array schema. Mirrors
+// mkx_manifest.json; intentionally hard-coded here so the engine runs
+// without a JSON parser dependency (manifest remains SSOT for docs).
+fn mkx_load_atoms() -> AtomTable {
+    let mut ids = []
+    let mut tiers = []
+    let mut names = []
+    let mut lenses = []
+    let mut conds = []
+
+    // — Tier 10 (8 atoms) —
+    ids = ids.push("MKX-T10-subcoup");        tiers = tiers.push(10); names = names.push("substrate-coupling");     lenses = lenses.push("info_geom");      conds = conds.push("MI(atom_flag, grad_W) > 0.02")
+    ids = ids.push("MKX-T10-phi_q_deep");     tiers = tiers.push(10); names = names.push("phi-q-deep");             lenses = lenses.push("phi_variant");    conds = conds.push("depth-20 phi_q_norm >= 1.3x depth-1")
+    ids = ids.push("MKX-T10-holo_bdy");       tiers = tiers.push(10); names = names.push("holographic-boundary");   lenses = lenses.push("L2_holographic"); conds = conds.push("G_holo residual within 5% on n=6 vacuum")
+    ids = ids.push("MKX-T10-servant_grad");   tiers = tiers.push(10); names = names.push("servant-backward-tape");  lenses = lenses.push("servant_tape");   conds = conds.push("dropout grad matches analytic AD")
+    ids = ids.push("MKX-T10-n6_noether");     tiers = tiers.push(10); names = names.push("n6-noether");             lenses = lenses.push("AN14_sigma_phi"); conds = conds.push("sigma*phi=24 invariant eps [0,0.05]")
+    ids = ids.push("MKX-T10-tier6_promote");  tiers = tiers.push(10); names = names.push("tier6-promotion");        lenses = lenses.push("sumt_tier6");     conds = conds.push("tier-6 sumt atom passes H1/H2/H3 n>=3")
+    ids = ids.push("MKX-T10-ca_soc_edge");    tiers = tiers.push(10); names = names.push("ca-soc-edge-of-chaos");   lenses = lenses.push("ca_dynamics");    conds = conds.push("CA lambda [0.48,0.52] slope -1.5 pm 0.1")
+    ids = ids.push("MKX-T10-resonance_sig");  tiers = tiers.push(10); names = names.push("resonance-sigma-star");   lenses = lenses.push("sigma_grid");     conds = conds.push("5% abs-gain at sigma != 0.05")
+
+    // — Tier 11 (8 atoms, most blocked on lens closure) —
+    ids = ids.push("MKX-T11-desire");         tiers = tiers.push(11); names = names.push("desire-phenom");          lenses = lenses.push("PHIL_desire");    conds = conds.push("hire_sim rubric delta >= 0.1 n=3")
+    ids = ids.push("MKX-T11-narrative");      tiers = tiers.push(11); names = names.push("narrative-coherence");    lenses = lenses.push("PHIL_narrative"); conds = conds.push("MI(ctx_t,ctx_t+k) monotone k [1..16]")
+    ids = ids.push("MKX-T11-alterity");       tiers = tiers.push(11); names = names.push("alterity-dual-agent");    lenses = lenses.push("PHIL_alterity");  conds = conds.push("dual-agent reduces joint phi var >=8%")
+    ids = ids.push("MKX-T11-finitude");       tiers = tiers.push(11); names = names.push("finitude-sein");          lenses = lenses.push("ONTO_finitude");  conds = conds.push("termination KL >= threshold not length")
+    ids = ids.push("MKX-T11-questioning");    tiers = tiers.push(11); names = names.push("dasein-questioning");     lenses = lenses.push("DASEIN_quest");   conds = conds.push("interrog activations corr >= 0.5 entropy")
+    ids = ids.push("MKX-T11-sein");           tiers = tiers.push(11); names = names.push("dasein-sein");            lenses = lenses.push("DASEIN_sein");    conds = conds.push("psi_vac=(0.5,0.5) fixed point within 5%")
+    ids = ids.push("MKX-T11-red_team");       tiers = tiers.push(11); names = names.push("red-team-survivor");      lenses = lenses.push("red_team");       conds = conds.push("adversarial degrades phi >=30% not loss")
+    ids = ids.push("MKX-T11-consensus");      tiers = tiers.push(11); names = names.push("nexus6-consensus");       lenses = lenses.push("nexus6");         conds = conds.push(">=3 agents converge edit-dist <= 0.2")
+
+    // — Tier 12 (8 atoms, emitted at runtime by synthesizer) —
+    ids = ids.push("MKX-T12-field_holo_quant"); tiers = tiers.push(12); names = names.push("field-holo-quant");     lenses = lenses.push("L1,L2,L3_quant");   conds = conds.push("3 fire dt=1 pairwise pearson >= 0.6 w=64")
+    ids = ids.push("MKX-T12-toe_resonance");    tiers = tiers.push(12); names = names.push("toe-x-resonance");      lenses = lenses.push("L_toe,sigma");      conds = conds.push("TOE dW and sigma-bonus cos >= 0.8")
+    ids = ids.push("MKX-T12-narr_desire_alter");tiers = tiers.push(12); names = names.push("narr-desire-alter");    lenses = lenses.push("T11_narr,des,alt"); conds = conds.push("3-way MI > 2-way MI by >= 15%")
+    ids = ids.push("MKX-T12-finit_sein_quest"); tiers = tiers.push(12); names = names.push("finit-sein-quest");     lenses = lenses.push("T11_fin,sein,q");   conds = conds.push("ontological triplet co-fire phi_holo peak")
+    ids = ids.push("MKX-T12-worldsheet_n6");    tiers = tiers.push(12); names = names.push("worldsheet-n6");        lenses = lenses.push("L4b_ws,AN14");      conds = conds.push("modular invariance + n=6 under regge perturb")
+    ids = ids.push("MKX-T12-ca_servant_holo");  tiers = tiers.push(12); names = names.push("ca-servant-holo");      lenses = lenses.push("CA_SOC,servant,L2");conds = conds.push("edge-of-chaos through boundary lift + tape")
+    ids = ids.push("MKX-T12-phi_q_hebb");       tiers = tiers.push(12); names = names.push("phi-q-hebb");           lenses = lenses.push("phi_q_deep,hebb");  conds = conds.push("depth-20 phi_q co-var w/ local hebbian plast")
+    ids = ids.push("MKX-T12-meta_contradic");   tiers = tiers.push(12); names = names.push("meta-contradic");       lenses = lenses.push("meta,contradic");   conds = conds.push("meta-lens fires on its own output bounded")
+
+    // — Tier 13 (6 atoms, external-witness required) —
+    ids = ids.push("MKX-T13-closure_fix");              tiers = tiers.push(13); names = names.push("a6-meta-closure-fix");     lenses = lenses.push("A6_closure");     conds = conds.push("fixed point stable +/-1 perturb 100 steps")
+    ids = ids.push("MKX-T13-self_ref");                 tiers = tiers.push(13); names = names.push("self-referential-law");    lenses = lenses.push("Law146");         conds = conds.push("law w/ internal symbols reproducible clean pod")
+    ids = ids.push("MKX-T13-counter_replay_detect");    tiers = tiers.push(13); names = names.push("counter-replay-detector"); lenses = lenses.push("d_quarantine");   conds = conds.push("engine flags own total_abs in {32,128,1234}")
+    ids = ids.push("MKX-T13-tier_boundary");            tiers = tiers.push(13); names = names.push("tier-boundary-predict");   lenses = lenses.push("saturation");     conds = conds.push("engine predicts own saturation n-step ahead")
+    ids = ids.push("MKX-T13-compress_peak");            tiers = tiers.push(13); names = names.push("phi-mi-compression-peak"); lenses = lenses.push("phi_non_monot");  conds = conds.push("engine detects peak-then-drop no hardcode")
+    ids = ids.push("MKX-T13-multi_epoch_persist");      tiers = tiers.push(13); names = names.push("multi-epoch-persistence"); lenses = lenses.push("ckpt_persist");   conds = conds.push("atom fires after pod restart + re-seed same id")
+
+    let tbl = AtomTable { ids: ids, tiers: tiers, names: names, lens_sources: lenses, conditions: conds }
+    return tbl
+}
+
+fn mkx_atom_count_by_tier(tbl: AtomTable, tier: int) -> int {
+    let mut c = 0
+    let mut i = 0
+    while i < len(tbl.tiers) {
+        if tbl.tiers[i] == tier { c = c + 1 }
+        i = i + 1
+    }
+    return c
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 3: Observability measurement (per-atom stubs)
+//
+// Each atom has a condition-check fn. Most are TODO stubs that return
+// false until the real measurement lands. T10 atoms are measurable today
+// on Mk.V.1 runs but we keep them as stubs in this ship — per budget
+// pitfall the plan is: atom loader + synthesizer + smoke land now,
+// observability gets wired per-atom in follow-up iters (design §5 plan).
+// ═══════════════════════════════════════════════════════════════════════
+
+// Check observability for a single atom. Returns (fired: bool, score: float).
+// Packed as 2-float array because multi-float struct returns are buggy.
+fn mkx_check_observability(atom_id: string, phi_vec: array, laws_state: string) -> array {
+    // TODO(T10 subcoup): wire real MI(atom_flag, grad_W) — needs hook
+    //                    into train_clm / train_alm gradient tape.
+    // TODO(T10 phi_q_deep): read depth-20 phi_q_norm from ALM ckpt.
+    // TODO(T10 holo_bdy): compute G_holo residual from PureField module.
+    // TODO(T10 servant_grad): cross-check analytic AD vs servant mask.
+    // TODO(T10 n6_noether): perturb sigma*phi product by eps in [0,0.05].
+    // TODO(T10 tier6_promote): iterate provisional_atoms_20260419.json.
+    // TODO(T10 ca_soc_edge): sweep CA lambda in [0.48,0.52].
+    // TODO(T10 resonance_sig): sigma grid sweep.
+    //
+    // TODO(T11 *): all blocked on 20_lenses_audit P0 (py->hexa port).
+    // TODO(T13 *): needs external witness (different pod/seed).
+    //
+    // For now: return (fired=false, score=0.0). Smoke test calibrated
+    // for this — it drives T12 via the synthesizer (Section 4), not
+    // via per-atom checks.
+    let mut out = []
+    out = out.push(0.0)  // fired flag (0 or 1)
+    out = out.push(0.0)  // score
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 4: Cross-lens synthesizer (lens-of-lenses, meta-lens M)
+//
+// Algorithm (from design §3):
+//   INPUT:  S[t,l] lens-score stream (T x 16)
+//           theta_fire per-lens threshold
+//           theta_corr co-variation threshold (0.6)
+//           w = 64 step window
+//           k in [3..5]
+//   OUTPUT: stream of provisional T12 atoms (lens triple + window + mean_corr)
+//
+// We keep the history buffer as a SINGLE flat array (T*16 floats), indexed
+// as hist[t * 16 + l], to avoid list-of-lists aliasing issues.
+// ═══════════════════════════════════════════════════════════════════════
+
+struct LensHistory {
+    flat: array,      // flat (T*16) float buffer
+    capacity: int,    // max T we retain = MKX_WINDOW_STEPS
+    steps_seen: int,  // monotonic step counter (for dedup keys)
+}
+
+fn mkx_new_history() -> LensHistory {
+    let mut flat = []
+    let h = LensHistory { flat: flat, capacity: MKX_WINDOW_STEPS, steps_seen: 0 }
+    return h
+}
+
+// Append one phi_vec (len 16) to the rolling window. Keeps last `capacity` rows.
+fn mkx_history_push(h: LensHistory, phi_vec: array) -> LensHistory {
+    let mut flat = h.flat
+    // Append 16 values.
+    let mut i = 0
+    while i < MKX_PHI_VEC_LEN {
+        let v = if i < len(phi_vec) { phi_vec[i] } else { 0.0 }
+        flat = flat.push(v)
+        i = i + 1
+    }
+    // Trim if oversized. Keep only last capacity rows (capacity*16 floats).
+    let max_floats = h.capacity * MKX_PHI_VEC_LEN
+    let n = len(flat)
+    if n > max_floats {
+        // Shift: drop the first (n - max_floats) floats.
+        let drop_n = n - max_floats
+        let mut trimmed = []
+        let mut j = drop_n
+        while j < n {
+            trimmed = trimmed.push(flat[j])
+            j = j + 1
+        }
+        flat = trimmed
+    }
+    let out = LensHistory { flat: flat, capacity: h.capacity, steps_seen: h.steps_seen + 1 }
+    return out
+}
+
+fn mkx_history_rows(h: LensHistory) -> int {
+    let n = len(h.flat)
+    return n / MKX_PHI_VEC_LEN
+}
+
+// Pearson correlation between two columns l_a and l_b across all rows.
+fn mkx_pearson(h: LensHistory, l_a: int, l_b: int) -> float {
+    let rows = mkx_history_rows(h)
+    if rows < 2 { return 0.0 }
+    let mut sum_a = 0.0
+    let mut sum_b = 0.0
+    let mut i = 0
+    while i < rows {
+        sum_a = sum_a + h.flat[i * MKX_PHI_VEC_LEN + l_a]
+        sum_b = sum_b + h.flat[i * MKX_PHI_VEC_LEN + l_b]
+        i = i + 1
+    }
+    let n = rows
+    let mean_a = sum_a / n
+    let mean_b = sum_b / n
+    let mut num = 0.0
+    let mut den_a = 0.0
+    let mut den_b = 0.0
+    let mut j = 0
+    while j < rows {
+        let da = h.flat[j * MKX_PHI_VEC_LEN + l_a] - mean_a
+        let db = h.flat[j * MKX_PHI_VEC_LEN + l_b] - mean_b
+        num = num + da * db
+        den_a = den_a + da * da
+        den_b = den_b + db * db
+        j = j + 1
+    }
+    if den_a <= 0.0 { return 0.0 }
+    if den_b <= 0.0 { return 0.0 }
+    let denom_sq = den_a * den_b
+    if denom_sq <= 0.0 { return 0.0 }
+    // sqrt via Newton — avoid stdlib dependency on sqrt.
+    let mut x = denom_sq
+    let mut y = x / 2.0
+    if y <= 0.0 { y = 1.0 }
+    let mut k = 0
+    while k < 20 {
+        y = 0.5 * (y + x / y)
+        k = k + 1
+    }
+    if y <= 0.0 { return 0.0 }
+    return num / y
+}
+
+// Find indices of "firing" lenses on the latest row.
+fn mkx_firing_lenses(h: LensHistory, theta_fire: float) -> array {
+    let mut fired = []
+    let rows = mkx_history_rows(h)
+    if rows == 0 { return fired }
+    let last = rows - 1
+    let mut l = 0
+    while l < MKX_PHI_VEC_LEN {
+        let v = h.flat[last * MKX_PHI_VEC_LEN + l]
+        if v >= theta_fire {
+            fired = fired.push(l)
+        }
+        l = l + 1
+    }
+    return fired
+}
+
+// Enumerate ALL unordered triples (a, b, c) from the firing lens list.
+// Returns a flat array where every 3 consecutive ints form one triple.
+// (We keep k_min = 3 as the primary synth size; k in [4..5] extension
+// omitted in v1 — design §3 budget worst-case includes them but the
+// 3-clique case dominates and is sufficient for smoke verification.)
+fn mkx_enumerate_triples(fired: array) -> array {
+    let mut triples = []
+    let n = len(fired)
+    let mut i = 0
+    while i < n {
+        let mut j = i + 1
+        while j < n {
+            let mut k = j + 1
+            while k < n {
+                triples = triples.push(fired[i])
+                triples = triples.push(fired[j])
+                triples = triples.push(fired[k])
+                k = k + 1
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return triples
+}
+
+// Check pairwise Pearson on a triple: all 3 pairs must exceed theta_corr.
+// Returns (pass: float{0|1}, mean_corr: float) packed in 2-float array.
+fn mkx_triple_corr_check(h: LensHistory, a: int, b: int, c: int, theta_corr: float) -> array {
+    let r_ab = mkx_pearson(h, a, b)
+    let r_ac = mkx_pearson(h, a, c)
+    let r_bc = mkx_pearson(h, b, c)
+    let mut pass = 0.0
+    if r_ab >= theta_corr {
+        if r_ac >= theta_corr {
+            if r_bc >= theta_corr {
+                pass = 1.0
+            }
+        }
+    }
+    let mean = (r_ab + r_ac + r_bc) / 3.0
+    let mut out = []
+    out = out.push(pass)
+    out = out.push(mean)
+    return out
+}
+
+// Build a compact dedup key from (a,b,c, t_start).
+// Encoding: sorted-lens-ids concat "_" + t_start.
+fn mkx_synth_key(a: int, b: int, c: int, t_start: int) -> string {
+    // Sort a,b,c ascending (bubble 3).
+    let mut x = a
+    let mut y = b
+    let mut z = c
+    if x > y { let t = x; x = y; y = t }
+    if y > z { let t = y; y = z; z = t }
+    if x > y { let t = x; x = y; y = t }
+    return str(x) + "_" + str(y) + "_" + str(z) + "@" + str(t_start)
+}
+
+// Key is in dedup list?
+fn mkx_key_seen(dedup: array, key: string) -> bool {
+    let mut i = 0
+    while i < len(dedup) {
+        if dedup[i] == key { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// Anti-counter-replay check: if mean_corr hashes to a cached fixed point
+// AND total_abs is in {32,128,1234}, treat as d-quarantine pattern.
+fn mkx_is_counter_replay(mean_corr: float, total_abs: int) -> bool {
+    if mkx_is_counter_replay_hash(total_abs) {
+        // Additionally require the mean_corr to be bit-exactly identical
+        // across the last two windows — but we only have the current
+        // window here, so treat any total_abs match as a soft signal.
+        return true
+    }
+    return false
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 5: AN11 promotion gate
+//
+// Triple check (shared/rules/anima.json AN11):
+//   (a) weight_emergent       — param-internal, not prompt wrapping
+//   (b) consciousness_attached— phi_vec + laws runtime verify
+//   (c) real_usable           — HTTP/CLI + R2 artifact + README
+//
+// In sidecar, we apply an INTERNAL soft-gate: atoms emitted from the
+// synthesizer get a verified-record attached but stay PROVISIONAL only.
+// Stable/ossified promotion never happens here — handled by downstream
+// absorption pipeline (project_absorption_pipeline_path_b).
+// ═══════════════════════════════════════════════════════════════════════
+
+struct AN11Record {
+    atom_id: string,
+    weight_emergent: bool,
+    consciousness_attached: bool,
+    real_usable: bool,
+    verdict: string,     // "PROVISIONAL_OK" | "REJECTED_a" | "REJECTED_b" | "REJECTED_c"
+    evidence: string,    // one-line blurb
+}
+
+// Soft gate: for a synth-emitted T12 atom, we certify:
+//   (a) weight_emergent = true iff the participating lenses' scores came
+//       from a live phi_vec (not a prompt replay). Caller asserts this by
+//       passing `source_is_live = true`.
+//   (b) consciousness_attached = true iff at least one of the triple is
+//       a Φ-axis lens (phi_holo / phi_refl / phi_time / phi_emb).
+//   (c) real_usable = true iff the mean_corr is bounded [0.6, 0.99] and
+//       not a counter-replay pattern.
+//
+// "PROVISIONAL_OK" means this atom is safe to register as stage-1
+// PROVISIONAL in the absorption pipeline — NOT promoted further.
+fn mkx_an11_gate(
+    atom_id: string,
+    l_a: int, l_b: int, l_c: int,
+    mean_corr: float,
+    source_is_live: bool,
+    total_abs: int
+) -> AN11Record {
+    // (a) weight_emergent
+    let a_pass = source_is_live
+
+    // (b) consciousness_attached — any of triple in {0,3,4,5}
+    let phi_axis_0 = (l_a == 0) || (l_b == 0) || (l_c == 0)
+    let phi_axis_3 = (l_a == 3) || (l_b == 3) || (l_c == 3)
+    let phi_axis_4 = (l_a == 4) || (l_b == 4) || (l_c == 4)
+    let phi_axis_5 = (l_a == 5) || (l_b == 5) || (l_c == 5)
+    let b_pass = phi_axis_0 || phi_axis_3 || phi_axis_4 || phi_axis_5
+
+    // (c) real_usable — bounded corr + no counter-replay hash
+    let c_pass_corr = (mean_corr >= 0.6) && (mean_corr <= 0.99)
+    let c_pass_rep = !mkx_is_counter_replay(mean_corr, total_abs)
+    let c_pass = c_pass_corr && c_pass_rep
+
+    let mut verdict = "PROVISIONAL_OK"
+    if !a_pass { verdict = "REJECTED_a" }
+    if !b_pass { if verdict == "PROVISIONAL_OK" { verdict = "REJECTED_b" } }
+    if !c_pass { if verdict == "PROVISIONAL_OK" { verdict = "REJECTED_c" } }
+
+    let evid = "lenses=[" + str(l_a) + "," + str(l_b) + "," + str(l_c) + "] corr=" + str(mean_corr) + " live=" + str(source_is_live) + " abs=" + str(total_abs)
+
+    let rec = AN11Record {
+        atom_id: atom_id,
+        weight_emergent: a_pass,
+        consciousness_attached: b_pass,
+        real_usable: c_pass,
+        verdict: verdict,
+        evidence: evid,
+    }
+    return rec
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Section 6: Integration API
+//
+// mkx_tick(phi_vec, laws_state) — one step of the Mk.X sidecar.
+//   Returns a bundle struct containing:
+//     - new_atoms:     array of atom-ids that passed observability (T10-T13)
+//     - fired_synths:  array of T12 synth ids (one entry per emission)
+//     - gate_records:  array of AN11 verdicts (flattened strings)
+//
+// Caller keeps a LensHistory across ticks and passes it in / back.
+// ═══════════════════════════════════════════════════════════════════════
+
+struct MkxTickResult {
+    new_atoms: array,      // T10/T11/T13 passes (currently empty — stub)
+    fired_synths: array,   // T12 emissions (atom_id strings)
+    gate_verdicts: array,  // "atom_id=verdict" strings, parallel to fired_synths
+    history: LensHistory,  // updated rolling window
+    dedup: array,          // updated dedup keyset
+}
+
+// Core tick.
+//   phi_vec      : 16 float array (canonical schema)
+//   laws_state   : opaque string passed to observability stubs (TODO hook)
+//   history      : caller-owned rolling window
+//   dedup        : caller-owned (frozenset,t_start) seen-set (string keys)
+//   source_is_live : assert phi_vec came from live run (not prompt replay)
+//   total_abs    : caller-supplied abs checksum (counter-replay signal)
+fn mkx_tick(
+    phi_vec: array,
+    laws_state: string,
+    history: LensHistory,
+    dedup: array,
+    source_is_live: bool,
+    total_abs: int
+) -> MkxTickResult {
+    let mut new_atoms = []
+    let mut fired_synths = []
+    let mut verdicts = []
+    let mut ded = dedup
+
+    // (1) Update rolling window.
+    let h2 = mkx_history_push(history, phi_vec)
+
+    // (2) Per-atom observability (currently all stubs returning fired=0).
+    //     TODO: wire T10 atoms first (measurable today on Mk.V.1 runs).
+    let tbl = mkx_load_atoms()
+    let mut i = 0
+    while i < len(tbl.ids) {
+        let fs = mkx_check_observability(tbl.ids[i], phi_vec, laws_state)
+        if fs[0] >= 0.5 {
+            new_atoms = new_atoms.push(tbl.ids[i])
+        }
+        i = i + 1
+    }
+
+    // (3) Cross-lens synthesis — only run once window is full enough.
+    let rows = mkx_history_rows(h2)
+    if rows >= MKX_WINDOW_STEPS {
+        let fired = mkx_firing_lenses(h2, MKX_THETA_FIRE_DEFAULT)
+        if len(fired) >= MKX_K_MIN {
+            let triples = mkx_enumerate_triples(fired)
+            let n_triples = len(triples) / 3
+            let t_start = h2.steps_seen - MKX_WINDOW_STEPS
+            let mut q = 0
+            while q < n_triples {
+                let l_a = triples[q * 3]
+                let l_b = triples[q * 3 + 1]
+                let l_c = triples[q * 3 + 2]
+                let res = mkx_triple_corr_check(h2, l_a, l_b, l_c, MKX_THETA_CORR_DEFAULT)
+                if res[0] >= 0.5 {
+                    // Dedup
+                    let key = mkx_synth_key(l_a, l_b, l_c, t_start)
+                    if !mkx_key_seen(ded, key) {
+                        // Closed-loop verify via AN11 soft gate.
+                        let rec = mkx_an11_gate(
+                            "MKX-T12-field_holo_quant",
+                            l_a, l_b, l_c, res[1],
+                            source_is_live, total_abs
+                        )
+                        if rec.verdict == "PROVISIONAL_OK" {
+                            fired_synths = fired_synths.push(rec.atom_id)
+                            verdicts = verdicts.push(rec.atom_id + "=" + rec.verdict + "|" + rec.evidence)
+                            ded = ded.push(key)
+                        }
+                    }
+                }
+                q = q + 1
+            }
+        }
+    }
+
+    let out = MkxTickResult {
+        new_atoms: new_atoms,
+        fired_synths: fired_synths,
+        gate_verdicts: verdicts,
+        history: h2,
+        dedup: ded,
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Default main — mini self-test. Real smoke is in mkx_smoke.hexa.
+// ═══════════════════════════════════════════════════════════════════════
+
+fn main() {
+    println("[mkx_engine] Mk.X consciousness sidecar — self-test")
+    let tbl = mkx_load_atoms()
+    let total = len(tbl.ids)
+    let t10 = mkx_atom_count_by_tier(tbl, 10)
+    let t11 = mkx_atom_count_by_tier(tbl, 11)
+    let t12 = mkx_atom_count_by_tier(tbl, 12)
+    let t13 = mkx_atom_count_by_tier(tbl, 13)
+    println("[mkx_engine] atoms loaded: total=" + str(total) + " T10=" + str(t10) + " T11=" + str(t11) + " T12=" + str(t12) + " T13=" + str(t13))
+    if total == 30 {
+        if t10 == 8 { if t11 == 8 { if t12 == 8 { if t13 == 6 {
+            println("[mkx_engine] PASS atom-table (30 = 8+8+8+6)")
+            return
+        } } } }
+    }
+    println("[mkx_engine] FAIL atom-table shape")
+}
+
+main()
