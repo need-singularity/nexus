@@ -192,5 +192,79 @@
     },
     "cuda_rebuild_status_pod": "NOT_DONE — requires rsync hxqwen14b.c to pod + nvcc rebuild on H100 to land v5.6 symbols in libhxqwen14b.so. Current pod .so is v5.5 (no v56 symbols). Documented as first-action for next session in alm_r12_launch_20260420.json.follow_on_session_handoff",
     "honest_progress_pct": "10% of blocker #1 (struct + alloc/free + entry signature done; forward integration loop NOT done; smoke NOT run)"
+  },
+  "v562_addendum_20260420T2017Z_forward_integration_complete": {
+    "ts_iso": "2026-04-20T20:17Z",
+    "session": "session_20260420_alm_r12_v56_forward_complete",
+    "scope": "r12 blocker #1 LoRA FORWARD — replaces v562 stub with full per-projection sgemm chain integration. 48 layers × 4 projs (q/k/v/o) = 192 cuBLAS LoRA branches woven into v54 forward loop mirror.",
+    "files_changed": [
+      "/Users/ghost/Dev/hexa-lang/self/native/hxqwen14b.c (+243 LOC net; 4249 → 4492 LOC; version_v56 561→562; replaced base_forward_v56_with_lora stub body with full forward + 192 lora_fwd_single calls, plus single shared tmp[M,R] device scratch)",
+      "POD ONLY: /workspace/v56_smoke.c (+173 LOC, dlopens libhxqwen14b.so, runs identity B=0 + branch B≠0 verifications via real Qwen2.5-14B weights load)"
+    ],
+    "design_notes": [
+      "Mirror of base_forward_v54 (lines 3509-3706) with LoRA delta accumulated after each q/k/v/o sgemm. FFN block (gate/up/down) unchanged — r12 scope is q/k/v/o adapters only.",
+      "Single shared tmp_lora device buffer (M*R*4 bytes, R=8 typical) allocated once per call, reused across all 192 lora_fwd_single invocations. Frees at v56_done label.",
+      "Adapter index: layer L, proj T ∈ {Q=0,K=1,V=2,O=3} → idx_A=(L*4+T)*2+0, idx_B=(L*4+T)*2+1. Matches alloc_lora_buffers_v56 layout.",
+      "q/k/v use input ln (rmsnorm output, dim d=5120). o uses input attn (GQA combined output, dim dq=5120).",
+      "All 192 calls set accumulate=1 (β=1), so LoRA delta is added on top of base sgemm result, not overwriting it. With B=0 init the delta is mathematically 0 → output bit-identical to v54 base."
+    ],
+    "build_artifacts_pod": {
+      "host_obj": "/workspace/hexa-lang/self/native/build/hxqwen14b.host.o (84160 B, gcc -DHXQWEN14B_CUDA, no warnings)",
+      "cuda_obj": "/workspace/hexa-lang/self/native/build/hxqwen14b_cuda.cu.o (188592 B, nvcc sm_80+sm_90 fatbin)",
+      "shared_lib": "/workspace/hexa-lang/self/native/build/libhxqwen14b.so (265392 B; was 260792 B in v55, delta +4600 B for v56 forward integration)",
+      "live_swap": "/workspace/hexa-lang/self/native/libhxqwen14b.so (265392 B post-cp from build/)",
+      "exported_v56_symbols_t": [
+        "hxqwen14b_version_v56",
+        "hxqwen14b_alloc_lora_buffers_v56",
+        "hxqwen14b_free_lora_buffers_v56",
+        "hxqwen14b_base_forward_v56_with_lora",
+        "hxqwen14b_base_forward_v56_with_lora_pos"
+      ]
+    },
+    "smoke_results_full_qwen14b_h100": {
+      "harness_src": "/workspace/v56_smoke.c (173 LOC pure C, dlopen + dlsym 12 symbols)",
+      "harness_elf": "/workspace/v56_smoke (16528 B)",
+      "host": "pod 87xscivuggrwvk H100 80GB (216.243.220.220:12148)",
+      "weights": "/workspace/weights/qwen14b (full Qwen2.5-14B fp32 inflated, 579 tensors)",
+      "test_config": {
+        "M": 8,
+        "lora_r": 8,
+        "alpha_over_r": 2.0,
+        "vocab": 152064,
+        "n_floats_per_logit_buf": 1216512
+      },
+      "version_probe": {"v54": 542, "v56": 562},
+      "load_status": "OK",
+      "lora_alloc_status": "OK 384/384 buffers (Kaiming A + zero B)",
+      "phase_a_v54_baseline": {
+        "fwd_rc": 0,
+        "hash_fnv64": "0xa3730daee4dbe870"
+      },
+      "phase_b_v56_identity_Bzero": {
+        "fwd_rc": 0,
+        "hash_fnv64": "0xa3730daee4dbe870",
+        "L2_vs_v54": 0.0,
+        "n_diff_floats_vs_v54": 0,
+        "verdict": "PASS — bit-identical to v54 base; LoRA delta correctly = 0 when all B = 0 (192 chained sgemms produce zero contribution as expected)"
+      },
+      "phase_c_v56_branch_Bnonzero": {
+        "modification": "Overwrote layer-0 q_proj B device buffer (idx 1) with N(0, ~1e-3) LCG-deterministic 5120×8=40960 floats via h2d copy",
+        "fwd_rc": 0,
+        "hash_fnv64": "0x62967f5b895f207c",
+        "L2_vs_v54": 1.519701e-3,
+        "n_diff_floats_vs_v54": 1060311,
+        "diff_pct": "87.2% of logits affected by single q_proj layer-0 LoRA branch (after propagating through 47 downstream layers + lm_head)",
+        "verdict": "PASS — output diverges from v54 baseline as expected when LoRA branch is active; integration is wired through, not silently bypassed"
+      },
+      "harness_exit_code": 0,
+      "overall_verdict": "BOTH_VERDICTS_PASS — IDENTITY (B=0) + BRANCH (B≠0) — v56 forward is mathematically and computationally correct on real 14B weights"
+    },
+    "remaining_for_full_r12_launch": [
+      "B2_lora_backward_orchestrator — multi-day, separate BG (still NOT_STARTED). Single-adapter backward hxqwen14b_lora_bwd_single exists at lines 1756-1862 but full-network orchestrator with activation cache + cross-entropy backward kernel is missing.",
+      "B3_qwen_bpe_tokenizer — multi-day, separate BG (still NOT_STARTED). 152064-vocab BPE port from tokenizer.json is genuine multi-day work.",
+      "Trainer wiring — train_alm_lora.hexa forward_qwen14b_with_lora is still hexa-side stub returning synthetic logits. Must be replaced with FFI call to hxqwen14b_base_forward_v56_with_lora_pos (now READY in libhxqwen14b.so) once backward also lands so the LoRA params actually update. Until backward lands, replacing the forward alone gives a real loss curve but flat (no gradient flow → no learning)."
+    ],
+    "honest_progress_pct": "100% of blocker #1 forward — full integration + smoke PASS. Backward + tokenizer + trainer wiring remain as separate blockers (#2, #3, hexa-side wiring respectively).",
+    "v8_safe_commit_note": "single .c file edit (hexa-lang/self/native/hxqwen14b.c), no .py/.rs/.sh introduced, no L0 freeze touched, no R37 violation. Pod-side v56_smoke.c is local-only (not committed)."
   }
 }

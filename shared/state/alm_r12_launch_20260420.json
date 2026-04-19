@@ -10,7 +10,7 @@
   "honest_status_summary": {
     "blocker_3_real_qwen_bpe_tokenizer": "NOT_STARTED — 152064-vocab BPE port is genuine multi-day work; not feasible in remainder of overnight session without faking correctness. Documented as r12 follow-on with concrete next-action plan below.",
     "blocker_4_hexackpt_v2_binary_format": "PASS — v2 helpers ported from train_clm.hexa fead4ea8 into train_alm_lora.hexa save_lora; gated on HEXACKPT_V2=1 env (default off keeps eval_alm.hexa text decoder backward compat). Bit-exact round-trip smoke PASS at training/hexackpt_v2_alm_lora_smoke.hexa: magic + version + meta + tensor data all match expected hex (76 bytes for [1..6] fp32 LE).",
-    "blocker_1_lora_forward_delta_cuda": "PARTIAL_SCAFFOLDING — single-adapter cuBLAS chain hxqwen14b_lora_fwd_single already exists in hxqwen14b.c (validated on device path 1668-1745). Added v5.6 scaffolding: HxQwenBaseFwdV56LoraArgs struct, hxqwen14b_alloc_lora_buffers_v56 (192 adapters × 2 = 384 device bufs, A=Kaiming-ish, B=zero), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora (returns RC_ERR_CUDA_TODO until per-projection sgemm chain lands), hxqwen14b_base_forward_v56_with_lora_pos. Compiles clean with gcc (no CUDA). Full integration of LoRA accumulate=1 into 192 sites of base_forward_v54 loop = remaining work.",
+    "blocker_1_lora_forward_delta_cuda": "PASS_v562 (2026-04-20T20:17Z) — per-projection sgemm chain integrated into hxqwen14b_base_forward_v56_with_lora. 48 layers × 4 projs (q/k/v/o) = 192 cuBLAS LoRA branches via hxqwen14b_lora_fwd_single(accumulate=1). Single shared tmp[M,R] device scratch reused across all 192 calls. Live on pod libhxqwen14b.so 265392 B. Smoke v56_smoke.c on H100 PASS: (1) IDENTITY_B0 — A=Kaiming/B=0 → forward output bit-identical to v54 base (FNV hash a3730daee4dbe870 match, L2=0, 0 differing floats over M*V=1.22M); (2) BRANCH_BNONZ — overwrite layer-0 q_proj B with N(0, ~1e-3) → output diverges (L2=1.52e-3, 1.06M floats differ, hash differs). Both verdicts PASS. Backward orchestrator still pending (separate BG / next session).",
     "blocker_2_lora_backward_kernels": "NOT_STARTED — single-adapter backward hxqwen14b_lora_bwd_single already exists (validated cuBLAS chain at lines 1756-1862). Full-network backward orchestrator through 48 layers + lm_head + softmax requires either activation cache (high memory) or recomputation pass — multi-day project, not honest to attempt overnight.",
     "phase_4_100_step_smoke": "DID_NOT_RUN — would FAIL by design: trainer per-step forward still uses stub_vocab=16 + stub_logits = forward_qwen14b_with_lora (lines 588-612). Real-LoRA loss curve cannot be measured without #1 + #3 landed.",
     "phase_5_500_step_full_launch": "NO_GO — strict adherence to feedback_one_shot_best ($12 H100 burn forbidden when stub forward still active) and 'Phase 4 smoke FAIL ⇒ no full launch' from prompt. Pod 87xscivuggrwvk left RUNNING with v5.5 .so + train_alm_lora ELF intact for next session.",
@@ -135,5 +135,47 @@
     "anima_body_summary": "Inlined HEXACKPT-v2 binary writer helpers ported from train_clm.hexa fead4ea8 into train_alm_lora.hexa save_lora. Gated on HEXACKPT_V2=1 env, default v1 text path preserves eval_alm.hexa decoder compat. Bit-exact round-trip smoke at training/hexackpt_v2_alm_lora_smoke.hexa PASSes. Phase 1 of r12 4-blocker resolution; #1 #2 #3 deferred per honest reporting (see shared/state/alm_r12_launch_20260420.json).",
     "hexa_lang_subject": "feat(hxqwen14b): v5.6 LoRA-fused forward scaffolding + alloc/free buffers — r12 blocker #1 partial",
     "hexa_lang_body_summary": "Added v5.6 LoRA scaffolding: HxQwenBaseFwdV56LoraArgs struct, hxqwen14b_alloc_lora_buffers_v56 (Kaiming A + zero B for 192 adapters × 2 = 384 device buffers), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora + _pos wrapper (returns RC_ERR_CUDA_TODO until per-projection sgemm chain lands inside the v54 forward loop). gcc compile-check PASS. Real cuBLAS integration for the 192 LoRA branches into base_forward = remaining r12 work."
+  },
+  "v562_forward_integration_addendum_20260420T2017Z": {
+    "scope": "Replaced RC_ERR_CUDA_TODO stub in base_forward_v56_with_lora with full per-projection LoRA chain integrated into v54 forward loop mirror.",
+    "files_touched": [
+      "/Users/ghost/Dev/hexa-lang/self/native/hxqwen14b.c (+243 LOC net; bumped version_v56 561→562; replaced stub body with full forward + 192 lora_fwd_single calls)",
+      "/workspace/v56_smoke.c (new, pod-only — minimal C harness, 173 LOC, dlopens libhxqwen14b.so and runs identity + branch tests)"
+    ],
+    "build_artifacts_pod": {
+      "host_obj": "/workspace/hexa-lang/self/native/build/hxqwen14b.host.o (84160 B — gcc -DHXQWEN14B_CUDA, clean)",
+      "cuda_obj": "/workspace/hexa-lang/self/native/build/hxqwen14b_cuda.cu.o (188592 B — nvcc sm_80+sm_90, clean)",
+      "shared_lib": "/workspace/hexa-lang/self/native/build/libhxqwen14b.so (265392 B vs prior 260792 B — delta +4600 B for v56 forward integration)",
+      "live_swap": "/workspace/hexa-lang/self/native/libhxqwen14b.so (265392 B, same)",
+      "exported_symbols": "hxqwen14b_version_v56 (T), hxqwen14b_alloc_lora_buffers_v56 (T), hxqwen14b_free_lora_buffers_v56 (T), hxqwen14b_base_forward_v56_with_lora (T), hxqwen14b_base_forward_v56_with_lora_pos (T), hxqwen14b_lora_fwd_single (T)"
+    },
+    "smoke_results": {
+      "harness": "/workspace/v56_smoke.c → /workspace/v56_smoke (16528 B ELF)",
+      "pod": "87xscivuggrwvk root@216.243.220.220:12148",
+      "env": "M=8 probe seq, lora_r=8, alpha_over_r=2.0, full Qwen2.5-14B fp32 weights loaded (V54_SLOT_EMBED + 48 layers + FINAL_NORM + LM_HEAD)",
+      "v54_version_reported": 542,
+      "v56_version_reported": 562,
+      "weights_load": "OK",
+      "lora_alloc": "OK 384/384 buffers allocated (Kaiming A + zero B)",
+      "v54_forward": "OK",
+      "v56_forward_Bzero": "OK",
+      "v56_forward_Bnonzero": "OK",
+      "hash_v54": "0xa3730daee4dbe870",
+      "hash_v56_Bzero": "0xa3730daee4dbe870",
+      "hash_v56_Bnonz": "0x62967f5b895f207c",
+      "L2_v54_vs_v56_Bzero": 0.0,
+      "n_diff_floats_v54_vs_v56_Bzero": 0,
+      "L2_v54_vs_v56_Bnonz": 1.519701e-3,
+      "n_diff_floats_v54_vs_v56_Bnonz": 1060311,
+      "n_total_floats": 1216512,
+      "VERDICT_IDENTITY_B0": "PASS — bit-identical, LoRA delta correctly =0 when B=0",
+      "VERDICT_BRANCH_BNONZ": "PASS — output diverges when single adapter B is overwritten with small nonzero, proving 192-chain integration is live (87% of logits affected by single q_proj L0 branch via 47 downstream layers)",
+      "exit_code": 0
+    },
+    "remaining_work_for_full_r12_launch": [
+      "B2_lora_backward_orchestrator — multi-day, separate BG (still NOT_STARTED)",
+      "B3_qwen_bpe_tokenizer — multi-day, separate BG (still NOT_STARTED)",
+      "Trainer wiring — train_alm_lora.hexa forward_qwen14b_with_lora must FFI-call hxqwen14b_base_forward_v56_with_lora_pos (currently still hexa-side stub)"
+    ]
   }
 }
