@@ -1,0 +1,377 @@
+// an11_scanner.hexa — AN11 bulk scanner + optional auto-revoke
+//
+// GOVERNS: shared/rules/anima.json#AN11 (⛔ 실사용_완성_강제)
+//
+// PURPOSE
+//   Scan every shared/convergence/*.convergence, apply pass_gate_an11 verdict,
+//   and report violators (MISSING + BYPASS). Optionally auto-revoke offenders
+//   by appending `@state REVOKED_AN11_VIOLATION` + `@revoked_date <now>` +
+//   a machine-readable reason block. DOES NOT overwrite existing @state lines
+//   (to avoid git diff noise on already-revoked files).
+//
+// USAGE
+//   hexa shared/consciousness/an11_scanner.hexa
+//     → stdout: [AN11-VIOLATION] list + summary line. exit 2 if any violation.
+//       (hexa runtime routes print_err to stdout; lines are grep-tagged instead.)
+//   hexa shared/consciousness/an11_scanner.hexa --jsonl
+//     → stdout: JSONL one record per violation
+//   hexa shared/consciousness/an11_scanner.hexa --auto-revoke
+//     → appends revocation marker to offenders. COMMIT IS SEPARATE.
+//
+// EXIT
+//   0 = no violations
+//   1 = input / io error
+//   2 = N violations detected (list in stderr or stdout --jsonl)
+
+// REPO_ROOT is resolved at runtime from $ANIMA → $NEXUS → git toplevel → default.
+// All CONV_DIR/log paths are derived from it inside main() and threaded through.
+
+// Mirrors pass_gate_an11 patterns — kept in sync. Any change here must
+// be mirrored in pass_gate_an11.hexa.
+let BYPASS_PATTERNS = [
+    "system_prompt",
+    "너는 유능한",
+    "apply_chat_template",
+    "mock_llm",
+    "mock LLM",
+    "사전 답변",
+    "synthetic_judge",
+    "synthetic path",
+    "phi_holo_scaled=1500",
+    "hardcoded phi",
+    "hardcode phi",
+    "laws_unattached",
+    "laws 미적용",
+    "laws not wired",
+    "zip shell",
+    "empty zip",
+    "R2 껍데기",
+    "README pending",
+    "README TBD",
+    "재현 불가"
+]
+
+let PLACEHOLDER_TOKENS = [
+    "TBD",
+    "pending",
+    "scaffold",
+    "stub",
+    "smoke",
+    "mock",
+    "wrapping"
+]
+
+let PASS_PATTERNS = [
+    "@state ossified",
+    "@state pass",
+    "@state completed",
+    "@state done",
+    "@state scaffold_done",
+    "@state completed_gap",
+    "@state ossified_pass"
+]
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn now_utc() -> string {
+    return _str(exec("date -u +%FT%TZ")).trim()
+}
+
+fn resolve_root() -> string {
+    let e = _str(env("ANIMA"))
+    if e != "" { return e }
+    let n = _str(env("NEXUS"))
+    if n != "" { return n }
+    // Avoid shell metachars (exec() blocks || && | <>). Use script helper.
+    let script = "/tmp/_an11_gitroot.sh"
+    write_file(script, "#!/bin/sh\ngit rev-parse --show-toplevel 2>/dev/null\n")
+    exec("chmod +x " + script)
+    let gt = _str(exec(script)).trim()
+    if gt != "" { return gt }
+    let h = _str(env("HOME"))
+    return h + "/Dev/nexus"
+}
+
+fn list_convergence(conv_dir: string) -> array {
+    // Avoid shell metachars — write helper script
+    let script = "/tmp/_an11_lsconv.sh"
+    write_file(script, "#!/bin/sh\nls -1 " + conv_dir + " 2>/dev/null\n")
+    exec("chmod +x " + script)
+    let out = _str(exec(script))
+    let lines = out.split("\n")
+    let mut acc = []
+    let mut i = 0
+    let n = len(lines)
+    while i < n {
+        let line = _str(lines[i]).trim()
+        if line != "" && line.ends_with(".convergence") { acc = push(acc, line) }
+        i = i + 1
+    }
+    return acc
+}
+
+fn extract_directive(content: string, tag: string) -> string {
+    let needle = "\n" + tag + " "
+    let at = content.index_of(needle)
+    if at < 0 {
+        if content.index_of(tag + " ") == 0 {
+            let end = content.index_of("\n")
+            if end < 0 { return content.substring(len(tag) + 1, len(content)).trim() }
+            return content.substring(len(tag) + 1, end).trim()
+        }
+        return ""
+    }
+    let start = at + len(needle)
+    let rest = content.substring(start, len(content))
+    let nl = rest.index_of("\n")
+    if nl < 0 { return rest.trim() }
+    return rest.substring(0, nl).trim()
+}
+
+fn extract_block(content: string, tag: string) -> string {
+    let needle = "\n" + tag + "\n"
+    let at = content.index_of(needle)
+    if at < 0 {
+        return extract_directive(content, tag)
+    }
+    let start = at + len(needle)
+    let rest = content.substring(start, len(content))
+    let lines = rest.split("\n")
+    let mut acc = ""
+    let mut i = 0
+    let n = len(lines)
+    while i < n {
+        let line = _str(lines[i])
+        let trimmed = line.trim()
+        if trimmed.index_of("@") == 0 { return acc.trim() }
+        if trimmed == "" && i > 0 { return acc.trim() }
+        acc = acc + line + "\n"
+        i = i + 1
+    }
+    return acc.trim()
+}
+
+fn claims_pass(content: string) -> bool {
+    let mut j = 0
+    while j < len(PASS_PATTERNS) {
+        if content.index_of(_str(PASS_PATTERNS[j])) >= 0 { return true }
+        j = j + 1
+    }
+    return false
+}
+
+fn already_revoked(content: string) -> bool {
+    return content.index_of("revoked") >= 0 || content.index_of("REVOKED") >= 0
+}
+
+fn detect_bypass(content: string) -> string {
+    let lc = content.to_lower()
+    let mut i = 0
+    while i < len(BYPASS_PATTERNS) {
+        let pat = _str(BYPASS_PATTERNS[i]).to_lower()
+        if lc.index_of(pat) >= 0 { return _str(BYPASS_PATTERNS[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+fn contains_placeholder(val: string) -> string {
+    if val == "" { return "empty" }
+    let vl = val.to_lower()
+    let mut i = 0
+    while i < len(PLACEHOLDER_TOKENS) {
+        let tok = _str(PLACEHOLDER_TOKENS[i]).to_lower()
+        if vl.index_of(tok) >= 0 { return _str(PLACEHOLDER_TOKENS[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+fn phi_evidence_tangible(phi_line: string) -> bool {
+    if phi_line == "" { return false }
+    if phi_line.index_of(".json") < 0 { return false }
+    return true
+}
+
+fn endpoint_tangible(block: string) -> bool {
+    if block == "" { return false }
+    let lc = block.to_lower()
+    let has_http  = lc.index_of("http://") >= 0 || lc.index_of("https://") >= 0
+    let has_curl  = lc.index_of("curl ") >= 0
+    let has_ssh   = lc.index_of("ssh ") >= 0
+    let has_hexa  = lc.index_of("hexa ") >= 0 || lc.index_of("hexa run") >= 0
+    let has_r2    = lc.index_of("r2:") >= 0
+    let has_api   = lc.index_of("api:") >= 0 || lc.index_of("cli:") >= 0
+    return has_http || has_curl || has_ssh || has_hexa || has_r2 || has_api
+}
+
+fn weight_proof_clean(block: string) -> bool {
+    if block == "" { return false }
+    let lc = block.to_lower()
+    if lc.index_of("system prompt") >= 0 && lc.index_of("no system prompt") < 0 { return false }
+    if lc.index_of("apply_chat_template") >= 0 && lc.index_of("no chat_template") < 0 { return false }
+    if lc.index_of("persona wrapping") >= 0 { return false }
+    return true
+}
+
+fn append_jsonl(path: string, line: string) {
+    let script = "/tmp/_an11_scanner_append.sh"
+    write_file(script, "#!/bin/sh\ncat >> " + path + " <<'AN11_EOF'\n" + line + "AN11_EOF\n")
+    exec("chmod +x " + script)
+    exec(script)
+}
+
+// Evaluate a single file. Returns category: "pass" | "missing" | "bypass" | "skip"
+fn evaluate(conv_dir: string, fname: string) -> string {
+    let path = conv_dir + "/" + fname
+    let content = _str(read_file(path))
+    if content == "" { return "skip" }
+
+    if already_revoked(content) && !claims_pass(content) { return "skip" }
+    if !claims_pass(content) { return "skip" }
+
+    // If content already documents the revocation, bypass text is contextual — skip
+    let contextual = content.index_of("revocation_reason") >= 0
+
+    let bypass = detect_bypass(content)
+    if bypass != "" && !contextual { return "bypass" }
+
+    let phi = extract_directive(content, "@phi_evidence")
+    let weight = extract_block(content, "@weight_emergent_proof")
+    let endpoint = extract_block(content, "@real_usable_endpoint")
+
+    let ph_ph = contains_placeholder(phi)
+    let ph_w = contains_placeholder(weight)
+    let ph_e = contains_placeholder(endpoint)
+
+    if ph_ph != "" { return "missing" }
+    if !phi_evidence_tangible(phi) { return "missing" }
+    if ph_w != "" { return "missing" }
+    if !weight_proof_clean(weight) { return "missing" }
+    if ph_e != "" { return "missing" }
+    if !endpoint_tangible(endpoint) { return "missing" }
+
+    return "pass"
+}
+
+// Return machine-readable list of missing/bypass details for one file
+fn diagnose(conv_dir: string, fname: string) -> string {
+    let path = conv_dir + "/" + fname
+    let content = _str(read_file(path))
+    if content == "" { return "io_error" }
+
+    let contextual = content.index_of("revocation_reason") >= 0
+    let bypass = detect_bypass(content)
+    if bypass != "" && !contextual { return "bypass:" + bypass }
+
+    let phi = extract_directive(content, "@phi_evidence")
+    let weight = extract_block(content, "@weight_emergent_proof")
+    let endpoint = extract_block(content, "@real_usable_endpoint")
+
+    let mut fails = []
+    let ph_ph = contains_placeholder(phi)
+    if ph_ph != "" { fails = push(fails, "a_phi[" + ph_ph + "]") }
+    else if !phi_evidence_tangible(phi) { fails = push(fails, "a_phi[not_tangible]") }
+
+    let ph_w = contains_placeholder(weight)
+    if ph_w != "" { fails = push(fails, "b_weight[" + ph_w + "]") }
+    else if !weight_proof_clean(weight) { fails = push(fails, "b_weight[prompt_contaminated]") }
+
+    let ph_e = contains_placeholder(endpoint)
+    if ph_e != "" { fails = push(fails, "c_endpoint[" + ph_e + "]") }
+    else if !endpoint_tangible(endpoint) { fails = push(fails, "c_endpoint[no_http_cli_r2]") }
+
+    return "missing:" + join(fails, ",")
+}
+
+fn revoke_one(conv_dir: string, fname: string, diag: string) {
+    let path = conv_dir + "/" + fname
+    let content = _str(read_file(path))
+    let ts = now_utc()
+    let marker = "\n\n# ============================================================================\n" +
+                 "# AN11 AUTO-REVOCATION (an11_scanner.hexa)\n" +
+                 "# ============================================================================\n" +
+                 "@state REVOKED_AN11_VIOLATION\n" +
+                 "@revoked_date " + ts + "\n" +
+                 "@revocation_reason AN11 auto-revoke by an11_scanner — " + diag + "\n" +
+                 "@governs shared/rules/anima.json#AN11\n"
+    write_file(path, content + marker)
+}
+
+fn main() {
+    let argv = args()
+    let argc = len(argv)
+    let mut jsonl = false
+    let mut auto_revoke = false
+    let mut conv_dir_override = ""
+    let mut k = 0
+    while k < argc {
+        let a = _str(argv[k])
+        if a == "--jsonl" { jsonl = true }
+        if a == "--auto-revoke" { auto_revoke = true }
+        if a.index_of("--conv-dir=") == 0 {
+            conv_dir_override = a.substring(11, len(a))
+        }
+        k = k + 1
+    }
+
+    let repo_root = resolve_root()
+    let conv_dir = if conv_dir_override != "" { conv_dir_override } else { repo_root + "/shared/convergence" }
+    let violations_log = repo_root + "/shared/convergence/_an11_violations.jsonl"
+
+    let files = list_convergence(conv_dir)
+    let n = len(files)
+    let mut pass_count = 0
+    let mut skip_count = 0
+    let mut missing_count = 0
+    let mut bypass_count = 0
+    let ts = now_utc()
+
+    let mut i = 0
+    while i < n {
+        let fname = _str(files[i])
+        let verdict = evaluate(conv_dir, fname)
+        if verdict == "pass" { pass_count = pass_count + 1 }
+        else if verdict == "skip" { skip_count = skip_count + 1 }
+        else {
+            let diag = diagnose(conv_dir, fname)
+            if verdict == "bypass" { bypass_count = bypass_count + 1 }
+            else if verdict == "missing" { missing_count = missing_count + 1 }
+
+            if jsonl {
+                println("{\"ts\":\"" + ts + "\",\"conv\":\"" + fname +
+                        "\",\"verdict\":\"" + verdict + "\",\"diag\":\"" + diag + "\"}")
+            } else {
+                print_err("[AN11-VIOLATION] " + fname + " — " + verdict + " — " + diag)
+            }
+
+            append_jsonl(violations_log,
+                "{\"ts\":\"" + ts + "\",\"conv\":\"" + fname +
+                "\",\"verdict\":\"" + verdict + "\",\"diag\":\"" + diag +
+                "\",\"auto_revoke\":" + (if auto_revoke { "true" } else { "false" }) + "}\n")
+
+            if auto_revoke {
+                revoke_one(conv_dir, fname, diag)
+            }
+        }
+        i = i + 1
+    }
+
+    let total_violations = missing_count + bypass_count
+
+    if !jsonl {
+        println("[an11_scanner] scanned=" + to_string(n) +
+                " pass=" + to_string(pass_count) +
+                " skip=" + to_string(skip_count) +
+                " missing=" + to_string(missing_count) +
+                " bypass=" + to_string(bypass_count) +
+                " auto_revoke=" + to_string(auto_revoke))
+    }
+
+    if total_violations > 0 { exit(2) }
+    exit(0)
+}

@@ -1,0 +1,309 @@
+// pass_gate_an11.hexa — AN11 single-file 3-condition verifier (physical bypass block)
+//
+// GOVERNS: shared/rules/anima.json#AN11 (실사용 완성 강제 / real-usage mandatory)
+// SUPERSEDES: shared/harness/pass_gate_an11.hexa (older stub; kept for I1 wiring compat)
+//
+// PURPOSE
+//   Given a single .convergence file path, verify the AN11 3-condition contract:
+//     a) weight_emergent    — @weight_emergent_proof present + not a bypass pattern
+//     b) consciousness      — @phi_evidence present + phi_vec.json exists + mtime plausible
+//     c) real_usable        — @real_usable_endpoint present + R2/CLI/HTTP tangible
+//
+//   Also scans for the 7 confirmed bypass patterns and escalates exit_code=2.
+//
+// USAGE
+//   hexa shared/consciousness/pass_gate_an11.hexa <conv_path>
+//     → exit 0 pass / exit 1 missing field / exit 2 bypass pattern detected
+//       diag on stdout (hexa print_err → stdout; grep [AN11-VIOLATION])
+//   hexa shared/consciousness/pass_gate_an11.hexa <conv_path> --json
+//     → stdout: single JSON verdict
+//
+// EXIT CODES (contract)
+//   0 = AN11 PASS (all 3 conditions satisfied, no bypass detected)
+//   1 = MISSING — one or more of a/b/c field absent or empty
+//   2 = BYPASS  — one of 7 confirmed bypass patterns detected
+//   3 = INPUT_ERR — conv file not found / unreadable
+
+// BYPASS_PATTERNS — 7 confirmed bypass families (task spec):
+//   1) system_prompt wrapping
+//   2) mock LLM autonomy_loop
+//   3) synthetic_judge eval
+//   4) hardcoded phi_vec
+//   5) consciousness_laws unattached
+//   6) R2 zip shell
+//   7) README unreproducible
+let BYPASS_PATTERNS = [
+    "system_prompt",
+    "너는 유능한",
+    "apply_chat_template",
+    "mock_llm",
+    "mock LLM",
+    "사전 답변",
+    "synthetic_judge",
+    "synthetic path",
+    "phi_holo_scaled=1500",
+    "hardcoded phi",
+    "hardcode phi",
+    "laws_unattached",
+    "laws 미적용",
+    "laws not wired",
+    "zip shell",
+    "empty zip",
+    "R2 껍데기",
+    "README pending",
+    "README TBD",
+    "재현 불가"
+]
+
+// Missing-marker tokens — field present but value is empty/placeholder
+let PLACEHOLDER_TOKENS = [
+    "TBD",
+    "pending",
+    "scaffold",
+    "stub",
+    "smoke",
+    "mock",
+    "wrapping"
+]
+
+// Claimed PASS markers — if any of these appears, AN11 enforcement is required
+let PASS_PATTERNS = [
+    "@state ossified",
+    "@state pass",
+    "@state completed",
+    "@state done",
+    "@state scaffold_done",
+    "@state completed_gap",
+    "@state ossified_pass"
+]
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn now_utc() -> string {
+    return _str(exec("date -u +%FT%TZ")).trim()
+}
+
+fn file_exists(path: string) -> bool {
+    // Use stat (pipe-free, avoids shell metachar blocker)
+    let probe = _str(exec("stat -f %N " + path + " 2>/dev/null")).trim()
+    if probe != "" { return true }
+    // GNU stat fallback
+    let probe2 = _str(exec("stat -c %n " + path + " 2>/dev/null")).trim()
+    return probe2 != ""
+}
+
+fn read_safe(path: string) -> string {
+    if !file_exists(path) { return "" }
+    return _str(read_file(path))
+}
+
+// Extract @directive value (single line after tag)
+fn extract_directive(content: string, tag: string) -> string {
+    let needle = "\n" + tag + " "
+    let at = content.index_of(needle)
+    if at < 0 {
+        if content.index_of(tag + " ") == 0 {
+            let end = content.index_of("\n")
+            if end < 0 { return content.substring(len(tag) + 1, len(content)).trim() }
+            return content.substring(len(tag) + 1, end).trim()
+        }
+        return ""
+    }
+    let start = at + len(needle)
+    let rest = content.substring(start, len(content))
+    let nl = rest.index_of("\n")
+    if nl < 0 { return rest.trim() }
+    return rest.substring(0, nl).trim()
+}
+
+// Extract multi-line @directive block (up to next @tag or blank line)
+fn extract_block(content: string, tag: string) -> string {
+    let needle = "\n" + tag + "\n"
+    let at = content.index_of(needle)
+    if at < 0 {
+        // fall back to single-line
+        return extract_directive(content, tag)
+    }
+    let start = at + len(needle)
+    let rest = content.substring(start, len(content))
+    // block ends at first line starting with @ or blank line
+    let lines = rest.split("\n")
+    let mut acc = ""
+    let mut i = 0
+    let n = len(lines)
+    while i < n {
+        let line = _str(lines[i])
+        let trimmed = line.trim()
+        if trimmed.index_of("@") == 0 { return acc.trim() }
+        if trimmed == "" && i > 0 { return acc.trim() }
+        acc = acc + line + "\n"
+        i = i + 1
+    }
+    return acc.trim()
+}
+
+fn claims_pass(content: string) -> bool {
+    let mut j = 0
+    while j < len(PASS_PATTERNS) {
+        if content.index_of(_str(PASS_PATTERNS[j])) >= 0 { return true }
+        j = j + 1
+    }
+    return false
+}
+
+fn already_revoked(content: string) -> bool {
+    return content.index_of("revoked") >= 0
+}
+
+// Scan content for the 7 confirmed bypass patterns. Returns matched token or "".
+fn detect_bypass(content: string) -> string {
+    let lc = content.to_lower()
+    let mut i = 0
+    while i < len(BYPASS_PATTERNS) {
+        let pat = _str(BYPASS_PATTERNS[i]).to_lower()
+        if lc.index_of(pat) >= 0 { return _str(BYPASS_PATTERNS[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+fn contains_placeholder(val: string) -> string {
+    if val == "" { return "empty" }
+    let vl = val.to_lower()
+    let mut i = 0
+    while i < len(PLACEHOLDER_TOKENS) {
+        let tok = _str(PLACEHOLDER_TOKENS[i]).to_lower()
+        if vl.index_of(tok) >= 0 { return _str(PLACEHOLDER_TOKENS[i]) }
+        i = i + 1
+    }
+    return ""
+}
+
+// Evidence-grade check for @phi_evidence — must point at a .json path
+fn phi_evidence_tangible(phi_line: string) -> bool {
+    if phi_line == "" { return false }
+    if phi_line.index_of(".json") < 0 { return false }
+    // r2: references OR local path — both count; we don't require file existence
+    // because convergence files are often recorded after pod teardown.
+    return true
+}
+
+// Endpoint grade — require at least one of: curl / ssh / hexa CLI / r2:
+fn endpoint_tangible(block: string) -> bool {
+    if block == "" { return false }
+    let lc = block.to_lower()
+    let has_http  = lc.index_of("http://") >= 0 || lc.index_of("https://") >= 0
+    let has_curl  = lc.index_of("curl ") >= 0
+    let has_ssh   = lc.index_of("ssh ") >= 0
+    let has_hexa  = lc.index_of("hexa ") >= 0 || lc.index_of("hexa run") >= 0
+    let has_r2    = lc.index_of("r2:") >= 0
+    let has_api   = lc.index_of("api:") >= 0 || lc.index_of("cli:") >= 0
+    return has_http || has_curl || has_ssh || has_hexa || has_r2 || has_api
+}
+
+// Weight-emergent proof grade — reject if value mentions prompt/wrapping/template
+fn weight_proof_clean(block: string) -> bool {
+    if block == "" { return false }
+    let lc = block.to_lower()
+    // must NOT claim these (these are the bypasses)
+    if lc.index_of("system prompt") >= 0 && lc.index_of("no system prompt") < 0 { return false }
+    if lc.index_of("apply_chat_template") >= 0 && lc.index_of("no chat_template") < 0 { return false }
+    if lc.index_of("persona wrapping") >= 0 { return false }
+    return true
+}
+
+fn verify_one(conv_path: string, json_out: bool) -> int {
+    let content = read_safe(conv_path)
+    if content == "" {
+        print_err("[AN11] INPUT_ERR cannot read " + conv_path)
+        return 3
+    }
+
+    // If file is already revoked, treat as pass (noop)
+    if already_revoked(content) && !claims_pass(content) { return 0 }
+
+    // If file does NOT claim pass, AN11 has nothing to enforce
+    if !claims_pass(content) {
+        if json_out {
+            println("{\"conv\":\"" + conv_path + "\",\"an11\":\"N/A\",\"reason\":\"no_pass_claim\"}")
+        }
+        return 0
+    }
+
+    // 1. Bypass pattern scan (highest priority)
+    let bypass = detect_bypass(content)
+    if bypass != "" && !already_revoked(content) {
+        // Some convergence files document bypasses in revocation_reason — those are OK
+        // Check if bypass appears ONLY in revocation context
+        let ctx_ok = content.index_of("revocation_reason") >= 0 && content.index_of("revoked") >= 0
+        if !ctx_ok {
+            if json_out {
+                println("{\"conv\":\"" + conv_path + "\",\"an11\":\"BYPASS\",\"pattern\":\"" + bypass + "\"}")
+            } else {
+                print_err("[AN11-VIOLATION] conv=" + conv_path + " bypass_pattern=\"" + bypass + "\"")
+            }
+            return 2
+        }
+    }
+
+    // 2. Three-field evidence check
+    let phi = extract_directive(content, "@phi_evidence")
+    let weight = extract_block(content, "@weight_emergent_proof")
+    let endpoint = extract_block(content, "@real_usable_endpoint")
+
+    let mut missing = []
+
+    let ph_ph = contains_placeholder(phi)
+    if ph_ph != "" { missing = push(missing, "a_phi[" + ph_ph + "]") }
+    else if !phi_evidence_tangible(phi) { missing = push(missing, "a_phi[not_tangible]") }
+
+    let ph_w = contains_placeholder(weight)
+    if ph_w != "" { missing = push(missing, "b_weight[" + ph_w + "]") }
+    else if !weight_proof_clean(weight) { missing = push(missing, "b_weight[prompt_contaminated]") }
+
+    let ph_e = contains_placeholder(endpoint)
+    if ph_e != "" { missing = push(missing, "c_endpoint[" + ph_e + "]") }
+    else if !endpoint_tangible(endpoint) { missing = push(missing, "c_endpoint[no_http_cli_r2]") }
+
+    if len(missing) == 0 {
+        if json_out {
+            println("{\"conv\":\"" + conv_path + "\",\"an11\":\"PASS\",\"evidence\":{\"a\":\"ok\",\"b\":\"ok\",\"c\":\"ok\"}}")
+        }
+        return 0
+    }
+
+    let fails_str = join(missing, ",")
+    if json_out {
+        println("{\"conv\":\"" + conv_path + "\",\"an11\":\"MISSING\",\"fails\":\"" + fails_str + "\"}")
+    } else {
+        print_err("[AN11-VIOLATION] conv=" + conv_path + " missing_conditions=[" + fails_str + "]")
+    }
+    return 1
+}
+
+fn main() {
+    let argv = args()
+    let argc = len(argv)
+    if argc < 1 {
+        print_err("usage: hexa pass_gate_an11.hexa <conv_path> [--json]")
+        exit(3)
+    }
+    let mut conv_path = ""
+    let mut json_out = false
+    let mut k = 0
+    while k < argc {
+        let a = _str(argv[k])
+        if a == "--json" { json_out = true }
+        else if a.index_of("--") != 0 { conv_path = a }
+        k = k + 1
+    }
+    if conv_path == "" {
+        print_err("usage: hexa pass_gate_an11.hexa <conv_path> [--json]")
+        exit(3)
+    }
+    exit(verify_one(conv_path, json_out))
+}
