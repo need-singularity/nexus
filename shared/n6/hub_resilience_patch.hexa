@@ -52,6 +52,18 @@ fn safe_float(s: string) -> f64 {
     return v
 }
 
+// ROI #39 (2026-04-19): atlas.n6.stats JSON scalar int 추출 — hexa-native.
+//   이전: echo '<raw>' | grep -oE '"k":[0-9]+' | cut -d: -f2  (exec 2회)
+//   현재: read_file(stats) 1회 + split 파싱 (drift_corrector.hexa:73 패턴 미러).
+fn _json_int(raw: string, key: string) -> i64 {
+    let marker = "\"" + key + "\":"
+    let chunks = raw.split(marker)
+    if len(chunks) < 2 { return 0 }
+    let tail = chunks[1].trim()
+    let val = tail.split(",")[0].split("}")[0].split("\n")[0].trim()
+    return safe_int(val)
+}
+
 // -- Validate ----------------------------------------------------
 if !file_exists(_ATLAS) { println("error: atlas not found: " + _ATLAS); exit(1) }  // @allow-silent-exit
 if !file_exists(_DEG) { println("error: degree sidecar not found: " + _DEG); exit(1) }  // @allow-silent-exit
@@ -65,10 +77,11 @@ println("")
 let mut total_nodes: i64 = 0
 let mut total_edges: i64 = 0
 if file_exists(_STATS) {
+    // ROI #39: 2 exec(echo|grep|cut) → 0 exec (read_file 1회 + _json_int native)
     try {
         let stats = read_file(_STATS).trim()
-        total_nodes = safe_int(exec("echo '" + stats + "' | grep -oE '\"nodes\":[0-9]+' | cut -d: -f2"))
-        total_edges = safe_int(exec("echo '" + stats + "' | grep -oE '\"edges\":[0-9]+' | cut -d: -f2"))
+        total_nodes = _json_int(stats, "nodes")
+        total_edges = _json_int(stats, "edges")
     } catch e {}  // @allow-silent-catch
 }
 println("  Graph: " + to_string(total_nodes) + " nodes, " + to_string(total_edges) + " edges")
@@ -85,46 +98,16 @@ let tmp_adj = "/tmp/.resilience_adj." + exec("echo $$").trim()
 let tmp_centrality = "/tmp/.resilience_cb." + exec("echo $$").trim()
 let tmp_bypass = "/tmp/.resilience_bypass." + exec("echo $$").trim()
 
-// Build from/to pair list from JSON edges
-try {
-    exec("bash", ["-c",
-        "awk -v FS='\"' '/\"type\":\"edge\"/{for(i=1;i<=NF;i++){if($i==\"from\")f=$(i+2);if($i==\"to\")t=$(i+2)}if(f!=\"\"&&t!=\"\")print f\"\\t\"t}' '" + _ATLAS + "' > '" + tmp_adj + "' 2>/dev/null"
-    ])
-} catch e {}  // @allow-silent-catch
+// ROI #38 (2026-04-19): 3-phase (awk1 edge-extract + awk2 join + downstream join) → single NR==FNR pass
+// 이전: awk extract > tmp_adj; awk NR==FNR(deg,tmp_adj) 두 단계 파이프 + 2 exec
+// 현재: 단일 exec — awk1 가 edges 추출 후 stdout 으로 awk2 에 feed, tee 로 tmp_adj 보존.
+//        downstream phase 2/3 (neighbor 검색) 이 tmp_adj 필요 → tee 로 1회 쓰기만.
+let centrality_cmd = "awk -v FS='\"' '/\"type\":\"edge\"/{f=\"\"; t=\"\"; for(i=1;i<=NF;i++){if($i==\"from\")f=$(i+2); if($i==\"to\")t=$(i+2)} if(f!=\"\"&&t!=\"\") print f\"\\t\"t}' '" + _ATLAS + "' 2>/dev/null | tee '" + tmp_adj + "' | awk -F'\\t' 'NR==FNR { deg[$1] = $2+0; next } { a=$1; b=$2; k=a\"|\"b; k2=b\"|\"a; if(!(k in S)){S[k]=1; nb[a]=nb[a] b\";\"} if(!(k2 in S)){S[k2]=1; nb[b]=nb[b] a\";\"} } END { for(v in deg){if(deg[v]<10) continue; n_str=nb[v]; if(n_str==\"\") continue; split(n_str, nbs, \";\"); sum_nd=0; nc=0; for(i in nbs){if(nbs[i]==\"\") continue; if(nbs[i] in deg) sum_nd+=deg[nbs[i]]; nc++} if(sum_nd>0){cb=(deg[v]*deg[v])/sum_nd; printf \"%.4f\\t%s\\t%d\\t%d\\t%.1f\\n\", cb,v,deg[v],nc,sum_nd/nc}}}' '" + _DEG + "' - | sort -t$'\\t' -k1 -rn > '" + tmp_centrality + "' 2>/dev/null"
+
+try { exec(centrality_cmd) } catch e {}  // @allow-silent-catch
 
 let adj_count = safe_int(exec("wc -l < '" + tmp_adj + "' 2>/dev/null"))
 println("  Edge pairs loaded: " + to_string(adj_count))
-
-// Compute centrality for hub nodes (degree >= 10)
-try {
-    exec("bash", ["-c",
-        "awk -F'\\t' '\n" +
-        "NR==FNR { deg[$1] = $2+0; next }\n" +
-        "{\n" +
-        "  a = $1; b = $2;\n" +
-        "  k = a \"|\" b; k2 = b \"|\" a;\n" +
-        "  if (!(k in S)) { S[k]=1; nb[a] = nb[a] b \";\"; }\n" +
-        "  if (!(k2 in S)) { S[k2]=1; nb[b] = nb[b] a \";\"; }\n" +
-        "}\n" +
-        "END {\n" +
-        "  for (v in deg) {\n" +
-        "    if (deg[v] < 10) continue;\n" +
-        "    n_str = nb[v]; if (n_str == \"\") continue;\n" +
-        "    split(n_str, nbs, \";\");\n" +
-        "    sum_nd = 0; nc = 0;\n" +
-        "    for (i in nbs) {\n" +
-        "      if (nbs[i] == \"\") continue;\n" +
-        "      if (nbs[i] in deg) sum_nd += deg[nbs[i]];\n" +
-        "      nc++;\n" +
-        "    }\n" +
-        "    if (sum_nd > 0) {\n" +
-        "      cb = (deg[v] * deg[v]) / sum_nd;\n" +
-        "      printf \"%.4f\\t%s\\t%d\\t%d\\t%.1f\\n\", cb, v, deg[v], nc, sum_nd/nc;\n" +
-        "    }\n" +
-        "  }\n" +
-        "}' '" + _DEG + "' '" + tmp_adj + "' | sort -t'\\t' -k1 -rn > '" + tmp_centrality + "' 2>/dev/null"
-    ])
-} catch e {}  // @allow-silent-catch
 
 // Read top 10 bottleneck hubs
 let top_raw = exec("head -10 '" + tmp_centrality + "' 2>/dev/null").trim()

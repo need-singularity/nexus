@@ -114,6 +114,22 @@ fn _state_int(path: string, key: string) -> i64 {
     return _exec_int(cmd)
 }
 
+// ROI #40 (2026-04-19): wc -l 캐시 — atlas.n6 전체 스캔 제거.
+//   state JSON 에 {mtime,size,total_lines} 저장 → mtime+size 일치 시 캐시 hit (O(1)).
+//   stale 시에만 wc -l 실행 (cold path).
+//   호출: _flines_cached(ATLAS, mtime, size, state_path)
+fn _flines_cached(path: string, cur_mtime: i64, cur_size: i64, state_path: string) -> i64 {
+    if file_exists(state_path) {
+        let cached_mtime = _state_int(state_path, "mtime")
+        let cached_size  = _state_int(state_path, "size")
+        if cached_mtime == cur_mtime && cached_size == cur_size && cached_mtime > 0 {
+            let cached_lines = _state_int(state_path, "total_lines")
+            if cached_lines > 0 { return cached_lines }
+        }
+    }
+    return _flines(path)
+}
+
 // ═══════════════════════════════════════════════════════════
 // MODE: --stream-tail  (tail-append incremental delta)
 // SSOT: state file since_line → atlas.n6 새 라인만 awk 로 분류
@@ -122,7 +138,8 @@ fn _state_int(path: string, key: string) -> i64 {
 if stream_tail {
     let cur_mtime = _mtime(ATLAS_PATH)
     let cur_size  = _fsize(ATLAS_PATH)
-    let cur_lines = _flines(ATLAS_PATH)
+    // ROI #40: wc -l 전체 스캔 → state JSON 캐시 (mtime+size unchanged 시 O(1))
+    let cur_lines = _flines_cached(ATLAS_PATH, cur_mtime, cur_size, STATE_PATH)
     let since_line = _state_int(STATE_PATH, "total_lines")
 
     let mut new_lines: i64 = 0
@@ -211,7 +228,8 @@ if stream_tail {
 // ═══════════════════════════════════════════════════════════
 let cur_mtime = _mtime(ATLAS_PATH)
 let cur_size  = _fsize(ATLAS_PATH)
-let cur_lines = _flines(ATLAS_PATH)
+// ROI #40: wc -l 전체 스캔 → state JSON 캐시 (mtime+size unchanged 시 O(1))
+let cur_lines = _flines_cached(ATLAS_PATH, cur_mtime, cur_size, STATE_PATH)
 let prev_mtime = _state_int(STATE_PATH, "mtime")
 let prev_size  = _state_int(STATE_PATH, "size")
 
@@ -262,19 +280,40 @@ let mut converge_count: i64 = 0   // ~> lines
 let mut verified_count: i64 = 0   // |> lines
 let mut bt_count: i64       = 0   // !! lines
 
-// count @-nodes and edge annotations using awk (fast)
-text_node_count = _exec_int("echo '" + to_string(len(text_lines)) + "' | cat -; grep -c '^@' '" + ATLAS_PATH + "' 2>/dev/null")
-// more reliable: use grep directly
-text_node_count = _exec_int("grep -c '^@' '" + ATLAS_PATH + "' 2>/dev/null")
-
-// count text-format edge annotations
-depends_count  = _exec_int("grep -cE '^\\s+<-' '" + ATLAS_PATH + "' 2>/dev/null")
-derives_count  = _exec_int("grep -cE '^\\s+->' '" + ATLAS_PATH + "' 2>/dev/null")
-equiv_count    = _exec_int("grep -cE '^\\s+==' '" + ATLAS_PATH + "' 2>/dev/null")
-converge_count = _exec_int("grep -cE '^\\s+~>' '" + ATLAS_PATH + "' 2>/dev/null")
-verified_count = _exec_int("grep -cE '^\\s+\\|>' '" + ATLAS_PATH + "' 2>/dev/null")
-bt_count       = _exec_int("grep -cE '^\\s+!!' '" + ATLAS_PATH + "' 2>/dev/null")
-app_count      = _exec_int("grep -cE '^\\s+=>' '" + ATLAS_PATH + "' 2>/dev/null")
+// ROI #36 (2026-04-19): 8 grep -c + 2 JSON grep → 단일 awk 10-패턴 멀티카운터.
+//   이전: 10회 grep -c (^@ / ^\s+<- / -> / == / ~> / |> / !! / => / JSON node+edge)
+//          = 10x atlas.n6 full scan + 10 syscall
+//   현재: 1회 awk — 단일 패스로 10 카운터 공백 분리 출력
+//   순서: at ld lr le lc lv lb la jn je  (text_node depends derives equiv converge verified bt app json_node json_edge)
+let counts_raw = _exec_str(
+    "awk 'BEGIN{at=0;ld=0;lr=0;le=0;lc=0;lv=0;lb=0;la=0;jn=0;je=0} " +
+    "/^@/{at++} " +
+    "/^[[:space:]]+<-/{ld++} " +
+    "/^[[:space:]]+->/{lr++} " +
+    "/^[[:space:]]+==/{le++} " +
+    "/^[[:space:]]+~>/{lc++} " +
+    "/^[[:space:]]+\\|>/{lv++} " +
+    "/^[[:space:]]+!!/{lb++} " +
+    "/^[[:space:]]+=>/{la++} " +
+    "/\"type\":\"node\"/{jn++} " +
+    "/\"type\":\"edge\"/{je++} " +
+    "END{printf \"%d %d %d %d %d %d %d %d %d %d\", at,ld,lr,le,lc,lv,lb,la,jn,je}' '" + ATLAS_PATH + "' 2>/dev/null"
+)
+let cparts = counts_raw.split(" ")
+let mut _json_node_count: i64 = 0
+let mut _json_edge_count: i64 = 0
+if len(cparts) >= 10 {
+    try { text_node_count = to_int(cparts[0]) } catch e {}  // @allow-silent-catch
+    try { depends_count   = to_int(cparts[1]) } catch e {}  // @allow-silent-catch
+    try { derives_count   = to_int(cparts[2]) } catch e {}  // @allow-silent-catch
+    try { equiv_count     = to_int(cparts[3]) } catch e {}  // @allow-silent-catch
+    try { converge_count  = to_int(cparts[4]) } catch e {}  // @allow-silent-catch
+    try { verified_count  = to_int(cparts[5]) } catch e {}  // @allow-silent-catch
+    try { bt_count        = to_int(cparts[6]) } catch e {}  // @allow-silent-catch
+    try { app_count       = to_int(cparts[7]) } catch e {}  // @allow-silent-catch
+    try { _json_node_count = to_int(cparts[8]) } catch e {}  // @allow-silent-catch
+    try { _json_edge_count = to_int(cparts[9]) } catch e {}  // @allow-silent-catch
+}
 
 // real edges = depends + derives + equiv (these create actual graph connections in parseAtlasN6)
 let real_edge_lines = depends_count + derives_count + equiv_count
@@ -286,11 +325,11 @@ println("  edge lines:    <- " + to_string(depends_count) + "  -> " + to_string(
 println("  annotations:   => " + to_string(app_count) + "  ~> " + to_string(converge_count) + "  |> " + to_string(verified_count) + "  !! " + to_string(bt_count))
 
 // ═══════════════════════════════════════════════════════════
-// PHASE 2: JSON-format edge/node 카운트 (atlas.n6 후반부)
+// PHASE 2: JSON-format edge/node 카운트 (ROI #36: 단일 awk 결과 재사용)
 // ═══════════════════════════════════════════════════════════
 
-let json_node_count = _exec_int("grep -c '\"type\":\"node\"' '" + ATLAS_PATH + "' 2>/dev/null")
-let json_edge_count = _exec_int("grep -c '\"type\":\"edge\"' '" + ATLAS_PATH + "' 2>/dev/null")
+let json_node_count = _json_node_count
+let json_edge_count = _json_edge_count
 
 println("  JSON nodes:    " + to_string(json_node_count))
 println("  JSON edges:    " + to_string(json_edge_count))
@@ -299,8 +338,11 @@ println("  JSON edges:    " + to_string(json_edge_count))
 // PHASE 3: domain 분포 + grade 분포 (awk fast path)
 // ═══════════════════════════════════════════════════════════
 
-let domain_dist = _exec_str("awk '/^@[A-Z?] /{match($0,/:: *([^ \\[]+)/,m); if(m[1]) print m[1]}' '" + ATLAS_PATH + "' 2>/dev/null | sort | uniq -c | sort -rn | head -20")
-let grade_dist  = _exec_str("awk '/^@[A-Z?] /{match($0,/\\[([^\\]]+)\\]/,m); if(m[1]) print m[1]}' '" + ATLAS_PATH + "' 2>/dev/null | sort | uniq -c | sort -rn | head -20")
+// ROI #37 (2026-04-19): 4단 pipe (awk|sort|uniq -c|sort -rn|head) → awk hash map + sort -rn|head.
+//   이전: awk + sort + uniq -c + sort -rn + head (5 프로세스 체인, 2 sort 스캔)
+//   현재: awk 내부 hash map 으로 즉시 count → 외부 sort -rn|head 만 유지 (uniq 제거, 1 sort 제거)
+let domain_dist = _exec_str("awk '/^@[A-Z?] /{match($0,/:: *([^ \\[]+)/,m); if(m[1]) c[m[1]]++} END{for(k in c) printf \"%7d %s\\n\", c[k], k}' '" + ATLAS_PATH + "' 2>/dev/null | sort -rn | head -20")
+let grade_dist  = _exec_str("awk '/^@[A-Z?] /{match($0,/\\[([^\\]]+)\\]/,m); if(m[1]) c[m[1]]++} END{for(k in c) printf \"%7d %s\\n\", c[k], k}' '" + ATLAS_PATH + "' 2>/dev/null | sort -rn | head -20")
 
 if verbose {
     println("\n  --- domain distribution (top 20) ---")

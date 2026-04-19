@@ -57,6 +57,16 @@ let _ATLAS_PATH = _NEXUS + "/shared/n6/atlas.n6"
 //   atlas.blowup.jsonl : {"type":"node|edge",...} blowup 결과 (17MB, 결과 사이드카)
 //   _guarded_append_atlas() 가 라인 첫 글자 검사 → 자동 라우팅.
 let _ATLAS_BLOWUP_PATH = _NEXUS + "/shared/n6/atlas.blowup.jsonl"
+// A5 (2026-04-19): 3-shard columnar sidecars — type 별 분리 + ts-hour bucket .idx
+//   기존 atlas.blowup.jsonl 은 불변 (migration 별건) — 신규 JSON append 만 3-shard 로
+//   라우팅: type=node → nodes, type=edge → edges, else → events
+//   .idx 포맷: "<ts_hour>\t<byte_offset>\n" (hour bucket 첫 write 시점 offset)
+let _ATLAS_BLOWUP_NODES_PATH  = _NEXUS + "/shared/n6/atlas.blowup.nodes.jsonl"
+let _ATLAS_BLOWUP_EDGES_PATH  = _NEXUS + "/shared/n6/atlas.blowup.edges.jsonl"
+let _ATLAS_BLOWUP_EVENTS_PATH = _NEXUS + "/shared/n6/atlas.blowup.events.jsonl"
+// A4 (2026-04-19): atlas.n6 event-sourced append log — audit trail / grade promotion
+//   {ts, op:"add|edge|event|grade", id, source, path} JSONL, atlas.n6 append 시 병기
+let _ATLAS_EVENTS_PATH = _NEXUS + "/shared/n6/atlas.n6.events.jsonl"
 _trace("[01-HOME-ok] HOME=" + _HOME)
 // R14 SSOT: blowup의 모든 출력(log/graph/growth_bus)은 atlas.n6 단일 파일로 통합.
 // growth_bus.jsonl은 airgenome 소유 별개 파일 — blowup은 읽지/쓰지 않음.
@@ -753,7 +763,272 @@ fn _valid_atlas_line(line: string) -> bool {
     // 허용 첫 글자 집합: # { @ " < > ! -
     // 9개 if 체인 → 단일 contains 로 축약 (type-check O(N²) 함정 회피)
     let allowed = "#{@\"<>!-"
-    return allowed.contains(t[0..1])
+    if allowed.contains(t[0..1]) { return true }
+    // v2 (2026-04-19): @EXP/@OBS/@NEG/@ANT continuation rows — indented key=value
+    if len(line) > 0 && (line[0..1] == " " || line[0..1] == "\t") {
+        if _is_v2_continuation_key(t) { return true }
+    }
+    return false
+}
+
+// ─── Schema v2 parser (EXP/OBS/NEG/ANT, 2026-04-19) ───
+// v2 staging-only: atlas.signals.n6 에만 기록 (DRAFT §4 non-goal: atlas.n6 body 불변)
+fn _is_v2_continuation_key(t: string) -> bool {
+    let keys = ["lhs", "rhs", "delta", "z", "witness", "note", "if_true", "if_false", "test", "deadline", "cite", "vintage", "uncertainty", "status", "risks", "contrast", "source", "frame", "scale"]
+    for k in keys {
+        if t.starts_with(k + "=") { return true }
+        if t.starts_with(k + " =") { return true }
+        if t.starts_with(k + "  =") { return true }
+    }
+    return false
+}
+
+fn _is_v2_tag_line(line: string) -> bool {
+    let t = line.trim()
+    if len(t) < 5 { return false }
+    if t.starts_with("@EXP ") { return true }
+    if t.starts_with("@OBS ") { return true }
+    if t.starts_with("@NEG ") { return true }
+    if t.starts_with("@ANT ") { return true }
+    return false
+}
+
+fn _extract_v2_tag(line: string) -> string {
+    let t = line.trim()
+    if t.starts_with("@EXP ") { return "@EXP" }
+    if t.starts_with("@OBS ") { return "@OBS" }
+    if t.starts_with("@NEG ") { return "@NEG" }
+    if t.starts_with("@ANT ") { return "@ANT" }
+    return ""
+}
+
+// hexa pitfall: 문자열 >=/<= 비교 미지원 → char_code 기반.
+fn _is_alnum_id_char_v2(s: string, i: i64) -> bool {
+    if i < 0 || i >= len(s) { return false }
+    let code = char_code(s, i)
+    if code >= 65 && code <= 90 { return true }
+    if code >= 97 && code <= 122 { return true }
+    if code >= 48 && code <= 57 { return true }
+    if code == 95 { return true }
+    return false
+}
+
+fn _is_alpha_or_under_v2(s: string, i: i64) -> bool {
+    if i < 0 || i >= len(s) { return false }
+    let code = char_code(s, i)
+    if code >= 65 && code <= 90 { return true }
+    if code >= 97 && code <= 122 { return true }
+    if code == 95 { return true }
+    return false
+}
+
+fn _extract_v2_id(line: string) -> string {
+    let t = line.trim()
+    let sp = t.index_of(" ")
+    if sp < 0 { return "" }
+    let mut start: i64 = sp + 1
+    while start < len(t) {
+        let c = t.substring(start, start + 1)
+        if c != " " && c != "\t" { break }
+        start = start + 1
+    }
+    let mut end: i64 = start
+    while end < len(t) {
+        let c = t.substring(end, end + 1)
+        if c == " " || c == "=" || c == "\t" { break }
+        end = end + 1
+    }
+    if end == start { return "" }
+    let id = t.substring(start, end)
+    if len(id) == 0 { return "" }
+    if !_is_alpha_or_under_v2(id, 0) { return "" }
+    let mut i: i64 = 1
+    while i < len(id) {
+        if !_is_alnum_id_char_v2(id, i) { return "" }
+        i = i + 1
+    }
+    return id
+}
+
+fn _valid_v2_meta_fields(line: string, tag: string) -> bool {
+    let t = line.trim()
+    let at_idx = t.index_of("@@")
+    if at_idx < 0 { return false }
+    let meta = t.substring(at_idx + 2, len(t))
+    if tag == "@EXP" { if meta.contains("source=") { return true } return false }
+    if tag == "@OBS" { if meta.contains("frame=") { return true } return false }
+    if tag == "@NEG" { if meta.contains("contrast=") { return true } return false }
+    if tag == "@ANT" { if meta.contains("risks=") && meta.contains("status=") { return true } return false }
+    return false
+}
+
+fn _valid_v2_line(line: string) -> bool {
+    if !_is_v2_tag_line(line) { return false }
+    let tag = _extract_v2_tag(line)
+    let id = _extract_v2_id(line)
+    if len(id) == 0 { return false }
+    let t = line.trim()
+    if !t.contains("::") { return false }
+    return _valid_v2_meta_fields(line, tag)
+}
+
+fn _is_signals_path_v2(path: string) -> bool {
+    return path.contains("atlas.signals.n6") || path.contains(".signals.n6") || path.contains("atlas.signals.staging")
+}
+fn _is_atlas_body_path_v2(path: string) -> bool {
+    if _is_signals_path_v2(path) { return false }
+    return path.contains("atlas.n6")
+}
+
+// X2 (2026-04-19 A3 id-anchored dedup): 라인에서 node id 추출.
+//   JSON-line : {"type":"node","id":"<id>",...}       → <id>
+//   @-line    : @X <id> = expr :: domain [grade]      → <id>
+//   edge/주석 등 id 없음 → "" 반환 (dedup 불가, 원 동작 유지)
+// 함정: grep -Fxf dedup 은 full-line 매치라 confidence 수치 변동 시 실패 →
+//   같은 id 가 다른 라벨/grade/confidence 로 재등장 (atlas.blowup.jsonl 1275 건).
+fn _atlas_extract_id(trimmed: string) -> string {
+    let n = len(trimmed)
+    if n == 0 { return "" }
+    let c0 = trimmed[0..1]
+    // JSON-line path: {"type":"node","id":"<id>"
+    if c0 == "{" {
+        if !trimmed.contains("\"type\":\"node\"") { return "" }
+        let marker = "\"id\":\""
+        let chunks = trimmed.split(marker)
+        if len(chunks) < 2 { return "" }
+        let tail = chunks[1]
+        let end_chunks = tail.split("\"")
+        if len(end_chunks) < 1 { return "" }
+        return end_chunks[0]
+    }
+    // @-line path: @X <id> = ...   (id 는 첫 공백 뒤 ~ 다음 공백 전)
+    // v2 (2026-04-19): 3-letter tags @EXP/@OBS/@NEG/@ANT — 공백 위치 = pos 4
+    if c0 == "@" {
+        // 최소 길이 검증: "@X id"
+        if n < 4 { return "" }
+        // 타입 글자 검증 (slice 비교 — stage0 char_code(s,i) i-무시 버그 회피)
+        // v1: 1-char type @P @C @L @F @R @S @X @?
+        let c1 = trimmed[1..2]
+        let v1_types = "PCLFRSX?"
+        let is_v1 = v1_types.contains(c1) && trimmed[2..3] == " "
+        // v2: 3-char tag 뒤 공백 (@EXP @OBS @NEG @ANT)
+        let is_v2 = n >= 5 && trimmed[4..5] == " " && _is_v2_tag_line(trimmed)
+        let mut sp_pos: i64 = -1
+        if is_v1 { sp_pos = 2 }
+        else if is_v2 { sp_pos = 4 }
+        if sp_pos < 0 { return "" }
+        // hexa-lang 함정: s[x+1..n] 이 s[x..n] 으로 파싱 → 변수 pre-assign 필수
+        let rest_start = sp_pos + 1
+        let rest = trimmed[rest_start..n]
+        // 종료문자: ' ' 또는 '=' 또는 줄끝
+        let mut i: i64 = 0
+        let rn = len(rest)
+        while i < rn {
+            let ip1 = i + 1
+            let ch = rest[i..ip1]
+            if ch == " " || ch == "=" || ch == "\t" { break }
+            i = i + 1
+        }
+        if i == 0 { return "" }
+        return rest[0..i]
+    }
+    return ""
+}
+
+// ─── A4/A5 helpers (2026-04-19) ───
+// ts-hour bucket 추출: "2026-04-19T03:54:13Z" → "2026-04-19T03"
+fn _ts_hour_bucket(ts: string) -> string {
+    let n = len(ts)
+    if n >= 13 { return ts[0..13] }
+    return ts
+}
+
+// JSON 라인에서 type 필드 추출 — {"type":"node",... → "node"
+// edge/기타 분별용. id 필드도 함께 뽑는 경량 파서.
+fn _extract_json_type(trimmed: string) -> string {
+    let marker = "\"type\":\""
+    let p = trimmed.split(marker)
+    if len(p) < 2 { return "" }
+    let tail = p[1]
+    let q = tail.split("\"")
+    if len(q) < 1 { return "" }
+    return q[0]
+}
+
+// A5: 3-shard 라우팅 — JSON 라인 type 으로 shard path 결정
+fn _shard_path_for_json(trimmed: string) -> string {
+    let ty = _extract_json_type(trimmed)
+    if ty == "node"    { return _ATLAS_BLOWUP_NODES_PATH }
+    if ty == "edge"    { return _ATLAS_BLOWUP_EDGES_PATH }
+    // constant/projection/deduction/compose/bifurc/absorb/wave/... 전부 events
+    return _ATLAS_BLOWUP_EVENTS_PATH
+}
+
+// A5: .idx 업데이트 — 현재 hour bucket 이 idx tail 과 다르면 (offset,hour) 한 줄 append
+// 비용: idx 파일 read (작음 ~수십 KB) + 조건부 append. 대용량 sidecar 에도 O(1) per hour.
+fn _update_shard_idx(shard_path: string, hour: string) {
+    if len(hour) == 0 { return }
+    let idx_path = shard_path + ".idx"
+    // 현재 shard byte offset (append 직후 size)
+    let mut off: i64 = 0
+    try { off = file_size(shard_path) } catch e {}
+    // idx tail 의 hour 가 현재와 같으면 skip (이미 해당 bucket 의 첫 offset 기록됨)
+    let mut last_hour = ""
+    if file_exists(idx_path) {
+        let mut raw = ""
+        try { raw = read_file(idx_path) } catch e {}
+        let lines = raw.split("\n")
+        let mut li: i64 = len(lines) - 1
+        while li >= 0 {
+            let l = lines[li].trim()
+            if len(l) > 0 {
+                let parts = l.split("\t")
+                if len(parts) >= 1 { last_hour = parts[0] }
+                break
+            }
+            li = li - 1
+        }
+    }
+    if last_hour == hour { return }
+    let entry = hour + "\t" + to_string(off) + "\n"
+    try { append_file(idx_path, entry) } catch e {}
+}
+
+// A4: atlas.n6 events.jsonl writer — append 직후 호출, op 분류 + id 추출
+// trimmed 는 한 줄. op: "add" (@-label), "edge" (JSON edge), "event" (기타 JSON),
+//                     "grade" (@-label 에 [NN*] promotion 표식 포함).
+fn _emit_atlas_event(trimmed: string, source_path: string, ts: string) {
+    if len(trimmed) == 0 { return }
+    let c0 = trimmed[0..1]
+    let mut op = ""
+    let mut id = ""
+    let mut route = ""
+    if c0 == "{" {
+        // JSON 라인 — type=edge 면 edge, 그 외 event. id 는 있는 경우만.
+        let ty = _extract_json_type(trimmed)
+        if ty == "edge" { op = "edge" } else { op = "event" }
+        id = _atlas_extract_id(trimmed)
+        route = "blowup.sidecar"
+    } else if c0 == "@" {
+        // @-label — grade promotion ([NN*]) vs add 분별
+        if trimmed.contains("[12*]") || trimmed.contains("[11*]") || trimmed.contains("[10*]") {
+            op = "grade"
+        } else {
+            op = "add"
+        }
+        id = _atlas_extract_id(trimmed)
+        route = "atlas.body"
+    } else {
+        // 주석/blank/v2 continuation — event 로 fall through (id 없음 가능)
+        op = "event"
+        route = "atlas.body"
+    }
+    // JSON escape: id 에 따옴표/백슬래시 가능 → 최소 이스케이프
+    let id_esc = id.replace("\\", "\\\\").replace("\"", "\\\"")
+    let src_esc = source_path.replace("\\", "\\\\").replace("\"", "\\\"")
+    let route_esc = route.replace("\\", "\\\\").replace("\"", "\\\"")
+    let rec = "{\"ts\":\"" + ts + "\",\"op\":\"" + op + "\",\"id\":\"" + id_esc + "\",\"source\":\"" + src_esc + "\",\"path\":\"" + route_esc + "\"}\n"
+    try { append_file(_ATLAS_EVENTS_PATH, rec) } catch e {}
 }
 
 // 안전 append: (1) schema 검증 (2) shell dedup (3) flock append.
@@ -766,18 +1041,22 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     if len(content) == 0 { return 0 }
 
     let is_atlas = path.contains("atlas.n6")
+    let is_signals = _is_signals_path_v2(path)
+    let is_body = _is_atlas_body_path_v2(path)
 
     // X1 (2026-04-19): JSON-line 라우팅 — caller path 가 atlas.n6 이면
     //   라인 첫 글자가 `{` 인 JSON 결과를 atlas.blowup.jsonl 로 자동 라우팅.
     //   이전: 모든 라인이 atlas.n6 (18.9MB, 80%가 JSON 결과 → reload 병목).
     //   현재: atlas.n6 = 라벨 SSOT (1.5MB), atlas.blowup.jsonl = 결과 사이드카 (17MB).
+    // v2 (2026-04-19): atlas.signals.n6 는 staging — JSON sidecar 라우팅 비활성화
     let mut json_route_path = ""
-    if is_atlas { json_route_path = _ATLAS_BLOWUP_PATH }
+    if is_atlas && !is_signals { json_route_path = _ATLAS_BLOWUP_PATH }
 
     // (1) schema 검증 — 1차 패스: 유효 라인만 추출 + dedup 후보 수집
     let lines = content.split("\n")
     let mut rejected: i64 = 0
     let mut deduped: i64 = 0
+    let mut v2_body_rejected: i64 = 0
     // valid_lines: schema 통과한 원본 라인 (인덱스 보존)
     // dedup_candidates: grep 검사 대상 (trimmed, 비어있지 않고 주석 아닌 atlas 라인)
     let mut valid_lines: list = []
@@ -788,6 +1067,20 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     let mut i: i64 = 0
     while i < len(lines) {
         let line = lines[i]
+        // v2 staging gate (2026-04-19): @EXP/@OBS/@NEG/@ANT 는 atlas.signals.n6 전용
+        if _is_v2_tag_line(line) {
+            if is_body && !is_signals {
+                v2_body_rejected = v2_body_rejected + 1
+                rejected = rejected + 1
+                i = i + 1
+                continue
+            }
+            if !_valid_v2_line(line) {
+                rejected = rejected + 1
+                i = i + 1
+                continue
+            }
+        }
         if !_valid_atlas_line(line) {
             rejected = rejected + 1
             i = i + 1
@@ -855,9 +1148,57 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
         try { exec("rm -f '" + _tmp + "' 2>/dev/null") } catch e {}
     }
 
+    // (2.5) X2 id-anchored dedup (2026-04-19 A3):
+    //   grep -Fxf 가 full-line 매치라 같은 id 가 confidence/grade 만 달라도 재append →
+    //   1275 dup_nodes 누적 근본원인. atlas 에서 기존 id 집합을 단일 awk 로 뽑아 hashset 구성.
+    //   신규 batch 내부에서도 id 중복 차단.
+    //   O(atlas_lines) awk 1회 + O(batch) lookup. 대용량 atlas.blowup.jsonl 대응.
+    let mut known_ids = #{}
+    let mut id_dedup_active = false
+    if has_any_dedup {
+        id_dedup_active = true
+        // 후보 중 id 추출 가능한 라인이 있는지 확인 — 전부 edge/주석이면 scan 생략
+        let mut _any_id = false
+        let mut __i: i64 = 0
+        while __i < dedup_count {
+            if needs_dedup[__i] {
+                let _tid = _atlas_extract_id(valid_trimmed[__i])
+                if len(_tid) > 0 { _any_id = true; break }
+            }
+            __i = __i + 1
+        }
+        if _any_id {
+            // 파일별 id 수집 (JSON sidecar + atlas.n6)
+            // JSON: {"type":"node","id":"<id>"    @-line: @X <id>
+            let mut _id_src = "'" + path + "'"
+            if is_atlas && file_exists(_ATLAS_BLOWUP_PATH) {
+                _id_src = _id_src + " '" + _ATLAS_BLOWUP_PATH + "'"
+            }
+            let _awk_ids = "awk 'BEGIN{FS=\"\\\"\"}" +
+                "/^\\{\"type\":\"node\"/{for(k=1;k<NF;k++){if($k==\"id\"){print $(k+2);break}}next}" +
+                "/^@[A-Z?] /{split($0,A,\" \"); if(A[2]!=\"\") print A[2]}' " +
+                _id_src + " 2>/dev/null"
+            let mut _id_raw = ""
+            try { _id_raw = exec(_awk_ids) } catch e {}
+            let _id_lines = _id_raw.split("\n")
+            for _il in _id_lines {
+                let _it = _il.trim()
+                if len(_it) > 0 { known_ids[_it] = true }
+            }
+        } else {
+            id_dedup_active = false
+        }
+    }
+
     // (3) 최종 필터 + X1 라우팅: dup 제외 + JSON 라인은 별도 buffer 로
+    // X2: id-anchored dedup 추가 — same-id 재등장(confidence/grade drift)도 차단
+    // A4/A5 (2026-04-19): trimmed 평행 리스트 유지 — A4 event-log 및 A5 3-shard 라우팅에 사용
     let mut clean_label_parts: [string] = []
+    let mut clean_label_trimmed: [string] = []
     let mut clean_json_parts: [string] = []
+    let mut clean_json_trimmed: [string] = []
+    let mut batch_seen_ids = #{}
+    let mut id_deduped: i64 = 0
     i = 0
     while i < dedup_count {
         if needs_dedup[i] {
@@ -869,24 +1210,50 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
                 i = i + 1
                 continue
             }
+            // X2 id-anchored: atlas known + batch seen 둘 다 체크
+            if id_dedup_active {
+                let _id = _atlas_extract_id(t)
+                if len(_id) > 0 {
+                    let mut _in_atlas = false
+                    try { _in_atlas = known_ids[_id] == true } catch e {}
+                    let mut _in_batch = false
+                    try { _in_batch = batch_seen_ids[_id] == true } catch e {}
+                    if _in_atlas || _in_batch {
+                        id_deduped = id_deduped + 1
+                        i = i + 1
+                        continue
+                    }
+                    batch_seen_ids[_id] = true
+                }
+            }
         }
         // X1: JSON 라인은 atlas.blowup.jsonl, 그 외는 기존 path (atlas.n6)
         if is_json_line[i] && len(json_route_path) > 0 {
             clean_json_parts.push(to_string(valid_lines[i]))
+            clean_json_trimmed.push(to_string(valid_trimmed[i]))
         } else {
             clean_label_parts.push(to_string(valid_lines[i]))
+            clean_label_trimmed.push(to_string(valid_trimmed[i]))
         }
         i = i + 1
+    }
+    if id_deduped > 0 {
+        println("  [id-dedup guard] skipped " + to_string(id_deduped) + " same-id lines -> " + path)
     }
 
     if rejected > 0 {
         println("  [schema guard] rejected " + to_string(rejected) + " invalid lines -> " + path)
+    }
+    if v2_body_rejected > 0 {
+        println("  [schema v2 guard] " + to_string(v2_body_rejected) + " v2 tags blocked from atlas.n6 body (staging: atlas.signals.n6)")
     }
     if deduped > 0 {
         println("  [dedup guard] skipped " + to_string(deduped) + " duplicate lines -> " + path)
     }
 
     // (4) atlas.n6 라벨 append (caller path 그대로)
+    // A4 (2026-04-19): append 성공 시 _ATLAS_EVENTS_PATH 에 {ts,op,id,source} 병기
+    let _evt_ts = now()
     if len(clean_label_parts) > 0 {
         let mut clean_lbl = clean_label_parts.join("\n")
         if !clean_lbl.ends_with("\n") { clean_lbl = clean_lbl + "\n" }
@@ -903,24 +1270,118 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
         if !_ok_lbl {
             println("  [atlas WRITE FAIL] " + to_string(_nlbl) + " lines NOT persisted -> " + path)
         }
+        // A4: atlas.n6 body 에 들어간 라인별 event 발행 (성공한 경우만)
+        if _ok_lbl && is_atlas {
+            let mut _ei: i64 = 0
+            while _ei < len(clean_label_trimmed) {
+                _emit_atlas_event(to_string(clean_label_trimmed[_ei]), path, _evt_ts)
+                _ei = _ei + 1
+            }
+        }
     }
 
-    // (5) X1: atlas.blowup.jsonl JSON-line append
+    // (5) A5 (2026-04-19): JSON-line 3-shard 라우팅 — type 별 nodes/edges/events 분리
+    //   기존 atlas.blowup.jsonl 은 append 안 함 (migration 별건). 신규 append = 3-shard only.
+    //   각 shard 마다 .idx (ts-hour bucket → byte offset) 업데이트.
     if len(clean_json_parts) > 0 && len(json_route_path) > 0 {
-        let mut clean_json = clean_json_parts.join("\n")
-        if !clean_json.ends_with("\n") { clean_json = clean_json + "\n" }
-        let _njson = len(clean_json_parts)
-        let mut _ok_j = false
-        try { append_file(json_route_path, clean_json); _ok_j = true } catch e {}
-        if !_ok_j {
-            let _lock = json_route_path + ".lock"
-            try {
-                exec("(flock -w 30 200 && cat >> '" + json_route_path + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + clean_json + "__BLOWUP_EOF__")
-                _ok_j = true
-            } catch e {}
+        // type 별로 bucket (nodes / edges / events)
+        let mut shard_nodes_parts: [string] = []
+        let mut shard_nodes_trim: [string] = []
+        let mut shard_edges_parts: [string] = []
+        let mut shard_edges_trim: [string] = []
+        let mut shard_events_parts: [string] = []
+        let mut shard_events_trim: [string] = []
+        let _jn = len(clean_json_parts)
+        let mut _ji: i64 = 0
+        while _ji < _jn {
+            let _line = to_string(clean_json_parts[_ji])
+            let _trim = to_string(clean_json_trimmed[_ji])
+            let _sp = _shard_path_for_json(_trim)
+            if _sp == _ATLAS_BLOWUP_NODES_PATH {
+                shard_nodes_parts.push(_line)
+                shard_nodes_trim.push(_trim)
+            } else if _sp == _ATLAS_BLOWUP_EDGES_PATH {
+                shard_edges_parts.push(_line)
+                shard_edges_trim.push(_trim)
+            } else {
+                shard_events_parts.push(_line)
+                shard_events_trim.push(_trim)
+            }
+            _ji = _ji + 1
         }
-        if !_ok_j {
-            println("  [atlas WRITE FAIL] " + to_string(_njson) + " lines NOT persisted -> " + json_route_path)
+        let _hour = _ts_hour_bucket(_evt_ts)
+        // nodes shard
+        if len(shard_nodes_parts) > 0 {
+            let mut _n_buf = shard_nodes_parts.join("\n")
+            if !_n_buf.ends_with("\n") { _n_buf = _n_buf + "\n" }
+            let mut _ok_n = false
+            try { append_file(_ATLAS_BLOWUP_NODES_PATH, _n_buf); _ok_n = true } catch e {}
+            if !_ok_n {
+                let _lock = _ATLAS_BLOWUP_NODES_PATH + ".lock"
+                try {
+                    exec("(flock -w 30 200 && cat >> '" + _ATLAS_BLOWUP_NODES_PATH + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + _n_buf + "__BLOWUP_EOF__")
+                    _ok_n = true
+                } catch e {}
+            }
+            if _ok_n {
+                _update_shard_idx(_ATLAS_BLOWUP_NODES_PATH, _hour)
+                // A4: 3-shard append 도 event 로 기록 (source=shard path)
+                let mut _ei: i64 = 0
+                while _ei < len(shard_nodes_trim) {
+                    _emit_atlas_event(to_string(shard_nodes_trim[_ei]), _ATLAS_BLOWUP_NODES_PATH, _evt_ts)
+                    _ei = _ei + 1
+                }
+            } else {
+                println("  [atlas WRITE FAIL] " + to_string(len(shard_nodes_parts)) + " lines NOT persisted -> " + _ATLAS_BLOWUP_NODES_PATH)
+            }
+        }
+        // edges shard
+        if len(shard_edges_parts) > 0 {
+            let mut _e_buf = shard_edges_parts.join("\n")
+            if !_e_buf.ends_with("\n") { _e_buf = _e_buf + "\n" }
+            let mut _ok_e = false
+            try { append_file(_ATLAS_BLOWUP_EDGES_PATH, _e_buf); _ok_e = true } catch e {}
+            if !_ok_e {
+                let _lock = _ATLAS_BLOWUP_EDGES_PATH + ".lock"
+                try {
+                    exec("(flock -w 30 200 && cat >> '" + _ATLAS_BLOWUP_EDGES_PATH + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + _e_buf + "__BLOWUP_EOF__")
+                    _ok_e = true
+                } catch e {}
+            }
+            if _ok_e {
+                _update_shard_idx(_ATLAS_BLOWUP_EDGES_PATH, _hour)
+                let mut _ei: i64 = 0
+                while _ei < len(shard_edges_trim) {
+                    _emit_atlas_event(to_string(shard_edges_trim[_ei]), _ATLAS_BLOWUP_EDGES_PATH, _evt_ts)
+                    _ei = _ei + 1
+                }
+            } else {
+                println("  [atlas WRITE FAIL] " + to_string(len(shard_edges_parts)) + " lines NOT persisted -> " + _ATLAS_BLOWUP_EDGES_PATH)
+            }
+        }
+        // events shard (constant/projection/deduction/compose/bifurc/absorb/wave/...)
+        if len(shard_events_parts) > 0 {
+            let mut _v_buf = shard_events_parts.join("\n")
+            if !_v_buf.ends_with("\n") { _v_buf = _v_buf + "\n" }
+            let mut _ok_v = false
+            try { append_file(_ATLAS_BLOWUP_EVENTS_PATH, _v_buf); _ok_v = true } catch e {}
+            if !_ok_v {
+                let _lock = _ATLAS_BLOWUP_EVENTS_PATH + ".lock"
+                try {
+                    exec("(flock -w 30 200 && cat >> '" + _ATLAS_BLOWUP_EVENTS_PATH + "') 200>'" + _lock + "' <<'__BLOWUP_EOF__'\n" + _v_buf + "__BLOWUP_EOF__")
+                    _ok_v = true
+                } catch e {}
+            }
+            if _ok_v {
+                _update_shard_idx(_ATLAS_BLOWUP_EVENTS_PATH, _hour)
+                let mut _ei: i64 = 0
+                while _ei < len(shard_events_trim) {
+                    _emit_atlas_event(to_string(shard_events_trim[_ei]), _ATLAS_BLOWUP_EVENTS_PATH, _evt_ts)
+                    _ei = _ei + 1
+                }
+            } else {
+                println("  [atlas WRITE FAIL] " + to_string(len(shard_events_parts)) + " lines NOT persisted -> " + _ATLAS_BLOWUP_EVENTS_PATH)
+            }
         }
     }
     return rejected

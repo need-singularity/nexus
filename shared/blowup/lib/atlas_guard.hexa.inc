@@ -7,12 +7,171 @@
 
 // ─── Schema guard: atlas.n6 라인 포맷 검증 ───
 // 유효: 빈줄/# 주석/{"type":/@X ... [grade]/들여쓰기 부속("<-!!->)
+// v2 (2026-04-19): @EXP/@OBS/@NEG/@ANT 태그 + 그 continuation 필드 (lhs=/rhs=/if_true=/test=...)
 fn _valid_atlas_line(line: string) -> bool {
     let t = line.trim()
     if len(t) == 0 { return true }
     // OPT-P8-9: 8 if-chain → single .contains() (core blowup.hexa 동기화)
     let allowed = "#{@\"<>!-"
-    return allowed.contains(t[0..1])
+    if allowed.contains(t[0..1]) { return true }
+    // v2 continuation: indented key=value rows (lhs=/rhs=/delta=/z=/witness=/
+    // note=/if_true=/if_false=/test=/deadline=) — 원본 line (trim 전) 에 leading ws 필수
+    if len(line) > 0 && (line[0..1] == " " || line[0..1] == "\t") {
+        if _is_v2_continuation_key(t) { return true }
+    }
+    return false
+}
+
+// v2 continuation row 감지 — `<key>=...` or `<key> = ...` 형태 + 허용 key whitelist.
+fn _is_v2_continuation_key(t: string) -> bool {
+    let keys = ["lhs", "rhs", "delta", "z", "witness", "note", "if_true", "if_false", "test", "deadline", "cite", "vintage", "uncertainty", "status", "risks", "contrast", "source", "frame", "scale"]
+    for k in keys {
+        if t.starts_with(k + "=") { return true }
+        if t.starts_with(k + " =") { return true }
+        if t.starts_with(k + "  =") { return true }
+    }
+    return false
+}
+
+// ─── Schema v2 tag parser (field-level validation) ───
+// v2 tags: @EXP (external witness) / @OBS (observer frame) / @NEG (negation) / @ANT (antithesis)
+// 공통 포맷: @TAG id = expr :: domain [grade] @@ key=val key=val ...
+// 검증:
+//   (1) tag prefix ∈ {@EXP,@OBS,@NEG,@ANT}
+//   (2) id = [A-Za-z0-9_]+ (첫 char alpha, 뒤 alnum/_)
+//   (3) `::` domain 섹션 존재
+//   (4) trailing grade `[...]` 있으면 _known_atlas_grade 통과
+//   (5) `@@` 메타 섹션 + 태그별 필수 필드:
+//        @EXP: source=
+//        @OBS: frame= (scale= 권장)
+//        @NEG: contrast= (n= 권장)
+//        @ANT: risks= status=
+fn _is_v2_tag_line(line: string) -> bool {
+    let t = line.trim()
+    if len(t) < 5 { return false }
+    if t.starts_with("@EXP ") { return true }
+    if t.starts_with("@OBS ") { return true }
+    if t.starts_with("@NEG ") { return true }
+    if t.starts_with("@ANT ") { return true }
+    return false
+}
+
+fn _extract_v2_tag(line: string) -> string {
+    let t = line.trim()
+    if t.starts_with("@EXP ") { return "@EXP" }
+    if t.starts_with("@OBS ") { return "@OBS" }
+    if t.starts_with("@NEG ") { return "@NEG" }
+    if t.starts_with("@ANT ") { return "@ANT" }
+    return ""
+}
+
+// hexa pitfall: 문자열 >=/<= 비교 미지원 → char_code 사용.
+fn _is_alnum_id_char(s: string, i: i64) -> bool {
+    if i < 0 || i >= len(s) { return false }
+    let code = char_code(s, i)
+    if code >= 65 && code <= 90 { return true }   // A-Z
+    if code >= 97 && code <= 122 { return true }  // a-z
+    if code >= 48 && code <= 57 { return true }   // 0-9
+    if code == 95 { return true }                  // _
+    return false
+}
+
+fn _is_alpha_or_under(s: string, i: i64) -> bool {
+    if i < 0 || i >= len(s) { return false }
+    let code = char_code(s, i)
+    if code >= 65 && code <= 90 { return true }
+    if code >= 97 && code <= 122 { return true }
+    if code == 95 { return true }
+    return false
+}
+
+// v2 id 추출: `@TAG ID = ...` 에서 ID 부분. 유효하지 않으면 "".
+fn _extract_v2_id(line: string) -> string {
+    let t = line.trim()
+    // @TAG 뒤 공백, 그 뒤 id
+    let sp = t.index_of(" ")
+    if sp < 0 { return "" }
+    // skip leading spaces manually (no trim_start dep)
+    let mut start: i64 = sp + 1
+    while start < len(t) {
+        let c = t.substring(start, start + 1)
+        if c != " " && c != "\t" { break }
+        start = start + 1
+    }
+    // id 끝: 첫 ' ' or '=' or '\t'
+    let mut end: i64 = start
+    while end < len(t) {
+        let c = t.substring(end, end + 1)
+        if c == " " || c == "=" || c == "\t" { break }
+        end = end + 1
+    }
+    if end == start { return "" }
+    let id = t.substring(start, end)
+    if len(id) == 0 { return "" }
+    // id validation: 첫 char alpha/underscore, 나머지 alnum/_
+    if !_is_alpha_or_under(id, 0) { return "" }
+    let mut i: i64 = 1
+    while i < len(id) {
+        if !_is_alnum_id_char(id, i) { return "" }
+        i = i + 1
+    }
+    return id
+}
+
+// v2 태그별 필수 `@@ key=` 필드 검증.
+fn _valid_v2_meta_fields(line: string, tag: string) -> bool {
+    let t = line.trim()
+    let at_idx = t.index_of("@@")
+    if at_idx < 0 { return false }
+    let meta = t.substring(at_idx + 2, len(t))
+    if tag == "@EXP" {
+        if meta.contains("source=") { return true }
+        return false
+    }
+    if tag == "@OBS" {
+        if meta.contains("frame=") { return true }
+        return false
+    }
+    if tag == "@NEG" {
+        if meta.contains("contrast=") { return true }
+        return false
+    }
+    if tag == "@ANT" {
+        if meta.contains("risks=") && meta.contains("status=") { return true }
+        return false
+    }
+    return false
+}
+
+// 종합 v2 line 검증: 헤더 line 전체. continuation 은 _valid_atlas_line 에서 별도 처리.
+fn _valid_v2_line(line: string) -> bool {
+    if !_is_v2_tag_line(line) { return false }
+    let tag = _extract_v2_tag(line)
+    let id = _extract_v2_id(line)
+    if len(id) == 0 { return false }
+    let t = line.trim()
+    // `::` domain required
+    if !t.contains(" :: ") && !t.contains("::") { return false }
+    // trailing grade optional, if present validate
+    let g = _extract_trailing_grade(t)
+    if len(g) > 0 && !_known_atlas_grade(g) {
+        // v2 also accepts [N!] / [10*!] style which _known_atlas_grade already covers,
+        // 및 draft 샘플 [7?] = conjecture-class → _known_atlas_grade 미포함 → accept
+        if g != "[7?]" && g != "[10*!]" && g != "[4?]" { return false }
+    }
+    // required meta fields per tag
+    return _valid_v2_meta_fields(line, tag)
+}
+
+// ─── Staging-only gate: v2 태그는 atlas.signals.n6 에만 기록 허용 ───
+// atlas.n6 body 에 v2 태그 append 시도하면 reject (DRAFT §4, §9 non-goal).
+fn _is_signals_path(path: string) -> bool {
+    return path.contains("atlas.signals.n6") || path.contains(".signals.n6") || path.contains("atlas.signals.staging")
+}
+
+fn _is_atlas_body_path(path: string) -> bool {
+    if _is_signals_path(path) { return false }
+    return path.contains("atlas.n6")
 }
 
 // ─── Grade whitelist + ordering (AI-native 계층 등급) ───
@@ -90,12 +249,15 @@ fn _extract_trailing_grade(line: string) -> string {
 fn _guarded_append_atlas(path: string, content: string) -> i64 {
     if len(content) == 0 { return 0 }
     let is_atlas = path.contains("atlas.n6")
+    let is_signals = _is_signals_path(path)
+    let is_body = _is_atlas_body_path(path)
     // X1: JSON sidecar path — 호출자 측 _ATLAS_BLOWUP_PATH 글로벌 정의 시 자동 라우팅
     let mut json_route_path = ""
-    try { if is_atlas { json_route_path = _ATLAS_BLOWUP_PATH } } catch e {}
+    try { if is_atlas && !is_signals { json_route_path = _ATLAS_BLOWUP_PATH } } catch e {}
     let lines = content.split("\n")
     let mut rejected: i64 = 0
     let mut deduped: i64 = 0
+    let mut v2_body_rejected: i64 = 0
 
     // (1) schema 검증 — 유효 라인만 추출 + dedup 후보 수집
     let mut valid_lines = []
@@ -105,6 +267,21 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
     let mut i: i64 = 0
     while i < len(lines) {
         let line = lines[i]
+        // v2 tag staging gate: atlas.n6 body 에 v2 태그 append 차단 (DRAFT §4, §9)
+        if _is_v2_tag_line(line) {
+            if is_body && !is_signals {
+                v2_body_rejected = v2_body_rejected + 1
+                rejected = rejected + 1
+                i = i + 1
+                continue
+            }
+            // v2 field-level 검증 (signals path 허용)
+            if !_valid_v2_line(line) {
+                rejected = rejected + 1
+                i = i + 1
+                continue
+            }
+        }
         if !_valid_atlas_line(line) {
             rejected = rejected + 1
             i = i + 1
@@ -189,6 +366,9 @@ fn _guarded_append_atlas(path: string, content: string) -> i64 {
 
     if rejected > 0 {
         println("  [schema guard] rejected " + to_string(rejected) + " invalid lines -> " + path)
+    }
+    if v2_body_rejected > 0 {
+        println("  [schema v2 guard] " + to_string(v2_body_rejected) + " v2 tags blocked from atlas.n6 body (staging: atlas.signals.n6)")
     }
     if deduped > 0 {
         println("  [dedup guard] skipped " + to_string(deduped) + " duplicate lines -> " + path)
