@@ -222,7 +222,7 @@ fn lg_acquire() -> string {
         got = "ok"
     }
     if r1 == "no" {
-        let cmd = "PID=$(cat '" + LG_LOCKDIR + "/pid' 2>/dev/null); AGE=$(( $(date +%s) - $(stat -f %m '" + LG_LOCKDIR + "' 2>/dev/null) )); STALE=" + to_string(LG_STALE_SEC) + "; if [ -z \"$PID\" ] && [ $AGE -lt 5 ]; then echo skip; elif [ -n \"$PID\" ] && kill -0 $PID 2>/dev/null && [ $AGE -lt $STALE ]; then echo skip; else rm -rf '" + LG_LOCKDIR + "' && mkdir '" + LG_LOCKDIR + "' 2>/dev/null && echo $PPID > '" + LG_LOCKDIR + "/pid' && echo ok || echo skip; fi"
+        let cmd = "PID=$(cat '" + LG_LOCKDIR + "/pid' 2>/dev/null); MTIME=$(stat -c %Y '" + LG_LOCKDIR + "' 2>/dev/null || stat -f %m '" + LG_LOCKDIR + "' 2>/dev/null || echo 0); AGE=$(( $(date +%s) - MTIME )); STALE=" + to_string(LG_STALE_SEC) + "; if [ -z \"$PID\" ] && [ $AGE -lt 5 ]; then echo skip; elif [ -n \"$PID\" ] && kill -0 $PID 2>/dev/null && [ $AGE -lt $STALE ]; then echo skip; else rm -rf '" + LG_LOCKDIR + "' && mkdir '" + LG_LOCKDIR + "' 2>/dev/null && echo $PPID > '" + LG_LOCKDIR + "/pid' && echo ok || echo skip; fi"
         let r2 = to_string(exec(cmd)).trim()  // @allow-bare-exec
         if r2 == "ok" { got = "ok" }
     }
