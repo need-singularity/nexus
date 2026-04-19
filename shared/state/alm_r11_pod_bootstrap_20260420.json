@@ -1,0 +1,109 @@
+{
+  "_meta": {
+    "name": "ALM r11 pod 87xscivuggrwvk bootstrap state",
+    "schema_version": "1.0",
+    "captured_utc": "2026-04-20T00:05:00Z",
+    "session": "session_20260420_alm_r11_pod_bootstrap",
+    "authorized_by": "parent agent task (BG #?? pod bootstrap)",
+    "related_files": [
+      "/Users/ghost/Dev/nexus/shared/state/alm_r11_launch_20260420.json",
+      "/Users/ghost/Dev/anima/training/r11_ffi_watchdog.hexa",
+      "/Users/ghost/Dev/anima/training/train_alm_lora.hexa"
+    ]
+  },
+
+  "pod": {
+    "id": "87xscivuggrwvk",
+    "name": "clm_r5_h100",
+    "ssh": "root@216.243.220.220:11621",
+    "os": "Ubuntu 22.04.5 LTS",
+    "glibc": "2.35",
+    "workspace_fs": "mfs#us-ne-1.runpod.net:9421 (MooseFS persistent, 685T)"
+  },
+
+  "bootstrap_steps": {
+    "hexa_binary": {
+      "status": "DONE",
+      "path": "/usr/local/bin/hexa",
+      "version": "hexa 0.1.0-stage1",
+      "build_method": "compiled on pod from /workspace/hexa-lang sources (glibc 2.38 incompatibility with pre-built binary — rebuilt locally)",
+      "build_chain": [
+        "gcc -O2 -D_GNU_SOURCE /workspace/hexa-lang/self/native/hexa_cc.c -o /tmp/hexa_cc",
+        "/tmp/hexa_cc self/main.hexa /tmp/hexa_main.c (transpile)",
+        "gcc -O2 -D_GNU_SOURCE -I self /tmp/hexa_main.c -o /usr/local/bin/hexa -lm"
+      ],
+      "notes": "Pre-built Mac hexa (Mach-O arm64) + ubu2/htz linux hexa (requires GLIBC_2.38 for __isoc23_strtoll) both unusable. Native build from source on pod worked cleanly."
+    },
+
+    "anima_repo": {
+      "status": "DONE",
+      "path": "/workspace/anima",
+      "remote": "https://github.com/need-singularity/anima.git",
+      "head": "0908ea1 ops(hetzner): disk cleanup — 92% → ~85%",
+      "clone_depth": 1,
+      "trainer_path": "/workspace/anima/training/train_alm_lora.hexa",
+      "trainer_size_bytes": 45775
+    },
+
+    "hexa_lang_repo": {
+      "status": "DONE",
+      "path": "/workspace/hexa-lang",
+      "remote": "https://github.com/need-singularity/hexa-lang.git",
+      "clone_depth": 1,
+      "notes": "Required for rebuilding hexa binary from source"
+    },
+
+    "corpus": {
+      "status": "DONE",
+      "path": "/workspace/corpus/corpus_alm_70b_stripped_kowiki15.txt",
+      "symlink": "/workspace/corpus/corpus_alm_r11.jsonl",
+      "size_bytes": 93301193,
+      "size_mib": 88.98,
+      "sha256": "04395bf3dd2bdd979c700b505f07974919f6c4bc1ac1ad464186a599813cde8e",
+      "sha256_prefix_match": true,
+      "source": "r2:anima-corpus/alm/corpus_alm_70b_stripped_kowiki15.txt",
+      "download_speed_mib_s": 21.1,
+      "download_elapsed_s": 4.8
+    },
+
+    "rclone_conf": {
+      "status": "DONE",
+      "path": "/root/.config/rclone/rclone.conf",
+      "perms": "0600",
+      "source": "scp from /Users/ghost/.config/rclone/rclone.conf",
+      "auth_test": "rclone lsd r2: returned buckets (anima-corpus, anima-eeg, anima-logs, anima-memory, anima-models, blitz, evo, odds, prism) — auth OK",
+      "provider_warning": "NOTICE: s3 provider \"Cloudflare\" not known — non-fatal, reads/writes work",
+      "c23_shim_installed": "/usr/local/lib/libc23shim.so (unused — pod binary now native-built, shim left in place as safety)"
+    },
+
+    "ckpt_dir": {
+      "status": "PRE_EXISTING",
+      "path": "/workspace/ckpt_alm14b_r11_20260420",
+      "watchdog_files_present": [
+        "first_blocked_ffi.txt (167 bytes, HEXA_BIN_MISSING)",
+        "r11_ffi_watchdog.cuda_landed (0 bytes, pre-existing — NOT created by this bootstrap)"
+      ],
+      "note": "Marker file r11_ffi_watchdog.cuda_landed was already present at 16:03 UTC before bootstrap started — not touched by this task"
+    }
+  },
+
+  "verification": {
+    "hexa_version": "hexa 0.1.0-stage1",
+    "hexa_path": "/usr/local/bin/hexa",
+    "anima_head": "0908ea1",
+    "corpus_sha256": "04395bf3dd2bdd979c700b505f07974919f6c4bc1ac1ad464186a599813cde8e",
+    "rclone_auth": true,
+    "watchdog_tmux_running": true,
+    "watchdog_session": "r11_ffi_watchdog",
+    "trainer_file_exists": true
+  },
+
+  "skipped": [],
+  "failed": [],
+  "notes": [
+    "Pitfall avoided: did NOT build on pod initially as scope creep, but after discovering both available Linux hexa binaries required GLIBC_2.38 (pod has 2.35), native rebuild from source was the fastest path (~60s compile).",
+    "Pitfall honored: did NOT touch r11_ffi_watchdog.cuda_landed marker (was pre-existing from earlier BG activity — out of scope for this bootstrap).",
+    "Pitfall honored: did NOT SSH to hhzla1nxmp5019 (BG #14 build pod).",
+    "rclone.conf contents never logged (redacted in diagnostic output)."
+  ]
+}
