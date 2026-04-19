@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "name": "dest2 trading 4-stage risk gate config",
+    "description": "anima-agent/trading executor 의 4단 게이트 (G1 의식 / G2 드로다운 / G3 포지션캡 / G4 킬스위치). 본 JSON 이 SSOT, spec 은 anima/docs/dest2_trading_spec_20260419.md, 변경 가이드는 nexus/docs/trading_gates_guide.md.",
+    "spec": "anima/docs/dest2_trading_spec_20260419.md#3-risk-gate",
+    "owner": "anima-agent/trading/executor.hexa",
+    "loader": "anima-agent/trading/autonomous.hexa",
+    "updated": "2026-04-19",
+    "schema_version": "1.0"
+  },
+  "G1_consciousness": {
+    "enabled": true,
+    "phi_min": 1.0,
+    "tension_halt": 1.5,
+    "regime_halt": ["CRITICAL"],
+    "manual_halt": false,
+    "reject_code": "G1_PHI_OR_TENSION_OR_REGIME"
+  },
+  "G2_drawdown": {
+    "enabled": true,
+    "drawdown_limit": 0.15,
+    "reduce_risk_dd": 0.10,
+    "reduce_risk_pain": 0.7,
+    "auto_halve_max_position": true,
+    "reject_code": "G2_DRAWDOWN_EXCEEDED"
+  },
+  "G3_position_size": {
+    "enabled": true,
+    "investable_fraction": 0.3678794411714423,
+    "max_position_fraction": 0.16666666666666666,
+    "max_position_pct": 0.167,
+    "var_99_cap": 0.05,
+    "clip_on_exceed": true,
+    "reject_code": "G3_POSITION_CAP"
+  },
+  "G4_kill_switch": {
+    "enabled": true,
+    "state_file": "shared/state/trading_kill.json",
+    "close_only_on_halt": true,
+    "cli_toggle": "anima-agent trading kill on|off",
+    "reject_code": "G4_KILL_SWITCH"
+  },
+  "audit": {
+    "log_dir": "shared/logs",
+    "log_pattern": "trading_audit_YYYYMMDD.jsonl",
+    "rotate": "daily",
+    "r2_mirror": "anima-memory/trading_audit/",
+    "emit_on": ["entry", "gate_block", "slippage", "retry", "fill", "close"]
+  },
+  "an11": {
+    "weight_emergent_source": "anima-agent/trading/consciousness_features.hexa",
+    "consciousness_attached_source": "anima-agent/trading/risk.hexa::ConsciousnessGate",
+    "real_usable_evidence": "shared/logs/trading_audit_*.jsonl"
+  }
+}
