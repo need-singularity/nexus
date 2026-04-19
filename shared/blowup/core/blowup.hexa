@@ -394,7 +394,10 @@ fn match_name(value: f64) -> string {
     while i < _n6_dyn_count {
         let cv: f64 = _n6_fcache[i]
         // 값 크기에 따른 적응적 threshold
-        let threshold = if abs_f(cv) >= 100.0 { 0.01 } else { if abs_f(cv) >= 1.0 { 0.0001 } else { if abs_f(cv) >= 0.01 { 0.001 } else { 0.005 } } }
+        let mut threshold = 0.005
+        if abs_f(cv) >= 100.0 { threshold = 0.01 }
+        else if abs_f(cv) >= 1.0 { threshold = 0.0001 }
+        else if abs_f(cv) >= 0.01 { threshold = 0.001 }
         if abs_f(value - cv) < threshold { return to_string(_n6_dyn_names[i]) }
         i = i + 1
     }
@@ -939,19 +942,25 @@ fn graph_count_type(content: string, ttype: string) -> i64 {
     return count
 }
 
-// ─── atlas.n6.stats 사이드카 캐시 (Phase 1 O(58k lines) → O(1) / O(Δ)) ───
-// 포맷 v2: {"schema":2,"mtime":<int>,"size":<int>,"line_count":<int>,
+// ─── atlas.blowup.jsonl.stats 사이드카 캐시 (Phase 1 O(58k lines) → O(1) / O(Δ)) ───
+// 포맷 blowup_v1: {"schema":"blowup_v1","mtime":<int>,"size":<int>,"line_count":<int>,
 //          "head_hash":<md5 first 256B>,"nodes":<int>,"edges":<int>,"hubs":<int>}
-// deg 사이드카: atlas.n6.deg — TSV "id\tdegree\n" (hub 재계산용)
+// deg 사이드카: atlas.blowup.jsonl.deg — TSV "id\tdegree\n" (hub 재계산용)
+// 2026-04-19 ROI#2: path 분리 — atlas_health v3 의 atlas.n6.stats (schema:3 derived)
+//   와 충돌 회피. blowup stats 의 SSOT 소스는 atlas.blowup.jsonl 이므로
+//   사이드카도 블로웁-소스 루트로 이동. atlas.n6.stats 는 atlas_health 전용.
 // 유효성:
 //   - exact: mtime+size 일치 → O(1) 리턴
 //   - incremental: size>cached + head_hash 일치 → Δ lines만 파싱 O(Δ)
 //   - miss: 전체 스캔 + 양쪽 사이드카 재작성
 fn graph_stats_cache_path() -> string {
+    // blowup 소스 존재 시 분리 경로, 없으면 레거시 fallback
+    if file_exists(_ATLAS_BLOWUP_PATH) { return _ATLAS_BLOWUP_PATH + ".stats" }
     return _ATLAS_PATH + ".stats"
 }
 
 fn graph_deg_cache_path() -> string {
+    if file_exists(_ATLAS_BLOWUP_PATH) { return _ATLAS_BLOWUP_PATH + ".deg" }
     return _ATLAS_PATH + ".deg"
 }
 
@@ -1211,7 +1220,7 @@ fn graph_stats_write_cache_full(nodes: i64, edges: i64, hubs: i64, line_count: i
     let mtime = sp[0]
     let size = sp[1]
     let head_hash = _head_hash_256(src_path)
-    let body = "{\"schema\":2,\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":" + to_string(line_count) + ",\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
+    let body = "{\"schema\":\"blowup_v1\",\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":" + to_string(line_count) + ",\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
     try { write_file(graph_stats_cache_path(), body) } catch e {}
     try { write_file(graph_deg_cache_path(), _serialize_deg_map(deg_map)) } catch e {}
 }
@@ -1264,7 +1273,7 @@ fn graph_stats_write_cache_after_awk(nodes: i64, edges: i64, hubs: i64) {
     try { lc_raw = exec("wc -l < '" + src_path + "'") } catch e {}
     let mut line_count: i64 = 0
     try { line_count = to_int(lc_raw.trim()) } catch e {}
-    let body = "{\"schema\":2,\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":" + to_string(line_count) + ",\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
+    let body = "{\"schema\":\"blowup_v1\",\"mtime\":" + mtime + ",\"size\":" + size + ",\"line_count\":" + to_string(line_count) + ",\"head_hash\":\"" + head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(hubs) + "}\n"
     try { write_file(graph_stats_cache_path(), body) } catch e {}
 }
 
@@ -1872,10 +1881,14 @@ fn telescope_verify(vals: string, threshold: f64) -> string {
     if s5 >= threshold { agree = agree + 1 }
 
     // consensus level
-    let level = if agree >= 4 { "High" } else { if agree >= 3 { "Candidate" } else { "None" } }
+    let mut level = "None"
+    if agree >= 4 { level = "High" } else if agree >= 3 { level = "Candidate" }
 
     // confidence boost: 3+ agreement = +0.1, 4+ = +0.15, 5 = +0.2
-    let boost = if agree >= 5 { 0.2 } else { if agree >= 4 { 0.15 } else { if agree >= 3 { 0.1 } else { 0.0 } } }
+    let mut boost = 0.0
+    if agree >= 5 { boost = 0.2 }
+    else if agree >= 4 { boost = 0.15 }
+    else if agree >= 3 { boost = 0.1 }
 
     return to_string(agree) + "|" + level + "|" + to_string(boost) + "|" + to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" + to_string(s4) + "|" + to_string(s5)
 }

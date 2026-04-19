@@ -39,44 +39,97 @@ if _ATLAS_PATH.ends_with("atlas.n6") {
 let _STATS_PATH = _ATLAS_PATH + ".stats"
 let mut _cache_hit = false
 
-// 현재 파일 mtime 취득 (1 exec)
+// 현재 파일 mtime 취득 — Mac BSD stat -f (filesystem on GNU) prose 회피.
+// GNU 에선 `stat -c` 만 숫자, BSD 는 `stat -f` 만 숫자. 둘 다 시도 후 마지막 라인 + 숫자만 추출.
+fn _last_numeric_line(raw: string) -> string {
+    let lines = raw.split("\n")
+    let mut i: i64 = len(lines) - 1
+    while i >= 0 {
+        let t = lines[i].trim()
+        if t != "" {
+            let mut all_digit = true
+            let mut j: i64 = 0
+            while j < len(t) {
+                let c = t.substring(j, j + 1)
+                if c < "0" || c > "9" { all_digit = false; j = len(t) }
+                j = j + 1
+            }
+            if all_digit { return t }
+        }
+        i = i - 1
+    }
+    return ""
+}
 let mut _cur_mtime = ""
 try {
-    _cur_mtime = to_string(exec("stat -f '%m' '" + _ATLAS_PATH + "' 2>/dev/null || stat -c '%Y' '" + _ATLAS_PATH + "' 2>/dev/null")).trim()
+    let raw = to_string(exec("stat -c '%Y' '" + _ATLAS_PATH + "' 2>/dev/null; stat -f '%m' '" + _ATLAS_PATH + "' 2>/dev/null"))
+    _cur_mtime = _last_numeric_line(raw)
 } catch e {}  // @allow-silent-catch
 
-// 캐시 사이드카 읽기 + mtime 비교
+// 캐시 사이드카 읽기 + mtime 비교  (v3: derived 6 필드 추가)
 let mut _c_size: i64 = 0
 let mut _c_lines: i64 = 0
 let mut _c_nodes: i64 = 0
 let mut _c_edges: i64 = 0
+let mut _c_schema: i64 = 0
+let mut _c_uniq_nodes: i64 = -1
+let mut _c_uniq_refs: i64 = -1
+let mut _c_orphans: i64 = -1
+let mut _c_virtual: i64 = -1
+let mut _c_dup: i64 = -1
+let mut _c_mal: i64 = -1
+let mut _c_grade_dist: string = ""
+let mut _derived_cache_hit = false
+fn _json_int_g(raw: string, key: string) -> i64 {
+    let mut v: i64 = 0
+    let marker = "\"" + key + "\":"
+    let idx = raw.index_of(marker)
+    if idx >= 0 {
+        let after = raw.substring(idx + len(marker), len(raw))
+        let mut end = after.index_of(",")
+        let end2 = after.index_of("}")
+        if end < 0 || (end2 >= 0 && end2 < end) { end = end2 }
+        if end > 0 {
+            try { v = to_int(after.substring(0, end).trim()) } catch e {}  // @allow-silent-catch
+        }
+    }
+    return v
+}
+fn _json_str_g(raw: string, key: string) -> string {
+    let marker = "\"" + key + "\":\""
+    let idx = raw.index_of(marker)
+    if idx < 0 { return "" }
+    let start = idx + len(marker)
+    let after = raw.substring(start, len(raw))
+    let end = after.index_of("\"")
+    if end < 0 { return "" }
+    return after.substring(0, end)
+}
 if _cur_mtime != "" && file_exists(_STATS_PATH) {
     let mut _stats_raw = ""
     try { _stats_raw = read_file(_STATS_PATH).trim() } catch e {}  // @allow-silent-catch
     if _stats_raw != "" {
-        // 수동 JSON 파싱: "key":value 패턴 추출
-        fn _json_int(raw: string, key: string) -> i64 {
-            let mut v: i64 = 0
-            let marker = "\"" + key + "\":"
-            let idx = raw.index_of(marker)
-            if idx >= 0 {
-                let after = raw.substring(idx + len(marker), len(raw))
-                let mut end = after.index_of(",")
-                let end2 = after.index_of("}")
-                if end < 0 || (end2 >= 0 && end2 < end) { end = end2 }
-                if end > 0 {
-                    try { v = to_int(after.substring(0, end).trim()) } catch e {}  // @allow-silent-catch
+        let cached_mtime = to_string(_json_int_g(_stats_raw, "mtime"))
+        if cached_mtime == _cur_mtime {
+            _c_schema = _json_int_g(_stats_raw, "schema")
+            _c_size = _json_int_g(_stats_raw, "size")
+            _c_lines = _json_int_g(_stats_raw, "line_count")
+            _c_nodes = _json_int_g(_stats_raw, "nodes")
+            _c_edges = _json_int_g(_stats_raw, "edges")
+            if _c_size > 0 && _c_lines > 0 { _cache_hit = true }
+            // v3 derived: present 시 _derived_cache_hit
+            if _c_schema >= 3 {
+                _c_uniq_nodes = _json_int_g(_stats_raw, "unique_nodes")
+                _c_uniq_refs = _json_int_g(_stats_raw, "unique_refs")
+                _c_orphans = _json_int_g(_stats_raw, "orphans_count")
+                _c_virtual = _json_int_g(_stats_raw, "virtual_refs")
+                _c_dup = _json_int_g(_stats_raw, "dup_lines")
+                _c_mal = _json_int_g(_stats_raw, "malformed_count")
+                _c_grade_dist = _json_str_g(_stats_raw, "grade_dist")
+                if _c_uniq_nodes >= 0 && _c_uniq_refs >= 0 && _c_orphans >= 0 && _c_dup >= 0 && _c_mal >= 0 {
+                    _derived_cache_hit = true
                 }
             }
-            return v
-        }
-        let cached_mtime = to_string(_json_int(_stats_raw, "mtime"))
-        if cached_mtime == _cur_mtime {
-            _c_size = _json_int(_stats_raw, "size")
-            _c_lines = _json_int(_stats_raw, "line_count")
-            _c_nodes = _json_int(_stats_raw, "nodes")
-            _c_edges = _json_int(_stats_raw, "edges")
-            if _c_size > 0 && _c_lines > 0 { _cache_hit = true }
         }
     }
 }
@@ -86,8 +139,23 @@ if _cur_mtime != "" && file_exists(_STATS_PATH) {
 fn _stat_size(path: string) -> i64 {
     let mut r = 0
     try {
-        let raw = to_string(exec("stat -f '%z' '" + path + "' 2>/dev/null || stat -c '%s' '" + path + "' 2>/dev/null")).trim()
-        r = to_int(raw)
+        let raw = to_string(exec("stat -c '%s' '" + path + "' 2>/dev/null; stat -f '%z' '" + path + "' 2>/dev/null"))
+        let lines = raw.split("\n")
+        let mut i: i64 = len(lines) - 1
+        while i >= 0 {
+            let t = lines[i].trim()
+            if t != "" {
+                let mut all_digit = true
+                let mut j: i64 = 0
+                while j < len(t) {
+                    let c = t.substring(j, j + 1)
+                    if c < "0" || c > "9" { all_digit = false; j = len(t) }
+                    j = j + 1
+                }
+                if all_digit { try { r = to_int(t); i = -1 } catch e {} }  // @allow-silent-catch
+            }
+            i = i - 1
+        }
     } catch e {}  // @allow-silent-catch
     return r
 }
@@ -125,18 +193,64 @@ if _cache_hit {
     nodes = _grep_count(_ATLAS_PATH, "\"type\":\"node\"")
     edges = _grep_count(_ATLAS_PATH, "\"type\":\"edge\"")
 }
+// atlas.n6 단독값 보존 (합산 전) — 사이드카 저장은 항상 단독값
+let _atlas_only_nodes = nodes
+let _atlas_only_edges = edges
 
 // X1: JSON sidecar 합산 (atlas.blowup.jsonl 의 nodes/edges 추가)
+// v3: blowup mtime 캐시 — 매번 17MB 풀스캔 회피
 let mut blowup_size: i64 = 0
 let mut blowup_lines: i64 = 0
 let mut blowup_nodes: i64 = 0
 let mut blowup_edges: i64 = 0
+let mut _blowup_mtime: string = ""
+let mut _blowup_cache_hit = false
 if _ATLAS_BLOWUP_PATH != "" {
-    blowup_size = _stat_size(_ATLAS_BLOWUP_PATH)
-    blowup_lines = _line_count(_ATLAS_BLOWUP_PATH)
-    blowup_nodes = _grep_count(_ATLAS_BLOWUP_PATH, "\"type\":\"node\"")
-    blowup_edges = _grep_count(_ATLAS_BLOWUP_PATH, "\"type\":\"edge\"")
-    // 합산값으로 기존 nodes/edges 갱신 (downstream 호환)
+    try {
+        let raw = to_string(exec("stat -c '%Y' '" + _ATLAS_BLOWUP_PATH + "' 2>/dev/null; stat -f '%m' '" + _ATLAS_BLOWUP_PATH + "' 2>/dev/null"))
+        _blowup_mtime = _last_numeric_line(raw)
+    } catch e {}  // @allow-silent-catch
+    // ROI#2 (2026-04-19): blowup stats SSOT 는 분리된 사이드카 atlas.blowup.jsonl.stats (schema:"blowup_v1")
+    //   1) blowup 사이드카 직접 읽기 (schema:"blowup_v1", blowup.hexa 생성)
+    //   2) atlas_health 인라인 캐시 (atlas.n6.stats 의 blowup_* 필드, backward-compat)
+    //   3) miss → 17MB 풀스캔 + 인라인 캐시 갱신
+    let _BLOWUP_STATS_PATH = _ATLAS_BLOWUP_PATH + ".stats"
+    let mut _bw_sidecar_hit = false
+    if file_exists(_BLOWUP_STATS_PATH) && _blowup_mtime != "" {
+        let mut _bw_raw = ""
+        try { _bw_raw = read_file(_BLOWUP_STATS_PATH).trim() } catch e {}  // @allow-silent-catch
+        if _bw_raw != "" {
+            let _bw_cached_mtime = to_string(_json_int_g(_bw_raw, "mtime"))
+            if _bw_cached_mtime == _blowup_mtime {
+                blowup_size = _json_int_g(_bw_raw, "size")
+                blowup_lines = _json_int_g(_bw_raw, "line_count")
+                blowup_nodes = _json_int_g(_bw_raw, "nodes")
+                blowup_edges = _json_int_g(_bw_raw, "edges")
+                if blowup_size > 0 && blowup_nodes >= 0 {
+                    _bw_sidecar_hit = true
+                    _blowup_cache_hit = true
+                }
+            }
+        }
+    }
+    if !_bw_sidecar_hit {
+        let mut _raw2 = ""
+        if _derived_cache_hit {
+            try { _raw2 = read_file(_STATS_PATH).trim() } catch e {}  // @allow-silent-catch
+        }
+        if _derived_cache_hit && _raw2 != "" && _blowup_mtime != "" && _blowup_mtime == to_string(_json_int_g(_raw2, "blowup_mtime")) {
+            _blowup_cache_hit = true
+            blowup_size = _json_int_g(_raw2, "blowup_size")
+            blowup_lines = _json_int_g(_raw2, "blowup_lines")
+            blowup_nodes = _json_int_g(_raw2, "blowup_nodes")
+            blowup_edges = _json_int_g(_raw2, "blowup_edges")
+        } else {
+            blowup_size = _stat_size(_ATLAS_BLOWUP_PATH)
+            blowup_lines = _line_count(_ATLAS_BLOWUP_PATH)
+            blowup_nodes = _grep_count(_ATLAS_BLOWUP_PATH, "\"type\":\"node\"")
+            blowup_edges = _grep_count(_ATLAS_BLOWUP_PATH, "\"type\":\"edge\"")
+        }
+    }
     nodes = nodes + blowup_nodes
     edges = edges + blowup_edges
 }
@@ -183,70 +297,102 @@ if _ATLAS_BLOWUP_PATH != "" {
     _JSON_SOURCES = _JSON_SOURCES + " '" + _ATLAS_BLOWUP_PATH + "'"
 }
 
-// ─── 유일 node ID 카운트 (awk 경유) ───  // @allow-bare-interp
-// 'node' + 'absorb' 양쪽 인식 (R*-* 7대난제 absorb 도 정당한 노드)
-let node_uniq_raw = to_string(exec("awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' " + _JSON_SOURCES + " 2>/dev/null | sort -u | wc -l")).trim()
+// ─── derived 6필드: cache_hit 시 사이드카에서 직접 (awk+sort 회피) ───
 let mut node_uniq: i64 = 0
-try { node_uniq = to_int(node_uniq_raw) } catch e {}  // @allow-silent-catch
-println("  unique nodes:  " + to_string(node_uniq) + " (dup node IDs: " + to_string(nodes - node_uniq) + ")")  // @allow-bare-interp
-
-// ─── edge 참조 (from/to) 유일 집합 ───
-let refs_uniq_raw = to_string(exec("awk '/\"type\":\"edge\"/ { match($0, /\"from\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+8, RLENGTH-9); match($0, /\"to\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+6, RLENGTH-7) }' " + _JSON_SOURCES + " 2>/dev/null | sort -u | wc -l")).trim()
 let mut refs_uniq: i64 = 0
-try { refs_uniq = to_int(refs_uniq_raw) } catch e {}  // @allow-silent-catch
-println("  unique refs:   " + to_string(refs_uniq))
-
-// ─── orphan refs 분리 (virtual n6-/bt-/foundation- 제외) ───
-let orphans_tmp = "/tmp/.atlas_health_orphans." + to_string(exec("echo $$").trim())
-// 노드 ID 집합 = JSON node/absorb + 텍스트포맷 @<TAG> <id> (L*/MUS*/etc 7106개)
-try { exec("bash", ["-c", "comm -23 <(awk '/\"type\":\"edge\"/ { match($0, /\"from\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+8, RLENGTH-9); match($0, /\"to\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+6, RLENGTH-7) }' " + _JSON_SOURCES + " | sort -u) <( { awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' " + _JSON_SOURCES + " ; awk '/^@[A-Z]+ /{print $2}' '" + _ATLAS_PATH + "' ; } | sort -u) > '" + orphans_tmp + "' 2>/dev/null"]) } catch e {}  // @allow-silent-catch
-let virtual_count_raw = to_string(exec("grep -cE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null")).trim()
 let mut virtual_count: i64 = 0
-try { virtual_count = to_int(virtual_count_raw) } catch e {}  // @allow-silent-catch
-let real_orphans_raw = to_string(exec("grep -cvE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null")).trim()
 let mut real_orphans: i64 = 0
-try { real_orphans = to_int(real_orphans_raw) } catch e {}  // @allow-silent-catch
-println("  virtual refs:  " + to_string(virtual_count) + " (n6-/bt-/foundation- 유도 체인)")
-let orphan_status = if real_orphans == 0 { "✓" } else { "⚠️" }
-println("  real orphans:  " + to_string(real_orphans) + "  " + orphan_status)
-
-if verbose && real_orphans > 0 {
-    println("  --- first 20 real orphans ---")
-    let sample = to_string(exec("grep -vE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null | head -20"))
-    let sample_lines = sample.split("\n")
-    for sl in sample_lines { if sl.trim() != "" { println("    " + sl) } }
-}
-try { exec("rm -f '" + orphans_tmp + "'") } catch e {}  // @allow-silent-catch
-
-// ─── 중복 데이터 라인 ───
-// continuation 라인(들여쓰기 시작) 제외 — 동일 서술("!! breakthrough" 등)이 다른 @-entry 부속으로 정당 반복
-let dup_raw = to_string(exec("grep -v '^#' '" + _ATLAS_PATH + "' 2>/dev/null | grep -v '^//' | grep -v '^$' | grep -v '^[[:space:]]' | sort | uniq -d | wc -l")).trim()
 let mut dup: i64 = 0
-try { dup = to_int(dup_raw) } catch e {}  // @allow-silent-catch
-let dup_status = if dup == 0 { "✓" } else { "⚠️" }
-println("  dup data lines:" + to_string(dup) + "  " + dup_status)
-
-// ─── malformed ───
-let mal_raw = to_string(exec("awk '/^$|^#|^\\/\\//{next} /^[[:space:]]/{next} /^[{]/{next} /^@/{next} {c++} END{print c+0}' '" + _ATLAS_PATH + "' 2>/dev/null")).trim()
 let mut mal: i64 = 0
-try { mal = to_int(mal_raw) } catch e {}  // @allow-silent-catch
-let mal_status = if mal == 0 { "✓" } else { "⚠️" }
-println("  malformed:     " + to_string(mal) + "  " + mal_status)
+let mut grade_dist_str: string = ""
+if _derived_cache_hit {
+    node_uniq = _c_uniq_nodes
+    refs_uniq = _c_uniq_refs
+    virtual_count = _c_virtual
+    if virtual_count < 0 { virtual_count = 0 }
+    real_orphans = _c_orphans
+    dup = _c_dup
+    mal = _c_mal
+    grade_dist_str = _c_grade_dist
+    println("  unique nodes:  " + to_string(node_uniq) + " (dup node IDs: " + to_string(nodes - node_uniq) + ")")  // @allow-bare-interp
+    println("  unique refs:   " + to_string(refs_uniq))
+    println("  virtual refs:  " + to_string(virtual_count) + " (n6-/bt-/foundation- 유도 체인)")
+    let _o_status = if real_orphans == 0 { "✓" } else { "⚠️" }
+    println("  real orphans:  " + to_string(real_orphans) + "  " + _o_status)
+    let _d_status = if dup == 0 { "✓" } else { "⚠️" }
+    println("  dup data lines:" + to_string(dup) + "  " + _d_status)
+    let _m_status = if mal == 0 { "✓" } else { "⚠️" }
+    println("  malformed:     " + to_string(mal) + "  " + _m_status)
+    println("  grade dist:")
+    if grade_dist_str != "" {
+        // grade_dist_str: "    9876 [10*]|    1234 [11*]|..." — '|' 구분
+        let _gparts = grade_dist_str.split("|")
+        for _gp in _gparts { if _gp.trim() != "" { println("    " + _gp.trim()) } }
+    }
+} else {
+    // ─── 유일 node ID 카운트 (awk 경유) ───  // @allow-bare-interp
+    // 'node' + 'absorb' 양쪽 인식 (R*-* 7대난제 absorb 도 정당한 노드)
+    let node_uniq_raw = to_string(exec("awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' " + _JSON_SOURCES + " 2>/dev/null | sort -u | wc -l")).trim()
+    try { node_uniq = to_int(node_uniq_raw) } catch e {}  // @allow-silent-catch
+    println("  unique nodes:  " + to_string(node_uniq) + " (dup node IDs: " + to_string(nodes - node_uniq) + ")")  // @allow-bare-interp
 
-if verbose && mal > 0 {
-    println("  --- first 10 malformed ---")
-    let sample = to_string(exec("awk '/^$|^#|^\\/\\//{next} /^[[:space:]]/{next} /^[{]/{next} /^@/{next} {print NR\": \"$0}' '" + _ATLAS_PATH + "' 2>/dev/null | head -10"))
-    let sample_lines = sample.split("\n")
-    for sl in sample_lines { if sl.trim() != "" { println("    " + sl) } }
+    // ─── edge 참조 (from/to) 유일 집합 ───
+    let refs_uniq_raw = to_string(exec("awk '/\"type\":\"edge\"/ { match($0, /\"from\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+8, RLENGTH-9); match($0, /\"to\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+6, RLENGTH-7) }' " + _JSON_SOURCES + " 2>/dev/null | sort -u | wc -l")).trim()
+    try { refs_uniq = to_int(refs_uniq_raw) } catch e {}  // @allow-silent-catch
+    println("  unique refs:   " + to_string(refs_uniq))
+
+    // ─── orphan refs 분리 (virtual n6-/bt-/foundation- 제외) ───
+    let orphans_tmp = "/tmp/.atlas_health_orphans." + to_string(exec("echo $$").trim())
+    try { exec("bash", ["-c", "comm -23 <(awk '/\"type\":\"edge\"/ { match($0, /\"from\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+8, RLENGTH-9); match($0, /\"to\":\"[^\"]*\"/); if(RSTART>0) print substr($0, RSTART+6, RLENGTH-7) }' " + _JSON_SOURCES + " | sort -u) <( { awk -F'\"id\":\"' '/\"type\":\"(node|absorb)\"/{split($2,a,\"\\\"\");print a[1]}' " + _JSON_SOURCES + " ; awk '/^@[A-Z]+ /{print $2}' '" + _ATLAS_PATH + "' ; } | sort -u) > '" + orphans_tmp + "' 2>/dev/null"]) } catch e {}  // @allow-silent-catch
+    let virtual_count_raw = to_string(exec("grep -cE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null")).trim()
+    try { virtual_count = to_int(virtual_count_raw) } catch e {}  // @allow-silent-catch
+    let real_orphans_raw = to_string(exec("grep -cvE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null")).trim()
+    try { real_orphans = to_int(real_orphans_raw) } catch e {}  // @allow-silent-catch
+    println("  virtual refs:  " + to_string(virtual_count) + " (n6-/bt-/foundation- 유도 체인)")
+    let orphan_status = if real_orphans == 0 { "✓" } else { "⚠️" }
+    println("  real orphans:  " + to_string(real_orphans) + "  " + orphan_status)
+
+    if verbose && real_orphans > 0 {
+        println("  --- first 20 real orphans ---")
+        let sample = to_string(exec("grep -vE '^(n6-|bt-|foundation-)' '" + orphans_tmp + "' 2>/dev/null | head -20"))
+        let sample_lines = sample.split("\n")
+        for sl in sample_lines { if sl.trim() != "" { println("    " + sl) } }
+    }
+    try { exec("rm -f '" + orphans_tmp + "'") } catch e {}  // @allow-silent-catch
+
+    // ─── 중복 데이터 라인 ───
+    let dup_raw = to_string(exec("grep -v '^#' '" + _ATLAS_PATH + "' 2>/dev/null | grep -v '^//' | grep -v '^$' | grep -v '^[[:space:]]' | sort | uniq -d | wc -l")).trim()
+    try { dup = to_int(dup_raw) } catch e {}  // @allow-silent-catch
+    let dup_status = if dup == 0 { "✓" } else { "⚠️" }
+    println("  dup data lines:" + to_string(dup) + "  " + dup_status)
+
+    // ─── malformed ───
+    let mal_raw = to_string(exec("awk '/^$|^#|^\\/\\//{next} /^[[:space:]]/{next} /^[{]/{next} /^@/{next} {c++} END{print c+0}' '" + _ATLAS_PATH + "' 2>/dev/null")).trim()
+    try { mal = to_int(mal_raw) } catch e {}  // @allow-silent-catch
+    let mal_status = if mal == 0 { "✓" } else { "⚠️" }
+    println("  malformed:     " + to_string(mal) + "  " + mal_status)
+
+    if verbose && mal > 0 {
+        println("  --- first 10 malformed ---")
+        let sample = to_string(exec("awk '/^$|^#|^\\/\\//{next} /^[[:space:]]/{next} /^[{]/{next} /^@/{next} {print NR\": \"$0}' '" + _ATLAS_PATH + "' 2>/dev/null | head -10"))
+        let sample_lines = sample.split("\n")
+        for sl in sample_lines { if sl.trim() != "" { println("    " + sl) } }
+    }
+
+    // ─── Grade 분포 (hypothesis [N?] 포함) ───
+    println("  grade dist:")
+    let grade_raw = to_string(exec("grep -oE ' \\[[0-9]+[?*]*\\]$' '" + _ATLAS_PATH + "' 2>/dev/null | sort | uniq -c | sort -rn | head -12"))
+    let grade_lines = grade_raw.split("\n")
+    let mut _gd_buf: string = ""
+    for gl in grade_lines {
+        let _g = gl.trim()
+        if _g != "" {
+            println("    " + _g)
+            if _gd_buf == "" { _gd_buf = _g } else { _gd_buf = _gd_buf + "|" + _g }
+        }
+    }
+    grade_dist_str = _gd_buf
 }
-
-// ─── Grade 분포 (hypothesis [N?] 포함) ───
-// end-anchor 사용: 식별자 내부의 [743] 등 false positive 제거
-// 패턴: space + [N?*] + EOL (grade 는 항상 @X 라인 말미)
-println("  grade dist:")
-let grade_raw = to_string(exec("grep -oE ' \\[[0-9]+[?*]*\\]$' '" + _ATLAS_PATH + "' 2>/dev/null | sort | uniq -c | sort -rn | head -12"))
-let grade_lines = grade_raw.split("\n")
-for gl in grade_lines { if gl.trim() != "" { println("    " + gl.trim()) } }
 
 // ─── 수식 산술 검증 (verify_formulas 위임) ───
 // n6_expr 필드의 claim 값 vs computed 값 불일치 감지
@@ -277,13 +423,16 @@ if verbose && formula_errors > 0 {
     println("  --- run: hexa shared/n6/verify_formulas.hexa for details ---")
 }
 
-// ─── 캐시 갱신 (miss 시 사이드카 재작성) ───
-if !_cache_hit && _cur_mtime != "" {
+// ─── 캐시 갱신 (miss / v3 미보유 / blowup 캐시 미보유 시 재작성) ───
+let _need_write = !_cache_hit || !_derived_cache_hit || (_ATLAS_BLOWUP_PATH != "" && !_blowup_cache_hit)
+if _need_write && _cur_mtime != "" {
     let mut _head_hash = ""
     try {
         _head_hash = to_string(exec("head -c 256 '" + _ATLAS_PATH + "' 2>/dev/null | md5 -q 2>/dev/null || head -c 256 '" + _ATLAS_PATH + "' 2>/dev/null | md5sum | cut -d' ' -f1")).trim()
     } catch e {}  // @allow-silent-catch
-    let _stats_json = "{\"schema\":2,\"mtime\":" + _cur_mtime + ",\"size\":" + to_string(size_bytes) + ",\"line_count\":" + to_string(lines) + ",\"head_hash\":\"" + _head_hash + "\",\"nodes\":" + to_string(nodes) + ",\"edges\":" + to_string(edges) + ",\"hubs\":" + to_string(node_uniq) + "}"
+    // grade_dist_str JSON-escape — '[' ']' '|' '*' digit space 만 등장 (안전), pass-through
+    let _gd_esc = grade_dist_str
+    let _stats_json = "{\"schema\":3,\"mtime\":" + _cur_mtime + ",\"size\":" + to_string(size_bytes) + ",\"line_count\":" + to_string(lines) + ",\"head_hash\":\"" + _head_hash + "\",\"nodes\":" + to_string(_atlas_only_nodes) + ",\"edges\":" + to_string(_atlas_only_edges) + ",\"hubs\":" + to_string(node_uniq) + ",\"unique_nodes\":" + to_string(node_uniq) + ",\"dup_nodes\":" + to_string(nodes - node_uniq) + ",\"unique_refs\":" + to_string(refs_uniq) + ",\"orphans_count\":" + to_string(real_orphans) + ",\"virtual_refs\":" + to_string(virtual_count) + ",\"dup_lines\":" + to_string(dup) + ",\"malformed_count\":" + to_string(mal) + ",\"grade_dist\":\"" + _gd_esc + "\",\"blowup_mtime\":" + (if _blowup_mtime == "" { "0" } else { _blowup_mtime }) + ",\"blowup_size\":" + to_string(blowup_size) + ",\"blowup_lines\":" + to_string(blowup_lines) + ",\"blowup_nodes\":" + to_string(blowup_nodes) + ",\"blowup_edges\":" + to_string(blowup_edges) + "}"
     try { write_file(_STATS_PATH, _stats_json + "\n") } catch e {}  // @allow-silent-catch
 }
 
