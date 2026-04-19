@@ -56,7 +56,8 @@ fn seed_quality(v: f64) -> f64 {
     return 1.0 - best
 }
 
-let _se_shared = env("NEXUS") + "/shared"
+let _se_nexus_env = env("NEXUS")
+let _se_shared = if _se_nexus_env.len() > 0 { _se_nexus_env + "/shared" } else { env("HOME") + "/Dev/nexus/shared" }   // @allow-devpath
 
 // ─── LRU FILE CACHE (/tmp/seed_cache.jsonl) ───
 // atlas.n6 cold scan 51s → cache hit ~5s. mtime 기반 무효화.
@@ -268,6 +269,21 @@ fn merge_all() -> string {
     // list .contains() 기반 dedup (pipe 문자열 분할 오버헤드 제거)
     let mut seen = ["6", "12", "2", "4", "5", "24", "7"]
     let mut result = "6|12|2|4|5|24|7"
+
+    // B3: external class (CODATA-2022) — merged ahead of discovery so n=6
+    // 기반 상수 + 공인 물리 상수 fusion.
+    let ext = load_external()
+    if ext.len() > 0 {
+        let eparts = ext.split("|")
+        let mut ei = 0
+        while ei < eparts.len() && seen.len() < 50 {
+            if !seen.contains(eparts[ei]) {
+                seen = seen + [eparts[ei]]
+                result = result + "|" + eparts[ei]
+            }
+            ei = ei + 1
+        }
+    }
 
     // discovery
     let disc = load_discovery()
@@ -845,14 +861,90 @@ fn qpermute_core(pipe_seeds: string) -> string {
     return out + "||" + to_string(used_bytes) + "||" + to_string(swaps)
 }
 
+// ─── B3 EXTERNAL CLASS — CODATA-2022 inline seeds (3rd class) ───
+// 기존 2-class(numeric, text-hash) 에 더해 external 공인 상수 기준.
+// 5 개만 하드코딩 (MVP) — 확장은 codata_2022.jsonl SSOT 로.
+// provenance: CODATA 2022 (NIST), 사용 시 --source external --cite CODATA-2022
+
+fn _codata_2022_list() -> [[string]] {
+    // [name, value_str, unit_or_note]
+    let mut rows: [[string]] = []
+    rows = rows + [["c_light",        "299792458",         "m/s (exact)"]]
+    rows = rows + [["planck_h",       "6.62607015e-34",    "J s (exact)"]]
+    rows = rows + [["electron_charge","1.602176634e-19",   "C (exact)"]]
+    rows = rows + [["avogadro",       "6.02214076e23",     "mol^-1 (exact)"]]
+    rows = rows + [["fine_structure", "7.2973525643e-3",   "dimensionless"]]
+    return rows
+}
+
+fn load_external() -> string {
+    let rows = _codata_2022_list()
+    let mut out = ""
+    let mut i = 0
+    while i < rows.len() {
+        let v = rows[i][1]
+        if out.len() > 0 { out = out + "|" }
+        out = out + v
+        i = i + 1
+    }
+    return out
+}
+
+// provenance append — shared/n6/atlas.blowup.jsonl
+// cite 비어 있으면 "CODATA-2022" 기본. ts 는 date -u 로 1회 캡처.
+fn _append_external_provenance(cite: string) {
+    let mut ts = ""
+    try { ts = exec("date -u +%Y-%m-%dT%H:%M:%SZ").trim() } catch e { ts = "" }
+    let rows = _codata_2022_list()
+    let out_path = _se_shared + "/n6/atlas.blowup.jsonl"
+    let mut blk = ""
+    let mut i = 0
+    while i < rows.len() {
+        let name = rows[i][0]
+        let val = rows[i][1]
+        let note = rows[i][2]
+        let line = "{\"type\":\"seed_external\",\"ts\":\"" + ts + "\",\"source\":\"external\",\"cite\":\"" + cite + "\",\"name\":\"" + name + "\",\"value\":\"" + val + "\",\"note\":\"" + note + "\"}"
+        blk = blk + line + "\n"
+        i = i + 1
+    }
+    try { append_file(out_path, blk) } catch e {}
+}
+
 // ─── MAIN ───
 
 let a = args()
 let mode = if a.len() >= 3 { a[2] } else { "info" }
 
+// --source external / --cite <tag>  플래그 스캔 (B3)
+let mut _b3_source = ""
+let mut _b3_cite = "CODATA-2022"
+let mut _fi = 3
+while _fi < a.len() {
+    if a[_fi] == "--source" && _fi + 1 < a.len() {
+        _b3_source = a[_fi + 1]
+        _fi = _fi + 2
+        continue
+    }
+    if a[_fi] == "--cite" && _fi + 1 < a.len() {
+        _b3_cite = a[_fi + 1]
+        _fi = _fi + 2
+        continue
+    }
+    _fi = _fi + 1
+}
+
 if mode == "discovery" {
     let d = load_discovery()
     if d.len() > 0 { println(d) } else { println("(empty)") }
+}
+
+if mode == "external" {
+    // B3: CODATA-2022 공인 상수 5개 출력 + provenance 기록
+    let e = load_external()
+    if _b3_source == "external" || _b3_source == "" {
+        _append_external_provenance(_b3_cite)
+    }
+    if e.len() > 0 { println(e) } else { println("(empty)") }
 }
 
 if mode == "atlas" {

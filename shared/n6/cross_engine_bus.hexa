@@ -26,15 +26,17 @@
 
 let _ARGV = args()
 let mut _APPLY = false
+let mut _AUTO_APPLY = false       // B5: AUTO-PASS verdict entries 만 실제 append
 let mut _VERBOSE = false
-let mut _NEXUS_ROOT = "/Users/ghost/Dev/nexus"
-let mut _DEV_ROOT = "/Users/ghost/Dev"
+let mut _NEXUS_ROOT = "/Users/ghost/Dev/nexus"   // @allow-devpath
+let mut _DEV_ROOT = "/Users/ghost/Dev"           // @allow-devpath
 let mut _MAX_PER_SOURCE: i64 = 200   // safety cap
 
 let mut _ai: i64 = 2
 while _ai < len(_ARGV) {
     let _t = _ARGV[_ai]
     if _t == "--apply" { _APPLY = true }
+    else if _t == "--auto-apply" { _AUTO_APPLY = true; _APPLY = true }   // B5
     else if _t == "--verbose" || _t == "-v" { _VERBOSE = true }
     else if _t == "--nexus" && _ai + 1 < len(_ARGV) {
         _NEXUS_ROOT = _ARGV[_ai + 1]
@@ -68,20 +70,24 @@ fn _safe_read(p: string) -> string {
 }
 
 fn _lower(s: string) -> string {
+    // ASCII A-Z → a-z fold via char_code (TS-20260416-STAGE0-STRCMP idiom).
+    // .to_lowercase() unsupported in hexa stage0; lookup table replacement.
+    let lwr = "abcdefghijklmnopqrstuvwxyz"
     let mut out = ""
-    let mut i: i64 = 0
     let n: i64 = len(s)
+    let mut i: i64 = 0
     while i < n {
         let c = s[i..i+1]
-        let b = c[0..1]
-        // hexa: simple a-z fold via byte arithmetic skipped; rely on .lowercase if available
-        out = out + c
+        let cc = char_code(c, 0)
+        if cc >= 65 && cc <= 90 {
+            let idx: i64 = cc - 65
+            out = out + lwr[idx..idx+1]
+        } else {
+            out = out + c
+        }
         i = i + 1
     }
-    // try built-in lowercase
-    let mut lc = out
-    try { lc = out.to_lowercase() } catch e {}
-    return lc
+    return out
 }
 
 // extract first @ line tag identifier from atlas line:
@@ -148,16 +154,21 @@ println("[bus] indexed nodes: " + to_string(len(_node_lines)) + ", existing @E: 
 // label 은 매칭 토큰 추출 source. tokens 는 짧은 키워드 후보군 (3+ chars)
 
 fn _split_tokens(text: string) -> [string] {
+    // stage0 string >= broken (TS-20260416-STAGE0-STRCMP) — use char_code
+    // underscore + hyphen treated as separators so "CORE_THEOREM" → ["core","theorem"]
     let mut out = []
     let n: i64 = len(text)
     let mut i: i64 = 0
     let mut buf = ""
     while i < n {
         let c = text[i..i+1]
-        let cb = c[0..1]
-        let is_alnum = (cb >= "a" && cb <= "z") || (cb >= "A" && cb <= "Z") || (cb >= "0" && cb <= "9") || cb == "-" || cb == "_"
+        let cc = char_code(c, 0)
+        let is_lower = cc >= 97 && cc <= 122
+        let is_upper = cc >= 65 && cc <= 90
+        let is_digit = cc >= 48 && cc <= 57
+        let is_alnum = is_lower || is_upper || is_digit
         if is_alnum {
-            buf = buf + cb
+            buf = buf + c
         } else {
             if len(buf) >= 4 { out = out.push(_lower(buf)) }
             buf = ""
@@ -532,6 +543,23 @@ while ci < len(_all_cands) {
         let mut already = false
         try { already = _existing_edges[edge_line] == true } catch e {}
         if !already {
+            // ─── B5: verdict auto-calc ───
+            // AUTO-PASS: hits(토큰 매칭) >= 2 AND 동일 sibling_node_id 의 기존 @E 없음
+            // else MANUAL.
+            let hit_count: i64 = len(hits)
+            let sibling_node_tag = "@E " + sibling_node_id + " ->"
+            let mut dup_existing = false
+            // scan existing @E keys for same sibling_node_id prefix
+            let _ek = _existing_edges.keys()
+            let mut _eki: i64 = 0
+            while _eki < len(_ek) {
+                let _k = _ek[_eki]
+                if _k.starts_with(sibling_node_tag) { dup_existing = true; break }
+                _eki = _eki + 1
+            }
+            let mut verdict = "MANUAL"
+            if hit_count >= 2 && !dup_existing { verdict = "AUTO-PASS" }
+
             _edges = _edges.push(#{
                 "sibling": sibling,
                 "sid": sid,
@@ -539,7 +567,8 @@ while ci < len(_all_cands) {
                 "target": target,
                 "label": label,
                 "edge_line": edge_line,
-                "all_hits": hits
+                "all_hits": hits,
+                "verdict": verdict
             })
             _matched_count = _matched_count + 1
             try {
@@ -552,6 +581,18 @@ while ci < len(_all_cands) {
 }
 
 println("[bus] matched: " + to_string(_matched_count) + ", unmatched: " + to_string(_unmatched_count))
+// B5: verdict breakdown
+let mut _auto_n: i64 = 0
+let mut _manual_n: i64 = 0
+let mut _vi: i64 = 0
+while _vi < len(_edges) {
+    let _ev = _edges[_vi]
+    let mut _vv = "MANUAL"
+    try { _vv = _ev["verdict"] } catch e {}
+    if _vv == "AUTO-PASS" { _auto_n = _auto_n + 1 } else { _manual_n = _manual_n + 1 }
+    _vi = _vi + 1
+}
+println("[bus] verdict: AUTO-PASS=" + to_string(_auto_n) + " MANUAL=" + to_string(_manual_n))
 let _sks = ["anima", "n6-architecture", "void", "hexa-lang"]
 let mut sx: i64 = 0
 while sx < len(_sks) {
@@ -588,7 +629,9 @@ while ei < len(_edges) {
         else { lab_safe = lab_safe + cc }
         li2 = li2 + 1
     }
-    let line = "{\"sibling\":\"" + e["sibling"] + "\",\"sid\":\"" + e["sid"] + "\",\"target\":\"" + e["target"] + "\",\"sibling_node_id\":\"" + e["sibling_node_id"] + "\",\"label\":\"" + lab_safe + "\",\"all_hits\":" + hits_str + ",\"edge_line\":\"" + e["edge_line"] + "\"}"
+    let mut verdict_val = "MANUAL"
+    try { verdict_val = e["verdict"] } catch e1 {}
+    let line = "{\"sibling\":\"" + e["sibling"] + "\",\"sid\":\"" + e["sid"] + "\",\"target\":\"" + e["target"] + "\",\"sibling_node_id\":\"" + e["sibling_node_id"] + "\",\"label\":\"" + lab_safe + "\",\"all_hits\":" + hits_str + ",\"verdict\":\"" + verdict_val + "\",\"edge_line\":\"" + e["edge_line"] + "\"}"
     _stage_lines = _stage_lines.push(line)
     ei = ei + 1
 }
@@ -627,14 +670,36 @@ if len(_edges) == 0 {
     exit(0)
 }
 
-println("[bus] APPLY: appending " + to_string(len(_edges)) + " @E lines to atlas.n6")
+// B5: --auto-apply filters to AUTO-PASS verdict only
+let mut _apply_edges = []
+if _AUTO_APPLY {
+    let mut _af: i64 = 0
+    while _af < len(_edges) {
+        let _e = _edges[_af]
+        let mut _v = "MANUAL"
+        try { _v = _e["verdict"] } catch e {}
+        if _v == "AUTO-PASS" { _apply_edges = _apply_edges.push(_e) }
+        _af = _af + 1
+    }
+    println("[bus] AUTO-APPLY: " + to_string(len(_apply_edges)) + " AUTO-PASS of " + to_string(len(_edges)) + " total")
+} else {
+    _apply_edges = _edges
+}
+
+if len(_apply_edges) == 0 {
+    println("[bus] APPLY: 0 eligible edges after verdict filter, atlas untouched.")
+    exit(0)
+}
+
+println("[bus] APPLY: appending " + to_string(len(_apply_edges)) + " @E lines to atlas.n6")
 
 // build append block (header comment + edges)
 let _ts = exec("date -u +%Y-%m-%d").trim()
-let mut _block = "\n# ─── cross-engine bus append (" + _ts + ") ───\n"
+let _hdr = if _AUTO_APPLY { "auto-apply" } else { "manual" }
+let mut _block = "\n# ─── cross-engine bus " + _hdr + " append (" + _ts + ") ───\n"
 let mut ai2: i64 = 0
-while ai2 < len(_edges) {
-    let e = _edges[ai2]
+while ai2 < len(_apply_edges) {
+    let e = _apply_edges[ai2]
     _block = _block + e["edge_line"] + "\n"
     ai2 = ai2 + 1
 }
@@ -643,7 +708,7 @@ while ai2 < len(_edges) {
 try {
     let cur = _safe_read(_ATLAS_PATH)
     write_file(_ATLAS_PATH, cur + _block)
-    println("[bus] APPLY OK: " + to_string(len(_edges)) + " edges appended.")
+    println("[bus] APPLY OK: " + to_string(len(_apply_edges)) + " edges appended.")
 } catch e {
     println("[bus] APPLY FAILED: " + to_string(e))
     exit(1)

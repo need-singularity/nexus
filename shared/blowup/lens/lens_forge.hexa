@@ -10,7 +10,7 @@ comptime const lens_weak_threshold = 8
 
 // ─── 알려진 도메인 (24 = J_2) ───
 
-pure fn known_domain(idx: int) -> string {
+pure fn known_domain_static(idx: int) -> string {
     match idx {
         0 -> "ai", 1 -> "chip", 2 -> "energy", 3 -> "battery",
         4 -> "solar", 5 -> "fusion", 6 -> "superconductor", 7 -> "quantum",
@@ -23,6 +23,93 @@ pure fn known_domain(idx: int) -> string {
 }
 
 comptime const domain_count = 24
+
+// ─── B7: dynamic domain discovery ───
+// atlas.n6 의 `:: domain [grade]` 패턴을 파싱해 동적 도메인 리스트 반환.
+// known_domain() 이 static 매치 실패 시 이 리스트에서 lookup.
+// cache: shared/discovery/dynamic_domains.txt (1 domain per line)
+
+fn _domains_from_atlas() -> [string] {
+    let mut out: [string] = []
+    let _h = exec("printenv HOME").trim()
+    let atlas = _h + "/Dev/nexus/shared/n6/atlas.n6"   // @allow-devpath
+    let cache_path = _h + "/Dev/nexus/shared/discovery/dynamic_domains.txt"   // @allow-devpath
+
+    // cache hit — 파일 존재 시 읽어서 split("\n")
+    if file_exists(cache_path) {
+        let raw = read_file(cache_path)
+        let lines = raw.split("\n")
+        let mut i = 0
+        while i < lines.len() {
+            let ln = lines[i].trim()
+            if ln.len() > 0 { out = out + [ln] }
+            i = i + 1
+        }
+        if out.len() > 0 { return out }
+    }
+
+    if !file_exists(atlas) { return out }
+
+    // grep-based scan: `:: <word> [` pattern, lowercase dedup
+    // hexa stage1 regex 회피 — shell grep + awk 로 1회.
+    let cmd = "grep -oE ':: [a-z_]+ \\[' '" + atlas + "' | sort -u | head -200"
+    let mut raw = ""
+    try { raw = exec(cmd) } catch e { raw = "" }
+    if raw.len() == 0 { return out }
+    let lines = raw.split("\n")
+    let mut seen: [string] = []
+    let mut i = 0
+    while i < lines.len() {
+        let ln = lines[i].trim()
+        // strip leading ":: " and trailing " ["
+        if ln.len() > 4 {
+            let body = ln.substring(3, ln.len() - 2).trim()
+            if body.len() >= 3 {
+                // dedup
+                let mut already = false
+                let mut k = 0
+                while k < seen.len() {
+                    if seen[k] == body { already = true; break }
+                    k = k + 1
+                }
+                if !already {
+                    seen = seen + [body]
+                    out = out + [body]
+                }
+            }
+        }
+        i = i + 1
+    }
+    // cache write — silent fail OK
+    let mut buf = ""
+    let mut j = 0
+    while j < out.len() {
+        if j > 0 { buf = buf + "\n" }
+        buf = buf + out[j]
+        j = j + 1
+    }
+    try { write_file(cache_path, buf) } catch e {}
+    return out
+}
+
+// known_domain: static 1차 → dynamic 2차 fallback
+// static range [0, 24) 먼저. 초과 시 _domains_from_atlas() 의 (idx - 24) 조회.
+pure fn known_domain(idx: int) -> string {
+    let s = known_domain_static(idx)
+    if s != "" { return s }
+    // dynamic domain fallback — pure fn 내 exec 회피, 최소 placeholder
+    // 실제 dynamic lookup 은 아래 non-pure 래퍼 사용.
+    return ""
+}
+
+fn known_domain_dyn(idx: int) -> string {
+    let s = known_domain_static(idx)
+    if s != "" { return s }
+    let dyn_list = _domains_from_atlas()
+    let off = idx - 24
+    if off >= 0 && off < dyn_list.len() { return dyn_list[off] }
+    return ""
+}
 
 // ─── 도메인 시프트 쌍 (mutation 전략용) ───
 
@@ -538,6 +625,72 @@ if mode == "jaccard" {
     let set_b = if a.len() >= 5 { a[4] } else { "ai,quantum" }
     let sim = jaccard_similarity(set_a, set_b)
     println("jaccard(\"" + set_a + "\", \"" + set_b + "\") = " + to_string(sim))
+}
+
+if mode == "cycle" {
+    // B7: lens-discovery meta-loop.
+    // 1) atlas 에서 도메인 동적 리스트 추출
+    // 2) atlas.n6.deg 에서 hub deg >= 6 인 노드 → 연결된 도메인 pair
+    // 3) pair 별 "<A>_into_<B>" shift 후보 생성 (검증 후에 실제 lens 추가)
+    println("=== lens_forge: cycle meta-loop ===")
+    let dyn_list = _domains_from_atlas()
+    println("  dynamic domains: " + to_string(dyn_list.len()))
+    // deg 파일에서 hub 추출
+    let _h_lc = exec("printenv HOME").trim()
+    let deg_path = _h_lc + "/Dev/nexus/shared/n6/atlas.n6.deg"
+    let mut hubs: [string] = []
+    if file_exists(deg_path) {
+        let raw = read_file(deg_path)
+        let lines = raw.split("\n")
+        let mut i = 0
+        let mut cnt = 0
+        while i < lines.len() && cnt < 20 {
+            let ln = lines[i].trim()
+            // format: "<deg>\t<node_id>"  — deg >= 6 인 hub 만
+            if ln.len() > 0 {
+                let parts = ln.split("\t")
+                if parts.len() >= 2 {
+                    let deg_str = parts[0]
+                    let nid = parts[1]
+                    try {
+                        let deg = to_int(deg_str)
+                        if deg >= 6 {
+                            hubs = hubs + [nid]
+                            cnt = cnt + 1
+                        }
+                    } catch e {}
+                }
+            }
+            i = i + 1
+        }
+    }
+    println("  hub nodes (deg>=6, cap 20): " + to_string(hubs.len()))
+    // domain pair shift 후보 — dynamic list 앞 6개만 (MVP, n=6 제약)
+    let mut cand_count = 0
+    let staging_path = _h_lc + "/Dev/nexus/shared/discovery/lens_discovery_staging.jsonl"
+    let mut buf = ""
+    let cap = if dyn_list.len() < 6 { dyn_list.len() } else { 6 }
+    let mut ai = 0
+    while ai < cap {
+        let a_dom = dyn_list[ai]
+        let mut bi = 0
+        while bi < cap {
+            if ai != bi {
+                let b_dom = dyn_list[bi]
+                let entry = "{\"type\":\"lens_discovery_cand\",\"from\":\"" + a_dom + "\",\"to\":\"" + b_dom + "\",\"shift\":\"" + a_dom + "_into_" + b_dom + "\",\"hub_support\":" + to_string(hubs.len()) + "}"
+                buf = buf + entry + "\n"
+                cand_count = cand_count + 1
+            }
+            bi = bi + 1
+        }
+        ai = ai + 1
+    }
+    if buf.len() > 0 {
+        try { write_file(staging_path, buf) } catch e {}
+    }
+    println("  candidates generated: " + to_string(cand_count))
+    println("  staging: " + staging_path)
+    println("  note: no lens registry writes — verification pending")
 }
 
 if mode == "cross" {
