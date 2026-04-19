@@ -261,6 +261,124 @@
     }
   },
 
+  "v54_so_built_20260420T1907Z": {
+    "status": "BUILT_AND_LIVE",
+    "pod_state_before": "EXITED (87xscivuggrwvk stopped); SSH port reassigned 11621→12148",
+    "pod_resumed_at_utc": "2026-04-20T18:57:00Z",
+    "pod_ssh_after_resume": "root@216.243.220.220:12148",
+    "git_sync": {
+      "hexa_lang_commits_pushed_from_mac": ["56eb3a19 hxnccl", "17b9423f nvcc link recipe", "..."],
+      "anima_commits_pushed_from_mac": ["62928e88 nccl_ffi", "179bd62e v5 cuda progress doc", "..."],
+      "pod_pull_result": "BOTH_FAST_FORWARD_AFTER_PUSH",
+      "pod_anima_local_conflicts_moved_to": "/workspace/anima/.pod_local_backup/{hxblas_cuda_shim.c,hxblas_cuda_smoke.c}"
+    },
+    "build_path": {
+      "tool_used": "bash 3-step recipe (hexa interpreter unavailable on pod — bin/hexa symlink dangling, hexa_v2_linux is hexa-cc not runner, hexa_stage0.linux GLIBC_2.38 missing)",
+      "step_1": "gcc -O3 -fPIC -c -march=native -DHXQWEN14B_CUDA -I/usr/local/cuda/include hxqwen14b.c -o build/hxqwen14b.host.o",
+      "step_2": "/usr/local/cuda/bin/nvcc -O3 -Xcompiler -fPIC -c -lineinfo -gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90 hxqwen14b_cuda.cu -o build/hxqwen14b_cuda.cu.o",
+      "step_3": "gcc -shared -fPIC build/hxqwen14b.host.o build/hxqwen14b_cuda.cu.o -L/usr/local/cuda/lib64 -lcudart -lcublas -lm -o build/libhxqwen14b.so",
+      "elapsed_total_sec": 90
+    },
+    "verify": {
+      "so_path": "/workspace/hexa-lang/self/native/build/libhxqwen14b.so",
+      "so_bytes": 260792,
+      "host_t_symbols": 34,
+      "cuda_t_symbols": 17,
+      "cudaLaunchKernel_undef_ref": "PRESENT (U cudaLaunchKernel@libcudart.so.12 — watchdog probe will pass)",
+      "v54_entries_present": ["hxqwen14b_version_v54", "hxqwen14b_load_all_weights", "hxqwen14b_base_forward_v54", "hxqwen14b_ce_loss_v54", "hxqwen14b_smoke_v54", "hxqwen14b_free_all_weights_v54"]
+    },
+    "live_so_swap": {
+      "live_path": "/workspace/hexa-lang/self/native/libhxqwen14b.so",
+      "previous_live_size": 107176,
+      "new_live_size": 260792,
+      "swapped_via": "cp build/libhxqwen14b.so libhxqwen14b.so",
+      "rationale": "watchdog probes /workspace/hexa-lang/self/native/libhxqwen14b.so for cuLaunchKernel — live path needed the v5.4 nvcc-built .so to clear BLOCKED_FFI"
+    },
+    "watchdog_marker": "/workspace/ckpt_alm14b_r11_20260420/r11_ffi_watchdog.cuda_landed touched at 2026-04-20T19:25Z"
+  },
+
+  "v54_train_alm_lora_wire_20260420T1910Z": {
+    "status": "WIRE_LANDED_FORWARD_PASS_SAVE_PARTIAL",
+    "diff_size": "+40 lines train_alm_lora.hexa (5 v5.4 extern decls + main probe block); +9 lines save_lora mkdir fix",
+    "anima_commits": ["2f579a0b feat(alm): r11 v5.4 wire", "afb15ad8 fix(alm): save_lora mkdir"],
+    "wire_position": "main() lines 1115-1145, after hxqwen14b_load + base_loaded check, before train_loop call",
+    "wire_calls_added": [
+      "hxqwen14b_version_v54() → returns 542 (real CUDA path detected, ABI version 5.4.2)",
+      "hxqwen14b_load_all_weights(h, cstring(cfg.base)) — gated on h_base>1 (skipped this smoke since legacy hxqwen14b_load on dir-path returned <=0 → h_base=1 stub)",
+      "hxqwen14b_smoke_v54(h) — same gate"
+    ],
+    "intentional_scope_hedge": "forward_qwen14b_with_lora kept as stub (synthetic logits over stub_vocab=16). Real LoRA-fused base forward (LoRA delta + hidden_state + lm_head) is r12 surface — needs hidden state output API + LoRA delta integration on device. Today's wire proves the v5.4 .so loads and exposes the entries; full forward fusion is the r12 work.",
+    "elf_build": {
+      "codegen_tool": "/workspace/hexa-lang/build/hexa_v2_linux (hexa-cc, .hexa → C)",
+      "elf_compile": "gcc -O2 -D_GNU_SOURCE -I /workspace/hexa-lang/self train_alm_lora.c -lm -ldl -lpthread -o train_alm_lora",
+      "elf_path": "/workspace/build_alm/train_alm_lora",
+      "elf_bytes": 301472,
+      "rationale_no_hexa_runner": "pod has no working hexa interpreter; hexa_stage0.linux requires GLIBC 2.38 (Ubuntu 22.04 base ships 2.35); hexa_v2 is Mac Mach-O. Bypass: codegen + native ELF runs train_alm_lora as standalone binary."
+    },
+    "smoke_results": {
+      "step_1_forward": {
+        "loss": 2.77368,
+        "loss_finite": true,
+        "loss_sanity": "log(stub_vocab=16) = 2.7726 — synthetic forward correctly produces uniform-ish logits",
+        "verdict": "PASS"
+      },
+      "v54_abi_probe": {
+        "abi_version_v54_returned": 542,
+        "verdict": "PASS — real CUDA path detected, .so v5.4.2 confirmed live"
+      },
+      "ckpt_step_1_save": {
+        "save_every_used": 9999,
+        "save_every_rationale": "skip per-step save during smoke to avoid the 47GB string-concat hang in save_lora (separate r12 bug)",
+        "final_dir_created": "/workspace/ckpt_alm14b_r11_smoke/final/ — mkdir fix applied",
+        "adapter_config_json_size_bytes": 326,
+        "adapter_config_content_verified": "valid peft config (base, peft_type=LORA, r=8, lora_alpha=16, target_modules=q/k/v/o_proj)",
+        "adapter_model_hexackpt_status": "NOT_WRITTEN — string-concat phase in save_lora exceeded smoke timeout (RAM ~47GB peak from O(n²) hexa-stage0 string builds for 7.86M float64 elements × 192 adapters × 2 matrices)",
+        "verdict": "PARTIAL — small ckpt artifact PASS, large tensor ckpt blocked by independent save_lora RAM bug"
+      },
+      "exit_code": 0,
+      "elapsed_sec": "~5"
+    },
+    "blockers_found": [
+      {
+        "id": "save_lora_string_concat_47gb_ram",
+        "severity": "high",
+        "scope": "train_alm_lora.hexa save_lora() / write_tensor_block()",
+        "symptom": "RAM grows ~47GB during string concat for 192-adapter HEXACKPT-v1 dump; never reaches write_file → ckpt artifact missing for any save_every<=500",
+        "root_cause": "hexa stage0 string += is O(n²) for repeated concat into accumulator; full ckpt = 192 × 2 × 40960 element string dump → 16M concat ops on a string growing past 200MB",
+        "fix_proposed_for_r12": "switch save_lora to chunked file writes (write_file once per tensor block, append mode) OR use HEXACKPT-v2 binary format already shipped in fead4ea8 (22× save speedup)",
+        "blocks_full_run": true
+      },
+      {
+        "id": "hxblas_dlsym_failures",
+        "severity": "low",
+        "scope": "libhxblas.so on pod (training/build/libhxblas.so) is older surface — missing hxblas_sgd_inplace, hxblas_axpy_inplace, hxblas_zero",
+        "symptom": "[hexa-ffi] dlsym failed warnings at startup; trainer falls back to hexa-side AdamW (slower but functional)",
+        "fix_proposed_for_r12": "rebuild libhxblas.so on pod from current /workspace/anima/training/build/build_libhxblas_cuda.hexa",
+        "blocks_full_run": false
+      },
+      {
+        "id": "hxqwen14b_load_dir_path_returns_neg",
+        "severity": "info",
+        "scope": "legacy hxqwen14b_load(safetensors_dir) ABI v5.2 entry — was designed for single-file probe",
+        "symptom": "h_base = -1 when called on /workspace/weights/qwen14b dir → main sets h_base=1 stub",
+        "side_effect": "v5.4 load_all_weights probe block is skipped (gated on h_base>1); v5.4 ABI probe still ran (542) so .so is verified loaded",
+        "fix_proposed_for_r12": "either (a) drop h_base>1 gate so v5.4 path runs even with legacy stub handle, or (b) make hxqwen14b_load(dir) return positive handle for valid Qwen dirs"
+      }
+    ],
+    "go_no_go_full_500_steps": {
+      "decision": "NO_GO",
+      "rationale": "r11 launch CLI sets save_every=100; first save attempt at step 100 would trigger the 47GB save_lora RAM bomb → trainer hangs without ckpt → identical failure mode to r11 EXITED (just at step 100 instead of step 0). Safer: defer launch until save_lora chunked-write fix lands.",
+      "wallclock_savings_usd": "12 USD (4h × 2.99 H100 SXM avoided)",
+      "compliance": "feedback_safe_path_auto + 'smoke FAIL ⇒ no full launch' rule (forward PASS but ckpt save PARTIAL counts as FAIL for the full launch criteria)"
+    },
+    "next_actions_r12": [
+      "save_lora chunked write OR HEXACKPT-v2 binary path (eliminates 47GB hang)",
+      "forward_qwen14b_with_lora real wire: hxqwen14b_base_forward_v54 + LoRA delta on hidden + lm_head logits + ce_loss_v54",
+      "rebuild libhxblas.so on pod from current source (restores axpy/sgd/zero entries)",
+      "either drop h_base>1 gate or fix legacy hxqwen14b_load(dir) so v5.4 probe runs unconditionally"
+    ]
+  },
+
   "stage0_unblock_20260419T1630Z": {
     "option": "A — build stage0 interpreter from hexa-lang source on pod",
     "why_chosen": "hexa-lang source present at /workspace/hexa-lang with clean transpile+gcc path; total build time <90s; simpler than editing/redeploying watchdog SSOT while it's actively polling",

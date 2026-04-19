@@ -41,9 +41,25 @@
       "interpretation": "Mac runtime FFI surface intact; trainer dry-run on Mac will get version=52, load_all_weights=-5 (RC_ERR_CUDA_TODO as designed for non-CUDA builds)"
     },
     "linux_cuda_so": {
-      "status": "NOT_RUN_FROM_MAC",
-      "reason": "nvcc + cuBLAS + cudart only present on H100 pod; Mac cannot exercise. Build script verified syntactically correct via mac-xverify path. Pod-side run-of-recipe deferred to first invocation on H100 (hxqwen14b_cuda.cu compile error visibility deferred to nvcc on pod).",
-      "next_action_for_pod": "ssh pod && cd /workspace/hexa-lang && HXQWEN14B_CUDA=1 ./hexa run tool/build_hxqwen14b_linux.hexa  # produces self/native/build/libhxqwen14b.so with all 51 symbols"
+      "status": "BUILT_AND_LIVE_ON_POD_2026_04_20T1907Z",
+      "pod_id": "87xscivuggrwvk",
+      "ssh": "root@216.243.220.220:12148 (port reassigned from 11621 after pod resume)",
+      "build_method": "bash 3-step recipe (hexa interpreter unavailable on pod — bin/hexa symlink dangling, hexa_v2_linux is hexa-cc not runner, hexa_stage0.linux GLIBC_2.38 missing)",
+      "cmds_executed": [
+        "gcc -O3 -fPIC -c -march=native -DHXQWEN14B_CUDA -I/usr/local/cuda/include hxqwen14b.c -o build/hxqwen14b.host.o",
+        "/usr/local/cuda/bin/nvcc -O3 -Xcompiler -fPIC -c -lineinfo -gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90 hxqwen14b_cuda.cu -o build/hxqwen14b_cuda.cu.o",
+        "gcc -shared -fPIC build/hxqwen14b.host.o build/hxqwen14b_cuda.cu.o -L/usr/local/cuda/lib64 -lcudart -lcublas -lm -o build/libhxqwen14b.so"
+      ],
+      "elapsed_total_sec": 90,
+      "so_path": "/workspace/hexa-lang/self/native/build/libhxqwen14b.so",
+      "so_bytes": 260792,
+      "host_t_symbols": 34,
+      "cuda_t_symbols": 17,
+      "cudaLaunchKernel_undef_ref": "PRESENT (U cudaLaunchKernel@libcudart.so.12 — watchdog probe will pass)",
+      "v54_entries_present": ["hxqwen14b_version_v54", "hxqwen14b_load_all_weights", "hxqwen14b_base_forward_v54", "hxqwen14b_ce_loss_v54", "hxqwen14b_smoke_v54", "hxqwen14b_free_all_weights_v54"],
+      "live_swap": "cp build/libhxqwen14b.so /workspace/hexa-lang/self/native/libhxqwen14b.so (260792 bytes, replaces 107176-byte v5.3 stub)",
+      "watchdog_marker_touched": "/workspace/ckpt_alm14b_r11_20260420/r11_ffi_watchdog.cuda_landed",
+      "abi_runtime_verified_via_train_alm_lora": "hxqwen14b_version_v54() returned 542 from native ELF dlopen — real CUDA path confirmed live"
     }
   },
   "alm_r11_unblock_chain": {
