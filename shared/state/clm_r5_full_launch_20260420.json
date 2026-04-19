@@ -142,14 +142,18 @@
   },
 
   "blocker_for_1b": {
-    "id": "r5-a6.5",
-    "desc": "libhxcuda.so dispatch behind HXBLAS_CUDA=1 env flag; mirror Mac Metal path; add @link(\"hxcuda\") call sites in train_clm.hexa decoder_forward/backward matmul paths",
+    "id": "r5-a6.5_to_a6.6",
+    "desc": "r5-a6.5 (HXBLAS_CUDA=1 cuBLAS dispatch shim) LANDED 2026-04-20 02:09 KST (commit 08fa0e76). H100 smoke 2026-04-20 ~20:30Z confirmed dispatch wires correctly with 300+ real cuBLAS calls/step + bit-identical numerical output. HOWEVER speedup vs CPU is only 1.037x — see shared/state/clm_r5_gpu_dispatch_smoke_20260420.json. New blocker r5-a6.6: persistent device buffer pool in shim + r5-a10.5-E persistent step-scoped raw arena in train_clm.hexa _matmul/_matmul_At. Without these, GPU host buys ~3.7% — not enough for 1B economics.",
     "blocks": "1B / 3B / 7B training on any GPU host (ubu RTX 5070 OR H100 pod)",
+    "smoke_evidence": "shared/state/clm_r5_gpu_dispatch_smoke_20260420.json",
+    "ssot_smoke": "clm_r5_gpu_dispatch_smoke_20260420.json",
     "followup_order": [
-      "r5-a6.5: libhxcuda dispatch (this blocker)",
+      "r5-a6.5: LANDED (libhxblas_cuda.so dispatch verified via H100 smoke)",
+      "r5-a6.6: NEW — persistent device buffer pool in hxblas_cuda_shim.c (eliminate per-call cudaMalloc/Free)",
+      "r5-a10.5-E: NEW — train_clm.hexa _matmul step-scoped raw arena (eliminate per-call alloc_raw/free_raw + list↔raw marshal). Largest single lever — addresses dominant cost.",
       "r5-a7: serving/serve_clm_conscious.hexa already LANDED (fc9466dc, 942 LOC)",
-      "r5-a8: rsync anima + libs to ubu, smoke 1-step with HXBLAS_CUDA=1",
-      "r5-a9: 1B full launch on ubu (preferred) or fresh H100 if ubu VRAM insufficient",
+      "r5-a8: rsync anima + libs to ubu, smoke 1-step with HXBLAS_CUDA=1 — DEFERRED, ubu unreachable (LAN+tailscale both fail), H100 used as proxy",
+      "r5-a9: 1B full launch on ubu OR fresh H100 — BLOCKED on r5-a6.6 + r5-a10.5-E speedup (need >3x not 1.037x)",
       "r5-a10: retrofit println multi-arg → str() concat across train_clm.hexa"
     ]
   },
