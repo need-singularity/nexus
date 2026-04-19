@@ -1,0 +1,147 @@
+{
+  "_meta": {
+    "name": "dest2 portfolio metrics SSOT",
+    "description": "anima-agent/trading/portfolio.hexa + risk.hexa 가 계산/보고하는 포트폴리오 지표. HWM/drawdown/Sharpe/Sortino/MAR + VaR/pain/concentration. 본 JSON 이 파라미터 SSOT, 소스 로직은 portfolio.hexa / risk.hexa.",
+    "spec": "anima/docs/dest2_trading_spec_20260419.md#2-feature-spec",
+    "owner_portfolio": "anima-agent/trading/portfolio.hexa",
+    "owner_risk": "anima-agent/trading/risk.hexa",
+    "dashboard_consumer": "anima-agent/dashboard_bridge.hexa",
+    "prometheus_exporter": "anima-agent/metrics_exporter.hexa",
+    "updated": "2026-04-19",
+    "schema_version": "1.0"
+  },
+  "base": {
+    "initial_balance_usd": 10000.0,
+    "reporting_currency": "USD",
+    "fee_bps": 10,
+    "bar_interval": "1h",
+    "trading_year_days": 252,
+    "trading_year_hours_crypto": 8760,
+    "risk_free_rate_annual": 0.045
+  },
+  "high_water_mark": {
+    "enabled": true,
+    "source": "trading/portfolio.hexa::Portfolio.high_water_mark",
+    "update_trigger": ["close_position", "mark_to_market"],
+    "reset_policy": "never",
+    "persist_path": "shared/state/portfolio_hwm.json"
+  },
+  "drawdown": {
+    "enabled": true,
+    "current_formula": "(HWM - portfolio_value) / HWM",
+    "max_formula": "max over equity curve of (peak - trough) / peak",
+    "limit_halt": 0.15,
+    "limit_reduce": 0.10,
+    "pain_threshold": 0.7,
+    "source": "trading/portfolio.hexa::portfolio_drawdown",
+    "gate_link": "trading_gates.json#G2_drawdown"
+  },
+  "sharpe": {
+    "enabled": true,
+    "formula": "(mean(r) - rf_per_bar) / std(r) * sqrt(periods_per_year)",
+    "periods_per_year_mode": "from_bar_interval",
+    "min_samples": 30,
+    "annualize": true,
+    "target_healthy": 1.0,
+    "target_excellent": 2.0
+  },
+  "sortino": {
+    "enabled": true,
+    "formula": "(mean(r) - rf_per_bar) / downside_std(r) * sqrt(periods_per_year)",
+    "downside_threshold": 0.0,
+    "min_samples": 30,
+    "annualize": true,
+    "target_healthy": 1.5,
+    "target_excellent": 3.0
+  },
+  "mar": {
+    "enabled": true,
+    "formula": "CAGR / abs(max_drawdown)",
+    "min_trading_days": 30,
+    "target_healthy": 0.5,
+    "target_excellent": 1.0,
+    "notes": "Managed Account Ratio; long-horizon health indicator"
+  },
+  "calmar": {
+    "enabled": true,
+    "formula": "CAGR / abs(max_drawdown_trailing_3y)",
+    "window_days": 1095,
+    "target_healthy": 1.0
+  },
+  "var": {
+    "enabled": true,
+    "confidence_levels": [0.95, 0.99],
+    "method": "historical",
+    "window_bars": 500,
+    "cap_99": 0.05,
+    "source": "trading/risk.hexa::calculate_var",
+    "gate_link": "trading_gates.json#G3_position_size.var_99_cap"
+  },
+  "cagr": {
+    "enabled": true,
+    "formula": "(final_equity / initial_equity)^(1/years) - 1",
+    "min_days": 7
+  },
+  "volatility": {
+    "enabled": true,
+    "formula": "std(r) * sqrt(periods_per_year)",
+    "window_bars": 500
+  },
+  "position_concentration": {
+    "enabled": true,
+    "formula": "sum(weight_i^2)",
+    "source": "trading/risk.hexa::calculate_risk_metrics",
+    "herfindahl_max": 0.5
+  },
+  "pain_signal": {
+    "enabled": true,
+    "formula": "min(1.0, abs(var_95) * 10.0)",
+    "reduce_risk_threshold": 0.7
+  },
+  "trade_stats": {
+    "enabled": true,
+    "metrics": [
+      "total_trades",
+      "win_rate",
+      "avg_win",
+      "avg_loss",
+      "profit_factor",
+      "expectancy",
+      "avg_duration_s",
+      "max_consecutive_losses"
+    ]
+  },
+  "reporting": {
+    "snapshot_interval_s": 60,
+    "snapshot_file": "shared/state/portfolio_metrics_snapshot.json",
+    "prometheus_gauges": [
+      "anima_portfolio_equity_usd",
+      "anima_portfolio_drawdown",
+      "anima_portfolio_hwm_usd",
+      "anima_portfolio_sharpe",
+      "anima_portfolio_sortino",
+      "anima_portfolio_mar",
+      "anima_portfolio_var95",
+      "anima_portfolio_var99",
+      "anima_portfolio_pain"
+    ],
+    "dashboard_fields": [
+      "equity",
+      "drawdown",
+      "hwm",
+      "sharpe",
+      "sortino",
+      "mar",
+      "pain_signal",
+      "open_positions",
+      "closed_trades"
+    ],
+    "r2_mirror": "anima-memory/portfolio_snapshots/",
+    "rotate": "daily"
+  },
+  "health_bands": {
+    "green": {"drawdown_max": 0.05, "sharpe_min": 1.0,  "sortino_min": 1.5},
+    "amber": {"drawdown_max": 0.10, "sharpe_min": 0.5,  "sortino_min": 0.8},
+    "red":   {"drawdown_max": 0.15, "sharpe_min": 0.0,  "sortino_min": 0.0}
+  }
+}

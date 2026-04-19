@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "name": "dest2 trading broker connection SSOT",
+    "description": "anima-agent/trading/broker.hexa 가 읽는 브로커 연결 설정. 기본값 paper(mock fill), 실자금 연결(live)은 전부 disabled 로 고정. 실자금 활성화는 별도 세션에서 owner 서명 필요.",
+    "spec": "anima/docs/dest2_trading_spec_20260419.md#2-feature-spec",
+    "owner": "anima-agent/trading/broker.hexa",
+    "loader": "anima-agent/trading/executor.hexa::new_order_executor",
+    "secrets_ref": "anima-agent/.env.example (TRADING_* 토큰 이름만, 실 키는 env/keychain)",
+    "updated": "2026-04-19",
+    "schema_version": "1.0"
+  },
+  "default_broker": "paper",
+  "paper_mode_global": true,
+  "live_enable_master": false,
+  "live_enable_reason_required": "owner signature + H4 audit + shared/state/trading_kill.json=off",
+  "brokers": {
+    "paper": {
+      "enabled": true,
+      "live": false,
+      "vendor": "internal",
+      "description": "Mock fill engine inside executor.hexa; 모든 place_order 를 paper-<ts> 로 채움",
+      "fill_model": "mid_plus_slippage",
+      "default_slippage_bps": 5,
+      "size_slippage_bps_per_10k": 10,
+      "latency_ms_mock": 50,
+      "market_data_source": "binance_public",
+      "reject_codes": []
+    },
+    "binance_public": {
+      "enabled": true,
+      "live": false,
+      "vendor": "binance",
+      "base_url": "https://api.binance.com/api/v3",
+      "auth_required": false,
+      "use_for": ["market_data", "klines", "ticker"],
+      "rate_limit_rpm": 1200,
+      "notes": "공개 market data 전용, 주문 API 비활성"
+    },
+    "binance_live": {
+      "enabled": false,
+      "live": true,
+      "vendor": "binance",
+      "base_url": "https://api.binance.com",
+      "auth_required": true,
+      "api_key_env": "BINANCE_API_KEY",
+      "api_secret_env": "BINANCE_API_SECRET",
+      "testnet": false,
+      "max_notional_usd": 0,
+      "disabled_reason": "paper-only default; owner must sign to enable"
+    },
+    "alpaca": {
+      "enabled": false,
+      "live": false,
+      "vendor": "alpaca",
+      "base_url_paper": "https://paper-api.alpaca.markets",
+      "base_url_live": "https://api.alpaca.markets",
+      "data_url": "https://data.alpaca.markets",
+      "auth_required": true,
+      "api_key_env": "ALPACA_API_KEY",
+      "api_secret_env": "ALPACA_API_SECRET",
+      "use_paper_endpoint": true,
+      "asset_classes": ["us_equity", "crypto"],
+      "disabled_reason": "SDK skeleton only; broker.hexa port pending"
+    },
+    "ibkr": {
+      "enabled": false,
+      "live": false,
+      "vendor": "interactive_brokers",
+      "gateway_host_env": "IBKR_GATEWAY_HOST",
+      "gateway_port_env": "IBKR_GATEWAY_PORT",
+      "client_id_env": "IBKR_CLIENT_ID",
+      "account_env": "IBKR_ACCOUNT",
+      "paper_mode": true,
+      "use_ibgateway": true,
+      "asset_classes": ["us_equity", "us_options", "futures", "forex"],
+      "disabled_reason": "gateway binary not deployed; requires TWS/IBGateway process"
+    },
+    "kis": {
+      "enabled": false,
+      "live": false,
+      "vendor": "korea_investment",
+      "base_url_paper": "https://openapivts.koreainvestment.com:29443",
+      "base_url_live": "https://openapi.koreainvestment.com:9443",
+      "app_key_env": "KIS_APP_KEY",
+      "app_secret_env": "KIS_APP_SECRET",
+      "account_env": "KIS_ACCOUNT_NO",
+      "market": "KRX",
+      "paper_mode": true,
+      "asset_classes": ["kr_equity", "kr_futures"],
+      "disabled_reason": "한국투자증권 OpenAPI 토큰 미등록"
+    }
+  },
+  "routing": {
+    "asset_class_to_broker": {
+      "crypto": "paper",
+      "us_equity": "paper",
+      "kr_equity": "paper"
+    },
+    "fallback_on_error": "paper",
+    "halt_on_all_disabled": true
+  },
+  "safety": {
+    "require_kill_switch_off": true,
+    "kill_switch_state_file": "shared/state/trading_kill.json",
+    "max_daily_orders": 500,
+    "max_daily_notional_usd": 100000,
+    "reject_if_paper_mode_global_and_broker_live": true
+  },
+  "audit": {
+    "log_dir": "shared/logs",
+    "log_pattern": "trading_broker_YYYYMMDD.jsonl",
+    "emit_on": ["connect", "auth_fail", "place", "fill", "reject", "cancel", "disconnect"]
+  }
+}
