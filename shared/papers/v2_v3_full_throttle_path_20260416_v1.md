@@ -1,3 +1,6 @@
+<!-- @doc(type=paper) -->
+<!-- @own(sections=["1. 목표", "2. 5 병렬", "3. 풀가동", "4. 단축", "5. R2", "6. P3", "7. 다음", "8. 외부"], strict=false, order=sequential) -->
+
 # anima v2.0 RC → v3.0 직원 — 풀가동 로드맵 (2026-04-16)
 
 > **새 세션 진입 시 메인 참조** (직전 v3_employee_capability_path_20260416.md 보강).

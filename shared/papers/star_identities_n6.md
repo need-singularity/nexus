@@ -7,6 +7,9 @@ license: "CC-BY-4.0"
 keywords: ["arithmetic identities", "perfect numbers", "n=6", "sigma", "phi", "tau", "omega", "Omega", "Jordan totient", "Delta_0 absoluteness"]
 ---
 
+<!-- @doc(type=paper) -->
+<!-- @own(sections=[WHY, COMPARE, STRUCT, FLOW, EVOLVE, VERIFY], strict=false, order=sequential, prefix="§") -->
+
 # STAR Identities: Three Arithmetic Equalities Whose Sole Solution in [1, N] is n=6
 
 **Version.** atlas.signals.n6 lines 613–643, atlas.n6 line 21636 (DELTA0_ABSOLUTE_THEOREM, [11*]).

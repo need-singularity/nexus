@@ -1,3 +1,6 @@
+<!-- @doc(type=paper) -->
+<!-- @own(sections=["1. Context", "2. Four", "3. Per-step", "4. Recommendation", "5. PoC", "6. A/B", "7. Timeline"], strict=false, order=sequential) -->
+
 # Wiring the 110 anima Φ engines into ALM/CLM training
 
 **Status:** design (not implementation) — 2026-04-15

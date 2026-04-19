@@ -1,3 +1,6 @@
+<!-- @doc(type=paper) -->
+<!-- @own(sections=["1. Baseline", "2. Bottleneck", "3. Improvement", "4. Short-term", "5. Recommended"], strict=false, order=sequential) -->
+
 # hexa-lang training hot-path performance audit
 
 **Date**: 2026-04-15

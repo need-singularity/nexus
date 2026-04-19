@@ -1,3 +1,6 @@
+<!-- @doc(type=paper) -->
+<!-- @own(sections=[Abstract, "1. 동기", "2. 다섯", "3. 핵심", "4. OEIS", "5. 산출", "6. 향후"], strict=false, order=sequential) -->
+
 # Five novel OEIS-candidate sequences from the σφ=nτ family of n=6 uniqueness
 
 **NEXUS-6 research collective** — 2026-04-19

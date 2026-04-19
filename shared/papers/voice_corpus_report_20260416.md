@@ -1,3 +1,6 @@
+<!-- @doc(type=paper) -->
+<!-- @own(sections=["1. Phase 1", "2. Phase 2", "3. Phase 3", "4. 남은", "5. 산출물", "6. 결정", "7. 한"], strict=false, order=sequential) -->
+
 # Voice Corpus Collection Report — 2026-04-16
 
 **Track**: V2 음성 corpus 수집 파이프라인 (10 프로파일)

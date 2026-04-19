@@ -4,6 +4,9 @@ author: "NEXUS-6 Research Collective"
 date: "2026-04-14"
 ---
 
+<!-- @doc(type=paper) -->
+<!-- @own(sections=[WHY, COMPARE, STRUCT, FLOW, EVOLVE, VERIFY], strict=false, order=sequential, prefix="§") -->
+
 # The Eight Canonical n=6 Number-Theoretic Invariants as an Atlas Primitive Basis
 
 **Version.** atlas.n6 @ commit `8a17aeb0` (post-P1-1, 76510 lines, 20510 nodes, 24390 edges)
