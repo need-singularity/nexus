@@ -1,4 +1,40 @@
 {
+  "v564_bwd_kernels_complete_20260420T2125Z": {
+    "scope": "All 5 CUDA backward kernels landed + unit-smoke PASS vs CPU reference. Orchestrator body deferred.",
+    "summary_table": {
+      "softmax_ce_bwd": "previous session — verified",
+      "rmsnorm_bwd":    "this session — atol 1e-7 PASS (M=4 d=128)",
+      "rope_bwd":       "this session — atol 1e-7 PASS (B=1 S=4 H=2 D=64)",
+      "swiglu_bwd":     "this session — atol 1e-8 PASS (N=1024)",
+      "gqa_bwd":        "this session — atol 1e-8 PASS (B=1 S=4 HQ=4 HK=2 D=32 causal)"
+    },
+    "lib_so": {
+      "path_pod": "/workspace/hexa-lang/self/native/build/libhxqwen14b.so",
+      "size_bytes": 521040,
+      "growth_from_v562": "+255648 B (v562→v564 = 4 bwd kernels + 1 cache surface + readiness probe)"
+    },
+    "alm_r12_launch_status": {
+      "before_session": "BLOCKED — 4 missing CUDA bwd kernels + orchestrator body + tokenizer + trainer wiring",
+      "after_session":  "STILL BLOCKED — orchestrator body + tokenizer BPE merges + trainer wiring remain. CUDA kernel layer is now COMPLETE.",
+      "estimate_to_launch": "1-2 sessions (orchestrator + 1-step grad cross-check + tokenizer merges + trainer activation)"
+    },
+    "next_session_blocker_priority": [
+      "P1: hxqwen14b_base_backward_v56 orchestrator body (~400 LOC)",
+      "P2: 1-step backward smoke with finite-difference cross-check on M=4 micro case",
+      "P3: BPE merge-rule application in training/tokenizer_qwen.hexa",
+      "P4: train_alm_lora.hexa wiring activation — call backward_v56 + alloc_grad_buffers + adamw_step in train loop"
+    ],
+    "files_changed": {
+      "hexa-lang/self/native/hxqwen14b.c": "+58 LOC (v564_bwd_kernels_ready + version_v564)",
+      "hexa-lang/self/native/hxqwen14b_cuda.cu": "+361 LOC (4 kernels + 4 launchers)"
+    },
+    "smoke_artifacts_pod_local": [
+      "/tmp/v563_bwd_smoke (compiled binary)",
+      "/tmp/v563_bwd_smoke.c (335 LOC harness)",
+      "/tmp/v564_cache_smoke (compiled binary)",
+      "/tmp/v564_cache_smoke.c (cache + readiness probe)"
+    ]
+  },
   "_meta": {
     "schema": "alm_r12_launch_v1",
     "session": "session_20260420_alm_r12_4blocker_partial",

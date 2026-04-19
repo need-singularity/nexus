@@ -1,4 +1,138 @@
 {
+  "v564_addendum_20260420T2125Z": {
+    "scope": "v5.6.4 — 4 remaining CUDA bwd kernels LANDED (rmsnorm/rope/swiglu/gqa) + readiness probe; orchestrator body still deferred",
+    "phases_completed": {
+      "phase_1_pod_sync_and_v563_build": {
+        "status": "PASS",
+        "actions": [
+          "scp hxqwen14b.c + hxqwen14b_cuda.cu to pod 87xscivuggrwvk:/workspace/hexa-lang/self/native/",
+          "Bypassed hexa wrapper (build/hexa_stage0.linux GLIBC_2.38 mismatch with pod libc) — invoked gcc + nvcc directly per existing 3-step recipe",
+          "Step 1: gcc -O3 -fPIC -c -DHXQWEN14B_CUDA -I/usr/local/cuda/include hxqwen14b.c → host.o (clean)",
+          "Step 2: nvcc -O3 -Xcompiler -fPIC -c -lineinfo -gencode arch=compute_80/90 hxqwen14b_cuda.cu → cu.o (clean)",
+          "Step 3: gcc -shared -fPIC + -lcudart -lcublas -lm → libhxqwen14b.so (307208 B for v5.6.3 baseline)"
+        ],
+        "v563_symbols_verified": [
+          "hxqwen14b_v56_alloc_activation_cache",
+          "hxqwen14b_v56_free_activation_cache",
+          "hxqwen14b_base_backward_v56",
+          "hxqwen14b_base_backward_v56_pos",
+          "hxqwen14b_version_v563",
+          "hxqwen14b_cu_launch_softmax_ce_bwd",
+          "v563_softmax_ce_bwd_kernel"
+        ],
+        "mid_smoke_alloc_M8": {
+          "bytes_alloc": 123797504,
+          "MB": 118.06,
+          "non_zero_ptrs": "626/626",
+          "free_rc": 0,
+          "verdict": "PASS"
+        }
+      },
+      "phase_2_rmsnorm_bwd": {
+        "status": "PASS",
+        "kernel": "v563_rmsnorm_bwd_kernel + hxqwen14b_cu_launch_rmsnorm_bwd",
+        "approach": "3-pass per-row block: pass1=Σx² (recompute r), pass2=Σ(w*dy*x)=c, pass3=write dx + atomicAdd dw partials per col",
+        "lines_added": 88,
+        "smoke_M4_d128": {
+          "dx_max_abs": 1.19e-7,
+          "dx_max_rel": 4.36e-7,
+          "dw_max_abs": 1.19e-7,
+          "dw_max_rel": 1.02e-6,
+          "atol": 1e-4,
+          "verdict": "PASS"
+        }
+      },
+      "phase_3_rope_bwd": {
+        "status": "PASS",
+        "kernel": "v563_rope_bwd_kernel + hxqwen14b_cu_launch_rope_bwd",
+        "approach": "rotation transpose (inverse): dx0=dy0*cs+dy1*sn, dx1=-dy0*sn+dy1*cs ; rotate_half layout matches forward",
+        "lines_added": 50,
+        "smoke_B1_S4_H2_D64": {
+          "dx_max_abs": 1.19e-7,
+          "dx_max_rel": 4.75e-6,
+          "atol": 1e-4,
+          "verdict": "PASS"
+        }
+      },
+      "phase_4_swiglu_bwd": {
+        "status": "PASS",
+        "kernel": "v563_swiglu_bwd_kernel + hxqwen14b_cu_launch_swiglu_bwd",
+        "approach": "elementwise: silu_d = sig + g*sig*(1-sig); dg = dy*u*silu_d; du = dy*silu(g)",
+        "lines_added": 48,
+        "smoke_N1024": {
+          "dg_max_abs": 1.49e-8,
+          "du_max_abs": 1.49e-8,
+          "atol": 1e-5,
+          "verdict": "PASS"
+        }
+      },
+      "phase_5_gqa_bwd": {
+        "status": "PASS",
+        "kernel": "v563_gqa_bwd_kernel + hxqwen14b_cu_launch_gqa_bwd",
+        "approach": "4-pass per (b,hq,i) block: pass1=row_max, pass2=Z, pass3=Σp*dp, pass4=write dQ + atomicAdd dK/dV (atomic because GQA group shares hk); recomputes p inside kernel for memory savings (no flash, no shared-attn cache)",
+        "lines_added": 175,
+        "smoke_B1_S4_HQ4_HK2_D32_causal": {
+          "dQ_max_abs": 1.03e-9,
+          "dK_max_abs": 1.40e-9,
+          "dV_max_abs": 5.96e-8,
+          "atol": 1e-4,
+          "verdict": "PASS"
+        }
+      },
+      "phase_6_orchestrator_body": {
+        "status": "DEFERRED",
+        "reason": "~400 LOC reverse-pass coordinator + 192 lora_bwd_single calls — high-risk single-pass write without iterative testing. Half-orchestrator producing partial gradients (only lm_head, not 48 layers) is no better than RC_ERR_CUDA_TODO from trainer perspective. Honest assessment: needs dedicated session with iterative numerical-grad cross-check at each layer reversal stage.",
+        "what_landed_instead": [
+          "hxqwen14b_v564_bwd_kernels_ready() probe — returns 1 once all 5 launchers linked + 1-byte cudaMalloc roundtrip succeeds",
+          "hxqwen14b_version_v564() = 564",
+          "Kernels ARE link-resolved and callable; trainer can hand-orchestrate from hexa side as interim path"
+        ]
+      },
+      "phase_7_1step_backward_smoke": {
+        "status": "DEFERRED — depends on Phase 6 orchestrator body"
+      },
+      "phase_8_ssot_commit": {
+        "status": "in-progress (this addendum)"
+      }
+    },
+    "files_touched": {
+      "hxqwen14b.c": {"prev_lines": 4757, "new_lines": "+58", "additions": ["v564_bwd_kernels_ready probe", "version_v564"]},
+      "hxqwen14b_cuda.cu": {"prev_lines": 701, "new_lines": "+361", "additions": ["v563_rmsnorm_bwd_kernel + launcher", "v563_rope_bwd_kernel + launcher", "v563_swiglu_bwd_kernel + launcher", "v563_gqa_bwd_kernel + launcher (4-pass)"]}
+    },
+    "all_5_bwd_launchers_now_in_so": [
+      "hxqwen14b_cu_launch_softmax_ce_bwd",
+      "hxqwen14b_cu_launch_rmsnorm_bwd",
+      "hxqwen14b_cu_launch_rope_bwd",
+      "hxqwen14b_cu_launch_swiglu_bwd",
+      "hxqwen14b_cu_launch_gqa_bwd"
+    ],
+    "lib_size": {
+      "v562_pre_v563": 265392,
+      "v563_after_softmax_ce_bwd_only": 307208,
+      "v564_after_4_more_bwd_kernels": 521040
+    },
+    "smoke_harness_files": [
+      "/tmp/v563_bwd_smoke.c (335 LOC) — 4 kernel × CPU-ref unit smokes",
+      "/tmp/v564_cache_smoke.c — readiness probe + alloc/free cache M=8 roundtrip"
+    ],
+    "next_session_first_action": [
+      "Write hxqwen14b_base_backward_v56 orchestrator body — straight-line reverse pass mirroring base_forward_v54 lines 3579-3690.",
+      "Each layer reversal: down sgemm bwd → swiglu_bwd → gate/up sgemm bwd → ln2 bwd → o sgemm bwd → gqa_bwd → rope_bwd Q + K → q/k/v sgemm bwd → ln1 bwd → x_now += dx_post_attn",
+      "Per layer call hxqwen14b_lora_bwd_single ×4 projs (q/k/v/o + gate/up/down where adapters present) accumulating into grad_lora_ptrs",
+      "Final: hxqwen14b_cu_launch_softmax_ce_bwd → cuBLAS sgemm bwd for tied lm_head → final rmsnorm_bwd → enter layer loop reversed L=47..0",
+      "1-step smoke: random ids[M=4] + targets → forward_v54_with_cache → backward_v56 → verify all grad_A and grad_B norms are finite + nonzero + match Python autograd reference (small case via PyTorch on H100, NOT for trainer use — for cross-check only, separate venv)"
+    ],
+    "remaining_to_full_alm_r12_launch": {
+      "blockers_resolved": "all 5 CUDA bwd kernels (5/5 done — 0 left)",
+      "blockers_remaining": [
+        "hxqwen14b_base_backward_v56 orchestrator body (~400 LOC)",
+        "BPE tokenizer (training/tokenizer_qwen.hexa exists 367 LOC but lacks merge-rule application)",
+        "trainer FFI wiring activation (anima/training/train_alm_lora.hexa decls landed but no live call site)",
+        "1-step backward smoke + finite-difference grad cross-check"
+      ],
+      "estimate_to_full_launch": "1-2 dedicated sessions"
+    }
+  },
   "v563_addendum_20260420T2110Z": {
     "scope": "v5.6.3 — LoRA backward orchestrator scaffolding + activation cache surface + 1/5 needed CUDA bwd kernels + tokenizer skeleton",
     "files_touched": {
