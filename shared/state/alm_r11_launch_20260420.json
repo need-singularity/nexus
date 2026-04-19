@@ -98,6 +98,61 @@
   "fsdp_halvening_plan_ref": "shared/state/alm_r11_fsdp_plan_20260420.json",
   "fsdp_halvening_verdict": "DESIGN_COMPLETE_WIRE_BLOCKED — 2×H100 SXM topology chosen but blocked on libhxnccl.so (B1) + train_alm_lora.hexa FSDP integration (B2); py accelerate runner fallback forbidden by py_ban_total (B3). r11 rides single-GPU 4h wallclock as authorized; halvening deferred to r12.",
 
+  "v54_smoke_20260419T1715Z": {
+    "status": "SMOKE_RAN_CE_OUT_OF_BAND_NO_SWAP",
+    "weights_downloaded": {
+      "source": "r2:anima-models/base_models/qwen25-14b-instruct/",
+      "dest": "/workspace/weights/qwen14b",
+      "bytes": "28G (27.522 GiB)",
+      "shards": "16/16 (8 safetensors + config + index + tokenizer + vocab + merges + special_tokens_map + generation_config + tokenizer_config)",
+      "method": "rclone copy --transfers 8 --checkers 16",
+      "wallclock_sec": 135,
+      "throughput_mb_s": 65
+    },
+    "gpu_before_smoke": "0% util, 0 processes, 0 MiB used — safe to load",
+    "disk_before": "429T free on /workspace (mfs)",
+    "driver": {
+      "file": "/workspace/hxqwen14b_build/smoke_driver.c (2904 bytes)",
+      "entry": "hxqwen14b_smoke_v54 via dlopen",
+      "tokens_used": "19-token ChatML scaffold (151644 im_start, 872 user, 198 newline, Korean-themed mid-id ids, 151645 im_end, 151644 assistant_header)",
+      "compiled": "gcc -O2 -o smoke_driver smoke_driver.c -ldl"
+    },
+    "smoke_result": {
+      "rc": 0,
+      "n_tensors_loaded": 434,
+      "expected_n_tensors": 434,
+      "mean_ce": 16.483528,
+      "ce_target_band": "[1.5, 5.0]",
+      "random_baseline": 11.51,
+      "top1_token": 143537,
+      "verdict": "OUT_OF_BAND (CE > random baseline; distinct from stub — real forward produces deterministic wrong-direction logits)"
+    },
+    "root_cause_identified": {
+      "symptom": "CE=16.48 > random 11.51 → logits actively skewed (not noise)",
+      "code_evidence": "hxqwen14b_v54.c:3253 comment '(lm_head is tied to embed — no separate slot.)' — V54_N_SLOTS = 1 (embed) + 48*9 (layers) + 1 (final_norm) = 434",
+      "runtime_evidence": "base_forward_v54 line calling hxqwen14b_cu_launch_tied_lm_head(ln, slots[V54_SLOT_EMBED].dev_ptr_fp32, ...) — forces tied embedding reuse",
+      "config_contradiction": "/workspace/weights/qwen14b/config.json has 'tie_word_embeddings: false' — Qwen2.5-14B-Instruct ships a DISTINCT model.embed_tokens.weight and lm_head.weight pair",
+      "effect": "Using embed_tokens^T as lm_head is a uniform wrong projection → every logit landscape biased → CE systematically high (above random)",
+      "fix_required": [
+        "Add V54_SLOT_LM_HEAD after V54_SLOT_FINAL_NORM (V54_N_SLOTS = 435)",
+        "v54_slot_name(V54_SLOT_LM_HEAD) → 'lm_head.weight'",
+        "Load it in hxqwen14b_load_all_weights (same path as embed, from shard index)",
+        "Swap base_forward_v54 final launch: tied_lm_head → new untied_lm_head (or reuse sgemm_rowmajor_xwt with lm_head.weight)",
+        "Rebuild .so; re-run smoke; target CE ∈ [1.5, 5.0]"
+      ],
+      "commit_impact": "v5.4 sealed at 96d2ea3a — fix goes into follow-up commit v5.4.1 (or v5.5)"
+    },
+    "swap_decision": "NOT_SWAPPED",
+    "swap_reason": "Swapping v5.4 .so with wrong-direction CE=16.5 would put r11 watchdog on a provably broken LM forward. Keeping v5.3 stub (live) is strictly safer until v5.4.1 fixes the untied lm_head slot. This matches scope hedge: 'If CE is wrong after full 5-point debug: save detailed diagnostics + roll back'.",
+    "live_so_untouched": "/workspace/hexa-lang/self/native/libhxqwen14b.so (v5.3, 107176 bytes) — NOT modified. No .v53.bak needed because no swap happened.",
+    "v54_so_preserved_for_fix": "/workspace/hxqwen14b_build/libhxqwen14b_v54.so (141984 bytes) — stays in build dir for v5.4.1 rebuild reference.",
+    "watchdog_impact": "NONE — r11 trainer still dlopens v5.3 live .so. Stub RC_ERR_CUDA_TODO continues until v5.4.1 correct .so lands.",
+    "follow_ups": [
+      "BG agent or next session: apply 5-line fix to hxqwen14b_v54.c (add V54_SLOT_LM_HEAD), rebuild, re-run /workspace/hxqwen14b_build/smoke_driver, if CE ∈ [1.5, 5.0] then atomic mv into live path",
+      "After successful swap: update r11 launch state v54_smoke.status → SWAPPED_LIVE and watchdog will transition next 60s poll"
+    ]
+  },
+
   "stage0_unblock_20260419T1630Z": {
     "option": "A — build stage0 interpreter from hexa-lang source on pod",
     "why_chosen": "hexa-lang source present at /workspace/hexa-lang with clean transpile+gcc path; total build time <90s; simpler than editing/redeploying watchdog SSOT while it's actively polling",
