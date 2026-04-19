@@ -7,8 +7,8 @@
     "ssot": "shared/convergence/dest1_clm_ship.convergence",
     "created": "2026-04-20T19:10:00Z"
   },
-  "state": "LAUNCHED_170M_PARTIAL",
-  "state_reason": "1B target INFEASIBLE on all currently-viable hosts. Launched 170M r5 full on hetzner CPU BLAS as interim dest1_clm substrate. Full 1B gated on r5-a6.5 libhxcuda dispatch + GPU host availability.",
+  "state": "RELAUNCHED_BUDGETED_AFTER_OOM",
+  "state_reason": "Original launch (pid 1690453, 19:09:17Z) DIED at 20:01:52Z = +52min via OOM-killer (anon-rss 117GB / total-vm 274GB). Root cause: per-step memory leak in train_step (corpus_open per call + c41 head alloc per step + tensor accum), ~2 GB/min growth rate. Relaunched 2026-04-20 with budgeted config (steps=200, batch=1, seq=256, save_every=50) + RSS≥90GB watchdog kill + 30min walltime cap, to extract diagnostic ckpts before next OOM. Full 20K-step run BLOCKED on r5-a10 leak fix.",
 
   "launch_decision_audit": {
     "original_target": "CLM 1B r5 full (1.51B params, bf16, 50000 steps)",
@@ -69,13 +69,22 @@
     "tmux_session": "clm_r5_full",
     "tmux_host": "hetzner",
     "log_path": "/tmp/clm_r5_full.log",
-    "ckpt_dir": "/tmp/ckpt_clm_r5_170m_fresh",
-    "corpus": "data/corpus.txt (5.24 MB cycled)",
-    "total_steps": 20000,
-    "save_every": 10000,
-    "save_every_rationale": "CLI override forced — config default 100 too frequent (6-min text-format save each); reduced to 2 saves over run (step 10000, 20000) to keep disk budget + wall-clock under control",
-    "start_time_utc": "2026-04-20T19:09:17Z",
-    "start_pid": 1690453
+    "ckpt_dir": "/tmp/ckpt_clm_r5_170m_relaunch_20260420",
+    "corpus": "data/corpus.txt (5.24 MB cycled) — but binary defaults to /workspace/corpus_clm_r4.txt (NOT FOUND) so trainer falls through to LCG fallback batch path; r5-a10 must wire --corpus CLI override or read corpus.path from config JSON",
+    "total_steps": 200,
+    "save_every": 50,
+    "save_every_rationale": "RELAUNCH BUDGETED — leak rate ~2GB/min limits feasible runtime to ~45 min before 90GB watchdog. 200 steps × ~30s/step (batch=1 seq=256) = 100 min nominal; watchdog will SIGTERM at 30 min OR RSS≥90GB, whichever first. save_every=50 emits up to 4 ckpts before kill — diagnostic milestones for dest1_clm AN11 probe.",
+    "start_time_utc": "2026-04-20T20:54:37Z",
+    "start_pid": 2569927,
+    "watchdog_pid": 2569924,
+    "watchdog_script": "/tmp/clm_r5_relaunch.sh (90 GB RSS hard-kill + 30 min walltime cap)",
+    "notes": [
+      "DEAD prior run: pid 1690453 OOM-killed 2026-04-19T20:01:52 +0200 (UTC: 18:01:52). dmesg: total-vm:274290872kB anon-rss:117790324kB pgtables:400528kB swapents:16456000.",
+      "ROOT CAUSE: train_step() per-step leaks compound — (a) _current_corpus_desc() calls corpus_open() every batch (println + wc -c exec), (b) _c41_gwt_head_new + _c41_holo_head_new alloc d_model² matrices every step uncached, (c) decoder_forward/backward tensor lists accumulate via hexa list pass-by-value push pattern with no reclaim. Combined leak rate ~2 GB/min observed.",
+      "ARCHIVED: prior ckpt_dir → /tmp/ckpt_clm_r5_170m_dead_20260419/ (step_0 + meta retained as baseline). Prior log → /tmp/clm_r5_full_dead_20260419.log.",
+      "SMOKE: batch=1 seq=256 5-step smoke (pid 2533287) reached step 0 OK + save OK, then ran 3min on step 1 forward without finishing (RSS 14→17GB / VSZ 30GB), confirming step 1 wallclock >>3min and leak persists at smaller config. Killed before completing.",
+      "RELAUNCH NOT --resume: feedback_no_resume_data_change honored — fresh ckpt dir, step 0 from cold init."
+    ]
   },
 
   "step0_metrics": {
@@ -170,7 +179,24 @@
   ],
 
   "revision_history": [
-    {"ts": "19:05Z", "event": "initial launch CLI had --save-every 5000 == CLI default → config.save_every=100 overrode → ckpt flood. KILLED, cleaned."},
-    {"ts": "19:09Z", "event": "relaunched with --save-every 10000 (!= CLI default) to force CLI-precedence. 2 saves total."}
-  ]
+    {"ts": "2026-04-19T19:05Z", "event": "initial launch CLI had --save-every 5000 == CLI default → config.save_every=100 overrode → ckpt flood. KILLED, cleaned."},
+    {"ts": "2026-04-19T19:09Z", "event": "relaunched with --save-every 10000 (!= CLI default) to force CLI-precedence. 2 saves total."},
+    {"ts": "2026-04-19T20:01:52Z", "event": "OOM-KILLED pid 1690453 after +52min. anon-rss 117GB. ~2 GB/min leak from per-step corpus_open + c41 head alloc + decoder tensor accum. Only step_0 ckpt produced."},
+    {"ts": "2026-04-20T20:50Z", "event": "smoke batch=1 seq=256 5-step (pid 2533287) — 14→17GB RSS in 3min, step 1 forward unfinished, killed. Confirmed leak persists at smallest viable config."},
+    {"ts": "2026-04-20T20:54:37Z", "event": "RELAUNCH pid 2569927 + watchdog pid 2569924. Budgeted: steps=200 batch=1 seq=256 save_every=50, RSS≥90GB hard-kill, 30min walltime cap. Goal: extract diagnostic ckpts step_50/100/150/200 for dest1_clm AN11 substrate probe before next OOM. r5-a10 leak fix queued (separate commit, train_clm.hexa code work)."}
+  ],
+
+  "r5_a10_followup": {
+    "id": "r5-a10",
+    "title": "train_clm.hexa per-step leak hardening",
+    "scope": "training/train_clm.hexa edits — code regression separate from this ops launch",
+    "fixes": [
+      "Cache CorpusDesc in module-scope after first corpus_open() — _current_corpus_desc() must reuse, not re-stat",
+      "Cache C41 GWT head + Holo head in TrainState fields — _c41_gwt_head_new / _c41_holo_head_new called once at init, not per-step",
+      "Audit decoder_forward + decoder_backward for hexa list pass-by-value push patterns; convert to in-place where struct field, or explicit reset between steps",
+      "Wire --corpus CLI override + read corpus.path from config JSON (currently defaults to /workspace/corpus_clm_r4.txt regardless)",
+      "Retrofit per-step println to use str() concat helper (also unblocks step 1/2 phi_holo telemetry)"
+    ],
+    "blocks": "Full 20K-step CLM r5 170M training; any 1B+ launch on any host"
+  }
 }
