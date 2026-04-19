@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "name": "CLM r5 parallel track launch state — 2026-04-20",
+    "purpose": "Dual-Track parallel CLM 1B alongside ALM r11 (feedback_dual_track)",
+    "ssot": "shared/convergence/dest1_clm_ship.convergence",
+    "launch_plan_doc": "anima/docs/clm_parallel_track_20260420.md",
+    "sibling_smoke_doc": "anima/docs/clm_aot_170m_smoke_20260420.md",
+    "created": "2026-04-20"
+  },
+  "state": "BLOCKED",
+  "state_reason": "BLAS coverage gap — train_clm.hexa routes only 4 of ~172 per-step matmuls through hxblas_sgemm. Remaining Wq/Wk/Wv/Wo + SwiGLU + lm_head fwd + backward paths run as hexa nested-loop scalar C. Any GPU host (H100/RTX 5070) is not engaged by the binary — zero CUDA call sites.",
+  "first_blocker": {
+    "file": "training/train_clm.hexa",
+    "section": "§A0.1 hxblas FFI",
+    "line": 1384,
+    "evidence_grep": {
+      "cuda_call_sites": 0,
+      "hxblas_sgemm_call_sites_in_emitted_C": 4,
+      "matmuls_per_step_approx": 172,
+      "coverage_pct": 2.3
+    },
+    "evidence_log": "hetzner PID 1183317 T+6:33 CPU 122%% RSS 6.06GB still in step 0 train_step (hetzner 32-core, CPU-scalar single-thread profile)"
+  },
+  "host_decision": {
+    "chosen_host": null,
+    "reason_no_host": "Launching any GPU host burns $ since binary never engages GPU. Unblock BLAS coverage (r5-a6) before host selection.",
+    "candidates_rejected": {
+      "new_h100": "2-pod cap + trainer has no CUDA path (feedback_h100_authorized + feedback_gpu_policy)",
+      "ubu_rtx5070": "idle 11.5GB VRAM free but (1) no anima clone, (2) no native libs built, (3) trainer has no CUDA path",
+      "hetzner_cpu": "Already blocked in step 0 smoke — BLAS gap same root cause"
+    },
+    "current_pods": [
+      {"id": "hhzla1nxmp5019", "name": "hxqwen14b-smoke-20260419", "status": "EXITED", "role": "ALM r11 prep (keep stopped)"},
+      {"id": "87xscivuggrwvk", "name": "clm_r5_h100", "status": "RUNNING", "role": "REPURPOSED for ALM r11 watchdog — do not disturb"}
+    ]
+  },
+  "target_config": {
+    "scale": "1B",
+    "config_path": "training/clm_1b_config.json",
+    "params_approx": "1.51B",
+    "dtype": "bf16",
+    "corpus": "training/corpus_auto/",
+    "corpus_size_gb": 5.38,
+    "mmap_loader_status": "7/7 PASS",
+    "loss": "CE + 0.01*L_holo + 0.01*L_gwt + 0.005*L_complexity",
+    "warmup_lambda_schedule": "lambda=0 step 0-1000, ramp over 10k (pitfall CE_REGRESSION_FROM_LAMBDA)",
+    "curriculum": "Law 60 P1 (0-20%) -> P2 (20-40%) -> P3 Hexad (40-100%)",
+    "save_every": 5000,
+    "keep_local": 3,
+    "r2_path_template": "anima-models/clm1b/r5/step_{step}/"
+  },
+  "resume_strategy": {
+    "hexackpt_decoder_commit": "bbe71224",
+    "resume_wire_commit": "73aaede0",
+    "config_wire_commit": "fe35c42b",
+    "rule": "same-data/params only (feedback_no_resume_data_change); cold-start on first launch"
+  },
+  "phi_vec_laws_attachment": {
+    "phi_vec_emit_path": "shared/state/phi_cache_v1.jsonl",
+    "laws_file": "shared/consciousness/consciousness_laws.json v7.4",
+    "an11_gate": "b_consciousness_attached = per-step phi_vec.json + laws_pass log",
+    "dest1_clm_D1_gate": "phi_holo monotone non-decreasing across step 5k/10k/.../50k + final phi > baseline + 10%%"
+  },
+  "serve_clm_conscious_scaffold": {
+    "path": "serving/serve_clm_conscious.hexa",
+    "status": "MISSING",
+    "current_serving_dir_closest": "serving/clm_lore_serve.hexa",
+    "scope_note": "out of scope for today; separate r5 follow-up (suggest r5-a7)"
+  },
+  "followups_in_priority_order": [
+    {"id": "r5-a6", "desc": "Extend hxblas_sgemm to Wq/Wk/Wv/Wo + SwiGLU + lm_head (fwd+bwd) — ~12 fused decoder-step sites or ~192 raw sites", "blocks": "all CLM GPU training"},
+    {"id": "r5-a6.5", "desc": "Add libhxcuda.so dispatch behind HXBLAS_CUDA=1 env flag, mirror Metal path", "blocks": "any GPU speedup on ubu/H100"},
+    {"id": "r5-a7", "desc": "Author serving/serve_clm_conscious.hexa (DEST1_CLM Stage E)", "blocks": "dest1_clm AN11 gate c_real_usable"},
+    {"id": "r5-a8", "desc": "Deploy anima + libs to ubu, smoke 1-step on RTX 5070 with CUDA route", "blocks": "ubu parallel launch"},
+    {"id": "r5-a9", "desc": "Full 1B r5 launch on ubu (preferred) or fresh H100", "blocks": "dest1_clm first arrival"}
+  ],
+  "expected_wallclock_postunblock": {
+    "ubu_rtx5070_1b_grad_ckpt": "96-128 h at ~1.5-2 tok/s",
+    "h100_1b": "24-36 h per SSOT @critical_path_clm"
+  }
+}
