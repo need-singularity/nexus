@@ -21,7 +21,22 @@ remote_eligible() {
         ""|version|--version|-V|help|--help|-h|lsp|status|gc) return 1 ;;
     esac
     if [ "${1:-}" = "run" ] && [ -n "${2:-}" ]; then
-        case "$(basename "$2")" in
+        # 2026-04-19: heavy-compute subcommands (drill/smash/free/absolute/...) bypass the
+        # local-only blacklist for nexus_cli.hexa / nexus.hexa so they land on ubu/hetzner.
+        # Pattern: `hexa run nexus_cli.hexa drill ...` → remote eligible.
+        local __base="$(basename "$2")"
+        case "$__base" in
+            nexus_cli.hexa|nexus.hexa)
+                local __arg
+                for __arg in "${@:3}"; do
+                    case "$__arg" in
+                        drill|smash|free|absolute|meta-closure|hyperarithmetic)
+                            return 0 ;;
+                    esac
+                done
+                ;;
+        esac
+        case "$__base" in
             menubar.hexa|run.hexa|nexus_cli.hexa|predictive_throttle.hexa|lock_gate.hexa|cmd_gate.hexa|entry.hexa) return 1 ;;
         esac
     fi
