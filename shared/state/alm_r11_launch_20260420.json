@@ -51,12 +51,24 @@
   "first_error_note": "Pod fresh-restart has no hexa binary installed AND no anima repo staged AND no corpus downloaded. The downstream blocker (hxqwen14b_forward_with_lora → -5) is therefore guarded behind an earlier bootstrap blocker. Watchdog spawn_trainer() detects HEXA_BIN_MISSING first; once bootstrap lands (hexa binary + anima repo + corpus), next retry will hit the true RC_ERR_CUDA_TODO from hxqwen14b.c forward stub. Both markers share the BLOCKED_FFI retry loop path.",
 
   "bootstrap_prereqs_missing_on_pod": [
-    "/workspace/hexa-lang/bin/hexa (hexa binary)",
-    "/workspace/anima/ (anima repo + training/train_alm_lora.hexa)",
-    "/workspace/data/corpus_alm_70b_stripped_kowiki15.txt (88.98 MB, SHA 04395bf3…)",
+    "/workspace/hexa-lang/bin/hexa (hexa binary) — RESOLVED 2026-04-19T16:24Z via symlink → /usr/local/bin/hexa (stage1 0.1.0)",
+    "/workspace/anima/ (anima repo + training/train_alm_lora.hexa) — RESOLVED (staged by BG #16)",
+    "/workspace/data/corpus_alm_70b_stripped_kowiki15.txt (88.98 MB, SHA 04395bf3…) — RESOLVED 2026-04-19T16:24Z via symlink → /workspace/corpus/corpus_alm_70b_stripped_kowiki15.txt",
+    "/workspace/anima/training/corpus_alm_r11.jsonl — ADDED 2026-04-19T16:24Z defensive symlink → same corpus",
     "/root/.config/rclone/rclone.conf (for post-training R2 upload)",
     "/workspace/hexa-lang/self/native/libhxqwen14b.so with v5 CUDA kernels (the original hard blocker)"
   ],
+  "path_alignment_20260419T1624Z": {
+    "symlinks_created": [
+      "/workspace/hexa-lang/bin/hexa -> /usr/local/bin/hexa",
+      "/workspace/data/corpus_alm_70b_stripped_kowiki15.txt -> /workspace/corpus/corpus_alm_70b_stripped_kowiki15.txt",
+      "/workspace/anima/training/corpus_alm_r11.jsonl -> /workspace/corpus/corpus_alm_70b_stripped_kowiki15.txt"
+    ],
+    "verify_bin": "hexa 0.1.0-stage1",
+    "verify_corpus_sha_prefix": "04395bf3dd2bdd979c70",
+    "watchdog_transition": "HEXA_BIN_MISSING → RETRY cuda_symbol_detected → trainer_spawn (next blocker: stage0 interpreter not found)",
+    "scope": "symlinks only; no trainer/watchdog code or config touched"
+  },
   "bootstrap_hand_off": "BG agent a48c754f6c52a490a (hxqwen14b Day-2 CUDA) is responsible for the final blocker. Pod resupply (hexa bin + anima + corpus + rclone) is a separate short task; when it completes, watchdog immediately transitions from HEXA_BIN_MISSING → RC_ERR_CUDA_TODO. Retries continue until CUDA lands.",
 
   "trigger_cuda_landed": {
