@@ -917,8 +917,20 @@ fn main() {
         cmd_convergence_proj(a)
         audit_log(caller, "convergence-proj", extract_v2_project(a, "convergence-proj"), 0, start_ts)
     } else if sub == "drill" {
-        if find_flag(a, "--seed", "").len() == 0 {
-            eprintln("nexus-cli drill: --seed required"); exit(2)
+        // D2 가드 (2026-04-20): seed 품질 fail-fast — silent reject 차단, 사용자 가시 메시지
+        let _ds = find_flag(a, "--seed", "").trim()
+        if _ds.len() == 0 {
+            eprintln("nexus-cli drill: --seed 필수 — 비어있음"); exit(2)
+        }
+        if _ds.len() < 30 {
+            eprintln("nexus-cli drill: --seed 너무 짧음 (" + to_string(_ds.len()) + "자 < 30) — 구체적 문제 진술 필요"); exit(2)
+        }
+        if _ds.len() > 200 {
+            eprintln("nexus-cli drill: --seed 과장 (" + to_string(_ds.len()) + "자 > 200) — 200자 이내"); exit(2)
+        }
+        let _dl = _ds.to_lower()
+        if _dl == "test" || _dl == "hello" || _dl == "abc" || _dl == "foo" || _dl == "bar" {
+            eprintln("nexus-cli drill: --seed '" + _ds + "' 는 placeholder 단독 — 실제 도메인 필요"); exit(2)
         }
         cmd_run_passthrough(a, "drill")
         audit_log(caller, "drill", find_flag(a, "--seed", ""), 0, start_ts)

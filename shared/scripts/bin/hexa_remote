@@ -40,8 +40,33 @@ pick_preferred_host() {
     printf 'ubu'
 }
 _probe_host() {
-    ssh -o ConnectTimeout=8 -o BatchMode=yes -o ServerAliveInterval=5 \
-        -o ServerAliveCountMax=1 "$1" true 2>/dev/null
+    local cand="$1"
+    local err rc
+    err="$(ssh -o ConnectTimeout=8 -o BatchMode=yes -o ServerAliveInterval=5 \
+        -o ServerAliveCountMax=1 "$cand" true 2>&1 1>/dev/null)"
+    rc=$?
+    if [ $rc -eq 0 ]; then
+        return 0
+    fi
+    local reason="unknown(rc=$rc)"
+    case "$err" in
+        *"Could not resolve hostname"*|*"Name or service not known"*|*"nodename nor servname"*)
+            reason="DNS 해석 실패" ;;
+        *"Connection refused"*)
+            reason="SSH 거부 (sshd down? 포트 차단?)" ;;
+        *"Permission denied"*|*"publickey"*|*"Authentication failed"*)
+            reason="인증 실패 (키/agent 확인)" ;;
+        *"Connection timed out"*|*"Operation timed out"*|*"timed out"*)
+            reason="타임아웃 (네트워크/방화벽)" ;;
+        *"Host key verification failed"*)
+            reason="호스트 키 불일치" ;;
+        *"No route to host"*)
+            reason="라우팅 없음" ;;
+        *)
+            [ -n "$err" ] && reason="$(printf '%s' "$err" | tail -n 1)" ;;
+    esac
+    echo "hexa_remote: host=$cand 실패: $reason" >&2
+    return $rc
 }
 
 PREFERRED="$(pick_preferred_host)"
@@ -64,8 +89,6 @@ for cand in $FALLBACK_CHAIN; do
         HOST="$cand"
         [ "$PREFERRED" != "$cand" ] && echo "hexa_remote: $PREFERRED unreachable, using $cand" >&2
         break
-    else
-        echo "hexa_remote: probe fail → $cand (next)" >&2
     fi
 done
 
@@ -138,10 +161,15 @@ REL="${REL#/}"
 if [ "${HEXA_REMOTE_NO_SYNC:-0}" != "1" ]; then
   # ssh 옵션 — rsync 중 네트워크 끊기면 30s 안에 감지 (기본 default 무한 대기 방지).
   RSYNC_SSH='ssh -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o BatchMode=yes'
-  rsync -aH -e "$RSYNC_SSH" "${SYNC_EXCLUDES[@]}" "$LOCAL_ROOT/" "$HOST:${REMOTE_ROOT#\$HOME/}/" >/dev/null 2>&1 || {
-    echo "hexa_remote: rsync failed ($HOST)" >&2
+  RSYNC_ERR_FILE="$(mktemp -t hexa_remote_rsync.XXXXXX 2>/dev/null || echo /tmp/hexa_remote_rsync.$$)"
+  if ! rsync -aH -e "$RSYNC_SSH" "${SYNC_EXCLUDES[@]}" "$LOCAL_ROOT/" "$HOST:${REMOTE_ROOT#\$HOME/}/" >/dev/null 2>"$RSYNC_ERR_FILE"; then
+    rsync_rc=$?
+    rsync_last="$(tail -n 1 "$RSYNC_ERR_FILE" 2>/dev/null)"
+    rm -f "$RSYNC_ERR_FILE"
+    echo "hexa_remote: rsync 실패 ($HOST, rc=$rsync_rc): ${rsync_last:-원인 미상}" >&2
     exit 64
-  }
+  fi
+  rm -f "$RSYNC_ERR_FILE"
 fi
 
 quote_args() {
@@ -153,7 +181,16 @@ quote_args() {
   printf '%s' "$out"
 }
 
-REMOTE_CMD="cd \"$REMOTE_ROOT${REL:+/$REL}\" && HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 $REMOTE_HEXA$(quote_args "$@")"
+# P1: 원격 shell EXIT 시 자식 hexa_stage0/hexa.real 정리 (ssh 채널 끊김 → orphan 방지).
+REMOTE_TRAP="trap 'rc=\$?; pkill -P \$\$ -f hexa_stage0 2>/dev/null; pkill -P \$\$ -f hexa.real 2>/dev/null; exit \$rc' EXIT INT TERM"
+REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 $REMOTE_HEXA$(quote_args "$@")"
 
 # -T = no pty, ServerAlive = 장시간 compute (drill) 중 네트워크 끊기면 30s 내 감지 후 종료.
-exec ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 "$HOST" "$REMOTE_CMD"
+# P3: stderr 직통 (2>/dev/null 제거 — 원격 진단정보 surface).
+echo "hexa_remote: $HOST 에서 원격 실행 중" >&2
+ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes "$HOST" "$REMOTE_CMD"
+ssh_rc=$?
+if [ $ssh_rc -ne 0 ]; then
+    echo "hexa_remote: 원격 실행 실패 ($HOST, rc=$ssh_rc)" >&2
+fi
+exit $ssh_rc

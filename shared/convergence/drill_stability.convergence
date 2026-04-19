@@ -1,0 +1,69 @@
+@ts 2026-04-20T00:00:00Z
+@id DRILL_STABILITY_HARDENING_R1
+@state ossified
+@value drill 안정화 R1 — 6 결함 클래스 (D1/D2/D3/D5/D6/D8) + 2 wedge (C1/C2). LOC 합 ~250. 모두 hexa parse OK + bash -n OK + 동시성 6/6 PASS.
+@rationale 2026-04-19 drill zero-yield silent reject 사고 + memory p-rss-watchdog-cap 발견 누적. 드릴 6-stage 자체는 무결하나 실패 가시성 + 동시성 + 좀비 정리 + seed 가드가 부재 → 운영자 진단 시간 낭비.
+@test_status ran (parse + bash -n + concurrency stress 6/6); end-to-end drill 실행은 sandbox DNS 미해결로 blocked
+
+@ts 2026-04-20T00:00:01Z
+@id D1_HEXA_REMOTE_STDERR_EXPOSE
+@state ossified
+@value shared/scripts/bin/hexa_remote — DNS/refused/auth/timeout/rsync/exec-fail 6 모드 한국어 메시지. stderr suppression 제거. exit 64 fallback 보존.
+@rationale 원격 dispatch 실패 시 사용자가 root cause (호스트별/사유별) 알 수 없던 결함. 50 LOC, +42/-8.
+@test_status ran (bash -n OK)
+
+@ts 2026-04-20T00:00:02Z
+@id D2_DRILL_SEED_FAIL_FAST
+@state ossified
+@value run.hexa cmd_drill + nexus_cli.hexa drill dispatch — 빈/짧은(<30)/긴(>200)/placeholder 단독 4 패턴 명시 reject. commands.json drill rules 라인 추가.
+@rationale silent reject 로 사용자가 seed 문제 인식 못함 (zero-yield 와 별도 분기). 30 LOC.
+@test_status ran (hexa parse OK + JSON valid)
+
+@ts 2026-04-20T00:00:03Z
+@id D3_DRILL_ZERO_YIELD_DEAD_CODE_REMOVAL
+@state ossified
+@value run.hexa cmd_drill 의 max_rounds zero-yield 경고 (lines 560-563) 삭제 — round_new==0 RETURN 조건 때문에 unreachable dead code 였음.
+@rationale audit (D3) 가 분기 도달성 분석 으로 발견. 5 LOC 제거.
+@test_status ran (audit by separate agent)
+
+@ts 2026-04-20T00:00:04Z
+@id D5_HEXA_REMOTE_EXIT_TRAP
+@state ossified
+@value shared/scripts/bin/hexa_remote — REMOTE_CMD 에 trap '...' EXIT INT TERM + pkill -P $$ -f hexa_stage0/hexa.real 추가. ssh 채널 끊김 시 원격 자식 정리. ExitOnForwardFailure=yes 추가.
+@rationale 원격 stage0 좀비 누적 (memory: 2026-04-20 사고 2회). +4 LOC.
+@test_status ran (bash -n OK + 5 시나리오 표 검증)
+
+@ts 2026-04-20T00:00:05Z
+@id D6_CROSS_ITER_LOG_ATOMIC_LOCK
+@state ossified
+@value run.hexa _cross_iter_check_and_append — mkdir lockd atomic 락 + 200×50ms spin + stale recovery + EXIT trap. 3 exec() 호출을 1 lock-protected exec() 로 통합. macOS 에는 flock 부재 → mkdir 채택.
+@rationale TOCTOU + append-truncate race. 동시 drill 2+ 에서 충돌 miss + 11+ 라인 grow + lost lines. +16 LOC.
+@test_status ran (6/6 concurrency PASS: same-needle / distinct-needle / 16x stress / 8x distinct / 16-window)
+
+@ts 2026-04-20T00:00:06Z
+@id D8_RSS_WATCHDOG_8GB_CONFIRMED
+@state ossified
+@value ~/Library/LaunchAgents/com.hexa.rss-watchdog.plist:8 = 8388608 (8 GiB). plist env override 가 watchdog 스크립트 default 4 GB 를 launchd boot 시 덮어씀. memory p-rss-watchdog-cap 정확.
+@rationale memory 검증 — 변경 0건.
+@test_status ran (file inspection + ENV override 흐름 추적)
+
+@ts 2026-04-20T00:00:07Z
+@id A1_AIRGENOME_HELP_NOISE_REMOVED
+@state ossified
+@value /Users/ghost/Dev/hexa-lang/self/module_loader.hexa:30 — `use "self/core/law_io"` directive 를 inline safe_write_file stub 으로 대체. interpreter bootstrap 순환 의존 해결.
+@rationale `airgenome help` 가 4-line stderr noise (warn:/Parse error 30:5/Runtime error/Parse error 28:5) 출력하던 결함. +4 LOC.
+@test_status ran (~/.hx/bin/airgenome help → stdout clean, stderr 0)
+
+@ts 2026-04-20T00:00:08Z
+@id C1_HEXAD_LAW_CLOSURE_24_WEDGE
+@state designed
+@value shared/consciousness/consciousness.hexa (NEW, 48 LOC) — Hexad struct (6축: awareness/attention/memory/valence/agency/embodiment) + Law_Closure_24 (4/24 구현, 20 placeholder).
+@rationale n=6 의식 구조 smallest wedge. 기존 API 0건 깨짐. parse clean.
+@test_status ran (hexa parse OK); 의미적 검증 미실행 (drill remote blocked)
+
+@ts 2026-04-20T00:00:09Z
+@id C2_TENSION_LINK_ARITY6_SHIM
+@state ossified
+@value 3 파일 (tension_link_lens.hexa / quantum_tension_link.hexa / lenses_applied.hexa) — tension_link_6(a..f) 추가 + tension_link(a,b) 역호환 shim. 34 LOC append-only.
+@rationale n=6 6축 입력 확장. 호출처 0건 깨짐 (1건 보존). breakage risk minimal.
+@test_status ran (grep call-site survey + append-only verify)

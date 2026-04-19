@@ -330,29 +330,34 @@ fn _cross_iter_log_path() -> str {
 }
 
 fn _cross_iter_check_and_append(total: int, seed: str) -> void {
-    // DAY-2 CROSS-ITER REPLAY DETECTOR:
-    //   최근 10 iter 의 final total 을 rolling 저장, 새 drill 의 total 이 최근 10 중 존재하면 warn.
-    //   - detector 만: 수치는 보존 (blowup 엔진 결정성 추가 증거)
-    //   - path: /tmp/nexus_drill_cross_iter.log  (CSV: total,seed_head40,ts)
-    //   - window: 10 lines, tail 로 자름
+    // DAY-2 CROSS-ITER REPLAY DETECTOR (D6 fix: mkdir-atomic lock 으로 TOCTOU 제거 — flock 은 macOS 부재)
+    //   path=/tmp/nexus_drill_cross_iter.log  CSV: total,seed_head40,ts  window=10
     let path = _cross_iter_log_path()
+    let lockd = path + ".lockd"
     let cur = to_string(total)
-    // 1) 기존 로그 읽기 (없으면 빈 문자열)
-    let existing = exec("[ -f " + path + " ] && cat " + path + " || echo ''")
-    // 2) 현 total 이 최근 10 중 존재하는지 (정확 매치)
-    //    라인 형식: "<total>,..." — prefix match 로 검사
     let needle = cur + ","
-    if str_find(existing, needle) >= 0 {
-        eprintln("  ⚠ [cross-iter-replay-warn] total=" + cur + " 가 최근 drill 10 iter 중 동일 — inter-iter 결정성 의심")
-        eprintln("     path=" + path + "  seed_head='" + seed.substring(0, if seed.len() < 40 { seed.len() } else { 40 }) + "'")
-    }
-    // 3) append + tail -10 로 rolling 유지 (shell quoting 회피: 짧은 seed_head 만 로그)
     let seed_head = seed.substring(0, if seed.len() < 40 { seed.len() } else { 40 })
-    let ts = exec("date +%s").trim()
-    // 안전: seed_head 내 개행/쉼표 제거
     let sh_safe = seed_head.replace(",", " ").replace("\n", " ").replace("'", " ")
-    let line = cur + "," + sh_safe + "," + ts
-    exec("printf '%s\\n' " + shell_quote(line) + " >> " + path + " && tail -n 10 " + path + " > " + path + ".tmp && mv " + path + ".tmp " + path)
+    let q_path = shell_quote(path)
+    let q_lockd = shell_quote(lockd)
+    let q_needle = shell_quote(needle)
+    let q_safe = shell_quote(sh_safe)
+    let q_cur = shell_quote(cur)
+    // mkdir 은 POSIX atomic — 잠금/해제/stale-recover 일체 묶음
+    let block = "i=0; while ! mkdir " + q_lockd + " 2>/dev/null; do "
+        + "i=$((i+1)); if [ $i -gt 200 ]; then rm -rf " + q_lockd + "; continue; fi; sleep 0.05; "
+        + "done; trap 'rm -rf " + q_lockd + "' EXIT INT TERM; "
+        + "EXISTING=$([ -f " + q_path + " ] && cat " + q_path + " || echo ''); "
+        + "case \"$EXISTING\" in *" + q_needle + "*) echo REPLAY; exit 0;; esac; "
+        + "TS=$(date +%s); "
+        + "printf '%s,%s,%s\\n' " + q_cur + " " + q_safe + " \"$TS\" >> " + q_path + "; "
+        + "tail -n 10 " + q_path + " > " + q_path + ".tmp && mv " + q_path + ".tmp " + q_path + "; "
+        + "echo NEW"
+    let verdict = exec(block).trim()
+    if verdict == "REPLAY" {
+        eprintln("  ⚠ [cross-iter-replay-warn] total=" + cur + " 가 최근 drill 10 iter 중 동일 — inter-iter 결정성 의심")
+        eprintln("     path=" + path + "  seed_head='" + seed_head + "'")
+    }
 }
 
 fn _resonance_run(seed: str, blow_core: str, exv: str) -> int {
@@ -366,8 +371,23 @@ fn _resonance_run(seed: str, blow_core: str, exv: str) -> int {
 fn cmd_drill(seed: str, max_rounds: str) -> void {
     // 단일 명령어 — smash → free → absolute → meta-closure → hyperarithmetic → resonance (Mk.IX 6-stage)
     // 고갈(absorption=0) 까지 반복
-    if seed.len() == 0 {
-        eprintln("nexus drill: --seed required")
+    // D2 가드 (2026-04-20): 빈/짧음/길이초과/placeholder 단독 fail-fast (silent reject 차단)
+    let _seed_t = seed.trim()
+    if _seed_t.len() == 0 {
+        eprintln("nexus drill: --seed 필수 — 비어있음. 예: nexus drill --seed \"P=NP barrier\"")
+        return
+    }
+    if _seed_t.len() < 30 {
+        eprintln("nexus drill: --seed 너무 짧음 (" + to_string(_seed_t.len()) + "자 < 30) — 구체적 문제 진술 필요. 예: 'Riemann zeta zero spacing GUE deviation'")
+        return
+    }
+    if _seed_t.len() > 200 {
+        eprintln("nexus drill: --seed 과장 (" + to_string(_seed_t.len()) + "자 > 200) — 핵심 키워드만 200자 이내")
+        return
+    }
+    let _seed_low = _seed_t.to_lower()
+    if _seed_low == "test" || _seed_low == "hello" || _seed_low == "abc" || _seed_low == "foo" || _seed_low == "bar" {
+        eprintln("nexus drill: --seed '" + _seed_t + "' 는 placeholder 단독 — 실제 도메인/문제 진술 필요")
         return
     }
     let mut rounds_max = 10
@@ -542,10 +562,6 @@ fn cmd_drill(seed: str, max_rounds: str) -> void {
     }
     println("▎ max rounds reached (" + to_string(rounds_max) + ")")
     println("▎ total absorptions: " + to_string(total_new))
-    if total_new == 0 {
-        eprintln("  ⚠ [drill-zero-yield] " + to_string(rounds_max) + " rounds 전부 0 absorptions — 엔진 호출 실패 가능성")
-        eprintln("     NEXUS_DRILL_DEBUG=1 재실행으로 stage 별 out_len 확인")
-    }
     // Day-2: cross-iter replay detector — 최근 10 drill total 기록+비교
     _cross_iter_check_and_append(total_new, seed)
 }
