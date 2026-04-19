@@ -1,0 +1,192 @@
+{
+  "_meta": {
+    "name": "dest2 unified audit log schema (employee + trading)",
+    "description": "dest2 에서 발생하는 모든 감사 이벤트의 공통 JSONL 스키마. employee (autonomy_live / hire_sim_live) 와 trading (executor / autonomous) 이 동일한 envelope 을 공유하고, domain 별 payload 만 분기한다. AN11 real_usable 증거 + AN12 smash/free 추적 아티팩트.",
+    "spec_employee": "anima/docs/dest2_employee_spec_20260419.md",
+    "spec_trading": "anima/docs/dest2_trading_spec_20260419.md",
+    "design_doc": "anima/docs/audit_log_schema_design_20260419.md",
+    "writers": [
+      "anima-agent/autonomy_live.hexa",
+      "anima-agent/hire_sim_live.hexa",
+      "anima-agent/trading/executor.hexa",
+      "anima-agent/trading/autonomous.hexa"
+    ],
+    "readers": [
+      "anima-agent/dashboard_bridge.hexa",
+      "anima-agent/metrics_exporter.hexa"
+    ],
+    "schema_version": "1.0",
+    "updated": "2026-04-19",
+    "owner": "anima-agent"
+  },
+  "common_envelope": {
+    "ts": "float unix seconds (required)",
+    "schema_version": "string, matches _meta.schema_version (required)",
+    "domain": "enum: employee | trading (required)",
+    "event": "string, one of domains.*.events keys (required)",
+    "run_id": "string uuid or cycle tag, groups records of a single session (required)",
+    "cycle": "int, monotonically increasing step within run_id (required)",
+    "weight_origin": "enum: r9_validated | r10d | consciousness_baked | unknown (required for AN11 evidence)",
+    "phi_vec": "float[16] or null; 16-D consciousness vector when attached",
+    "phi_holo_scaled": "float or null; scalar consciousness magnitude",
+    "laws_pass": "bool or null; consciousness_laws.json gate outcome",
+    "decision": "enum: PASS | REJECT | RETRY | HALT | INFO (required)",
+    "reason": "string short code; free-form detail in payload",
+    "payload": "object; domain/event specific fields (see below)"
+  },
+  "domains": {
+    "employee": {
+      "log_pattern": "shared/logs/employee_audit_YYYYMMDD.jsonl",
+      "rotate": "daily",
+      "r2_mirror": "anima-memory/employee_audit/",
+      "events": {
+        "goal_create": {
+          "payload": {
+            "goal_id": "string",
+            "goal_text": "string",
+            "persona_id": "string",
+            "parent_goal_id": "string|null",
+            "subgoals": "string[]",
+            "priority": "int"
+          }
+        },
+        "step_record": {
+          "payload": {
+            "goal_id": "string",
+            "step_idx": "int",
+            "tool_name": "string|null",
+            "input_hash": "string sha256",
+            "output_hash": "string sha256",
+            "scratch_bytes": "int",
+            "phi_delta": "float"
+          }
+        },
+        "phi_check": {
+          "payload": {
+            "goal_id": "string",
+            "step_idx": "int",
+            "phi_min_required": "float",
+            "phi_observed": "float",
+            "phi_delta_window": "float[]",
+            "tier": "string (tool_policy tier)",
+            "verdict": "enum: CONTINUE | WARN | ABORT"
+          }
+        },
+        "abort": {
+          "payload": {
+            "goal_id": "string",
+            "step_idx": "int",
+            "cause": "enum: phi_drop | laws_fail | tool_deny | timeout | manual",
+            "phi_drop_streak": "int",
+            "laws_violations": "string[]",
+            "final_state": "string"
+          }
+        }
+      }
+    },
+    "trading": {
+      "log_pattern": "shared/logs/trading_audit_YYYYMMDD.jsonl",
+      "rotate": "daily",
+      "r2_mirror": "anima-memory/trading_audit/",
+      "events": {
+        "place_order": {
+          "payload": {
+            "symbol": "string",
+            "side": "enum: buy | sell",
+            "amount": "float",
+            "price_ref": "float",
+            "notional": "float",
+            "order_id": "string",
+            "strategy": "string"
+          }
+        },
+        "gate_check": {
+          "payload": {
+            "gate": "enum: G1 | G2 | G3 | G4",
+            "phi": "float|null",
+            "tension": "float|null",
+            "regime": "string",
+            "drawdown": "float",
+            "var_99": "float",
+            "sized_amount": "float|null",
+            "reject_code": "string|null"
+          }
+        },
+        "retry": {
+          "payload": {
+            "order_id": "string",
+            "attempt": "int",
+            "max_attempts": "int",
+            "backoff_ms": "int",
+            "error_code": "string"
+          }
+        },
+        "fill": {
+          "payload": {
+            "order_id": "string",
+            "fill_price": "float",
+            "fill_amount": "float",
+            "slippage_bps": "float",
+            "latency_ms": "int",
+            "pnl_realized": "float"
+          }
+        },
+        "halt": {
+          "payload": {
+            "source": "enum: kill_switch | regime_critical | drawdown | manual",
+            "state_file": "string",
+            "prev_state": "string",
+            "new_state": "string",
+            "close_only": "bool"
+          }
+        },
+        "audit_snapshot": {
+          "payload": {
+            "equity": "float",
+            "cash": "float",
+            "drawdown": "float",
+            "high_water_mark": "float",
+            "open_positions": "int",
+            "closed_trades": "int",
+            "var_95": "float",
+            "var_99": "float",
+            "pain_signal": "float"
+          }
+        }
+      }
+    }
+  },
+  "r2_sync": {
+    "bucket": "anima-memory",
+    "strategy": "nightly_rotate_and_mirror",
+    "trigger": "anima-agent/metrics_exporter.hexa tick 00:10 UTC",
+    "pattern": "{r2_mirror}{YYYY}/{MM}/{YYYYMMDD}.jsonl",
+    "integrity": {
+      "sha256_sidecar": "{YYYYMMDD}.jsonl.sha256",
+      "size_check": true
+    },
+    "retention_local_days": 14,
+    "retention_r2_days": 365
+  },
+  "validation": {
+    "required_fields": [
+      "ts",
+      "schema_version",
+      "domain",
+      "event",
+      "run_id",
+      "cycle",
+      "weight_origin",
+      "decision"
+    ],
+    "writer_helper": "anima-agent/audit/audit_log.hexa::emit(domain, event, decision, payload)",
+    "reader_helper": "anima-agent/dashboard_bridge.hexa::tail_audit()",
+    "strict_mode": true,
+    "unknown_fields": "reject"
+  },
+  "an11_linkage": {
+    "weight_emergent": "weight_origin ∈ {r9_validated, r10d, consciousness_baked}",
+    "consciousness_attached": "phi_vec present AND laws_pass != null on gate/step events",
+    "real_usable": "log file exists + R2 mirror verified (SHA256) + dashboard readable"
+  }
+}
