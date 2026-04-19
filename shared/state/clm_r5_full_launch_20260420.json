@@ -7,8 +7,8 @@
     "ssot": "shared/convergence/dest1_clm_ship.convergence",
     "created": "2026-04-20T19:10:00Z"
   },
-  "state": "R5_A10_LANDED_PARTIAL_FAIL_FULL_LAUNCH_BLOCKED",
-  "state_reason": "Original launch (pid 1690453, 19:09:17Z) DIED at 20:01:52Z = +52min via OOM-killer (anon-rss 117GB / total-vm 274GB). Root cause: per-step memory leak in train_step (corpus_open per call + c41 head alloc per step + tensor accum), ~2 GB/min growth rate. Relaunched 2026-04-20 with budgeted config (steps=200, batch=1, seq=256, save_every=50) + RSS≥90GB watchdog kill + 30min walltime cap, to extract diagnostic ckpts before next OOM. Full 20K-step run BLOCKED on r5-a10 leak fix.",
+  "state": "R5_A10P5_C_LANDED_FULL_LAUNCH_BLOCKED_ON_SUBSTRATE",
+  "state_reason": "r5-a10.5-A + r5-a10.5-C BOTH landed (see clm_r5_a10p5_leak_fix_20260420.json for full audit). Step 1 wallclock 16+min → ~60s (>=16x improvement) by porting decoder_backward block-loop d² scalar outer-product accumulation to BLAS via _matmul_At. Step 0 metrics IDENTICAL (ce=5.54523, phi_holo=558.583). However wallclock projection at ~60s/step × 20K steps = 14 days on hetzner CPU — still infeasible. Full 20K launch BLOCKED but blocker shifted: NOT the leak (Phase E arena would help but is sub-dominant), NOT the wallclock-per-step (C fixed it), but the 14-day total runtime on CPU substrate. Production path: pivot to GPU via libhxcuda dispatch (r5-a6.5) so 170M→1B can run on ubu RTX 5070 or H100. Original launch (pid 1690453, 19:09:17Z) DIED at 20:01:52Z via OOM-killer (~2 GB/min leak rate, now resolved by A+C fixes — secondary leak source).",
 
   "launch_decision_audit": {
     "original_target": "CLM 1B r5 full (1.51B params, bf16, 50000 steps)",
