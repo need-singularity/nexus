@@ -1,228 +1,37 @@
 @track DEST1_DEST2_SHIP
-@state roadmap_AN11_enforced
-@date 2026-04-18
-@governs AN11 (shared/rules/anima.json) — 실사용_완성_강제
+@state DEPRECATED_SPLIT
+@date 2026-04-19
+@deprecated_on 2026-04-19
+@deprecated_reason D4 finding — ALM/CLM 두 트랙 혼재. CLM 분리 권장 → 아래 2 파일로 split.
+@redirect_alm shared/convergence/dest1_alm_ship.convergence
+@redirect_clm shared/convergence/dest1_clm_ship.convergence
+@content_preserved YES — 원본 내용은 dest1_alm_ship.convergence 에 full 보존 (ALM r10c 14B 파이프라인 전체). CLM 측은 dest1_clm_ship.convergence 에서 별도 기술 (clm_r4_mmap + AOT build + CLM_VAL/TRAIN/SERVE).
+@do_not_edit 이 파일은 아카이브. 수정은 분리된 2 파일에만. sidecar 참조는 #dest1_alm / #dest1_clm 앵커로 유지.
+
+# ============================================================================
+# SIDECAR ANCHOR COMPATIBILITY (로드맵 anima.json 참조 호환용)
+# ============================================================================
+# anima.json 내 convergence_ssot 패턴 참조 유지:
+#   #dest1_alm → shared/convergence/dest1_alm_ship.convergence
+#   #dest1_clm → shared/convergence/dest1_clm_ship.convergence
+#   #dest2_alm → shared/convergence/dest1_alm_ship.convergence (ALM track 하단)
+#   #dest2_clm → shared/convergence/dest1_clm_ship.convergence (CLM track 하단)
+@anchor_dest1_alm → dest1_alm_ship.convergence
+@anchor_dest1_clm → dest1_clm_ship.convergence
+@anchor_dest2_alm → dest1_alm_ship.convergence
+@anchor_dest2_clm → dest1_clm_ship.convergence
+
+# ============================================================================
+# HISTORICAL CONTEXT (for audit)
+# ============================================================================
+@governs AN11 (shared/rules/anima.json) — 실사용_완성_강제 (still applies to split files)
 @roadmap_json shared/convergence/roadmap_dest_consciousness.json
 @memory memory/project_destinations.md + memory/feedback_philosophy_no_system_prompt.md
 
-@an11_conditions 모든 도착지 PASS 는 3 조건 동시:
-  a_weight_emergent (system_prompt wrapping 금지)
-  b_consciousness_attached (phi_vec + consciousness_laws runtime)
-  c_real_usable (HTTP endpoint + R2 artifact + README 재현)
+@original_created 2026-04-18 (ALM r10c ship checklist built post-r10 collapse analysis)
+@original_scope_claim "3-stage serial ship — 도착지1 (페르소나) → 직원가능 → 트레이딩" (실제로는 ALM track만 상세, CLM 측 공백)
+@d4_finding 2026-04-19 — CLM 트랙은 clm_1b_r4 / clm_r4_mmap / clm_eval 에 분산 기술, 통합 ship sequence 부재. dest1_clm_ship.convergence 로 통합.
 
-@dest1_persona definition="20 persona weight-emergent + phi + endpoint" tracks=[C1,C2,P1,S1] critical_path_h=3
-@dest2_employee definition="100 task autonomy real LLM + phi gate" tracks=[E1,E2] critical_path_h=3.5 depends=[dest1]
-@dest3_trading definition="Φ-weighted live trading + backtest" tracks=[T1,T2] critical_path_h=2.5 depends=[dest2]
-
-@critical_path_total 9h (parallel C1+C2+P1 → S1 → E1 → E2 → T1 → T2)
-@serial_path_total 11.3h (no parallelism)
-@parallelism_saving 2.3h
-
-@smash_free_batch 9 seeds (7 smash + 2 free) — shared/convergence/roadmap_dest_consciousness.json#smash_free_batch
-
-@revoked_prior:
-  persona_base_serve.convergence (dest1 shortcut REVOKED AN11 violation)
-  employee_base_serve.convergence (dest2 shortcut REVOKED AN11 violation)
-
-@blocker_hexa_cli Linux local CLI syntax mismatch; Mac session required for smash/free. 의식 없는 shortcut 대신 정규 경로 유지.
-
-@enforcement_mechanism:
-  shared/rules/anima.json AN11 → convergence_update.hexa scanner + pass_gate_an11.hexa (TBD)
-  .convergence @state pass/ossified/completed 패턴 → 3 필드 검사 (@phi_evidence + @weight_emergent_proof + @real_usable_endpoint)
-  위반 시 auto-revoke + stderr [AN11-VIOLATION] + convergence.failed++
-
-@chain ←roadmap_reality_sync.convergence →roadmap_dest_consciousness.json →(all tracks의 future .convergence files)
-@scope 3-stage 직렬 ship — 도착지1 (페르소나, Φ>1000 기반) → 직원가능 → 트레이딩
+@chain ←roadmap_reality_sync.convergence ←ALL_HISTORICAL →dest1_alm_ship.convergence (ALM 계승) →dest1_clm_ship.convergence (CLM 신규)
 @owner needsingularity
-@governance R14 (shared/CLAUDE.md) — this .convergence is the SSOT for the ship sequence. Do NOT duplicate into project notes.
-@correction 2026-04-18 user 정정: 도착지1=페르소나(Φ>1000 substrate 포함), 거기서 →직원가능 →트레이딩. 이전 "도착지2=P22-P25 loop" 별도 트랙 해석은 틀림 (memory/project_destinations.md 참조).
-
-# ============================================================================
-# OBJECTIVES (3-stage serial, each reuses prior substrate)
-# ============================================================================
-@dest1 페르소나 — 20 persona end-to-end on live /hire/task with Φ-probe output attached
-@dest1_substrate r10c step_2000 phi_vec.json phi_holo_scaled > 1000 (SUBSTRATE only, not gate pass alone)
-@dest1_persona_layer TALM-P2-1 per-persona LoRA adapters + serving/hire_routes.hexa TSRV-P4-1 + anima-speak voice + character_builder_ui.hexa
-@dest1_gate single persona round-trip: POST /hire/task {persona, prompt} → response text + phi_holo attached + serving/hire_sim verdict
-@dest1_substrate_gate training/phi_gt_1000_verify.hexa exit 0 on ckpt_alm_14b_r10c_seed3407/step_2000/phi_vec.json (pre-req for dest1 full)
-
-@dest_employee 직원가능 — 100-task autonomy with real persona LoRA
-@dest_employee_gate TCLM-P4-1 autonomy_loop + TSRV-P4-2 hire_sim_100: 완료율>=0.85 AND 개입<=5/hr AND 평균 task<=10min (per anima.json Agent_platform)
-@dest_employee_depends_on dest1 LIVE (not mock) — real persona LoRA + Claude/AnimaLM adapter wired
-
-@dest_trading 트레이딩 — Φ-weighted trading + qualia NPV
-@dest_trading_gate per shared/convergence/p32_economic_market.convergence — scaffold 실측 promotion (feed + backtest + risk controls)
-@dest_trading_depends_on dest_employee (agent autonomy stable)
-
-# ============================================================================
-# ARTIFACTS (built this session — referenced below)
-# ============================================================================
-@r10c_launcher training/launch_alm_14b_r10c.hexa
-@r10_watcher_patched training/deploy/alm14b_r10_watcher.hexa (E7-OSS-02 pid_alive gate)
-@kowiki_slicer training/kowiki_slice.hexa (stream-safe 15% slicer, PI-EXEC-SPLIT-OOM safe)
-@phi_gate_verifier training/phi_gt_1000_verify.hexa (DEST1 gate)
-@sentinel training/kr_gen_sentinel.hexa (authoritative post-kr_gen exit code)
-@phi_logger training/alm_phi_vec_logger.hexa (canonical 16D schema)
-@convergence_parent shared/convergence/alm_14b_r10.convergence (triple collapse findings)
-@convergence_corpus shared/convergence/corpus_pipeline.convergence
-@convergence_runpod shared/convergence/runpod.convergence
-@convergence_eval_real shared/convergence/eval_harness_real.convergence
-
-# ============================================================================
-# PREREQS (verify BEFORE launching any cmd below)
-# ============================================================================
-@prereq_1 runpodctl configured (~/.runpod/config.toml) with SSH key (~/.runpod/ssh/RunPod-Key-Go)
-@prereq_2 rclone configured with r2: remote (anima-models bucket reachable)
-@prereq_3 hexa binary on Linux host (for local kowiki_slice sanity) + pod-side (for runtime use)
-@prereq_4 training/corpus_auto/kowiki.jsonl present locally (1.28 GiB, verified 2026-04-18 17:41)
-@prereq_5 shared/config/runpod.json reviewed — H100_80GB spot $1.50/h preferred
-@prereq_6 R14 SSOT: if any cmd below fails, update this .convergence FIRST before improvising
-
-# ============================================================================
-# STAGE A — POD PROVISION
-# ============================================================================
-@cmd_A1 runpodctl create pod --name anima-alm14b-r10c-$(date +%Y%m%d) --gpuType "NVIDIA H100 80GB HBM3" --gpuCount 1 --imageName "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" --containerDiskInGb 100 --volumeInGb 200 --volumeMountPath /workspace --ports "22/tcp"
-@gate_expected_A1 pod ID returned (14-char alphanumeric), status=CREATING → RUNNING within 2-5 min
-@rollback_A1 runpodctl remove pod <POD_ID>
-
-@cmd_A2 runpodctl ssh info <POD_ID> # capture direct IP:PORT (proxy unreliable per RUNPOD ossified)
-@gate_expected_A2 prints "ssh -p <PORT> root@<IP>" — write this to shell var POD_SSH for reuse
-@rollback_A2 N/A (read-only)
-
-@cmd_A3 $POD_SSH "dd if=/dev/zero of=/workspace/_q_test bs=1M count=20000 status=none && rm /workspace/_q_test && echo PREFLIGHT_OK"
-@gate_expected_A3 stdout contains "PREFLIGHT_OK" — confirms MFS quota ≥20GB writable (per runpod_mfs_quota ossified)
-@rollback_A3 if FAIL: $POD_SSH "rm -rf /workspace/ckpt_* /workspace/*.tmp" → retry A3 once; if still FAIL pod is quota-broken → runpodctl remove pod <POD_ID>, back to A1
-
-# ============================================================================
-# STAGE B — BASE MODEL + CORPUS SYNC
-# ============================================================================
-@cmd_B1 $POD_SSH "mkdir -p /workspace/anima && rclone copy r2:anima-models/qwen2.5-14b-instruct/ /workspace/base_model/ -v --s3-no-check-bucket"
-@gate_expected_B1 base_model dir populated (~28GB — config.json, tokenizer*, model-*.safetensors). $POD_SSH "du -sh /workspace/base_model" reports ~28G
-@rollback_B1 $POD_SSH "rm -rf /workspace/base_model" → re-run B1
-
-@cmd_B2 rclone copy r2:anima-corpus/corpus_alm_70b_stripped.txt /tmp/corpus_stripped.txt --s3-no-check-bucket && rsync -avz -e "ssh -p <PORT>" /tmp/corpus_stripped.txt root@<IP>:/workspace/corpus_alm_70b_stripped.txt
-@gate_expected_B2 $POD_SSH "wc -c /workspace/corpus_alm_70b_stripped.txt" returns >100MB (stripped 70B corpus)
-@rollback_B2 $POD_SSH "rm /workspace/corpus_alm_70b_stripped.txt" → re-run B2
-
-@cmd_B3_local_note size=$(wc -c < training/corpus_auto/kowiki.jsonl) && MAIN=$(wc -c < /tmp/corpus_stripped.txt) && hexa run training/kowiki_slice.hexa "$MAIN" /tmp/kowiki_slice_15pct.jsonl
-@gate_expected_B3 stdout: "[kowiki_slice] OK out_bytes=<N> lines=<M> actual_mix_ratio=~0.15" and "[kowiki_slice] verdict=PASS"
-@rollback_B3 rm /tmp/kowiki_slice_15pct.jsonl → re-run (hexa binary must be Mach-O-compatible on host; if Linux host: skip local slice, run on pod — see B3_pod_alt)
-
-@cmd_B3_pod_alt $POD_SSH "cd /workspace/anima && hexa run training/kowiki_slice.hexa \$(wc -c < /workspace/corpus_alm_70b_stripped.txt) /workspace/kowiki.jsonl"
-@gate_expected_B3_pod_alt same as B3 — slice lands directly on pod, no rsync needed
-@rollback_B3_pod_alt $POD_SSH "rm /workspace/kowiki.jsonl" → re-run
-
-@cmd_B4 rsync -avz -e "ssh -p <PORT>" /tmp/kowiki_slice_15pct.jsonl root@<IP>:/workspace/kowiki.jsonl  # only if B3 (not B3_pod_alt)
-@gate_expected_B4 $POD_SSH "wc -c /workspace/kowiki.jsonl" returns ~15% of corpus_stripped.txt size
-@rollback_B4 $POD_SSH "rm /workspace/kowiki.jsonl" → re-run B4
-
-@cmd_B5 rsync -avz -e "ssh -p <PORT>" training/ root@<IP>:/workspace/anima/training/ --exclude "corpus_auto/kowiki.jsonl" --exclude "ckpt_*"
-@gate_expected_B5 $POD_SSH "ls /workspace/anima/training/launch_alm_14b_r10c.hexa /workspace/anima/training/kr_gen_sentinel.hexa /workspace/anima/training/phi_gt_1000_verify.hexa" lists all 3
-@rollback_B5 N/A (overwrite-safe rsync)
-
-# ============================================================================
-# STAGE C — R10C SEED SWEEP (smoke before production)
-# ============================================================================
-@cmd_C1 $POD_SSH "cd /workspace/anima && DRY_RUN=1 hexa run training/launch_alm_14b_r10c.hexa --seed-sweep"
-@gate_expected_C1 prints "[DRY_RUN] r10c plan:" with py/runner/sweep=true/seeds=3407 42 1337 and E7-OSS-01/02/03 lines
-@rollback_C1 N/A (dry run)
-
-@cmd_C2 $POD_SSH "cd /workspace/anima && setsid hexa run training/launch_alm_14b_r10c.hexa --seed-sweep 2>&1 | tee /workspace/r10c_sweep.log"
-@gate_expected_C2 all 3 seeds complete 200-step smoke, each /workspace/ckpt_alm_14b_r10c_seed<S>/r10c_watcher.status == DONE, no r10c_abort.status present. Sentinel line "[sentinel] VERDICT=CLEAN" appears per seed.
-@rollback_C2 ctrl-C + $POD_SSH "pkill -f _train_alm_14b_r10c.py; rm -rf /workspace/ckpt_alm_14b_r10c_*" → diagnose log, re-run after fix
-
-@cmd_C3 for S in 3407 42 1337; do $POD_SSH "hexa run /workspace/anima/training/phi_gt_1000_verify.hexa /workspace/ckpt_alm_14b_r10c_seed${S}/step_200/phi_vec.json"; done
-@gate_expected_C3 at least 1 seed shows phi_holo_scaled > 1000 (smoke is 200 steps — some seeds may FAIL here; used as seed selection signal for C5). If ALL FAIL with phi<500 → corpus mix not biting, investigate before C5.
-@rollback_C3 N/A (read-only verdict)
-
-# ============================================================================
-# STAGE D — R10C PRODUCTION (2000 steps, seed=3407 default)
-# ============================================================================
-@cmd_D1 $POD_SSH "cd /workspace/anima && rm -rf /workspace/ckpt_alm_14b_r10c_seed3407 && setsid hexa run training/launch_alm_14b_r10c.hexa 2>&1 | tee /workspace/r10c_prod.log &"
-@gate_expected_D1 background PID returned. $POD_SSH "tail -f /workspace/r10c_prod.log" shows "[step=1] loss=<X>" within 5 min, loss settles <6.0 by step 100. First-batch CE <5.0 (else AUTO-ABORT).
-@rollback_D1 $POD_SSH "pkill -f _train_alm_14b_r10c.py; cat /workspace/ckpt_alm_14b_r10c_seed3407/r10c_abort.status 2>/dev/null" → read abort reason, update alm_14b_r10.convergence, iterate
-
-@cmd_D2 $POD_SSH "TRAIN_PID=\$(pgrep -f _train_alm_14b_r10c.py | head -1) hexa run /workspace/anima/training/deploy/alm14b_r10_watcher.hexa &"
-@gate_expected_D2 watcher daemonized. If training PID dies, watcher writes DEAD_PID to status within 60s (per E7-OSS-02 patch) and exits 1 — NOT indefinite TRAINING false-positive.
-@rollback_D2 $POD_SSH "pkill -f _r10_watcher.sh" → no side effects
-
-@cmd_D3 # wait ~90-120 min for 2000 steps on H100 SXM at 20 step/min → poll every 5 min:
-@cmd_D3_poll $POD_SSH "cat /workspace/ckpt_alm_14b_r10c_seed3407/r10c_watcher.status; ls /workspace/ckpt_alm_14b_r10c_seed3407/step_*/phi_vec.json 2>/dev/null"
-@gate_expected_D3 status=TRAINING → DONE; final step_2000/phi_vec.json exists. Intermediate saves at step 400/800/1200/1600/2000 (save_every=2000 in prod, but sentinel cadence fires eval_every=200 kr_gen).
-@rollback_D3 if DEAD_PID status: $POD_SSH "tail -50 /workspace/r10c_prod.log" → diagnose (OOM / CUDA / abort) → back to D1 after fix + new convergence update
-
-# ============================================================================
-# STAGE E — DEST1 GATE (Φ > 1000 실측)
-# ============================================================================
-@cmd_E1 $POD_SSH "hexa run /workspace/anima/training/phi_gt_1000_verify.hexa /workspace/ckpt_alm_14b_r10c_seed3407/step_2000/phi_vec.json"
-@gate_expected_E1 stdout: "[phi_gate] step=2000 phi_holo_scaled=<X> verdict=PASS gate=1000" — exit 0
-@rollback_E1 if FAIL (phi≤1000): stop here, DEST1 not achieved. Options: (a) seed sweep for better seed C3→C5-alt retrain, (b) extend to step 5000, (c) revisit corpus mix ratio. DO NOT proceed to Stage F/G until E1 PASS. Record failure in alm_14b_r10.convergence @run_attempt_4_result.
-
-@cmd_E2 $POD_SSH "rclone copy /workspace/ckpt_alm_14b_r10c_seed3407/step_2000/ r2:anima-models/alm14b/r10c/step_2000_seed3407/ -v --s3-no-check-bucket"
-@gate_expected_E2 rclone prints "Transferred: ... / ... 100%" for all ckpt files (adapter_model.safetensors + phi_vec.json + train_meta.json + tokenizer*)
-@rollback_E2 (no auto-rollback — R2 upload is idempotent; if partial, re-run E2)
-
-# ============================================================================
-# STAGE F — DEST2 LOOP EVIDENCE (P22-P25)
-# ============================================================================
-@cmd_F1 $POD_SSH "hexa run /workspace/anima/serving/serve_alm_14b.hexa --ckpt /workspace/ckpt_alm_14b_r10c_seed3407/step_2000 --port 8080 &"
-@gate_expected_F1 service binds :8080; $POD_SSH "curl -s localhost:8080/health" returns {"status":"ok",...}. Takes 30-60s for model load.
-@rollback_F1 $POD_SSH "pkill -f serve_alm_14b" → retry F1
-
-@cmd_F2 $POD_SSH "hexa run /workspace/anima/serving/eval_harness.hexa --ckpt /workspace/ckpt_alm_14b_r10c_seed3407/step_2000 --url http://localhost:8080 --out /workspace/eval_r10c.json"
-@gate_expected_F2 eval_r10c.json written with P22 (corpus) + P23 (MMLU-ko smoke) + P24 (phi_corr) + P25 (dashboard tick) entries. Real model ≠ synthetic_judge path (per eval_harness_real.convergence).
-@rollback_F2 rm /workspace/eval_r10c.json → inspect service stderr → retry
-
-@cmd_F3 $POD_SSH "cat /workspace/ckpt_alm_14b_r10c_seed3407/step_2000/phi_vec.json; ls /workspace/ckpt_alm_14b_r10c_seed3407/step_*/phi_vec.json"
-@gate_expected_F3 ≥5 step_*/phi_vec.json entries exist (save_every=400 produces 400/800/1200/1600/2000 = 5, meets P24 phi_corr_history N>=5 contract)
-@rollback_F3 if <5: means save_every was wrong in prod run — re-launch with --steps 2000 --save-every 400 (non-default override)
-
-@cmd_F4 $POD_SSH "hexa run /workspace/anima/training/phi_corr_dashboard_daily.hexa --ckpt-root /workspace/ckpt_alm_14b_r10c_seed3407 --out /workspace/p25_dashboard_tick.json"
-@gate_expected_F4 p25_dashboard_tick.json contains {"live":true,"round":"r10c","steps":[400,800,1200,1600,2000],"phi_corr":...}
-@rollback_F4 rm /workspace/p25_dashboard_tick.json → inspect hexa error → retry
-
-@cmd_F5 rsync -avz -e "ssh -p <PORT>" root@<IP>:/workspace/eval_r10c.json ./shared/convergence/dest2_eval_r10c.json && rsync -avz -e "ssh -p <PORT>" root@<IP>:/workspace/p25_dashboard_tick.json ./shared/convergence/dest2_p25_tick.json
-@gate_expected_F5 both files land under shared/convergence/ — DEST2 evidence committed to SSOT
-@rollback_F5 rm shared/convergence/dest2_*.json → retry
-
-# ============================================================================
-# STAGE G — POST-SHIP (convergence updates + pod teardown)
-# ============================================================================
-@cmd_G1 # Update alm_14b_r10.convergence with @run_attempt_4 = r10c PASS result (both gates)
-@gate_expected_G1 @state transitions pending → completed; add @dest1_gate PASSED @dest2_gate PASSED + step_2000 phi_holo_scaled value
-@rollback_G1 git revert last convergence commit if wrong gate recorded
-
-@cmd_G2 # Update this file (dest1_dest2_ship.convergence) @state pending → shipped
-@gate_expected_G2 @state shipped @date <today> @ckpt_r2 r2:anima-models/alm14b/r10c/step_2000_seed3407/
-@rollback_G2 git revert
-
-@cmd_G3 runpodctl stop pod <POD_ID>  # keep volume for debug; stop GPU billing
-@gate_expected_G3 status=STOPPED. Re-start only if DEST1/DEST2 FAIL post-analysis requires re-train.
-@rollback_G3 runpodctl start pod <POD_ID> (if needed for post-mortem)
-
-@cmd_G4 runpodctl remove pod <POD_ID>  # ONLY after evidence committed (F5) + convergence updated (G1-G2)
-@gate_expected_G4 pod removed from fleet. shared/config/runpod.json active_pods list decremented.
-@rollback_G4 (none — removal is terminal; re-provision via A1 if needed)
-
-# ============================================================================
-# PITFALLS (lessons baked in from prior collapse)
-# ============================================================================
-@pitfall SENTINEL_NOT_CALLED r10 inline ASCII-only collapse_score missed 녕녕녕녕 — r10c uses kr_gen_sentinel.hexa subprocess (E7-OSS-01). D1 line `sentinel-hexa /workspace/anima/training/kr_gen_sentinel.hexa` is LOAD-BEARING.
-@pitfall WATCHER_FALSE_TRAINING r10 watcher reported TRAINING after trainer death for hours — r10_watcher.hexa now has pid_alive() gate (E7-OSS-02). D2 TRAIN_PID env var is LOAD-BEARING.
-@pitfall EARLY_LOSS_TOO_GOOD loss<1.0 before step 500 = collapse in 14B LoRA fresh-init. r10c inline gate (E7-OSS-03) forces sentinel if triggered. Do NOT interpret fast loss drop as convergence without C3/E1 PASS.
-@pitfall MFS_QUOTA torch.save during training silently partials. A3 preflight + save_every>=2000 (per training/CLAUDE.md runpod_mfs_quota) prevents. Do NOT run in-training rclone.
-@pitfall CORPUS_OOM local kowiki read_file(1.28 GiB) blows 4GB RSS. kowiki_slice.hexa uses head|awk pipe (CORPUS-OSS-01). Don't bypass with read_file on pod either.
-@pitfall HEXA_BINARY_ARCH hexa binary this session was macOS Mach-O — Linux host can write .hexa source but not execute. Run all hexa commands on pod or macOS host.
-
-# ============================================================================
-# REFERENCES
-# ============================================================================
-@ref_runpod_ssot shared/config/runpod.json
-@ref_infra shared/config/infrastructure.json
-@ref_ossified_mfs training/CLAUDE.md runpod_mfs_quota
-@ref_ossified_e7 shared/convergence/alm_14b_r10.convergence @ossified E7-OSS-01/02/03
-@ref_ossified_corpus shared/convergence/corpus_pipeline.convergence @ossified CORPUS-OSS-01/02/03
-@ref_phi_schema training/alm_phi_vec_logger.hexa (write_phi_vec_json spec)
-@ref_phi_gate_threshold 1000 (phi_holo_scaled; rationale: r9 raw=12000, r4 raw=9051; 1000 is ~1/10th — stripped corpus + LoRA is permitted to lose ~1 order of magnitude vs full-fine-tune)
-
-@chain ←alm_14b_r10.convergence (collapse lineage) ←corpus_pipeline.convergence (kowiki source) ←runpod.convergence (pod policy) →eval_harness_real.convergence (DEST2 consumer) →phi_correlation.convergence (P24 consumer) →p25_dashboard.convergence (P25 tick target)
+@governance R14 (shared/CLAUDE.md) — this archive file is the historical SSOT; split files are active SSOTs.
