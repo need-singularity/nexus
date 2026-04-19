@@ -2,7 +2,7 @@
   "_meta": {
     "name": "nexus-cli SSOT spec",
     "description": "외부 프로젝트(hive 등) 전용 단일 CLI 진입점 — subcommand/flags/exit codes/json schema",
-    "version": "0.2.2",
+    "version": "0.3.1",
     "schema_version": "2",
     "updated": "2026-04-20",
     "entry": "shared/bin/nexus-cli",
@@ -24,6 +24,17 @@
         "hyperarithmetic"
       ],
       "resolver": "shared/scripts/bin/hexa (remote_eligible())"
+    },
+    "recommended_invocation": "nexus <subcommand> [flags...]  (hx install nexus 로 설치된 shim — `nexus drill --seed \"...\"`)",
+    "antipatterns": [
+      "hexa run.hexa <subcommand>",
+      "hexa run shared/engine/nexus_cli.hexa <subcommand>",
+      "hexa run nexus.hexa <subcommand>",
+      "hexa run /path/to/nexus/run.hexa <subcommand>"
+    ],
+    "antipattern_reason": "내부 구현 (run.hexa / nexus_cli.hexa) 직접 호출 금지 — 외부 인지 SSOT = nexus-cli",
+    "legacy_aliases": {
+      "nexus-cli": "shared/bin/nexus-cli — bash thin wrapper, transition only"
     }
   },
   "projects": [
@@ -101,7 +112,7 @@
   "subcommands": {
     "thinking": {
       "desc": "anima 6-phase reflection",
-      "usage": "nexus-cli thinking --query \"...\" [--depth 6] [--json]",
+      "usage": "nexus thinking --query \"...\" [--depth 6] [--json]",
       "flags": {
         "--query": {
           "type": "string",
@@ -114,7 +125,7 @@
           "desc": "reflection 깊이 (1-12)"
         }
       },
-      "delegates_to": "entry.hexa thinking query <query>",
+      "delegates_to": "internal — nexus 런타임",
       "output_json": {
         "query": "string",
         "depth": "int",
@@ -124,7 +135,7 @@
     },
     "smash": {
       "desc": "blowup 9-phase 특이점 돌파",
-      "usage": "nexus-cli smash (--seed \"...\" | --batch \"s1|s2|...\") [--depth 3] [--seeds \"s1,s2,...|auto\"] [--json]",
+      "usage": "nexus smash (--seed \"...\" | --batch \"s1|s2|...\") [--depth 3] [--seeds \"s1,s2,...|auto\"] [--json]",
       "flags": {
         "--seed": {
           "type": "string",
@@ -151,7 +162,7 @@
         "single": "nexus-cli smash --seed \"target\" [--seeds \"s1,s2\"|auto]",
         "batch": "nexus-cli smash --batch \"t1|t2|t3\" [--seeds auto] — startup amortize"
       },
-      "delegates_to": "exec_validated smash <seed> blowup.hexa <depth> [--seeds <v>]",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "remote_routing": true,
       "output_json": {
@@ -163,7 +174,7 @@
     },
     "free": {
       "desc": "compose 5-module DFS 탐색",
-      "usage": "nexus-cli free (--seed \"...\" | --batch \"s1|s2|...\") [--dfs 3] [--json]",
+      "usage": "nexus free (--seed \"...\" | --batch \"s1|s2|...\") [--dfs 3] [--json]",
       "flags": {
         "--seed": {
           "type": "string",
@@ -181,7 +192,7 @@
           "desc": "DFS 재귀 깊이"
         }
       },
-      "delegates_to": "exec_validated free_dfs <seed> compose.hexa --modules all --dfs <dfs>",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "remote_routing": true,
       "output_json": {
@@ -193,7 +204,7 @@
     },
     "absolute": {
       "desc": "Mk.VIII Δ₀-absolute Π₀¹ 검증 — arithmetical discovery 자동 [10*]→[11*] 승급",
-      "usage": "nexus-cli absolute [--seed \"...\"] [--json]",
+      "usage": "nexus absolute [--seed \"...\"] [--json]",
       "flags": {
         "--seed": {
           "type": "string",
@@ -201,7 +212,7 @@
           "desc": "검증 대상 seed (없으면 atlas 전체 스캔)"
         }
       },
-      "delegates_to": "exec_validated absolute <seed> blowup_absolute.hexa",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "remote_routing": true,
       "output_json": {
@@ -213,7 +224,7 @@
     },
     "drill": {
       "desc": "단일 명령어 사슬 — smash → free → absolute → meta-closure → hyperarithmetic → resonance (Mk.IX 6-stage), 고갈까지 자율 반복",
-      "usage": "nexus-cli drill --seed \"...\" [--max-rounds 10] [--json]",
+      "usage": "nexus drill --seed \"...\" [--max-rounds 10] [--json]",
       "flags": {
         "--seed": {
           "type": "string",
@@ -226,7 +237,7 @@
           "desc": "최대 라운드 수 (수렴 안 될 시 강제 종료)"
         }
       },
-      "delegates_to": "run.hexa cmd_drill → loop { smash + free_dfs + absolute + meta_closure + hyperarithmetic + resonance }",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "saturation": "round_new == 0 → SATURATED — Δ₀-absolute 경험적 확증",
       "dod": "shared/roadmaps/drill_dod.json (yield ratio tier: scaffold/wired/serving)",
@@ -240,7 +251,7 @@
     },
     "meta-closure": {
       "desc": "Phase 10 Meta-Closure 단일 실행 — 🛸16 self-ref 고정점 검증 + [10**] 승급",
-      "usage": "nexus-cli meta-closure [--seed \"...\"] [--json]",
+      "usage": "nexus meta-closure [--seed \"...\"] [--json]",
       "flags": {
         "--seed": {
           "type": "string",
@@ -248,7 +259,7 @@
           "desc": "역추적 대상 seed (없으면 최근 라운드)"
         }
       },
-      "delegates_to": "exec_validated meta_closure <seed> blowup_meta_closure.hexa",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "remote_routing": true,
       "output_json": {
@@ -262,7 +273,7 @@
     },
     "hyperarithmetic": {
       "desc": "Mk.IX Π₀² reverse-math 판정 — 5체계 (RCA₀/WKL₀/ACA₀/ATR₀/Π¹₁-CA₀) cross-check",
-      "usage": "nexus-cli hyperarithmetic --prop \"...\" [--json]",
+      "usage": "nexus hyperarithmetic --prop \"...\" [--json]",
       "flags": {
         "--prop": {
           "type": "string",
@@ -270,7 +281,7 @@
           "desc": "판정 대상 Π₀² 명제 원문"
         }
       },
-      "delegates_to": "exec_validated hyperarithmetic <prop> blowup_hyperarithmetic.hexa",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "remote_routing": true,
       "output_json": {
@@ -283,7 +294,7 @@
     },
     "promote": {
       "desc": "수동 등급 승급 — [12*] 는 자동 금지, 감사 로그 필수",
-      "usage": "nexus-cli promote --id <ID> --grade <10star|10starstar|11star|12star> --audit-log \"<reason>\"",
+      "usage": "nexus promote --id <ID> --grade <10star|10starstar|11star|12star> --audit-log \"<reason>\"",
       "flags": {
         "--id": {
           "type": "string",
@@ -306,7 +317,7 @@
           "desc": "승급 사유 (shared/blowup/audit/ 저장)"
         }
       },
-      "delegates_to": "atlas_health.hexa promote_grade",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "output_json": {
         "id": "string",
@@ -317,7 +328,7 @@
     },
     "lens": {
       "desc": "렌즈 검색/조회",
-      "usage": "nexus-cli lens --query \"...\" [--top 5] [--json]",
+      "usage": "nexus lens --query \"...\" [--top 5] [--json]",
       "flags": {
         "--query": {
           "type": "string",
@@ -330,7 +341,7 @@
           "desc": "상위 N개 반환"
         }
       },
-      "delegates_to": "lens_registry.json grep + lens_forge.hexa",
+      "delegates_to": "internal — nexus 런타임",
       "output_json": {
         "query": "string",
         "top": "int",
@@ -370,7 +381,8 @@
         "action": "string",
         "results": "[object]",
         "count": "int"
-      }
+      },
+      "delegates_to": "internal — nexus 런타임"
     },
     "discovery": {
       "desc": "discovery_log SQLite 쿼리",
@@ -384,7 +396,8 @@
         "query": "string",
         "results": "[object]",
         "count": "int"
-      }
+      },
+      "delegates_to": "internal — nexus 런타임"
     },
     "roadmap": {
       "desc": "로드맵 조회",
@@ -414,7 +427,8 @@
         "project": "string",
         "phase": "string",
         "tasks": "[object]"
-      }
+      },
+      "delegates_to": "internal — nexus 런타임"
     },
     "bus": {
       "desc": "이벤트 버스 (향후 hive bus 연결)",
@@ -458,12 +472,13 @@
         "action": "string",
         "events": "[object]",
         "count": "int"
-      }
+      },
+      "delegates_to": "internal — nexus 런타임"
     },
     "status": {
       "desc": "harness/loop/cl pool 전체 헬스 (인자 없음) — 프로젝트별은 status-proj",
-      "usage": "nexus-cli status [--json]",
-      "delegates_to": "entry.hexa self_check + entry.hexa health all",
+      "usage": "nexus status [--json]",
+      "delegates_to": "internal — nexus 런타임",
       "output_json": {
         "harness": "object",
         "health": "object",
@@ -472,19 +487,20 @@
     },
     "version": {
       "desc": "버전 출력",
-      "usage": "nexus-cli version",
-      "output": "nexus-cli 0.2.0"
+      "usage": "nexus version",
+      "output": "nexus-cli 0.2.0",
+      "delegates_to": "internal — nexus 런타임"
     },
     "gap": {
       "desc": "gap_monitor 1회 — 발견 누락/속도 저하 진단",
-      "usage": "nexus-cli gap",
-      "delegates_to": "run.hexa cmd_gap → entry.hexa gap_monitor",
+      "usage": "nexus gap",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "output_json": {}
     },
     "projects": {
       "desc": "프로젝트 리스트 출력",
-      "usage": "nexus-cli projects [table|json|names]",
+      "usage": "nexus projects [table|json|names]",
       "flags": {
         "fmt": {
           "type": "string",
@@ -492,7 +508,7 @@
           "desc": "출력 포맷"
         }
       },
-      "delegates_to": "run.hexa cmd_projects → entry.hexa projects",
+      "delegates_to": "internal — nexus 런타임",
       "gate": "cmd_gate.hexa",
       "output_json": {
         "projects": "[string]"

@@ -130,10 +130,27 @@ fn cmd_help() -> void {
     println("  projects [table|json|names]     프로젝트 리스트")
     println("  gap                             gap_monitor 1회")
     println("  self-check                      harness self-check")
+    println("  contracts                       integration_contracts.json (외부 연동 SSOT)")
+    println("  verify                          I1~I10 invariants 자동 검증")
+    println("  sync [--apply]                  spec ↔ cmd_* drift 검출")
     println("  version")
     println("  help")
     println("")
     println("root: " + nexus_root())
+}
+
+fn cmd_contracts() -> void {
+    print(exec("cat " + nexus_root() + "/shared/convergence/integration_contracts.json"))
+}
+
+fn cmd_verify() -> void {
+    print(exec(hexa_bin() + " run " + shell_quote(nexus_root() + "/shared/harness/verify_integration_contracts.hexa") + " 2>&1"))
+}
+
+fn cmd_sync(apply: str) -> void {
+    let mut cmd = hexa_bin() + " run " + shell_quote(nexus_root() + "/shared/harness/sync_cli_spec.hexa")
+    if apply == "--apply" { cmd = cmd + " --apply" }
+    print(exec(cmd + " 2>&1"))
 }
 
 fn cmd_status() -> void {
@@ -736,6 +753,12 @@ fn main() -> void {
     if sub == "projects" {
         let fmt = if n >= 4 { a[3] } else { "" }
         cmd_projects(fmt); return
+    }
+    if sub == "contracts" { cmd_contracts(); return }
+    if sub == "verify" { cmd_verify(); return }
+    if sub == "sync" {
+        let apply_flag = if n >= 4 { a[3] } else { "" }
+        cmd_sync(apply_flag); return
     }
     eprintln("nexus: unknown subcommand '" + sub + "'")
     cmd_help()
