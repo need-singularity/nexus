@@ -1,4 +1,62 @@
 {
+  "v563_addendum_20260420T2110Z": {
+    "scope": "v5.6.3 — LoRA backward orchestrator scaffolding + activation cache surface + 1/5 needed CUDA bwd kernels + tokenizer skeleton",
+    "files_touched": {
+      "hxqwen14b.c": {"prev_lines": 4492, "new_lines": 4757, "delta": "+265"},
+      "hxqwen14b_cuda.cu": {"prev_lines": 608, "new_lines": 701, "delta": "+93"},
+      "training/train_alm_lora.hexa": {"delta": "+30 (FFI extern decls for v56 + v563 surface)"},
+      "training/tokenizer_qwen.hexa": {"prev_lines": 0, "new_lines": 367, "delta": "+367 NEW FILE"}
+    },
+    "new_symbols_in_hxqwen14b": [
+      "hxqwen14b_v56_activation_cache_bytes",
+      "hxqwen14b_v56_alloc_activation_cache",
+      "hxqwen14b_v56_free_activation_cache",
+      "hxqwen14b_v56_cache_total_slots",
+      "hxqwen14b_v56_cache_slots_per_layer",
+      "hxqwen14b_v56_cache_slot_bytes_at",
+      "hxqwen14b_base_backward_v56",
+      "hxqwen14b_base_backward_v56_pos",
+      "hxqwen14b_v56_alloc_grad_buffers",
+      "hxqwen14b_v56_free_grad_buffers",
+      "hxqwen14b_version_v563"
+    ],
+    "new_cuda_kernels_in_hxqwen14b_cuda": ["v563_softmax_ce_bwd_kernel", "hxqwen14b_cu_launch_softmax_ce_bwd"],
+    "missing_cuda_bwd_kernels_for_full_orchestrator": [
+      "hxqwen14b_cu_launch_rmsnorm_bwd",
+      "hxqwen14b_cu_launch_rope_bwd",
+      "hxqwen14b_cu_launch_gqa_bwd",
+      "hxqwen14b_cu_launch_swiglu_bwd"
+    ],
+    "activation_cache_design": {
+      "slots_per_layer": 13,
+      "global_slots": 2,
+      "total_slots": 626,
+      "vram_at_M_1024_GB": 14.9,
+      "vram_at_M_2048_GB": 30.0,
+      "fits_h100_80gb_at_M_1024": true,
+      "slot_layout": [
+        "0:ln1_input[M*d]", "1:ln1_out[M*d]", "2:q_pre_rope[M*dq]",
+        "3:k_pre_rope[M*dkv]", "4:v_buf[M*dkv]", "5:q_post_rope[M*dq]",
+        "6:k_post_rope[M*dkv]", "7:attn_out[M*dq]", "8:x_post_attn[M*d]",
+        "9:ln2_out[M*d]", "10:gate[M*Fn]", "11:up[M*Fn]", "12:ffn_mid[M*Fn]",
+        "global+0:x_final_pre_norm[M*d]", "global+1:ln_final_out[M*d]"
+      ]
+    },
+    "smoke_results_mac_only": {
+      "hxqwen14b_c_gcc": "PASS (51968 B object, 1 pre-existing warning)",
+      "hxqwen14b_cu_nvcc": "DEFERRED — pod rebuild required, no nvcc on Mac",
+      "tokenizer_qwen_inline_smoke": "PASS — JSON range scan {} + [] balance + b2u table 256 entries",
+      "train_alm_lora_parse": "PASS post-extern-add"
+    },
+    "pod_status": "UNCHANGED — pod libhxqwen14b.so still v5.6.2 (265392 B). Next session must rsync new .c/.cu and nvcc rebuild. New .so will export 11 additional symbols (cache helpers + bwd scaffolding); softmax_ce_bwd kernel will be live but unused until orchestrator body lands.",
+    "next_session_first_action": [
+      "rsync hxqwen14b.c + hxqwen14b_cuda.cu to /workspace/hexa-lang/self/native/",
+      "On pod: nvcc rebuild via existing 3-step recipe (gcc -c .c → nvcc -c .cu → gcc -shared link)",
+      "Verify v563 symbols: nm -D libhxqwen14b.so | grep -E 'v563|backward_v56|cache'",
+      "Tiny CUDA harness for softmax_ce_bwd: feed [logits[M,V], targets[M]] → check dlogits[m,t]<0 + sum(dlogits[m,*])≈0 invariants",
+      "Then proceed to writing rmsnorm_bwd kernel (simplest of the 4 remaining)"
+    ]
+  },
   "scope": "libhxqwen14b_v5_cuda_link_recipe",
   "session_date": "2026-04-20",
   "session_phase": "night_autonomous",

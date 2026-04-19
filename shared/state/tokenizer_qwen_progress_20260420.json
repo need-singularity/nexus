@@ -1,0 +1,59 @@
+{
+  "scope": "Qwen2.5 BPE tokenizer pure-hexa port for ALM r12 trainer",
+  "session_date": "2026-04-20",
+  "session_phase": "night_autonomous",
+  "predecessor": "alm_r12_launch_20260420.json (B3 NOT_STARTED)",
+  "phase_landed": "PHASE-1 SKELETON",
+  "phase_pending": "PHASE-2 (vocab+merges parse), PHASE-3 (encode loop), PHASE-4 (vs-reference smoke)",
+  "files": [
+    {
+      "path": "/Users/ghost/Dev/anima/training/tokenizer_qwen.hexa",
+      "lines": 367,
+      "status": "NEW",
+      "parse_check": "PASS",
+      "smoke_check": "PASS — inline-tiny-JSON range scan + b2u 256-entry table"
+    }
+  ],
+  "what_landed": {
+    "QwenTokenizer_struct": "8-field struct (loaded, vocab_size, vocab_keys, vocab_ids, merges_a, merges_b, b2u, u2b)",
+    "build_b2u": "GPT-2 byte-to-unicode escape table — 33..126 + 161..172 + 174..255 identity, remaining 68 bytes mapped to U+0100+k. Smoke verified len=256.",
+    "find_substring_index": "Linear naive scan O(nm); good enough for single-shot vocab/merges key lookup.",
+    "skip_ws": "Skip space/tab/CR/LF forward.",
+    "find_matching_close": "Tracks JSON {} or [] depth + string-literal escape sequences. Smoke verified on tiny JSON: vocab range 34..52, merges range 63..75.",
+    "load_qwen_tokenizer": "Phase-1 skeleton: locates vocab + merges substrings in the raw 7 MB JSON. Inner key/id/merge parse PENDING; returns loaded=0 to signal 'not ready' so trainer falls back to text_to_ids_stub.",
+    "encode_bytes_bpe": "API surface only; returns [] when loaded=0.",
+    "smoke_inline_json": "Tiny synthetic JSON {model:{vocab:{a:0,b:1,c:2},merges:[a b,b c]}} — proves range scan + b2u correctness without 7 MB load."
+  },
+  "what_NOT_landed": {
+    "vocab_inner_parse": "Walking the vocab object range and emitting (key,id) pairs. With 152064 entries and pure-hexa interpreted execution + O(n) string append per push, naive implementation will take minutes. Real fix: small C FFI hashmap (insert/lookup/iter) so the hot path stays in compiled code. Skeleton currently emits empty vocab arrays.",
+    "merges_inner_parse": "~50K merge rules; same O(n²) interpreter cost concerns. Same FFI fix.",
+    "encode_loop": "Greedy lowest-rank-merge loop — algorithmic core. Depends on vocab + merges populated.",
+    "byte_to_unicode_escape_in_encode": "Plumbed via b2u table but not yet connected to encode pipeline.",
+    "vs_reference_smoke": "Compare encode('안녕') and encode('hello world') ids vs Qwen tokenizer ground truth. Need to capture reference output once (pure-hexa cannot import HF tokenizers crate); save to JSON for byte-exact comparison."
+  },
+  "honest_eta_for_remaining_phases": {
+    "phase_2_vocab_merges_parser_with_FFI_hashmap": "8-12h focused work (4h FFI hashmap C lib + 4h vocab/merges walker + 2-4h iteration)",
+    "phase_3_encode_loop": "4-8h focused work (1h byte-to-unicode + 2h pre-tokenize regex equivalent + 4h merge loop + 1h vocab lookup)",
+    "phase_4_vs_reference_smoke": "2-4h (capture reference, write byte-exact comparator, debug discrepancies)",
+    "total_remaining": "14-24h focused work — multi-day"
+  },
+  "interpreter_perf_note": {
+    "observation": "Reading 7 MB tokenizer.json + scanning bytes via stage0 interpreter timed out >2 min during smoke attempt. Single read_file(7 MB) into hexa string + per-byte byte_at() (which currently does substring + char_code) = O(n) substring allocation per byte ⇒ O(n²) = 49 trillion ops nominally; pathological.",
+    "fix_options": [
+      "(a) read_file_bytes returns array<int>; access via direct array indexing — O(1) per byte. Verify hexa intrinsic exists or wire via FFI to mmap.",
+      "(b) Compile tokenizer_qwen.hexa to C via hexa_cc and run native — bypass interpreter entirely.",
+      "(c) Write the parser in pure C as a tiny hxtok library, expose hexa FFI surface (load/encode/free)."
+    ],
+    "recommended": "(c) — 200-400 LOC C, links cleanly with existing hxblas/hxnccl/hxqwen14b ecosystem, sidesteps both interpreter perf and hexa string indexing quirks."
+  },
+  "blockers": {
+    "for_trainer_wiring": "Tokenizer must exist before train_loop can produce real Qwen ids; current trainer uses text_to_ids_stub (vocab=16) which makes loss=log(16)≈2.77 invariant.",
+    "for_full_r12_launch": "Forward+backward+tokenizer ALL three must be real. Backward is the higher-priority blocker (more LOC, more domain expertise) but tokenizer is a hard prereq for measuring meaningful loss curve."
+  },
+  "policy_compliance": {
+    "feedback_py_ban_total": "OK — pure .hexa skeleton, no .py touched",
+    "feedback_hexa_first_strict": "OK — new file is .hexa",
+    "honest_reporting": "OK — Phase-1 only landed, Phase-2/3/4 explicitly marked NOT_LANDED with concrete ETA",
+    "feedback_one_shot_best": "OK — did not attempt full 7 MB parse on stage0 after seeing perf wall; documented FFI hashmap recommendation"
+  }
+}

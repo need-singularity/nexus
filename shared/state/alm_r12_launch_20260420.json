@@ -136,6 +136,104 @@
     "hexa_lang_subject": "feat(hxqwen14b): v5.6 LoRA-fused forward scaffolding + alloc/free buffers — r12 blocker #1 partial",
     "hexa_lang_body_summary": "Added v5.6 LoRA scaffolding: HxQwenBaseFwdV56LoraArgs struct, hxqwen14b_alloc_lora_buffers_v56 (Kaiming A + zero B for 192 adapters × 2 = 384 device buffers), hxqwen14b_free_lora_buffers_v56, hxqwen14b_base_forward_v56_with_lora + _pos wrapper (returns RC_ERR_CUDA_TODO until per-projection sgemm chain lands inside the v54 forward loop). gcc compile-check PASS. Real cuBLAS integration for the 192 LoRA branches into base_forward = remaining r12 work."
   },
+  "v563_backward_cache_tokenizer_addendum_20260420T2110Z": {
+    "scope": "Phase-1 cache surface + Phase-2 backward orchestrator scaffolding + Phase-4 BPE tokenizer skeleton.",
+    "session_outcome": "PARTIAL — cache surface + bwd scaffolding LANDED + 1/5 bwd CUDA kernels (softmax_ce_bwd) shipped + tokenizer skeleton with passing JSON-range smoke. Full backward orchestrator NOT_LANDED (4 missing kernels). Trainer wiring NOT_LANDED (depends on bwd). 100-step smoke + full launch NO_GO.",
+    "files_touched": [
+      {
+        "path": "/Users/ghost/Dev/hexa-lang/self/native/hxqwen14b.c",
+        "delta_lines": "+265 LOC v5.6.3 addendum (4757 total, was 4492)",
+        "additions": [
+          "v56_cache_slot_bytes static helper — per-layer / per-slot byte sizing (13 slots × 48 layers + 2 globals = 626 slots)",
+          "hxqwen14b_v56_activation_cache_bytes(M) — public total-bytes query (returns ~15 GB at M=1024)",
+          "hxqwen14b_v56_alloc_activation_cache(M, out_ptrs_p) — alloc 626 device buffers, OOM rollback",
+          "hxqwen14b_v56_free_activation_cache(ptrs_p)",
+          "hxqwen14b_v56_cache_total_slots / cache_slots_per_layer / cache_slot_bytes_at — describe helpers",
+          "HxQwenBaseBwdV56Args struct — frozen ABI for backward orchestrator",
+          "hxqwen14b_base_backward_v56(args) — returns RC_ERR_CUDA_TODO until 5 missing CUDA kernels land",
+          "hxqwen14b_base_backward_v56_pos — positional FFI wrapper",
+          "hxqwen14b_v56_alloc_grad_buffers / free_grad_buffers — mirror LoRA alloc API",
+          "hxqwen14b_version_v563 — returns 563"
+        ],
+        "compile_check": "PASS (gcc -c -fPIC -O0 -Wall -Wno-unused-function, 51968 B object, 1 pre-existing warning)"
+      },
+      {
+        "path": "/Users/ghost/Dev/hexa-lang/self/native/hxqwen14b_cuda.cu",
+        "delta_lines": "+93 LOC (701 total, was 608)",
+        "additions": [
+          "v563_softmax_ce_bwd_kernel __global__ — softmax + CE backward, dlogits = (softmax-onehot)/M, warp-reduce row max + row sum",
+          "hxqwen14b_cu_launch_softmax_ce_bwd extern C launcher (1 of 5 needed bwd kernels)"
+        ],
+        "compile_check": "DEFERRED (no nvcc on Mac); clang++ syntax-only fails on cuda_runtime.h missing as expected; nvcc rebuild on pod required for verification"
+      },
+      {
+        "path": "/Users/ghost/Dev/anima/training/train_alm_lora.hexa",
+        "delta_lines": "+30 LOC FFI extern decls (1557 total, was 1527 = +1521+30 actually — 1521 was wc before; +30 ≈ extern bindings)",
+        "additions": [
+          "extern fn hxqwen14b_version_v56 / alloc_lora_buffers_v56 / free_lora_buffers_v56 / base_forward_v56_with_lora_pos",
+          "extern fn hxqwen14b_version_v563",
+          "extern fn hxqwen14b_v56_activation_cache_bytes / alloc_activation_cache / free_activation_cache / cache_total_slots / alloc_grad_buffers / free_grad_buffers",
+          "extern fn hxqwen14b_base_backward_v56_pos"
+        ],
+        "parse_check": "PASS"
+      },
+      {
+        "path": "/Users/ghost/Dev/anima/training/tokenizer_qwen.hexa",
+        "delta_lines": "+367 LOC NEW",
+        "additions": [
+          "QwenTokenizer struct (vocab_keys, vocab_ids, merges_a, merges_b, b2u, u2b)",
+          "build_b2u — GPT-2 byte-to-unicode escape table (256 entries)",
+          "find_substring_index, skip_ws, find_matching_close — JSON range scan helpers (string-literal + escape aware)",
+          "load_qwen_tokenizer — Phase-1 SKELETON: locates vocab + merges byte ranges in 7 MB JSON, returns loaded=0 (full inner parse PENDING)",
+          "encode_bytes_bpe — API surface, returns [] when loaded=0",
+          "smoke_inline_json — tiny JSON {vocab:{a:0,b:1,c:2},merges:[...]} verifies range scan + b2u; PASS verified on Mac stage0 (vocab range 34..52, merges 63..75, b2u len=256)"
+        ],
+        "parse_check": "PASS",
+        "smoke_result": "PASS — [smoke] PASS — JSON range scan + b2u OK"
+      }
+    ],
+    "what_did_NOT_land": {
+      "B2_full_backward_orchestrator": "NOT_STARTED (only ABI struct + scaffolding returning CUDA_TODO). Requires 4 more CUDA bwd kernels: rmsnorm_bwd, rope_bwd, gqa_bwd, swiglu_bwd. Each ~80-150 LOC CUDA + corresponding host launcher. Plus the 400-LOC reverse-pass orchestrator body inside hxqwen14b_base_backward_v56. Honest ETA: 12-18h focused work + on-pod nvcc verification iteration.",
+      "trainer_wiring_phase_3": "NOT_STARTED. forward_qwen14b_with_lora in train_alm_lora.hexa still returns synthetic stub logits; train_loop still calls stub backward path. Wiring blocked on B2 because if backward is fake, optimizer step drives loss to noise — better to gate on real bwd availability (rc != RC_ERR_CUDA_TODO) before flipping forward FFI on too.",
+      "B3_real_BPE_encode": "NOT_STARTED inner content. Skeleton lands the JSON-range scan + b2u + API surface. Remaining: vocab key/value extractor (152064 entries via FFI hashmap to avoid O(n²) hexa array), merges parser (~50K rules), greedy lowest-rank-merge encode loop, vs-reference smoke. Honest ETA: 16-24h focused work.",
+      "100_step_smoke": "DID_NOT_RUN — would still mathematically FAIL (forward stub + bwd CUDA_TODO ⇒ no LoRA weight updates, loss flat). $0.50 burn for a-priori failure not justified."
+    },
+    "smoke_artifacts_this_session": {
+      "tokenizer_qwen_inline_json": {
+        "command": "/Users/ghost/Dev/nexus/shared/bin/hexa run /Users/ghost/Dev/anima/training/tokenizer_qwen.hexa",
+        "stdout_tail": "[smoke] vocab range 34..52 / [smoke] merges range 63..75 / [smoke] b2u built, len=256 / [smoke] PASS — JSON range scan + b2u OK / [tokenizer_qwen] PHASE-2 (real vocab/merges parse) PENDING",
+        "verdict": "PASS",
+        "interpretation": "JSON range scan handles {} + [] + string-literal escape correctly; b2u table builds without crash. Production parse of 7 MB tokenizer.json on interpreted hexa stage0 takes minutes (timed out >2min in earlier attempt) — needs FFI hashmap or compiled-hexa for production use; deferred to next session."
+      },
+      "trainer_parse_check_post_extern_add": {
+        "command": "/Users/ghost/Dev/nexus/shared/bin/hexa parse /Users/ghost/Dev/anima/training/train_alm_lora.hexa",
+        "verdict": "PASS"
+      },
+      "hxqwen14b_c_compile_check_v563": {
+        "command": "gcc -c -fPIC -O0 -Wall -Wno-unused-function hxqwen14b.c -o /tmp/hxqwen14b_v563_compile_check.o",
+        "object_bytes": 51968,
+        "errors": 0,
+        "warnings": 1,
+        "warning_text": "g_v54_shard_name unused (pre-existing)",
+        "verdict": "PASS_CPU_ONLY"
+      }
+    },
+    "remaining_for_full_r12_launch_after_this_session": [
+      "PRIORITY 1 — Write rmsnorm_bwd, rope_bwd, gqa_bwd, swiglu_bwd CUDA kernels (~500 LOC CUDA total) and corresponding host launchers (~80 LOC). These are the gate; everything downstream depends on them.",
+      "PRIORITY 2 — Implement hxqwen14b_base_backward_v56 body (~400 LOC orchestrator) walking layers 47..0 with cache reads + 4 lora_bwd_single calls per layer + lm_head sgemm bwd.",
+      "PRIORITY 3 — Trainer wiring: replace forward_qwen14b_with_lora hexa stub with FFI to base_forward_v56_with_lora_pos; replace backward_lora_only stub with FFI to base_backward_v56_pos; gate optimizer step on rc==RC_OK.",
+      "PRIORITY 4 — Tokenizer Phase-2/3: vocab + merges full parser (most likely via small C FFI hashmap to dodge interpreted hexa O(n) string ops on 7 MB), encode pipeline, vs-Qwen-reference smoke.",
+      "PRIORITY 5 — On-pod rebuild + 1-step end-to-end smoke (forward → bwd → opt step → assert |delta_A| > 0)",
+      "PRIORITY 6 — 100-step smoke (loss curve trends down)",
+      "PRIORITY 7 — Full r12 launch (only after #5+#6 PASS, per feedback_one_shot_best)"
+    ],
+    "honest_progress_assessment": {
+      "what_was_done": "Cache surface API + bwd ABI struct + 1/5 bwd kernels (softmax_ce_bwd) + tokenizer skeleton + trainer FFI extern decls. ~755 LOC across 4 files, 2 smokes PASS (Mac CPU-only).",
+      "what_was_NOT_done": "4 bwd kernels (rmsnorm/rope/gqa/swiglu), 400-LOC orchestrator body, trainer wiring activation, tokenizer inner parse, any on-pod test, any actual LoRA gradient computation.",
+      "fraction_of_remaining_r12_work_completed": "~15-20% of remaining backward+tokenizer scope. Pure scaffolding + 1 of 5 needed CUDA kernels.",
+      "next_session_first_action": "rsync hxqwen14b.c + hxqwen14b_cuda.cu to pod, rebuild .so via nvcc with v5.6.3 symbols, verify softmax_ce_bwd kernel via tiny CUDA harness on H100, then start writing rmsnorm_bwd kernel."
+    }
+  },
   "v562_forward_integration_addendum_20260420T2017Z": {
     "scope": "Replaced RC_ERR_CUDA_TODO stub in base_forward_v56_with_lora with full per-projection LoRA chain integrated into v54 forward loop mirror.",
     "files_touched": [
