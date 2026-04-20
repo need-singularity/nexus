@@ -16,7 +16,15 @@
   "depth_min": 3,
   "module_coverage": "5/5",
   "diagonal_agreement_min": 0.8,
-  "fail_case": "absorption_rate >= 0.3 OR saturation_state != 'fixpoint' OR any module < depth_min",
+  "cross_run_consistency_required": true,
+  "cross_run_policy": {
+    "n_runs": 2,
+    "random_state_derivation": "hash(seed + run_tag)",
+    "required_match_fields": ["saturation", "absorption", "depth"],
+    "fixture_env": "DRILL_FIXTURE",
+    "gate_module": "tool/drill_cross_run.hexa"
+  },
+  "fail_case": "absorption_rate >= 0.3 OR saturation_state != 'fixpoint' OR any module < depth_min OR cross_run_mismatch",
   "target_jump": "T3 85% -> T4 95%",
   "singularity_master_switch": "saturation_policy",
   "singularity_spec": "docs/drill_singularity_20260421.md",
@@ -26,6 +34,7 @@
     "saturation_policy": "v2 master switch — promotes saturation from boolean to fixpoint/converging/open enum. mode=fixpoint_strict requires module_signature stability + invariant preservation (sigma*phi = n*tau = 24) across k_window consecutive DFS frames past depth_min, with diagonal_agreement >= diag_min.",
     "depth_min": "3 — DFS shallower than 3 levels cannot falsify deep structure; now justified as k_window(2) + 1 prefix step",
     "module_coverage": "5/5 — all 5 lenses must participate; predicate input to saturation_policy",
-    "diagonal_agreement_min": "0.8 — aliased to saturation_policy.diag_min"
+    "diagonal_agreement_min": "0.8 — aliased to saturation_policy.diag_min",
+    "cross_run_consistency_required": "true — drift/non-determinism detection gate (2026-04-21). Each seed runs TWICE with distinct random_state derived via hash(seed+run_tag); verdict emitted only when both runs' required_match_fields are identical. Rationale: single PASS can be coincidence; two matching PASSes under perturbed random_state witness true determinism. Gate impl: tool/drill_cross_run.hexa — runner internally invokes 2x and fails on any field diff. Test fixtures: DRILL_FIXTURE=det (pure hash oracle, 2 runs identical → PASS) vs DRILL_FIXTURE=nondet (oracle leaks random_state, 2 runs diverge → FAIL with diff_fields). NOT an LLM judge."
   }
 }
