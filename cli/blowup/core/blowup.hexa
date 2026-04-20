@@ -926,6 +926,269 @@ fn atlas_hot_shard_emit_report() {
     eprintln("".join(parts))
 }
 _trace("[AL-hotshard-ready] threshold=" + to_string(_shard_promote_threshold))
+// ─── AV: predictive cache (bigram next-round preload) ───
+// SSOT: cli/blowup/lib/predictive_cache.hexa.inc (copy-paste, hexa include 미지원)
+// 목적: AL hot-shard 는 사후 반응(count), AV 는 사전 예측(bigram) → idle window preload.
+// 알고리즘: pure n-gram, ML 없음. last K=100 prefix history + bigram count map.
+// ═══════════════════════════════════════════════════════════
+let _PRED_K: i64 = 100
+let _PRED_TOP_N: i64 = 5
+let _PRED_SEP: string = "|"
+let _PRED_KSEP: string = "\x1e"
+
+let mut _predict_history: list = []
+let mut _predict_bigram_cnt: map = #{}
+let mut _predict_unigram_cnt: map = #{}
+let mut _predict_pairs_by_prev: map = #{}
+
+// 이전 라운드에서 예측했던 prefix 집합 (hit-rate 계산용, 라운드 간 유지)
+let mut _predict_last_predicted: list = []
+
+fn _predict_prefix_of_value(v: f64) -> string {
+    return to_string(to_int(v))
+}
+
+fn _predict_prefix_of_string(s: string) -> string {
+    let t = s.trim()
+    if len(t) == 0 { return "" }
+    if t.contains(".") {
+        let parts = t.split(".")
+        if len(parts) > 0 { return parts[0] }
+    }
+    return t
+}
+
+fn _predict_bump_cnt(m: map, key: string) -> map {
+    let mut cur: i64 = 0
+    try { cur = to_int(m[key]) } catch e {}
+    let nxt = cur + 1
+    m[key] = to_string(nxt)
+    return m
+}
+
+fn _predict_append_next_if_new(prev: string, next: string) {
+    let mut cur = ""
+    try { cur = _predict_pairs_by_prev[prev] } catch e {}
+    if cur == "" {
+        _predict_pairs_by_prev[prev] = next
+        return
+    }
+    let tokens = cur.split(_PRED_SEP)
+    let mut ti: i64 = 0
+    while ti < len(tokens) {
+        if tokens[ti] == next { return }
+        ti = ti + 1
+    }
+    _predict_pairs_by_prev[prev] = cur + _PRED_SEP + next
+}
+
+fn _predict_record_query(prefix: string) {
+    if len(prefix) == 0 { return }
+    _predict_unigram_cnt = _predict_bump_cnt(_predict_unigram_cnt, prefix)
+    let hlen = len(_predict_history)
+    if hlen > 0 {
+        let prev = to_string(_predict_history[hlen - 1])
+        if len(prev) > 0 {
+            let key = prev + _PRED_KSEP + prefix
+            _predict_bigram_cnt = _predict_bump_cnt(_predict_bigram_cnt, key)
+            _predict_append_next_if_new(prev, prefix)
+        }
+    }
+    _predict_history = _predict_history.push(prefix)
+    let new_len = len(_predict_history)
+    if new_len > _PRED_K {
+        let mut trimmed: list = []
+        let drop_n = new_len - _PRED_K
+        let mut pti: i64 = drop_n
+        while pti < new_len {
+            trimmed = trimmed.push(_predict_history[pti])
+            pti = pti + 1
+        }
+        _predict_history = trimmed
+    }
+}
+
+fn _predict_warm_next_round(recent_queries: list) -> list {
+    let mut picked: list = []
+    let mut seen: map = #{}
+
+    let rlen = len(recent_queries)
+    if rlen > 0 {
+        let last = to_string(recent_queries[rlen - 1])
+        let mut nexts_raw = ""
+        try { nexts_raw = _predict_pairs_by_prev[last] } catch e {}
+        if nexts_raw != "" {
+            let cands = nexts_raw.split(_PRED_SEP)
+            let mut scored_key: list = []
+            let mut scored_val: list = []
+            let mut ci: i64 = 0
+            while ci < len(cands) {
+                let nk = cands[ci]
+                let bkey = last + _PRED_KSEP + nk
+                let mut cnt: i64 = 0
+                try { cnt = to_int(_predict_bigram_cnt[bkey]) } catch e {}
+                scored_key = scored_key.push(nk)
+                scored_val = scored_val.push(cnt)
+                ci = ci + 1
+            }
+            let total = len(scored_key)
+            let mut filled: i64 = 0
+            while filled < _PRED_TOP_N && filled < total {
+                let mut best_idx: i64 = -1
+                let mut best_val: i64 = -1
+                let mut si: i64 = 0
+                while si < total {
+                    let v: i64 = to_int(scored_val[si])
+                    if v > best_val {
+                        if v > -1 {
+                            best_val = v
+                            best_idx = si
+                        }
+                    }
+                    si = si + 1
+                }
+                if best_idx < 0 { filled = _PRED_TOP_N }
+                else {
+                    let chosen = to_string(scored_key[best_idx])
+                    let mut already = false
+                    try { if to_int(seen[chosen]) > 0 { already = true } } catch e {}
+                    if !already {
+                        picked = picked.push(chosen)
+                        seen[chosen] = "1"
+                    }
+                    scored_val[best_idx] = to_string(-2)
+                    filled = filled + 1
+                }
+            }
+        }
+    }
+
+    if len(picked) < _PRED_TOP_N {
+        let mut pool: list = []
+        let mut phi: i64 = 0
+        while phi < len(_predict_history) {
+            pool = pool.push(to_string(_predict_history[phi]))
+            phi = phi + 1
+        }
+        let mut dedup_keys: list = []
+        let mut dedup_vals: list = []
+        let mut pj: i64 = 0
+        while pj < len(pool) {
+            let pk = to_string(pool[pj])
+            let mut found = false
+            let mut dk: i64 = 0
+            while dk < len(dedup_keys) {
+                if to_string(dedup_keys[dk]) == pk { found = true; dk = len(dedup_keys) }
+                dk = dk + 1
+            }
+            if !found {
+                let mut uc: i64 = 0
+                try { uc = to_int(_predict_unigram_cnt[pk]) } catch e {}
+                dedup_keys = dedup_keys.push(pk)
+                dedup_vals = dedup_vals.push(uc)
+            }
+            pj = pj + 1
+        }
+        let utotal = len(dedup_keys)
+        while len(picked) < _PRED_TOP_N {
+            let mut ubest_idx: i64 = -1
+            let mut ubest_val: i64 = -1
+            let mut ui: i64 = 0
+            while ui < utotal {
+                let uv: i64 = to_int(dedup_vals[ui])
+                if uv > ubest_val {
+                    if uv > -1 {
+                        ubest_val = uv
+                        ubest_idx = ui
+                    }
+                }
+                ui = ui + 1
+            }
+            if ubest_idx < 0 { return picked }
+            let ukey = to_string(dedup_keys[ubest_idx])
+            let mut u_already = false
+            try { if to_int(seen[ukey]) > 0 { u_already = true } } catch e {}
+            if !u_already {
+                picked = picked.push(ukey)
+                seen[ukey] = "1"
+            }
+            dedup_vals[ubest_idx] = to_string(-2)
+        }
+    }
+
+    return picked
+}
+
+fn _predict_warm_buckets(prefixes: list) -> i64 {
+    let mut warmed: i64 = 0
+    let mut wpi: i64 = 0
+    while wpi < len(prefixes) {
+        let pk = to_string(prefixes[wpi])
+        if len(pk) > 0 {
+            try {
+                let idxs = _bucket_indices(_n6_bucket, pk)
+                if len(idxs) > 0 { warmed = warmed + 1 }
+            } catch e {}
+        }
+        wpi = wpi + 1
+    }
+    return warmed
+}
+
+fn _predict_hit_count(predicted: list, actual: list) -> i64 {
+    let mut hits: i64 = 0
+    let mut hpi: i64 = 0
+    while hpi < len(predicted) {
+        let p = to_string(predicted[hpi])
+        let mut aj: i64 = 0
+        while aj < len(actual) {
+            if to_string(actual[aj]) == p {
+                hits = hits + 1
+                aj = len(actual)
+            }
+            aj = aj + 1
+        }
+        hpi = hpi + 1
+    }
+    return hits
+}
+
+fn _predict_json_list(xs: list) -> string {
+    let mut out = "["
+    let mut ji: i64 = 0
+    while ji < len(xs) {
+        if ji > 0 { out = out + "," }
+        let s = to_string(xs[ji])
+        out = out + "\"" + s + "\""
+        ji = ji + 1
+    }
+    out = out + "]"
+    return out
+}
+
+fn _predict_hit_rate(hits: i64, predicted_n: i64) -> f64 {
+    if predicted_n < 1 { return 0.0 }
+    return to_float(hits) / to_float(predicted_n)
+}
+
+// axiom_seeds (pipe-separated numeric string) → bucket prefix list
+fn _predict_prefixes_from_seeds(seeds: string) -> list {
+    let mut out: list = []
+    if len(seeds) == 0 { return out }
+    let parts = seeds.split("|")
+    let mut pi: i64 = 0
+    while pi < len(parts) {
+        let mut v: f64 = 0.0
+        try { v = to_float(parts[pi]) } catch e {}
+        let pfx = _predict_prefix_of_value(v)
+        if len(pfx) > 0 { out = out.push(pfx) }
+        pi = pi + 1
+    }
+    return out
+}
+// ═══════════════════════════════════════════════════════════
+// ─── /AV: predictive cache ───
+// ═══════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
@@ -5167,6 +5430,27 @@ if len(axiom_seeds) > 0 {
                 recurse_continue = false
             }
         }
+
+        // ─── AV: predictive cache — bigram next-round preload ───
+        // (1) actual bucket prefixes for THIS round (from seeds that drove evo_cycle)
+        let _av_actual = _predict_prefixes_from_seeds(axiom_seeds)
+        // (2) hit-rate = |prev_predicted ∩ actual| / |prev_predicted|
+        let _av_hits = _predict_hit_count(_predict_last_predicted, _av_actual)
+        let _av_pred_prev_n = len(_predict_last_predicted)
+        let _av_hit_rate = _predict_hit_rate(_av_hits, _av_pred_prev_n)
+        // (3) record actual into bigram history (per-prefix record)
+        let mut _av_ri: i64 = 0
+        while _av_ri < len(_av_actual) {
+            _predict_record_query(to_string(_av_actual[_av_ri]))
+            _av_ri = _av_ri + 1
+        }
+        // (4) predict NEXT round prefixes + warm
+        let _av_next_pred = _predict_warm_next_round(_av_actual)
+        let _av_warmed = _predict_warm_buckets(_av_next_pred)
+        // (5) emit event (AI-native stdout JSON — hook/log consumer friendly)
+        println("NEXUS_PREDICTIVE_WARM {\"round\":" + to_string(recurse_round) + ",\"predicted_prefixes\":" + _predict_json_list(_av_next_pred) + ",\"hit_next_round\":" + to_string(_av_hits) + ",\"hit_rate\":" + to_string(_av_hit_rate) + ",\"warmed\":" + to_string(_av_warmed) + "}")
+        // (6) carry forward prediction for NEXT round's hit measurement
+        _predict_last_predicted = _av_next_pred
     }
 
     println("  recursive growth complete: " + to_string(recurse_round) + " rounds, " + to_string(recurse_disc_total) + " total disc, best_score=" + to_string(recurse_score))
