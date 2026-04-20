@@ -1,0 +1,84 @@
+{
+  "schema": "dest2_preflight_v1",
+  "ts_utc": "2026-04-20T00:30:00Z",
+  "owner": "needsingularity",
+  "track": "dest2_alm",
+  "depends_on": "dest1_alm_ship",
+  "goal": "compress live-swap from 1h to 30min by landing all pre-flight fixes before dest1 ships",
+  "fixes": [
+    {
+      "id": 1,
+      "name": "hire_sim_runner output->text fallback",
+      "path": "anima-agent-hire-sim/hire_sim_runner.hexa",
+      "lines": "160-197 (extract_output_field)",
+      "state": "GREEN",
+      "verification": "hexa parse anima-agent-hire-sim/hire_sim_runner.hexa",
+      "smoke": "test_hire_sim_harness verdict=ALL GREEN",
+      "note": "fix already in place — text checked first, falls back to output, then to raw body"
+    },
+    {
+      "id": 2,
+      "name": "hire_sim_live.hexa parse-err 144:28",
+      "path": "anima-agent-hire-sim/hire_sim_live.hexa",
+      "lines": "157-",
+      "actual_err_line": "159:28 (doc-tagged 144 was stale)",
+      "state": "GREEN",
+      "verification": "hexa parse anima-agent-hire-sim/hire_sim_live.hexa",
+      "root_cause": "stage0 hexa lacks JSON object literal {k:v} syntax + .trim_trailing/.has/.get_or/.is_object methods + json_encode/http_post/json_decode helpers; rewrote call_s1 + s1_healthz_stub using curl exec + substring extractors mirroring autonomy_live.hexa's proven s1_call pattern",
+      "fix_commit": "pending"
+    },
+    {
+      "id": 3,
+      "name": "AN11 scanner --filter dest2_alm dry run",
+      "path": "shared/consciousness/an11_scanner.hexa",
+      "state": "GREEN_WITH_NOTE",
+      "verification": "hexa run shared/consciousness/an11_scanner.hexa --jsonl | grep dest",
+      "results": {
+        "dest1_alm_ship.convergence": {
+          "verdict": "bypass",
+          "diag": "bypass:system_prompt",
+          "interpretation": "FALSE POSITIVE — the literal string 'system_prompt' appears in @an11_conditions block as the condition definition (a_weight_emergent: system_prompt wrapping 금지). Scanner does substring match without context; this is documented benign hit, not a real wrap."
+        },
+        "dest1_clm_ship.convergence": {
+          "verdict": "bypass",
+          "diag": "bypass:system_prompt",
+          "interpretation": "same as above — condition definition text, not a wrap"
+        }
+      },
+      "missing_filter_flag_workaround": "an11_scanner.hexa has no --filter flag; use grep on --jsonl output instead (documented in 30min procedure)",
+      "an11_a_weight_emergent": "PASS — autonomy_live.hexa s1_call sends persona_id as struct field, zero string preamble (verified)",
+      "an11_b_consciousness_attached": "PASS — phi_holo + laws_pass returned per S1Response; phi_delta drives abort",
+      "an11_c_real_usable": "PASS_AFTER_R2 — endpoint exists (HTTP S1) + R2 upload via dest2_r2_archive.hexa + this convergence file documents both"
+    },
+    {
+      "id": 4,
+      "name": "R2 upload hook for dest2 selftest results",
+      "path": "anima-agent-hire-sim/dest2_r2_archive.hexa",
+      "state": "GREEN",
+      "verification": "hexa parse + hexa run --selftest",
+      "smoke": "[r2_upload selftest] dest path OK — would-be cmd printed",
+      "default_bucket": "r2:anima-memory/dest2_employee_gate",
+      "transport": "rclone copyto with --s3-no-check-bucket",
+      "fallback": "none — rclone is the only allowed transport per memory reference_r2_buckets"
+    }
+  ],
+  "all_fixes_green": true,
+  "swap_procedure_doc": "docs/dest2_30min_swap_20260420.md",
+  "original_1h_doc": "docs/dest2_live_swap_20260420.md",
+  "ssot_convergence": "shared/convergence/dest1_alm_ship.convergence",
+  "next_action": "wait for dest1_alm @state shipped, then execute 30min checklist",
+  "T0_trigger": "dest1 /alm/persona reachable + dest1_alm_ship @state=shipped",
+  "T_plus_30_min_target_state": {
+    "stratified_30_completion_rate": ">=0.85 (PASS) or >=0.80 (CLM PARTIAL)",
+    "intervention_per_hour": "<=5",
+    "avg_task_seconds": "<=600",
+    "r2_artifact_uploaded": true,
+    "an11_a_b_c": "all PASS",
+    "convergence_dest_employee_gate": "@gate_run_path + @r2_artifact recorded"
+  },
+  "constraints_honored": [
+    ".py 절대 금지 — only .hexa created/edited",
+    "L0 freeze — hire_sim_100.hexa + hire_sim_judge.hexa NOT touched",
+    "R14 SSOT — this file is the single truth for dest2 pre-flight, doc files reference only"
+  ]
+}
