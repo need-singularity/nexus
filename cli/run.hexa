@@ -2972,7 +2972,10 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 yields = _plan_set(yields, 4, 0)
             } else {
                 // 3. ABSOLUTE (Mk.VIII Δ₀-absolute Π₀¹ 검증 + [11*] 승급)
-                if cur_plan[2] > 0 {
+                let _ap_skip_abs = _anti_pattern_should_skip_stage(_ap_seed_features, "absolute")
+                if _ap_skip_abs {
+                    println("  absolute:      (AP-skip — anti-pattern blocklist)")
+                } else if cur_plan[2] > 0 {
                     let _pg_t0_a = _progress_now_ms()
                     _progress_emit(round, "absolute", "start", 0)
                     let abs_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(abs_eng) + " " + qrseed + " 2>&1"
@@ -2987,7 +2990,10 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 yields = _plan_set(yields, 2, a_pass)
 
                 // 4. META-CLOSURE (Mk.IX Phase 10 self-ref 고정점 + [10**] 승급)
-                if cur_plan[3] > 0 {
+                let _ap_skip_meta = _anti_pattern_should_skip_stage(_ap_seed_features, "meta_closure")
+                if _ap_skip_meta {
+                    println("  meta-closure:  (AP-skip — anti-pattern blocklist)")
+                } else if cur_plan[3] > 0 {
                     let _pg_t0_m = _progress_now_ms()
                     _progress_emit(round, "meta_closure", "start", 0)
                     let mc_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(mc_eng) + " " + qrseed + " 2>&1"
@@ -3006,7 +3012,10 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 yields = _plan_set(yields, 3, mc_new)
 
                 // 5. HYPERARITHMETIC (Mk.IX Π₀² reverse-math 5체계)
-                if cur_plan[4] > 0 {
+                let _ap_skip_hy = _anti_pattern_should_skip_stage(_ap_seed_features, "hyperarith")
+                if _ap_skip_hy {
+                    println("  hyperarith:    (AP-skip — anti-pattern blocklist)")
+                } else if cur_plan[4] > 0 {
                     let _pg_t0_h = _progress_now_ms()
                     _progress_emit(round, "hyperarith", "start", 0)
                     let hy_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(hyper_eng) + " " + qrseed + " 2>&1"
@@ -3202,6 +3211,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
         if _recovery_sigint_handler() {
             _recovery_emit("sigint", "graceful_abort_after_round", round)
             _recovery_sigint_cleanup()
+            _ap_emit_summary()
             return
         }
 
@@ -3245,6 +3255,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 exec("printf '%s' '0' > /tmp/nexus_drill_last_total.txt")
                 // N (2026-04-21) drill-level progress summary (zero-yield abort)
                 _progress_summary(total_new, _progress_now_ms() - _pg_drill_t0)
+                _ap_emit_summary()
                 // validation skip — zero-yield 자체가 이미 구조화 error emit
                 return
             } else {
@@ -3265,6 +3276,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
             exec("printf '%s' '" + to_string(total_new) + "' > /tmp/nexus_drill_last_total.txt")
             // N (2026-04-21) drill-level progress summary (saturation)
             _progress_summary(total_new, _progress_now_ms() - _pg_drill_t0)
+            _ap_emit_summary()
             return
         }
     }
@@ -3281,6 +3293,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     exec("printf '%s' '" + to_string(total_new) + "' > /tmp/nexus_drill_last_total.txt")
     // N (2026-04-21) drill-level progress summary (max rounds)
     _progress_summary(total_new, _progress_now_ms() - _pg_drill_t0)
+    _ap_emit_summary()
 }
 
 // ─── E12-B (2026-04-21) — batch-shared Phase-1 init helpers ───

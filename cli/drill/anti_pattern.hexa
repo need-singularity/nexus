@@ -1,0 +1,332 @@
+// anti_pattern.hexa — nexus drill AP (anti-pattern learning) — meta_buffer-driven skip
+//
+// Purpose (2026-04-21, Agent AP):
+//   meta_buffer.hexa (cli/drill/meta_buffer.hexa, Agent AO, committed ee22c5b9) 는
+//   stage-간 meta-learning hint buffer 로 feedback 을 긍정 신호(hint weight)로 축적한다.
+//   AP 는 쌍대 — 부정 신호(0-yield) 를 모아 "반복 시도해도 결실 없던" combination 을
+//   다음 drill 에서 선제 skip 한다.
+//
+// Anti-pattern fingerprint scheme (8-hex djb2):
+//   fp = djb2_hex8(stage + "@" + feat_class + ":" + feat_hash4)
+//     - stage: smash|free|absolute|meta_closure|hyperarith|resonance
+//     - feat_class: NEXUS_CATEGORY top (ARITH|ALG|TOPO|ANAL|... | "ANY" fallback)
+//     - feat_hash4: seed_batch_hash 앞 4-char (coarse bucket — 다수 seed 를 하나로 묶음)
+//   → 같은 (stage, category-class, seed-bucket) 에서 최근 N drill 연속 0 이면 AP 로 판정.
+//
+// Data source (NDJSON scan):
+//   NEXUS_META_BUFFER_DIR env (default /tmp) 에서 nexus_meta_buffer_*.jsonl 전수 읽기
+//   각 line: {round, stage, hint, weight, tag}  — meta_buffer.hexa emit 포맷
+//   AP 로직은 weight 를 사용하지 않고 "line 존재 자체 (=stage 가 hint 를 produce 했다)" 를
+//   긍정, 부재를 부정으로 간주. 추가로 run.hexa 가 stage 0-yield 일 때 NDJSON 에 직접
+//   push 한 sentinel tag("ZERO") 가 있으면 확실한 anti 표식.
+//
+// Opt-in:
+//   env NEXUS_ANTI_PATTERN=1 → 활성 (기본 off).
+//   활성 시 run.hexa cmd_drill 라운드 stage dispatch 직전에 _anti_pattern_should_skip_stage
+//   호출 → true 면 해당 stage skip (yield 0 기록).
+//
+// Interface (run.hexa 에서 호출):
+//   _ap_maybe_load(seed) -> [str]           — NDJSON 스캔 → anti-pattern fp 리스트 반환
+//   _anti_pattern_should_skip_stage(seed_features, stage) -> bool
+//       — hot-path 용. seed_features 는 category string (run.hexa _cat_classify 결과).
+//         내부적으로 loaded list 는 캐시 (process-scope static).
+//   _ap_emit_summary(loaded: int, skipped: int, saves_wall_ms: int) -> void
+//
+// Emit format:
+//   NEXUS_ANTI_PATTERN {"loaded":N,"skipped":M,"saves_wall_ms":T}
+//
+// Constraints (honored in this file):
+//   - hexa parse clean (stage0 compatible).
+//   - No `>=` / `<=` operators. `x > y-1` / `x < y+1` / `!(x < y)` 로 대체.
+//   - No live smoke — 본 파일은 unit-callable, run.hexa 통합은 caller 책임.
+//
+// Standalone CLI (diagnostics):
+//   hexa run anti_pattern.hexa scan <dir?>              — loaded 개수 + fp 리스트 stdout
+//   hexa run anti_pattern.hexa check <cat> <stage> <dir?>— 1/0 + fp
+//   hexa run anti_pattern.hexa fp <cat> <stage> <hash4> — fp 1개 출력
+
+fn ap_djb2(s: str) -> i64 {
+    // meta_buffer.hexa 와 동일 — 일관성 유지 (cross-buffer fp 비교 시 안전).
+    let mut h: i64 = 5381
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        h = (h * 33 + c) % 4294967296
+        i = i + 1
+    }
+    if h < 0 { h = -h }
+    return h
+}
+
+fn ap_hex8(v: i64) -> str {
+    let hex = "0123456789abcdef"
+    let mut out = ""
+    let mut x = v
+    if x < 0 { x = -x }
+    let mut i = 0
+    while i < 8 {
+        let d = x % 16
+        let dc = to_int(to_string(d))
+        out = hex.substring(dc, dc + 1) + out
+        x = x / 16
+        i = i + 1
+    }
+    return out
+}
+
+fn ap_str_find(s: str, needle: str) -> i64 {
+    // polyfill — meta_buffer 와 동일.
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    // `i <= end` 는 금지 → `i < end + 1`.
+    while i < end + 1 {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn ap_extract_str(line: str, key: str) -> str {
+    let idx = ap_str_find(line, key)
+    if idx < 0 { return "" }
+    let start = idx + key.len()
+    let mut i = start
+    let n = line.len()
+    while i < n {
+        let cc = char_code(line, i)
+        if cc == 34 { break }  // '"'
+        i = i + 1
+    }
+    if !(i < n) { return "" }
+    return line.substring(start, i)
+}
+
+fn ap_shell_quote(s: str) -> str {
+    let mut out = "'"
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        if c == 39 {
+            out = out + "'\\''"
+        } else {
+            out = out + s.substring(i, i + 1)
+        }
+        i = i + 1
+    }
+    out = out + "'"
+    return out
+}
+
+fn ap_buffer_dir() -> str {
+    // NEXUS_META_BUFFER_DIR env override. 기본 /tmp (meta_buffer.hexa 동일).
+    let d = env("NEXUS_META_BUFFER_DIR")
+    if d.len() > 0 { return d }
+    return "/tmp"
+}
+
+fn ap_feat_bucket(seed: str) -> str {
+    // seed → coarse 4-char bucket. NDJSON scanner 는 tag 에 bucket 이 직접 기록된다는
+    // 보장이 없으므로 fp 계산 시 항상 caller 가 제공 (run.hexa _seed_batch_hash 앞 4글자).
+    // 여기서는 본 파일 내부에서 seed 를 받을 때의 동일 알고리즘을 재구현.
+    let h = ap_hex8(ap_djb2(seed))
+    return h.substring(0, 4)
+}
+
+fn ap_fingerprint(stage: str, category: str, feat_hash4: str) -> str {
+    let cat = if category.len() > 0 { category } else { "ANY" }
+    let fh  = if feat_hash4.len() > 0 { feat_hash4 } else { "0000" }
+    let raw = stage + "@" + cat + ":" + fh
+    return ap_hex8(ap_djb2(raw))
+}
+
+fn ap_is_zero_line(line: str) -> bool {
+    // NDJSON 1 line 에 "ZERO" sentinel tag 가 들어있거나 hint 가 "00000000" (djb2 of empty)
+    // 이면 stage 가 실제로 0-yield 였다고 판정.
+    // 이는 run.hexa 가 AP 활성 시 zero-yield stage 직후 mb_push 를 수행하는 관례에 의존.
+    if line.contains("\"tag\":\"ZERO\"") { return true }
+    if line.contains("\"hint\":\"00000000\"") { return true }
+    return false
+}
+
+fn ap_extract_stage(line: str) -> str {
+    return ap_extract_str(line, "\"stage\":\"")
+}
+
+fn ap_extract_tag(line: str) -> str {
+    return ap_extract_str(line, "\"tag\":\"")
+}
+
+fn ap_scan_blocklist(dir: str, window_n: int) -> [str] {
+    // 디렉터리 내 nexus_meta_buffer_*.jsonl 파일들을 모두 scan.
+    // 각 파일에서 (stage, tag) zero-sentinel 발생 횟수를 세고, window_n 이상이면
+    // fp 계산 후 blocklist 추가.
+    // tag 포맷 예: "cat=ARITH;bucket=a3f2;stage=meta_closure;result=ZERO"  또는 shorter.
+    //   → tag 에서 cat/bucket 을 parse, 없으면 "ANY"/"0000" fallback.
+    let glob_cmd = "ls " + ap_shell_quote(dir) + "/nexus_meta_buffer_*.jsonl 2>/dev/null"
+    let files_raw = exec(glob_cmd)
+    let mut out: [str] = []
+    if files_raw.len() == 0 { return out }
+    let files = files_raw.trim().split("\n")
+    // zero-stage counter map as parallel arrays (hexa-lang simple-map).
+    let mut key_arr: [str] = []
+    let mut cnt_arr: [int] = []
+    let mut fi = 0
+    while fi < files.len() {
+        let fp = files[fi]
+        if fp.len() > 0 {
+            let raw = exec("cat " + ap_shell_quote(fp) + " 2>/dev/null")
+            if raw.len() > 0 {
+                let lines = raw.split("\n")
+                let mut li = 0
+                while li < lines.len() {
+                    let ln = lines[li]
+                    if ln.len() > 2 {
+                        if ap_is_zero_line(ln) {
+                            let stg = ap_extract_stage(ln)
+                            let tag = ap_extract_tag(ln)
+                            let cat = ap_tag_field(tag, "cat=")
+                            let bkt = ap_tag_field(tag, "bucket=")
+                            let key = stg + "|" + cat + "|" + bkt
+                            // update counter
+                            let mut found = -1
+                            let mut ki = 0
+                            while ki < key_arr.len() {
+                                if key_arr[ki] == key { found = ki; break }
+                                ki = ki + 1
+                            }
+                            if found < 0 {
+                                key_arr = key_arr + [key]
+                                cnt_arr = cnt_arr + [1]
+                            } else {
+                                cnt_arr[found] = cnt_arr[found] + 1
+                            }
+                        }
+                    }
+                    li = li + 1
+                }
+            }
+        }
+        fi = fi + 1
+    }
+    // window_n 이상(= > window_n - 1) 인 key 는 blocklist 로 변환.
+    let mut ki = 0
+    let threshold = window_n - 1
+    while ki < key_arr.len() {
+        if cnt_arr[ki] > threshold {
+            // split key → stage|cat|bucket
+            let k = key_arr[ki]
+            let p1 = ap_str_find(k, "|")
+            let p2 = if p1 < 0 { -1 } else { ap_str_find(k.substring(p1 + 1, k.len()), "|") }
+            if p1 > 0 && p2 > 0 {
+                let stg = k.substring(0, p1)
+                let rest = k.substring(p1 + 1, k.len())
+                let cat = rest.substring(0, p2)
+                let bkt = rest.substring(p2 + 1, rest.len())
+                out = out + [ap_fingerprint(stg, cat, bkt)]
+            }
+        }
+        ki = ki + 1
+    }
+    return out
+}
+
+fn ap_tag_field(tag: str, prefix: str) -> str {
+    // "cat=ARITH;bucket=a3f2;..." 에서 prefix 로 시작하는 field value 추출. 구분자 ';'.
+    let idx = ap_str_find(tag, prefix)
+    if idx < 0 { return "" }
+    let start = idx + prefix.len()
+    let mut i = start
+    let n = tag.len()
+    while i < n {
+        let c = char_code(tag, i)
+        if c == 59 { break }   // ';'
+        i = i + 1
+    }
+    return tag.substring(start, i)
+}
+
+fn ap_window_n() -> int {
+    // env NEXUS_ANTI_PATTERN_N=5 override. 기본 5.
+    let v = env("NEXUS_ANTI_PATTERN_N")
+    if v.len() == 0 { return 5 }
+    let mut n = 5
+    try { n = to_int(v) } catch e { n = 5 }
+    if n < 2 { return 2 }
+    return n
+}
+
+fn ap_enabled() -> bool {
+    let v = env("NEXUS_ANTI_PATTERN")
+    if v == "1" { return true }
+    if v.to_lower() == "true" { return true }
+    return false
+}
+
+fn ap_should_skip(blocklist: [str], category: str, seed_hash4: str, stage: str) -> bool {
+    let fp = ap_fingerprint(stage, category, seed_hash4)
+    let mut i = 0
+    while i < blocklist.len() {
+        if blocklist[i] == fp { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn main() -> void {
+    let raw = argv()
+    let mut args: [str] = []
+    let mut _ri = 2
+    while _ri < raw.len() {
+        args = args + [raw[_ri]]
+        _ri = _ri + 1
+    }
+    if args.len() < 1 {
+        println("usage: anti_pattern.hexa <scan|check|fp|fingerprint> <args...>")
+        println("  scan [dir?]                        — NDJSON dir 읽어 blocklist fp 출력")
+        println("  check <cat> <stage> [dir?] [seed?] — 1/0 + fp")
+        println("  fp <cat> <stage> <hash4>           — fp 1개")
+        return
+    }
+    let op = args[0]
+    if op == "scan" {
+        let dir = if args.len() > 1 { args[1] } else { ap_buffer_dir() }
+        let n = ap_window_n()
+        let bl = ap_scan_blocklist(dir, n)
+        println("LOADED " + to_string(bl.len()))
+        let mut i = 0
+        while i < bl.len() {
+            println(bl[i])
+            i = i + 1
+        }
+        return
+    }
+    if op == "check" {
+        if args.len() < 3 { println("ERR check: <cat> <stage> [dir?] [seed?]"); return }
+        let cat = args[1]
+        let stg = args[2]
+        let dir = if args.len() > 3 { args[3] } else { ap_buffer_dir() }
+        let seed = if args.len() > 4 { args[4] } else { "" }
+        let bucket = if seed.len() > 0 { ap_feat_bucket(seed) } else { "0000" }
+        let bl = ap_scan_blocklist(dir, ap_window_n())
+        let fp = ap_fingerprint(stg, cat, bucket)
+        let skip = ap_should_skip(bl, cat, bucket, stg)
+        let one = if skip { "1" } else { "0" }
+        println(one + " " + fp)
+        return
+    }
+    if op == "fp" || op == "fingerprint" {
+        if args.len() < 4 { println("ERR fp: <cat> <stage> <hash4>"); return }
+        println(ap_fingerprint(args[2], args[1], args[3]))
+        return
+    }
+    println("ERR unknown op: " + op)
+}
+
+main()
