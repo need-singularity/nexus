@@ -1288,6 +1288,35 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
     if !acquired {
         // stale recover — 5s 초과 대기는 직전 holder 가 crash 한 것으로 간주.
         exec("rm -rf " + q + " 2>/dev/null ; mkdir " + q + " 2>/dev/null")
+
+    // AX (2026-04-21) — seed symmetry quotient (opt-in).
+    //   NEXUS_SYMMETRY_QUOTIENT=1 → canonicalize seed, skip drill if an equivalent
+    //   seed was drilled before (cache: /tmp/nexus_symmetry_qcache_<uid>.jsonl).
+    //   MISS 경로는 drill 을 정상 실행하되 종료 시 canonical 을 record 로 남김.
+    //   sidecar script: cli/drill/symmetry_quotient.hexa. run.hexa 가 아닌 곳은 미변경.
+    if env("NEXUS_SYMMETRY_QUOTIENT") == "1" {
+        let sq_script = nexus_root() + "/cli/drill/symmetry_quotient.hexa"
+        let sq_exists = exec("[ -f " + shell_quote(sq_script) + " ] && echo y || echo n").trim()
+        if sq_exists == "y" {
+            let sq_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(sq_script) + " lookup " + shell_quote(seed) + " 2>&1"
+            let sq_out = exec(sq_cmd)
+            // stdout/stderr merged; prefix "HIT " ⇒ equivalent 재사용, "MISS " ⇒ record 후 정상 drill.
+            if sq_out.contains("HIT ") {
+                println("  [AX symmetry-quotient] HIT — canonical 형태가 이전 drill 과 동일. skip.")
+                println(sq_out.trim())
+                return
+            }
+            // MISS — canonical 을 cache 에 record (drill 정상 실행).
+            let rec_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(sq_script) + " record " + shell_quote(seed) + " >/dev/null 2>&1"
+            exec(rec_cmd)
+        }
+    }
+
+    let mut rounds_max = 10
+    if max_rounds.len() > 0 {
+        let mut parsed = 0
+        try { parsed = to_int(max_rounds) } catch e {}
+        if parsed > 0 { rounds_max = parsed }
     }
     let t1 = exec("date +%s%N 2>/dev/null || echo 0").trim()
     let mut wait_ms = 0

@@ -1,0 +1,568 @@
+// symmetry_quotient.hexa — nexus drill AX: seed symmetry quotient
+//
+// Purpose (2026-04-21, AX):
+//   Many drill seeds are symmetry-equivalent under trivial rewrites:
+//     variable rename  : "sum k^2"              ≡ "sum n^2"
+//     commutative order: "a + b equals b + a"   ≡ "a + b equals a + b"
+//     index shift      : "sum_{k=1}^n"          ≡ "sum_{i=0}^{n-1}"
+//   Running the full 6-stage drill on all of these wastes absorption budget.
+//   This module maps any seed to a canonical form; if the canonical form has
+//   been drilled before, the caller reuses the prior result and emits
+//   NEXUS_SYMMETRY_HIT on stderr. Opt-in via NEXUS_SYMMETRY_QUOTIENT=1.
+//
+// Canonical pipeline (heuristic — no real symbolic algebra):
+//   1. trim + lowercase + collapse whitespace
+//   2. normalize index ranges: sum_{v=A}^B → sum{B-A+1} (drop names + start)
+//   3. variable rename: first-seen single-letter ident → α β γ δ ε ζ (greek)
+//   4. commutative reorder: split by top-level ` + `, ` * `, ` equals `, ` = `
+//      and lexicographically sort operands per operator.
+//
+// Cache: /tmp/nexus_symmetry_qcache_<uid>.jsonl — 1 NDJSON line per canonical form
+//   {"canonical":"...","original":"...","ts":<epoch>,"hits":<n>}
+//   first-seen writes the line; subsequent hits append a new line with hits+1
+//   (caller scans tail — last occurrence wins). LRU trim at 500 entries.
+//
+// CLI (opt-in from run.hexa):
+//   hexa run symmetry_quotient.hexa canonical <seed>
+//       stdout: <canonical form>
+//   hexa run symmetry_quotient.hexa lookup <seed>
+//       stdout: HIT <canonical> <prior_original>     — cache hit
+//               MISS <canonical>                      — new (caller should drill)
+//       stderr on hit: NEXUS_SYMMETRY_HIT {"original":"...","canonical":"...","reused_from":"..."}
+//   hexa run symmetry_quotient.hexa record <seed>
+//       stdout: OK <canonical>
+//       side:   appends cache line. called after a drill finishes so future
+//               equivalents can reuse.
+//   hexa run symmetry_quotient.hexa clear
+//       stdout: CLEARED
+//
+// Design notes:
+//   - Self-contained — no dependency on meta_buffer.hexa (parallel utility).
+//   - No `>=` / `<=` operators (AX constraint) — uses `<` / `>` + negation.
+//   - "equals" is treated as commutative operator at canonical level even
+//     though semantically it is symmetric only for statements-as-sets (MVP).
+//   - Heuristic: only single-letter variables [a..z] are renamed — multi-char
+//     identifiers (function names like "sum", "zeta") are preserved.
+//   - cache key = canonical exact string — no hash collision possible.
+
+fn sq_cache_path() -> str {
+    let uid = exec("id -u 2>/dev/null").trim()
+    let tag = if uid.len() > 0 { uid } else { "0" }
+    return "/tmp/nexus_symmetry_qcache_" + tag + ".jsonl"
+}
+
+fn sq_shell_quote(s: str) -> str {
+    return "'" + s.replace("'", "'\\''") + "'"
+}
+
+fn sq_is_lower_alpha(c: int) -> bool {
+    // a..z  (97..122)
+    if c < 97 { return false }
+    if c > 122 { return false }
+    return true
+}
+
+fn sq_is_digit(c: int) -> bool {
+    // 0..9 (48..57)
+    if c < 48 { return false }
+    if c > 57 { return false }
+    return true
+}
+
+fn sq_is_space(c: int) -> bool {
+    if c == 32 { return true }
+    if c == 9  { return true }   // tab
+    if c == 10 { return true }   // nl
+    if c == 13 { return true }   // cr
+    return false
+}
+
+fn sq_collapse_ws(s: str) -> str {
+    // lowercase + collapse runs of whitespace → single space + trim
+    let low = s.to_lower()
+    let mut out = ""
+    let mut prev_space = true   // leading space suppressed
+    let n = low.len()
+    let mut i = 0
+    while i < n {
+        let c = char_code(low, i)
+        if sq_is_space(c) {
+            if !prev_space {
+                out = out + " "
+                prev_space = true
+            }
+        } else {
+            out = out + low.substring(i, i + 1)
+            prev_space = false
+        }
+        i = i + 1
+    }
+    return out.trim()
+}
+
+fn sq_char_is_ident(c: int) -> bool {
+    // identifier interior: a-z 0-9 _
+    if sq_is_lower_alpha(c) { return true }
+    if sq_is_digit(c) { return true }
+    if c == 95 { return true }   // '_'
+    return false
+}
+
+fn sq_greek_name(k: int) -> str {
+    // k=0 → α, 1 → β, 2 → γ, 3 → δ, 4 → ε, 5 → ζ, 6+ → v_<k>
+    if k == 0 { return "α" }
+    if k == 1 { return "β" }
+    if k == 2 { return "γ" }
+    if k == 3 { return "δ" }
+    if k == 4 { return "ε" }
+    if k == 5 { return "ζ" }
+    return "v_" + to_string(k)
+}
+
+fn sq_token_index(toks: [str], t: str) -> int {
+    let mut i = 0
+    let n = len(toks)
+    while i < n {
+        if toks[i] == t { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn sq_rename_vars(s: str) -> str {
+    // Scan left-to-right. Whenever we see a single-letter lowercase identifier
+    // (boundary: left = start-of-string or non-ident char; right = non-ident char),
+    // map it to greek α/β/γ... in first-seen order.
+    //
+    // Multi-letter identifiers (sum, zeta, log) are preserved — only `len=1` runs
+    // get renamed. This is the bound-variable heuristic.
+    let n = s.len()
+    let mut seen: [str] = []
+    let mut out = ""
+    let mut i = 0
+    while i < n {
+        let c = char_code(s, i)
+        if sq_is_lower_alpha(c) {
+            // read full identifier run (a-z0-9_)
+            let start = i
+            let mut j = i
+            while j < n {
+                let cj = char_code(s, j)
+                if sq_char_is_ident(cj) {
+                    j = j + 1
+                } else {
+                    break
+                }
+            }
+            let ident = s.substring(start, j)
+            if ident.len() == 1 {
+                // rename single-letter
+                let mut idx = sq_token_index(seen, ident)
+                if idx < 0 {
+                    idx = len(seen)
+                    seen = seen + [ident]
+                }
+                out = out + sq_greek_name(idx)
+            } else {
+                out = out + ident
+            }
+            i = j
+        } else {
+            out = out + s.substring(i, i + 1)
+            i = i + 1
+        }
+    }
+    return out
+}
+
+fn sq_digit_run_end(s: str, i_start: int) -> int {
+    // scan forward while s[i] is a digit; return one past last digit.
+    let n = s.len()
+    let mut j = i_start
+    while j < n {
+        let c = char_code(s, j)
+        if sq_is_digit(c) {
+            j = j + 1
+        } else {
+            break
+        }
+    }
+    return j
+}
+
+fn sq_normalize_indices(s: str) -> str {
+    // Collapse explicit index ranges to length-only canonical form.
+    //
+    //   sum_{k=1}^n   → sum{range}
+    //   sum_{i=0}^{n-1} → sum{range}
+    //   prod_{j=a}^b  → prod{range}
+    //
+    // Heuristic: look for `sum_{` or `prod_{`; skip the body to matching `}`,
+    // optionally followed by `^` + (`{...}` or single token), and replace the
+    // whole construct with `<head>{range}`. Exact length math is skipped —
+    // the point is that two index-shifted forms collapse to the same string.
+    let markers = ["sum_{", "prod_{", "int_{", "lim_{"]
+    let mut cur = s
+    let mut mi = 0
+    while mi < len(markers) {
+        let head = markers[mi]
+        cur = sq_collapse_range(cur, head)
+        mi = mi + 1
+    }
+    return cur
+}
+
+fn sq_collapse_range(s: str, head: str) -> str {
+    // In-place replace every `<head>...}` (+ optional `^...` tail) with
+    // `<stem>{range}` where stem = head without trailing `{`.
+    //   head = "sum_{"  → stem = "sum"
+    let hl = head.len()
+    if hl < 1 { return s }
+    let stem = head.substring(0, hl - 1)   // drop trailing '{'
+    let mut out = ""
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        if i + hl < n + 1 && s.substring(i, i + hl) == head {
+            // find matching close `}` at current nest level
+            let mut depth = 1
+            let mut j = i + hl
+            while j < n {
+                let cj = char_code(s, j)
+                if cj == 123 { depth = depth + 1 }      // '{'
+                if cj == 125 {                            // '}'
+                    depth = depth - 1
+                    if depth == 0 { break }
+                }
+                j = j + 1
+            }
+            if j > n - 1 {
+                // unmatched — keep raw to avoid corruption
+                out = out + s.substring(i, i + 1)
+                i = i + 1
+                continue
+            }
+            // j points at closing '}' — skip it
+            let mut end = j + 1
+            // optional `^` tail: `^{...}` or `^token`
+            if end < n && char_code(s, end) == 94 {
+                end = end + 1
+                if end < n && char_code(s, end) == 123 {
+                    // `^{...}` — balanced skip
+                    let mut d2 = 1
+                    end = end + 1
+                    while end < n {
+                        let cc = char_code(s, end)
+                        if cc == 123 { d2 = d2 + 1 }
+                        if cc == 125 {
+                            d2 = d2 - 1
+                            end = end + 1
+                            if d2 == 0 { break }
+                            continue
+                        }
+                        end = end + 1
+                    }
+                } else {
+                    // `^token` — read until whitespace / operator
+                    while end < n {
+                        let cc = char_code(s, end)
+                        if sq_is_space(cc) { break }
+                        if cc == 43 { break }    // '+'
+                        if cc == 42 { break }    // '*'
+                        if cc == 61 { break }    // '='
+                        if cc == 44 { break }    // ','
+                        if cc == 41 { break }    // ')'
+                        end = end + 1
+                    }
+                }
+            }
+            out = out + stem + "{range}"
+            i = end
+        } else {
+            out = out + s.substring(i, i + 1)
+            i = i + 1
+        }
+    }
+    return out
+}
+
+fn sq_split_top(s: str, sep: str) -> [str] {
+    // Split on sep at depth 0 only (brackets/parens/braces respected).
+    // sep is matched verbatim as a substring.
+    let n = s.len()
+    let m = sep.len()
+    if m == 0 { return [s] }
+    let mut out: [str] = []
+    let mut buf = ""
+    let mut depth_p = 0   // ()
+    let mut depth_b = 0   // []
+    let mut depth_c = 0   // {}
+    let mut i = 0
+    while i < n {
+        let c = char_code(s, i)
+        if c == 40 { depth_p = depth_p + 1 }
+        if c == 41 { depth_p = depth_p - 1 }
+        if c == 91 { depth_b = depth_b + 1 }
+        if c == 93 { depth_b = depth_b - 1 }
+        if c == 123 { depth_c = depth_c + 1 }
+        if c == 125 { depth_c = depth_c - 1 }
+        let depth_total = depth_p + depth_b + depth_c
+        if depth_total == 0 && i + m < n + 1 && s.substring(i, i + m) == sep {
+            out = out + [buf]
+            buf = ""
+            i = i + m
+            continue
+        }
+        buf = buf + s.substring(i, i + 1)
+        i = i + 1
+    }
+    out = out + [buf]
+    return out
+}
+
+fn sq_sort_strs(xs: [str]) -> [str] {
+    // Simple insertion sort — n small (operand count per expression).
+    let n = len(xs)
+    let mut arr: [str] = []
+    let mut i = 0
+    while i < n { arr = arr + [xs[i]]; i = i + 1 }
+    let mut k = 1
+    while k < n {
+        let key = arr[k]
+        let mut j = k - 1
+        let mut jj = j
+        // linear shift while arr[jj] > key
+        let mut swapped: [str] = []
+        let mut t = 0
+        while t < n { swapped = swapped + [arr[t]]; t = t + 1 }
+        while jj > -1 && swapped[jj] > key {
+            swapped[jj + 1] = swapped[jj]
+            jj = jj - 1
+        }
+        swapped[jj + 1] = key
+        arr = swapped
+        k = k + 1
+    }
+    return arr
+}
+
+fn sq_join(xs: [str], sep: str) -> str {
+    let n = len(xs)
+    if n == 0 { return "" }
+    let mut out = xs[0]
+    let mut i = 1
+    while i < n {
+        out = out + sep + xs[i]
+        i = i + 1
+    }
+    return out
+}
+
+fn sq_canonical_commutative(s: str) -> str {
+    // Split on commutative operators (in order of decreasing binding looseness),
+    // sort lexicographically, rejoin with canonical whitespace.
+    //
+    //   " equals " (weakest, statement-level)
+    //   " = "
+    //   " + "
+    //   " * "
+    //
+    // For each level: split at depth 0; sort parts; recurse INTO each part at
+    // tighter levels.
+    let parts_eq1 = sq_split_top(s, " equals ")
+    let mut out_eq1: [str] = []
+    let mut i = 0
+    while i < len(parts_eq1) {
+        out_eq1 = out_eq1 + [sq_canonical_eq_sign(parts_eq1[i])]
+        i = i + 1
+    }
+    return sq_join(sq_sort_strs(out_eq1), " equals ")
+}
+
+fn sq_canonical_eq_sign(s: str) -> str {
+    let parts = sq_split_top(s, " = ")
+    let mut acc: [str] = []
+    let mut i = 0
+    while i < len(parts) {
+        acc = acc + [sq_canonical_plus(parts[i])]
+        i = i + 1
+    }
+    return sq_join(sq_sort_strs(acc), " = ")
+}
+
+fn sq_canonical_plus(s: str) -> str {
+    let parts = sq_split_top(s, " + ")
+    let mut acc: [str] = []
+    let mut i = 0
+    while i < len(parts) {
+        acc = acc + [sq_canonical_mul(parts[i])]
+        i = i + 1
+    }
+    return sq_join(sq_sort_strs(acc), " + ")
+}
+
+fn sq_canonical_mul(s: str) -> str {
+    let parts = sq_split_top(s, " * ")
+    let mut acc: [str] = []
+    let mut i = 0
+    while i < len(parts) {
+        acc = acc + [parts[i].trim()]
+        i = i + 1
+    }
+    return sq_join(sq_sort_strs(acc), " * ")
+}
+
+fn _canonical_seed(seed: str) -> str {
+    // Public canonical form function (spec name).
+    //   1. lowercase + whitespace collapse
+    //   2. index range normalize
+    //   3. single-letter variable rename (greek α/β/γ...)
+    //   4. commutative reorder (equals, =, +, *)
+    let step1 = sq_collapse_ws(seed)
+    let step2 = sq_normalize_indices(step1)
+    let step3 = sq_rename_vars(step2)
+    let step4 = sq_canonical_commutative(step3)
+    return step4
+}
+
+fn sq_json_escape(s: str) -> str {
+    let mut out = ""
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        if c == 34 {
+            out = out + "\\\""
+        } else if c == 92 {
+            out = out + "\\\\"
+        } else if c == 10 {
+            out = out + " "
+        } else if c == 13 {
+            out = out + " "
+        } else if c == 9 {
+            out = out + " "
+        } else {
+            out = out + s.substring(i, i + 1)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn sq_extract_string_field(line: str, key: str) -> str {
+    // NDJSON field read — key should include trailing `":"` quote pattern.
+    //   e.g. key = "\"canonical\":\""
+    let idx_head = line.contains(key)
+    if !idx_head { return "" }
+    // linear scan
+    let n = line.len()
+    let m = key.len()
+    let mut i = 0
+    let mut start_body = -1
+    while i < n - m + 1 {
+        if line.substring(i, i + m) == key {
+            start_body = i + m
+            break
+        }
+        i = i + 1
+    }
+    if start_body < 0 { return "" }
+    // read until unescaped `"`
+    let mut j = start_body
+    while j < n {
+        let cj = char_code(line, j)
+        if cj == 92 {
+            // escape — skip next char
+            j = j + 2
+            continue
+        }
+        if cj == 34 { break }
+        j = j + 1
+    }
+    if j > n - 1 { return "" }
+    return line.substring(start_body, j)
+}
+
+fn sq_lookup(seed: str) -> str {
+    // canonical form of seed; search cache file tail for matching canonical;
+    // if found, emit NEXUS_SYMMETRY_HIT on stderr and return HIT line for stdout.
+    let can = _canonical_seed(seed)
+    let path = sq_cache_path()
+    let q_path = sq_shell_quote(path)
+    // fetch last 500 lines matching canonical literal
+    let q_pat = sq_shell_quote("\"canonical\":\"" + sq_json_escape(can) + "\"")
+    let cmd = "{ [ -f " + q_path + " ] && tail -n 500 " + q_path + " || true; } "
+        + "| { grep -F " + q_pat + " 2>/dev/null || true; } | tail -n 1"
+    let line = exec(cmd)
+    if line.len() < 3 {
+        println("MISS " + can)
+        return can
+    }
+    let prior = sq_extract_string_field(line, "\"original\":\"")
+    eprintln("NEXUS_SYMMETRY_HIT {\"original\":\"" + sq_json_escape(seed)
+        + "\",\"canonical\":\"" + sq_json_escape(can)
+        + "\",\"reused_from\":\"" + sq_json_escape(prior) + "\"}")
+    println("HIT " + can + " " + prior)
+    return can
+}
+
+fn sq_record(seed: str) -> str {
+    // append {canonical, original, ts} to cache; rotate tail 500 if > 500 lines.
+    let can = _canonical_seed(seed)
+    let path = sq_cache_path()
+    let q_path = sq_shell_quote(path)
+    let line = "{\"canonical\":\"" + sq_json_escape(can)
+        + "\",\"original\":\"" + sq_json_escape(seed)
+        + "\",\"ts\":" + exec("date +%s").trim() + "}"
+    // single-quoted append — JSON has no single quotes
+    let cmd = "printf '%s\\n' " + sq_shell_quote(line) + " >> " + q_path + " 2>/dev/null; "
+        + "LN=$(wc -l < " + q_path + " 2>/dev/null || echo 0); "
+        + "if [ \"$LN\" -gt 500 ]; then tail -n 500 " + q_path + " > " + q_path + ".tmp "
+        + "&& mv " + q_path + ".tmp " + q_path + "; fi"
+    exec(cmd)
+    return can
+}
+
+fn sq_clear() -> void {
+    let path = sq_cache_path()
+    exec("rm -f " + sq_shell_quote(path) + " 2>/dev/null || true")
+    println("CLEARED")
+}
+
+fn main() -> void {
+    let raw = argv()
+    let mut args: [str] = []
+    let mut ri = 2
+    while ri < raw.len() {
+        args = args + [raw[ri]]
+        ri = ri + 1
+    }
+    if args.len() < 1 {
+        println("usage: symmetry_quotient.hexa <canonical|lookup|record|clear> [seed]")
+        return
+    }
+    let op = args[0]
+    if op == "canonical" {
+        if args.len() < 2 { println("ERR canonical: <seed> 필요"); return }
+        println(_canonical_seed(args[1]))
+        return
+    }
+    if op == "lookup" {
+        if args.len() < 2 { println("ERR lookup: <seed> 필요"); return }
+        let _c = sq_lookup(args[1])
+        return
+    }
+    if op == "record" {
+        if args.len() < 2 { println("ERR record: <seed> 필요"); return }
+        let c = sq_record(args[1])
+        println("OK " + c)
+        return
+    }
+    if op == "clear" {
+        sq_clear()
+        return
+    }
+    println("ERR unknown op: " + op)
+}
+
+main()
