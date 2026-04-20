@@ -84,7 +84,28 @@ fn entry_hexa() -> str {
 }
 
 fn exec_validated() -> str {
+    // DEPRECATED (2026-04-20): harness 폐기 — hexa_bin() 직접 호출로 전환. 하위 호환 위해 함수 유지만.
     return nexus_root() + "/shared/harness/exec_validated"
+}
+
+fn _reject_seed(seed: str, cmd: str) -> bool {
+    // cmd_gate validation 알고리즘 inline (harness 폐기 후) — smash/free/drill seed 품질 검증.
+    // 참조: shared/harness/cmd_gate.hexa check_smash/check_free. 길이/추상토큰 체크만 수행.
+    // 반환: true = REJECT (ai-native JSON error stderr 출력), false = pass
+    let trimmed = seed.trim()
+    if trimmed.len() == 0 {
+        eprintln("NEXUS_CMD_REJECT {\"cmd\":\"" + cmd + "\",\"reason\":\"empty_seed\"}")
+        return true
+    }
+    if cmd == "smash" && trimmed.len() < 2 {
+        eprintln("NEXUS_CMD_REJECT {\"cmd\":\"smash\",\"reason\":\"seed_too_short\",\"len\":" + to_string(trimmed.len()) + "}")
+        return true
+    }
+    if trimmed.len() > 300 {
+        eprintln("NEXUS_CMD_REJECT {\"cmd\":\"" + cmd + "\",\"reason\":\"seed_too_long\",\"len\":" + to_string(trimmed.len()) + ",\"max\":300}")
+        return true
+    }
+    return false
 }
 
 fn shell_quote(s: str) -> str {
@@ -180,7 +201,8 @@ fn cmd_smash(seed: str, depth: str) -> void {
     }
     let d = if depth.len() > 0 { depth } else { "3" }
     let engine = nexus_root() + "/shared/blowup/core/blowup.hexa"
-    let mut cmd = shell_quote(exec_validated()) + " smash " + shell_quote(seed) + " " + shell_quote(engine) + " " + d
+    if _reject_seed(seed, "smash") { return }
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(seed) + " " + d
     print(exec(cmd + " 2>&1"))
 }
 
@@ -191,7 +213,8 @@ fn cmd_free(seed: str, dfs: str) -> void {
     }
     let d = if dfs.len() > 0 { dfs } else { "3" }
     let engine = nexus_root() + "/shared/blowup/compose.hexa"
-    let mut cmd = shell_quote(exec_validated()) + " free_dfs " + shell_quote(seed) + " " + shell_quote(engine) + " --modules all --dfs " + d
+    if _reject_seed(seed, "free") { return }
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(seed) + " --modules all --dfs " + d
     print(exec(cmd + " 2>&1"))
 }
 
@@ -199,8 +222,7 @@ fn cmd_absolute(seed: str) -> void {
     // Mk.VIII 단일 검증 — Δ₀-absolute Π₀¹ 판정 + [10*]→[11*] 자동 승급
     let s = if seed.len() > 0 { seed } else { "atlas" }
     let engine = nexus_root() + "/shared/blowup/modules/blowup_absolute.hexa"
-    let mut cmd = shell_quote(exec_validated()) + " absolute "
-               + shell_quote(s) + " " + shell_quote(engine)
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(s)
     print(exec(cmd + " 2>&1"))
 }
 
@@ -410,7 +432,8 @@ fn _cross_iter_check_and_append(total: int, seed: str) -> void {
 
 fn _resonance_run(seed: str, blow_core: str, exv: str) -> int {
     // 단일 σ-변형 smash 1회 (depth=1 고정, 재귀 폭발 방지)
-    let cmd = shell_quote(exv) + " smash " + shell_quote(seed) + " " + shell_quote(blow_core) + " 1 2>&1"
+    // harness-free (2026-04-20): exec_validated 폐기 — hexa run <engine> <seed> <args> 직접 호출
+    let cmd = shell_quote(hexa_bin()) + " run " + shell_quote(blow_core) + " " + shell_quote(seed) + " 1 2>&1"
     let out = exec(cmd)
     let _res_err = _check_stage_err(out, "resonance")
     return _count_discoveries(out)
@@ -536,7 +559,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
     let abs_eng   = nx + "/shared/blowup/modules/blowup_absolute.hexa"
     let mc_eng    = nx + "/shared/blowup/modules/blowup_meta_closure.hexa"
     let hyper_eng = nx + "/shared/blowup/modules/blowup_hyperarithmetic.hexa"
-    let exv       = exec_validated()
+    // harness-free (2026-04-20): exv 미사용, hexa_bin() 직접 호출
     let qseed     = shell_quote(seed)
 
     let mut round = 0
@@ -599,7 +622,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
         // 1. SMASH (발견 — Mk.II~VII blowup 9-phase)
         // CRITICAL FIX(2026-04-19): exec("bash", ["-c", cmd]) 는 hexa stage1 에서 stdout 캡처 안 됨 — len=0 반환
         // → 모든 stage 호출을 single-string exec(cmd) 로 통일 (검증: .exectest.hexa)
-        let smash_cmd = shell_quote(exv) + " smash " + qrseed + " " + shell_quote(blow_core) + " 3 2>&1"
+        let smash_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(blow_core) + " " + qrseed + " 3 2>&1"
         let smash_out = exec(smash_cmd)
         if _check_stage_err(smash_out, "smash") { err_stages = err_stages + "smash,"; err_count = err_count + 1 }
         // FIX(2026-04-19): _count_marker(out,"ABSORB") 는 항상 0 — engine 마커 불일치
@@ -611,7 +634,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
         println("  smash:         +" + to_string(s_new) + " absorptions")
 
         // 2. FREE (탐색 — compose DFS, 6-core)
-        let free_cmd = shell_quote(exv) + " free_dfs " + qrseed + " " + shell_quote(compose) + " --modules all --dfs 3 2>&1"
+        let free_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(compose) + " " + qrseed + " --modules all --dfs 3 2>&1"
         let free_out = exec(free_cmd)
         if _check_stage_err(free_out, "free") { err_stages = err_stages + "free,"; err_count = err_count + 1 }
         let f_new = _count_discoveries(free_out)
@@ -621,14 +644,14 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
         println("  free:          +" + to_string(f_new) + " absorptions")
 
         // 3. ABSOLUTE (Mk.VIII Δ₀-absolute Π₀¹ 검증 + [11*] 승급)
-        let abs_cmd = shell_quote(exv) + " absolute " + qrseed + " " + shell_quote(abs_eng) + " 2>&1"
+        let abs_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(abs_eng) + " " + qrseed + " 2>&1"
         let abs_out = exec(abs_cmd)
         if _check_stage_err(abs_out, "absolute") { err_stages = err_stages + "absolute,"; err_count = err_count + 1 }
         let a_pass = _count_marker(abs_out, "ABSOLUTE-PASS") + _count_marker(abs_out, "[11*]")
         println("  absolute:      " + to_string(a_pass) + " Π₀¹ verifications")
 
         // 4. META-CLOSURE (Mk.IX Phase 10 self-ref 고정점 + [10**] 승급)
-        let mc_cmd = shell_quote(exv) + " meta_closure " + qrseed + " " + shell_quote(mc_eng) + " 2>&1"
+        let mc_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(mc_eng) + " " + qrseed + " 2>&1"
         let mc_out = exec(mc_cmd)
         if _check_stage_err(mc_out, "meta-closure") { err_stages = err_stages + "meta-closure,"; err_count = err_count + 1 }
         // META-CLOSED 마커 부재 — meta_closed/promoted 숫자 직접 파싱 + [10**] 매치
@@ -639,7 +662,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
         println("  meta-closure:  " + to_string(mc_new) + " self-ref fixed points")
 
         // 5. HYPERARITHMETIC (Mk.IX Π₀² reverse-math 5체계)
-        let hy_cmd = shell_quote(exv) + " hyperarithmetic " + qrseed + " " + shell_quote(hyper_eng) + " 2>&1"
+        let hy_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(hyper_eng) + " " + qrseed + " 2>&1"
         let hy_out = exec(hy_cmd)
         if _check_stage_err(hy_out, "hyperarith") { err_stages = err_stages + "hyperarith,"; err_count = err_count + 1 }
         let hy_pass = _count_marker(hy_out, "REVERSE-PROVEN") + _count_marker(hy_out, "ABSOLUTE-PASS-PI02")
@@ -748,8 +771,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str) -> void {
 fn cmd_meta_closure(seed: str) -> void {
     let s = if seed.len() > 0 { seed } else { "atlas" }
     let engine = nexus_root() + "/shared/blowup/modules/blowup_meta_closure.hexa"
-    let mut cmd = shell_quote(exec_validated()) + " meta_closure "
-               + shell_quote(s) + " " + shell_quote(engine)
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(s)
     print(exec(cmd + " 2>&1"))
 }
 
@@ -759,8 +781,7 @@ fn cmd_hyperarithmetic(prop: str) -> void {
         return
     }
     let engine = nexus_root() + "/shared/blowup/modules/blowup_hyperarithmetic.hexa"
-    let mut cmd = shell_quote(exec_validated()) + " hyperarithmetic "
-               + shell_quote(prop) + " " + shell_quote(engine)
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(prop)
     print(exec(cmd + " 2>&1"))
 }
 
