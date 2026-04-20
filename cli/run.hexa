@@ -2697,6 +2697,14 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     // D5-P2: round 진입 직전 baseline hexa proc 카운트 — round 종료 시 delta 비교
     let mut prev_hexa_n = _count_active_hexa()
 
+    // AP (2026-04-21) — anti-pattern blocklist load (drill 당 1회, opt-in: NEXUS_ANTI_PATTERN=1).
+    //   seed_features: "<category>|<seed_hash4>" — _anti_pattern_should_skip_stage 호출 시 key.
+    _ap_load_blocklist()
+    let _ap_seed_hash = _seed_batch_hash(seed)
+    let _ap_h4 = if _ap_seed_hash.len() > 3 { _ap_seed_hash.substring(0, 4) } else { "0000" }
+    let _ap_cat = if _cat_on && _cat_name.len() > 0 { _cat_name } else { "ANY" }
+    let _ap_seed_features = _ap_cat + "|" + _ap_h4
+
     // E9 (2026-04-21) — fast-resume (기본 ON). --fresh 로 opt-out, 또는 resume_flag=false.
     //   동일 seed → path 매칭 → stale(7d) / hash 검증 통과 시 즉시 round/total/history 복원.
     //   not found / stale / corrupt / hash-mismatch → silent fresh start.
@@ -2909,7 +2917,10 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
             // 1. SMASH (발견 — Mk.II~VII blowup 9-phase)
             // CRITICAL FIX(2026-04-19): exec("bash", ["-c", cmd]) 는 hexa stage1 에서 stdout 캡처 안 됨 — len=0 반환
             // → 모든 stage 호출을 single-string exec(cmd) 로 통일 (검증: .exectest.hexa)
-            if cur_plan[0] > 0 {
+            let _ap_skip_smash = _anti_pattern_should_skip_stage(_ap_seed_features, "smash")
+            if _ap_skip_smash {
+                println("  smash:         (AP-skip — anti-pattern blocklist)")
+            } else if cur_plan[0] > 0 {
                 let _pg_t0_s = _progress_now_ms()
                 _progress_emit(round, "smash", "start", 0)
                 let smash_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(blow_core) + " " + qrseed + " " + to_string(cur_plan[0]) + " 2>&1"
@@ -2927,7 +2938,10 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
             yields = _plan_set(yields, 0, s_new)
 
             // 2. FREE (탐색 — compose DFS, 6-core)
-            if cur_plan[1] > 0 {
+            let _ap_skip_free = _anti_pattern_should_skip_stage(_ap_seed_features, "free")
+            if _ap_skip_free {
+                println("  free:          (AP-skip — anti-pattern blocklist)")
+            } else if cur_plan[1] > 0 {
                 let _pg_t0_f = _progress_now_ms()
                 _progress_emit(round, "free", "start", 0)
                 let free_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(compose) + " " + qrseed + " --modules all --dfs " + to_string(cur_plan[1]) + " 2>&1"

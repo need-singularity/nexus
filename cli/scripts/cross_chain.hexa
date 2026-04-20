@@ -1,0 +1,338 @@
+// ═══════════════════════════════════════════════════════════
+// cross_chain.hexa — nexus→anima cross-engine drill chain (W)
+//
+// 배경:
+//   nexus drill 은 absorption 를 생성한다 (cli/run.hexa cmd_drill).
+//   anima engine 은 별도 저장소 (core/anima 혹은 Dev/anima, hx packages/anima)
+//   에 설치될 수 있으며 drill output 을 검증/진화 할 수 있다.
+//
+// 목적:
+//   nexus drill 결과를 anima 로 전달 → 통합 리포트 생성.
+//   anima 미설치 시 typed error + graceful exit.
+//
+// 인터페이스:
+//   hexa cli/scripts/cross_chain.hexa run --seed <seed> --engines nexus,anima
+//     [--max-rounds N] [--preset fast|probe|coarse|standard]
+//     [--report <path>]   JSON 리포트 출력 파일 (default stdout)
+//     [--dry-run]         anima 실제 spawn 없이 shim 모드로 실행 (기본 ON)
+//
+// 리포트 (JSON):
+//   { "stages": ["nexus", "anima"],
+//     "nexus_result": { "abs_total": N, "ok": bool, "stderr_tail": "..." },
+//     "anima_result": { "abs_total": N, "ok": bool, "status": "ok|missing|shim", "path": "..." },
+//     "agreement": "match" | "divergent" | "n_a",
+//     "unified_abs_total": N }
+//
+// 실패 모드 (anima_missing):
+//   stderr: NEXUS_CROSS_CHAIN {"status":"anima_missing","guidance":"..."}
+//   exit   : 2 (non-zero)
+//
+// 규칙:
+//   - hexa `>=`/`<=` 금지 — `<`/`>` 만 사용.
+//   - 본 script 는 "no live exec" — anima spawn 은 존재 확인 레벨만 수행,
+//     실제 drill 호출은 상위 run.hexa cmd_chain 에서만 트리거 (여기선 shim).
+// ═══════════════════════════════════════════════════════════
+
+// ─── util: shell-safe single-quote ───
+fn _shq(s: string) -> string {
+    let mut parts: [string] = []
+    parts.push("'")
+    let n = len(s)
+    let mut i: i64 = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "'" { parts.push("'\\''") } else { parts.push(c) }
+        i = i + 1
+    }
+    parts.push("'")
+    return parts.join("")
+}
+
+// ─── util: JSON string escape (minimal) ───
+fn _jesc(s: string) -> string {
+    let mut out: [string] = []
+    let n = len(s)
+    let mut i: i64 = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "\\" { out.push("\\\\") }
+        else if c == "\"" { out.push("\\\"") }
+        else if c == "\n" { out.push("\\n") }
+        else if c == "\r" { out.push("\\r") }
+        else if c == "\t" { out.push("\\t") }
+        else { out.push(c) }
+        i = i + 1
+    }
+    return out.join("")
+}
+
+// ─── util: file exists (via test -e) ───
+fn _path_exists(p: string) -> bool {
+    let raw = to_string(exec("[ -e " + _shq(p) + " ] && echo y || echo n")).trim()
+    return raw == "y"
+}
+
+fn _dir_exists(p: string) -> bool {
+    let raw = to_string(exec("[ -d " + _shq(p) + " ] && echo y || echo n")).trim()
+    return raw == "y"
+}
+
+fn _file_exists(p: string) -> bool {
+    let raw = to_string(exec("[ -f " + _shq(p) + " ] && echo y || echo n")).trim()
+    return raw == "y"
+}
+
+// ─── util: env with default ───
+fn _env_or(k: string, dflt: string) -> string {
+    let v = env(k)
+    if v.len() > 0 { return v }
+    return dflt
+}
+
+// ─── util: nexus root ───
+fn _nexus_root() -> string {
+    let n = env("NEXUS")
+    if n.len() > 0 { return n }
+    return env("HOME") + "/Dev/nexus"
+}
+
+// ─── anima discovery ───
+// 순차 후보 검색: $HOME/core/anima → $HOME/Dev/anima → $HOME/.hx/packages/anima.
+// 발견 기준: 디렉토리 존재 AND (run.hexa OR launch.hexa OR start.hexa) 중 하나 존재.
+fn _anima_candidates() -> [string] {
+    let h = env("HOME")
+    return [
+        h + "/core/anima",
+        h + "/Dev/anima",
+        h + "/.hx/packages/anima"
+    ]
+}
+
+fn _anima_entry_in(dir: string) -> string {
+    // 우선순위: run.hexa > launch.hexa > start.hexa
+    let cands = ["run.hexa", "launch.hexa", "start.hexa"]
+    let mut i: i64 = 0
+    while i < len(cands) {
+        let p = dir + "/" + cands[i]
+        if _file_exists(p) { return p }
+        i = i + 1
+    }
+    return ""
+}
+
+// 반환: [root_path, entry_path] — 미발견 시 ["", ""]
+fn _anima_locate() -> [string] {
+    let roots = _anima_candidates()
+    let mut i: i64 = 0
+    while i < len(roots) {
+        let r = roots[i]
+        if _dir_exists(r) {
+            let e = _anima_entry_in(r)
+            if e.len() > 0 { return [r, e] }
+        }
+        i = i + 1
+    }
+    return ["", ""]
+}
+
+// ─── nexus drill wrapper — shim mode ───
+// "no live exec" 원칙: 실제 drill 스폰 대신 sentinel 파일 읽기로 갈음.
+// cmd_drill 이 saturation/max-rounds 경로에서 쓰는 /tmp/nexus_drill_last_total.txt 를 소비.
+// 해당 파일 없으면 drill 미실행 → ok=false, abs_total=0.
+fn _collect_nexus_result() -> [string] {
+    // 반환: [abs_total_str, ok_str("true"|"false"), note]
+    let sentinel = "/tmp/nexus_drill_last_total.txt"
+    if !_file_exists(sentinel) {
+        return ["0", "false", "sentinel_missing"]
+    }
+    let mut total: i64 = 0
+    try {
+        let raw = to_string(exec("cat " + _shq(sentinel))).trim()
+        total = to_int(raw)
+    } catch e {}  // @allow-silent-catch
+    if total < 0 { total = 0 }
+    return [to_string(total), "true", "sentinel_ok"]
+}
+
+// ─── anima consumption — shim ───
+// live exec 금지: anima 가 존재해도 실제 invoke 하지 않고, entry 검증만 수행.
+// 추후 anima engine 쪽 drill_consume 엔트리가 생기면 본 함수에서만 exec 활성화.
+// 지금은 "shim" status 로 abs_total=nexus_abs_total 반환 (agreement=match).
+fn _consume_with_anima(nexus_total: i64, entry: string) -> [string] {
+    // 반환: [abs_total_str, ok_str, status, path]
+    if entry.len() == 0 {
+        return ["0", "false", "missing", ""]
+    }
+    // shim 경로: anima entry 는 존재 확인됨 → 동일 total 반영.
+    // 실제 anima 가 drill_consume 구현 시 여기서 exec 로 전환.
+    return [to_string(nexus_total), "true", "shim", entry]
+}
+
+// ─── agreement 판정 ───
+fn _agreement(nexus_ok: bool, anima_ok: bool, nexus_total: i64, anima_total: i64) -> string {
+    if !nexus_ok { return "n_a" }
+    if !anima_ok { return "n_a" }
+    if nexus_total == anima_total { return "match" }
+    return "divergent"
+}
+
+// ─── unified total: anima agreement=match 면 그대로, divergent 면 max ───
+fn _unified_total(nexus_total: i64, anima_total: i64, agreement: string) -> i64 {
+    if agreement == "match" { return nexus_total }
+    if agreement == "n_a" { return nexus_total }
+    // divergent: conservative max
+    if nexus_total > anima_total { return nexus_total }
+    return anima_total
+}
+
+// ─── 리포트 생성 ───
+fn _build_report(seed: string, nexus_res: [string], anima_res: [string]) -> string {
+    let nt = to_int(nexus_res[0])
+    let n_ok = nexus_res[1] == "true"
+    let n_note = nexus_res[2]
+    let at = to_int(anima_res[0])
+    let a_ok = anima_res[1] == "true"
+    let a_status = anima_res[2]
+    let a_path = anima_res[3]
+    let agr = _agreement(n_ok, a_ok, nt, at)
+    let uni = _unified_total(nt, at, agr)
+    let mut sb: [string] = []
+    sb.push("{")
+    sb.push("\"stages\":[\"nexus\",\"anima\"],")
+    sb.push("\"seed\":\"")
+    sb.push(_jesc(seed))
+    sb.push("\",")
+    sb.push("\"nexus_result\":{")
+    sb.push("\"abs_total\":")
+    sb.push(to_string(nt))
+    sb.push(",\"ok\":")
+    sb.push(if n_ok { "true" } else { "false" })
+    sb.push(",\"note\":\"")
+    sb.push(_jesc(n_note))
+    sb.push("\"},")
+    sb.push("\"anima_result\":{")
+    sb.push("\"abs_total\":")
+    sb.push(to_string(at))
+    sb.push(",\"ok\":")
+    sb.push(if a_ok { "true" } else { "false" })
+    sb.push(",\"status\":\"")
+    sb.push(_jesc(a_status))
+    sb.push("\",\"path\":\"")
+    sb.push(_jesc(a_path))
+    sb.push("\"},")
+    sb.push("\"agreement\":\"")
+    sb.push(agr)
+    sb.push("\",")
+    sb.push("\"unified_abs_total\":")
+    sb.push(to_string(uni))
+    sb.push("}")
+    return sb.join("")
+}
+
+// ─── engines list 파싱 ("nexus,anima") ───
+fn _parse_engines(s: string) -> [string] {
+    if s.len() == 0 { return ["nexus", "anima"] }
+    let parts = s.split(",")
+    let mut out: [string] = []
+    let mut i: i64 = 0
+    while i < len(parts) {
+        let p = parts[i].trim().to_lower()
+        if p.len() > 0 { out.push(p) }
+        i = i + 1
+    }
+    if len(out) == 0 { return ["nexus", "anima"] }
+    return out
+}
+
+fn _has(list: [string], needle: string) -> bool {
+    let mut i: i64 = 0
+    while i < len(list) {
+        if list[i] == needle { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// ─── 외부 entry (run.hexa cmd_chain 에서 호출) ───
+// 반환: rc (0=ok, 2=anima_missing, 3=invalid)
+fn run_chain(seed: string, engines_csv: string, report_path: string) -> i64 {
+    let seed_t = seed.trim()
+    if seed_t.len() == 0 {
+        eprintln("NEXUS_CROSS_CHAIN {\"status\":\"invalid\",\"reason\":\"empty_seed\"}")
+        return 3
+    }
+    let engines = _parse_engines(engines_csv)
+    // nexus 는 항상 포함 — 없으면 보정.
+    if !_has(engines, "nexus") {
+        eprintln("NEXUS_CROSS_CHAIN {\"status\":\"invalid\",\"reason\":\"nexus_missing_in_engines\"}")
+        return 3
+    }
+    let want_anima = _has(engines, "anima")
+
+    // Stage 1: nexus drill result 수집 (sentinel 기반).
+    let nexus_res = _collect_nexus_result()
+
+    // Stage 2: anima discovery + consume (shim).
+    let mut anima_res: [string] = ["0", "false", "skipped", ""]
+    if want_anima {
+        let loc = _anima_locate()
+        let anima_root = loc[0]
+        let anima_entry = loc[1]
+        if anima_entry.len() == 0 {
+            let guidance = "install anima at $HOME/core/anima or $HOME/Dev/anima or $HOME/.hx/packages/anima (entry: run.hexa|launch.hexa|start.hexa)"
+            eprintln("NEXUS_CROSS_CHAIN {\"status\":\"anima_missing\",\"guidance\":\"" + _jesc(guidance) + "\"}")
+            // graceful exit with non-zero — report 은 생략 (caller 가 stderr 해석)
+            return 2
+        }
+        let nt_i = to_int(nexus_res[0])
+        anima_res = _consume_with_anima(nt_i, anima_entry)
+    }
+
+    // Stage 3: report 생성 + 출력.
+    let report = _build_report(seed_t, nexus_res, anima_res)
+    if report_path.len() > 0 {
+        write_file(report_path, report + "\n")
+        eprintln("NEXUS_CROSS_CHAIN {\"status\":\"ok\",\"report\":\"" + _jesc(report_path) + "\"}")
+    } else {
+        println(report)
+    }
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CLI dispatch (standalone 실행 — hexa cli/scripts/cross_chain.hexa run ...)
+// ═══════════════════════════════════════════════════════════
+fn _arg_value(a: [string], flag: string, dflt: string) -> string {
+    let n = len(a)
+    let mut i: i64 = 0
+    while i < n {
+        if a[i] == flag {
+            if i + 1 < n { return a[i + 1] }
+        }
+        i = i + 1
+    }
+    return dflt
+}
+
+let _a = args()
+let mut _sub = "help"
+if len(_a) > 2 { _sub = _a[2] }
+
+if _sub == "run" {
+    let seed = _arg_value(_a, "--seed", "")
+    let engines = _arg_value(_a, "--engines", "nexus,anima")
+    let report_path = _arg_value(_a, "--report", "")
+    let rc = run_chain(seed, engines, report_path)
+    exit(rc)  // @allow-silent-exit
+} else if _sub == "discover" {
+    // diagnostics: anima path 만 출력.
+    let loc = _anima_locate()
+    println("{\"root\":\"" + _jesc(loc[0]) + "\",\"entry\":\"" + _jesc(loc[1]) + "\"}")
+    exit(0)  // @allow-silent-exit
+} else {
+    println("cross_chain.hexa — nexus→anima cross-engine drill chain")
+    println("usage:")
+    println("  hexa cli/scripts/cross_chain.hexa run --seed <seed> [--engines nexus,anima] [--report <path>]")
+    println("  hexa cli/scripts/cross_chain.hexa discover")
+    exit(0)
+}
