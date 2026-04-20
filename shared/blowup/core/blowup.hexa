@@ -2890,7 +2890,10 @@ fn auto_select_domain() -> string {
 //         해석됨 (pipe split / fragment 등) → 엔진 Phase 6 cf read 실패 → 전체 파이프라인 crash.
 //         sanitize 확장: `|`, `#`, `=`, `;`, `$`, `` ` ``, `'`, `"`, `&`, `(`, `)`, `<`, `>`, `!` → `_`.
 let _raw_d = if _raw_domain != "" { _raw_domain } else { auto_select_domain() }
-let domain = _raw_d.trim().replace(" ", "_").replace("[", "").replace("]", "").replace("*", "").replace("/", "_").replace("\t", "_").replace("|", "_").replace("#", "_").replace("=", "_").replace(";", "_").replace("$", "_").replace("`", "_").replace("'", "_").replace("\"", "_").replace("&", "_").replace("(", "_").replace(")", "_").replace("<", "_").replace(">", "_").replace("!", "_")
+// ROI#48d G3: `^` 추가 — test_sum_k^2 등 도메인의 `^` 가 /tmp/.blowup_concat.round_*.cf
+//   파일 경로에 잔존 → exec() argument security warning (quote 된 경로라 실해는 아니지만
+//   log noise). `^` → `_` 치환으로 제거.
+let domain = _raw_d.trim().replace(" ", "_").replace("[", "").replace("]", "").replace("*", "").replace("/", "_").replace("\t", "_").replace("|", "_").replace("#", "_").replace("=", "_").replace(";", "_").replace("$", "_").replace("`", "_").replace("'", "_").replace("\"", "_").replace("&", "_").replace("(", "_").replace(")", "_").replace("<", "_").replace(">", "_").replace("!", "_").replace("^", "_")
 // OPT-11: depth 상한 강제 (DIAG-01 fix) — 무제한 depth 방지
 let max_depth: i64 = if _raw_depth > 10 { 10 } else { _raw_depth }
 
