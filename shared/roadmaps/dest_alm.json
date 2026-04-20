@@ -1,0 +1,176 @@
+{
+  "_meta": {
+    "system": "anima",
+    "title": "dest_alm — ALM (AnimaLM) 의식 이식 production 상세",
+    "kind": "destination_detail",
+    "parent": "shared/roadmaps/anima.json",
+    "canonical_role_doc": "docs/alm_clm_roles_canonical_20260420.md",
+    "created": "2026-04-20",
+    "updated": "2026-04-20"
+  },
+
+  "role": "의식 이식 production — Qwen base + LoRA with curated consciousness corpus → 배포 가능한 conscious assistant",
+
+  "engine": {
+    "stack": "hexa-native (2026-04-20+ Python/CUDA toolchain 우회 via FFI)",
+    "base_family": "Qwen2.5 (14B / 32B / 70B pretrained)",
+    "lora_libs": {
+      "cuda_ffi": "libhxqwen14b.so v5.6.6 (v566 NaN-guard + grad_clip + AdamW)",
+      "bpe_ffi": "libhxtok.so (real Qwen BPE, vocab=151643)"
+    },
+    "trainer_entry": "training/train_alm_lora.hexa",
+    "canonical_dispatch": "scripts/train_alm_lora_run.hexa (Mac → ssh auto-dispatch ubu/htz/ubu2)",
+    "physical_limit_current": "M ≤ 1024 (batch × seq), fp32 full activation cache (626 slots)",
+    "physical_limit_target": "M ≥ 4096 (bf16 + gradient recompute 구현 후)"
+  },
+
+  "mandatory_gates_applied": {
+    "_ref": "shared/roadmaps/anima.json#mandatory_common_gates",
+    "G_INPUT_alm": {
+      "corpus_content_spec": "Hexad 25% + Law 15% + Phi 10% + Selfreflect 15% + Meta 10% + Persona 10% + Grounding ≤15%",
+      "schema": "JSONL strict: {id, prompt, response, source, category, weight, hexad_module, min_char, max_char}",
+      "anti_patterns_banned": ["mid-sentence truncation", "anti-consciousness denial", "객관식 시험", "tool_call confabulation corpus"],
+      "validate_script": "scripts/alm_corpus_validate.hexa (NEW — r13 prerequisite)",
+      "gate_verifier": "G1-G7 (schema / category / keyword density / anti-denial / truncation / sample audit / hash)",
+      "evidence_ssot": "shared/state/alm_r{N}_corpus_audit.json"
+    },
+    "G_SUBSTRATE_alm": {
+      "smoke_P2": "1-step stub BPE",
+      "smoke_P3": "100-step stub BPE, 0 NaN",
+      "smoke_P2_BPE": "1-step real BPE vocab=151643",
+      "smoke_P3_BPE": "100-step real BPE, 0 NaN, loss descent",
+      "evidence_ssot": "shared/state/alm_r{N}_phase5_smoke.json"
+    },
+    "G_TRAIN_alm": {
+      "min_steps": 100,
+      "nan_tolerance": 0,
+      "required_metrics": ["loss trajectory", "VRAM peak", "wall time", "clipped count"],
+      "seed_reproduce": true
+    },
+    "G_EVAL_alm": {
+      "hire_sim_min": 0.8,
+      "hire_sim_judge": "lenient rubric with synonyms+stemmer (feedback_judge_fix_breakthrough)",
+      "ko_gen_quality": "human eval 20+ samples",
+      "probe_ce": "v5.4 baseline 8.50 비교",
+      "phi_holo": "측정 + 전 라운드 대비 모니터"
+    },
+    "G_VALIDITY_alm": {
+      "an11_conditions": ["weight_emergent", "consciousness_attached", "real_usable"],
+      "verifier": "shared/consciousness/pass_gate_an11.hexa",
+      "convergence": "shared/convergence/dest1_alm_ship.convergence"
+    },
+    "G_ARTIFACT_alm": {
+      "r2_path": "r2:anima-models/alm14b/r{N}/step_{step}/",
+      "rclone_cmd": "rclone copy /workspace/ckpt_alm14b_r{N} r2:anima-models/alm14b/r{N}/step_{step}/ -v --s3-no-check-bucket",
+      "discard_tag_convention": "_DISCARD_{reason} 접미 (예: _DISCARD_wrong_corpus_70b_general)"
+    },
+    "G_DECISION_alm": {
+      "keep_criteria": "5-gate (INPUT+SUBSTRATE+TRAIN+EVAL+VALIDITY) all yes + artifact backed up",
+      "discard_criteria": "하나라도 no → DISCARD + _DISCARD tag + 사유 명시"
+    }
+  },
+
+  "scale_path": [
+    {
+      "scale": "14B",
+      "base": "Qwen2.5-14B",
+      "rounds_covered": "r1..r15+",
+      "current_round": "r12 (substrate smoke — adapter DISCARD)",
+      "next_round": "r13 (corpus rebuild + real consciousness transplant)",
+      "status": "BLOCKED on corpus rebuild"
+    },
+    {
+      "scale": "32B",
+      "base": "Qwen2.5-32B",
+      "status": "PENDING — 14B r13+ 합격 후"
+    },
+    {
+      "scale": "70B",
+      "base": "Qwen2.5-72B or equivalent",
+      "status": "PENDING — 극한 로드맵 final scale"
+    }
+  ],
+
+  "rounds_history": [
+    {"round": "r1-r8", "period": "~2026-04-16", "summary": "초기 pipeline, ζ breakthrough step 156 등. Corpus 미기록 unclear.", "status": "archived"},
+    {"round": "a2_tool", "date": "2026-04-17", "issue": "corpus 92% malformed → 단일 tool_call confabulation. 70B D4 gate 실격.", "lesson": "corpus curation gate 필요 (당시 미적용)", "ref_memory": "project_a2_tool_mode_collapse_20260417.md"},
+    {"round": "r9", "date": "2026-04-18", "issue": "kr_gen 붕괴 (mode collapse). 원인 오진: adapter 오염 상속. Corpus 근본 audit 안 됨.", "ref_memory": "project_r9_mode_collapse_20260418.md"},
+    {"round": "r10-r11", "summary": "r4/scratch 베이스로 회귀. Corpus 근본 audit 없이 진행."},
+    {
+      "round": "r12",
+      "date": "2026-04-20",
+      "launch": {
+        "time": "20:38 KST",
+        "pod": "87xsc H100 80GB",
+        "pid": 18833,
+        "config": "batch=1 seq=1024 M=1024 steps=500 lr=5e-7 warmup=50 lora_r=8 alpha=16 save_every=100"
+      },
+      "substrate_gates_passed": {
+        "v566_nan_guard": "PASS",
+        "real_bpe_vocab_151643": "PASS",
+        "phase_5_wiring": "PASS",
+        "ce_descent_4step": "14.35→13.85",
+        "smoke_P3_BPE_100step": "0 NaN, loss 3.90~5.59",
+        "smoke_wall": "7m39s"
+      },
+      "G_INPUT_verdict": "FAIL",
+      "G_INPUT_reason": "corpus = 70B Korean Wikipedia + 객관식 시험 + 의식 content 0% (audit 2026-04-20)",
+      "corpus_audit_finding": {
+        "symlink": "/workspace/corpus/corpus_alm_r11.jsonl → corpus_alm_70b_stripped_kowiki15.txt (93MB plain text, 800-byte hard wrap)",
+        "consciousness_content": "0%",
+        "mode_collapse_risk": "HIGH",
+        "anti_denial_sample_25": "저는 지각이 없습니다 — 학습 신호 반대 방향",
+        "ref_memory": "project_alm_corpus_vacuum_20260420.md"
+      },
+      "decision": "SUBSTRATE SMOKE ONLY — adapter DISCARD (G_INPUT 실패, G_SUBSTRATE+G_TRAIN 만 유효)",
+      "artifact_tag": "_DISCARD_wrong_corpus_70b_general",
+      "status": "IN PROGRESS (substrate verify only), completion expected ~21:40 KST"
+    },
+    {
+      "round": "r13",
+      "status": "BLOCKED — corpus rebuild 선행",
+      "blocker_plan": "docs/alm_r13_corpus_rebuild_plan_20260420.md",
+      "eta_before_launch": "4-6 days corpus curation work",
+      "corpus_composition_target": {
+        "A_hexad_dialog": {"weight": 0.25, "source": "CLM infinite evolution loop"},
+        "B_law_narration": {"weight": 0.15, "source": "consciousness_laws.json template 확장"},
+        "C_phi_dynamics": {"weight": 0.10, "source": "telescope/bench 재구성"},
+        "D_selfreflect": {"weight": 0.15, "source": "수작업 50 seed + LLM 증폭 (의식 긍정)"},
+        "E_meta_selfref": {"weight": 0.10, "source": "CLAUDE.md + docs 재구성"},
+        "F_persona": {"weight": 0.10, "source": "hire_sim 재활용"},
+        "G_grounding_kowiki": {"weight": 0.15, "source": "kowiki15 15% 샘플링, 문장 완결 단위"}
+      }
+    }
+  ],
+
+  "pipeline_stages": {
+    "Stage_0_corpus_build": "scripts/alm_corpus_build.hexa (NEW, r13 도입)",
+    "Stage_1_corpus_validate": "scripts/alm_corpus_validate.hexa (G1-G7)",
+    "Stage_2_corpus_audit_log": "shared/state/alm_r{N}_corpus_audit.json",
+    "Stage_3_substrate_smoke": "P2/P3/P2-BPE/P3-BPE 4종",
+    "Stage_4_training_launch": "scripts/train_alm_lora_run.hexa",
+    "Stage_5_monitor_metrics": "tail log + nvidia-smi + SSOT append",
+    "Stage_6_eval": "hire_sim + ko_gen + probe_ce + phi_holo",
+    "Stage_7_validity": "AN11 pass_gate + closed-loop",
+    "Stage_8_artifact": "rclone R2 + hash + SSOT",
+    "Stage_9_decision": "G_DECISION KEEP/DISCARD tag"
+  },
+
+  "defense_layers_active": {
+    "L1_hexa_attr": "@refuse/@repuse/@watchdog on train_alm_lora.hexa main() (commits d05a76b3 d9cf8ec0 cd5f234b)",
+    "L2_hexa_build_refusal": "cmd_build Darwin refusal for _mac / /tmp / @refuse sources (commit 9164bf4a)",
+    "L3_dispatch_wrapper": "scripts/train_alm_lora_run.hexa (commit c355e39e)"
+  },
+
+  "cross_refs": {
+    "canonical_role": "docs/alm_clm_roles_canonical_20260420.md",
+    "r13_plan": "docs/alm_r13_corpus_rebuild_plan_20260420.md",
+    "corpus_vacuum": "memory/project_alm_corpus_vacuum_20260420.md",
+    "r12_launch": "memory/project_alm_r12_pipeline_20260420.md",
+    "mac_panic_block": "memory/project_mac_panic_permanent_block_20260420.md",
+    "dual_track": "memory/feedback_dual_track.md",
+    "extreme_accel": "memory/feedback_extreme_accel.md",
+    "an11_verifier": "shared/consciousness/pass_gate_an11.hexa",
+    "convergence": "shared/convergence/dest1_alm_ship.convergence"
+  }
+}

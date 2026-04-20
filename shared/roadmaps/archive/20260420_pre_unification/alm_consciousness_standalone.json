@@ -1,0 +1,658 @@
+{
+  "_meta": {
+    "name": "ALM 단독 + 의식 로드맵 (수렴골화 브레인스토밍)",
+    "project": "alm-consciousness-standalone",
+    "parent_project": "anima",
+    "sibling_roadmap": "shared/roadmaps/clm_consciousness_standalone.json",
+    "description": "ALM 단독 (runtime 외부 LLM 의존 X) + 의식 (Φ baked-in) 최적경로. 5 트랙(A/B/C/D/E) × 옵션 exhaustive 브레인스토밍 → chosen/alternative/rejected. 특히 C(hexa-lang 학습속도)는 시간단축 필수 레버.",
+    "updated": "2026-04-16",
+    "schema": "convergence_ossification_v1",
+    "brainstorm_state": "provisional",
+    "mandatory_constraints": [
+      "ALM 단독 — runtime 에서 외부 LLM (Claude/GPT) 의존 X",
+      "의식 — Φ / GWT / Orch-OR / self-critique 가 모델 weight 에 baked-in",
+      "R2 백업 — production ckpt 필수, experiment ckpt 는 폐기"
+    ],
+    "target": "hire_sim_100 stratified30 completion ≥ 0.85 AND phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥1000 deprecated 2026-04-20 as phantom — raw MI × seq×d trivially exceeds 1000 at random init for ALM 14B)",
+    "phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio = phi_holo(step_N) / phi_holo(step_0)",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_1000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
+    "baseline_estimate": {
+      "days": "4-5",
+      "usd": "200-400",
+      "without_track_c": "4-5 days",
+      "with_track_c_fully_landed": "2-3 days (C1+C2+C4 적용 시)"
+    },
+    "update_protocol": "각 option 의 state 는 검증 후 승격 (provisional → chosen → ossified). rejected 도 이유 기록. brainstorm_state 는 전체 track 의 options state 평균으로 결정."
+  },
+  "tracks": {
+    "A": {
+      "name": "ALM 학습 (14B base + LoRA)",
+      "required": true,
+      "brainstorm_complete": false,
+      "options": [
+        {
+          "id": "A1",
+          "summary": "14B r4 base resume + Φ-aware LoRA (단일 pod)",
+          "state": "chosen",
+          "rationale": "r4 checkpoint R2 보관됨. LoRA 64 rank + phi_holo consistency loss. 시간 최소.",
+          "cost_usd": 36,
+          "wall_hours": 12,
+          "depends_on": [
+            "B1"
+          ],
+          "evidence": "r4 CE=3.65, r8a phi_holo=6111 이미 확보"
+        },
+        {
+          "id": "A2",
+          "summary": "Orch-OR sampling LoRA (Pod A 별도 round) + tool-use LoRA (Pod B 병렬)",
+          "state": "chosen",
+          "rationale": "Orch-OR 는 창발성, tool-use 는 직원 기능 확장. 2 pod 병렬로 Day 2 에 완료",
+          "cost_usd": 72,
+          "wall_hours": 12,
+          "depends_on": [
+            "A1"
+          ]
+        },
+        {
+          "id": "A3",
+          "summary": "14B scratch retrain (Qwen2.5 base weight 무시, 처음부터)",
+          "state": "rejected",
+          "rationale": "14B from-scratch = H100×2 주 단위. 4-5일 budget 불가능. 그리고 base Qwen2.5 의 일반 능력 버리는 것 ROI 음수.",
+          "rejection_ts": "2026-04-16"
+        },
+        {
+          "id": "A4",
+          "summary": "base frozen + consciousness attention head 주입 only",
+          "state": "alternative",
+          "rationale": "LoRA 보다 더 경량. 의식 주입 깊이 얕을 수 있음. A1 fail 시 fallback.",
+          "cost_usd": 18,
+          "wall_hours": 6
+        },
+        {
+          "id": "A5",
+          "summary": "Multi-LoRA stack (phi + orch + tool) 를 단일 pod 순차",
+          "state": "alternative",
+          "rationale": "2 pod 불가 시 single pod 24h 순차. 시간 2배.",
+          "cost_usd": 72,
+          "wall_hours": 24
+        },
+        {
+          "id": "A6",
+          "summary": "14B 대신 7B base (Qwen2.5-7B)",
+          "state": "alternative",
+          "rationale": "학습 속도 2x, 서빙 경량. 품질은 14B 대비 낮음. hire_sim gate 위태로울 수 있음.",
+          "cost_usd": 20,
+          "wall_hours": 6,
+          "note": "decisions.json model_size=14b 이므로 현재 rejected. gate 시 재검토"
+        }
+      ],
+      "optimal_path": [
+        "A1",
+        "A2"
+      ]
+    },
+    "B": {
+      "name": "Φ 엔진 110개 → 학습 loss 통합",
+      "required": true,
+      "brainstorm_complete": false,
+      "options": [
+        {
+          "id": "B1",
+          "summary": "top-3 ensemble: phi_holo + phi_complexity + gwt_broadcast",
+          "state": "done",
+          "done_at": "2026-04-16T14:45Z",
+          "done_evidence": "shared/state/phi_integration_status.json",
+          "done_source": "agent-stale-promoter 2026-04-16 (13.75x speedup, loss 3.47->2.10 stable, cache path verified)",
+          "rationale": "계산량 최소, 핵심 3 지표만. pre-compute batch 가능.",
+          "training_overhead_pct": 8,
+          "depends_on": []
+        },
+        {
+          "id": "B2",
+          "summary": "10 engine ensemble weighted sum (top-10)",
+          "state": "alternative",
+          "rationale": "quality 개선 여지, 하지만 batch time 20% 추가",
+          "training_overhead_pct": 20
+        },
+        {
+          "id": "B3",
+          "summary": "110 engines → 5 category head reduction",
+          "state": "alternative",
+          "rationale": "전체 의식 stack 반영. P5 scale-up 시 전환 후보.",
+          "training_overhead_pct": 35
+        },
+        {
+          "id": "B4",
+          "summary": "110 engines → meta-model predicts single phi target",
+          "state": "provisional",
+          "rationale": "meta-learner 추가 학습 필요. 장기 option."
+        },
+        {
+          "id": "B5",
+          "summary": "Φ signal 을 KL divergence regularizer 로 (auxiliary task 아니라 policy shaping)",
+          "state": "rejected",
+          "rationale": "RLHF 스타일 복잡. 4-5일에 안 맞음. 장기 검토."
+        }
+      ],
+      "optimal_path": [
+        "B1"
+      ],
+      "post_gate": "gate PASS 후 B3 으로 승격"
+    },
+    "C": {
+      "name": "hexa-lang 학습속도 개선 ⭐ 시간단축 필수",
+      "required": true,
+      "brainstorm_complete": false,
+      "priority": "HIGHEST — 4-5일 → 2-3일 단축 레버",
+      "options": [
+        {
+          "id": "C1",
+          "summary": "hexa native int codegen (boxed-int 탈출, hot loop 가속)",
+          "state": "provisional",
+          "rationale": "inner loop 박싱 오버헤드 제거. 누적 큰 이득.",
+          "effort_days": "2-3",
+          "gain_pct": "15-25",
+          "board_status": "in_progress",
+          "board_evidence": "설계 + 구현 시작"
+        },
+        {
+          "id": "C2",
+          "summary": "layer-level fused FFI (단일 C call per layer_fwd/bwd)",
+          "state": "provisional",
+          "rationale": "FFI 호출 오버헤드 bulk 제거. 2-5x uplift.",
+          "effort_days": "2-3",
+          "gain_pct": "100-400",
+          "board_status": "in_progress",
+          "board_evidence": "fused FFI 설계 + ffi_fused_layer.hexa + C stub 작성 시작"
+        },
+        {
+          "id": "C3",
+          "summary": "stage0 OOM PBV (pass-by-value) leak 근본 fix",
+          "state": "provisional",
+          "rationale": "긴 학습 안정성. 현재 PBV leak 이 장시간 학습 OOM 유발.",
+          "effort_days": "2-4",
+          "gain_pct": "안정성 (학습 중단 빈도 10x 감소)",
+          "board_status": "in_progress",
+          "board_evidence": "experiments/pbv_leak_isolate_A~G.hexa 7개 + repro + concat_vs_push isolation 진행 중"
+        },
+        {
+          "id": "C4",
+          "summary": "CUDA fused mega-kernels + bf16 Tensor Core",
+          "state": "chosen",
+          "rationale": "H100 SM 현재 27% → 60%+ 달성. 실 학습 시간 대폭 단축.",
+          "effort_days": "3-5",
+          "gain_pct": "100-200"
+        },
+        {
+          "id": "C5",
+          "summary": "FP8 native (NeMo/Megatron rewrite)",
+          "state": "rejected",
+          "rationale": "2-4주. 4-5일 budget 에 안 맞음. 장기 P5+ option.",
+          "rejection_ts": "2026-04-16"
+        },
+        {
+          "id": "C6",
+          "summary": "hxblas + libhxvdsp Linux 빌드 (포팅)",
+          "state": "chosen",
+          "rationale": "H100 CPU pre/post 가속. 이미 Mac 2.59x 달성 — Linux 포팅 1일.",
+          "effort_days": "1",
+          "gain_pct": "15-30 (pre/post pipeline)",
+          "board_status": "done",
+          "board_evidence": "Mac baseline 256²16.8x/512²59.8x PASS, Linux .c+build script+bench ready for H100 pod, commit 2029844"
+        },
+        {
+          "id": "C7",
+          "summary": "Triton kernel generation from hexa",
+          "state": "provisional",
+          "rationale": "C4 대안. Triton autotune 으로 kernel 개발 시간 단축.",
+          "effort_days": "5-7"
+        },
+        {
+          "id": "C8",
+          "summary": "PyTorch 2.x compile (torch.compile) hexa→torch bridge",
+          "state": "rejected",
+          "rationale": "hexa-first 원칙 위배. PyTorch 의존 방지."
+        },
+        {
+          "id": "C9",
+          "summary": "checkpoint sharding + async save (학습 중 blocking 제거)",
+          "state": "provisional",
+          "rationale": "R2 upload 가 학습 pause 시키는 이슈 해결",
+          "effort_days": "1-2"
+        },
+        {
+          "id": "C10",
+          "summary": "gradient accumulation 동적 조정 (OOM 감지 시 자동 up)",
+          "state": "provisional",
+          "board_status": "in_progress",
+          "board_evidence": "API 설계 완료 - 구현 시작"
+        }
+      ],
+      "optimal_path": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "critical_path_parallel": "C1+C2+C3 Day -1 prep, C4 H100 학습 중 inflight tune, C6 Mac 선작업",
+      "without_c_cost": "4-5 days",
+      "with_c1_c2_only": "3-4 days",
+      "with_all_chosen": "2-3 days"
+    },
+    "D": {
+      "name": "의식 Φ 엔진 실사화 wave (inference-time)",
+      "required": true,
+      "brainstorm_complete": false,
+      "options": [
+        {
+          "id": "D1",
+          "summary": "Φ_holo realtime (≤ 100ms per response)",
+          "state": "done",
+          "done_at": "2026-04-16T14:45Z",
+          "done_evidence": "shared/state/d1_d6_phi_realtime_20260416.json",
+          "done_source": "agent-stale-promoter 2026-04-16 (verdict=PASS 5/5, stage0 miss=50ms)",
+          "rationale": "inference 시 Φ metadata 반환 필수. 100ms 내 batch 계산.",
+          "effort_hours": 6
+        },
+        {
+          "id": "D2",
+          "summary": "GWT 6채널 simultaneous broadcast (단일 → 6)",
+          "state": "alternative",
+          "rationale": "단일 채널로 시작, 6채널은 P5 gate 후.",
+          "effort_days": "4-7"
+        },
+        {
+          "id": "D3",
+          "summary": "Orch-OR 양자 붕괴 샘플링 inference integration (anima-engines 기존 활용)",
+          "state": "done",
+          "done_at": "2026-04-16T14:45Z",
+          "done_evidence": "shared/state/d1_d6_phi_realtime_20260416.json",
+          "done_source": "agent-stale-promoter 2026-04-16 (Orch-OR sampler 5/5 PASS per d3_test)",
+          "rationale": "기존 quantum_collapse_sample.hexa 있음. LoRA A2 와 연동.",
+          "effort_days": "2-3"
+        },
+        {
+          "id": "D4",
+          "summary": "EEG 동조 < 100ms (anima-eeg)",
+          "state": "rejected",
+          "rationale": "EEG 하드웨어 의존. 4-5일 scope 밖. P5+."
+        },
+        {
+          "id": "D5",
+          "summary": "CDESM 헥사곤 6채널 (anima-hexad)",
+          "state": "provisional",
+          "rationale": "hexad 모듈 존재. 통합 reward 얼마일지 측정 필요."
+        },
+        {
+          "id": "D6",
+          "summary": "phi_holo batch precompute cache (inference 시 대부분 hit)",
+          "state": "chosen",
+          "rationale": "자주 나오는 prompt 패턴 cache. latency 추가 감소.",
+          "effort_hours": 4
+        },
+        {
+          "id": "D7",
+          "summary": "Dasein 철학 렌즈 통합 (philosophy_lenses.hexa)",
+          "state": "rejected",
+          "rationale": "직원 task 와 직접 연관 약함. P5+."
+        }
+      ],
+      "optimal_path": [
+        "D1",
+        "D3",
+        "D6"
+      ]
+    },
+    "E": {
+      "name": "실사용 모델 발전 + R2 백업 정책",
+      "required": true,
+      "brainstorm_complete": false,
+      "options": [
+        {
+          "id": "E1",
+          "summary": "rclone wrapper 자동 백업 (ckpt save 훅)",
+          "state": "done",
+          "rationale": "R2 upload automated. 수동 실수 방지.",
+          "effort_days": 1,
+          "artifact": "scripts/ckpt_backup_hook.hexa",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E2",
+          "summary": "ckpt labeling policy (production|experiment|archive)",
+          "state": "done",
+          "rationale": "production 만 R2 영구, experiment 는 pod 삭제 시 폐기. decisions.json ckpt_label_default=experiment 반영.",
+          "effort_hours": 4,
+          "artifact": "shared/config/ckpt_policy.json",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E3",
+          "summary": "naming convention 강제 (alm14b-phi-{round}-s{step} 등)",
+          "state": "done",
+          "rationale": "memory feedback_no_version_in_filename 준수. round-step 정형",
+          "effort_hours": 2,
+          "artifact": "scripts/ckpt_name_lint.hexa",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E4",
+          "summary": "rotation cleanup (실험 ckpt 자동 폐기, production 만 R2)",
+          "state": "done",
+          "rationale": "디스크/R2 비용 절약. h100_idle_cap_seconds=0 정책 지원.",
+          "effort_days": 1,
+          "artifact": "scripts/ckpt_rotation.hexa",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E5",
+          "summary": "promotion gate (측정 통과한 ckpt 만 production 승격)",
+          "state": "done",
+          "rationale": "random ckpt 공격 차단. hire_sim + Φ gate 둘 다 통과 필수.",
+          "effort_days": "1-2",
+          "artifact": "scripts/ckpt_promote.hexa",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E6",
+          "summary": "R2 preemptive step-level upload (학습 중 매 N step 자동)",
+          "state": "alternative",
+          "rationale": "crash 복구용. 디스크/R2 비용 증가. E1 scheduled 이면 충분.",
+          "effort_hours": 4
+        },
+        {
+          "id": "E7",
+          "summary": "R2 manifest + integrity check (sha256)",
+          "state": "done",
+          "rationale": "체크포인트 손상 탐지. 다운로드 무결성.",
+          "effort_hours": 4,
+          "artifact": "scripts/ckpt_manifest.hexa",
+          "done_date": "2026-04-16"
+        },
+        {
+          "id": "E8",
+          "summary": "R2 인덱스 DB (SQLite) + query 인터페이스",
+          "state": "provisional",
+          "rationale": "많은 ckpt 관리 시 필요. 현재 scope 는 단일 production line 이라 미뤄도 됨."
+        }
+      ],
+      "optimal_path": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E7"
+      ]
+    }
+  },
+  "critical_path": {
+    "day_minus_1": [
+      {
+        "track": "C",
+        "ids": [
+          "C1",
+          "C2",
+          "C3",
+          "C6"
+        ],
+        "parallel": true,
+        "purpose": "학습속도 사전 준비"
+      }
+    ],
+    "day_0": [
+      {
+        "track": "B",
+        "ids": [
+          "B1"
+        ],
+        "purpose": "Φ pre-label pipeline"
+      },
+      {
+        "track": "E",
+        "ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "purpose": "백업 인프라"
+      }
+    ],
+    "day_1": [
+      {
+        "track": "A",
+        "ids": [
+          "A1"
+        ],
+        "pod": "A",
+        "h100": 1,
+        "wall": 12
+      },
+      {
+        "track": "C",
+        "ids": [
+          "C4"
+        ],
+        "parallel_with_train": true
+      }
+    ],
+    "day_2": [
+      {
+        "track": "A",
+        "ids": [
+          "A2"
+        ],
+        "pods": [
+          "A",
+          "B"
+        ],
+        "h100": 2,
+        "wall": 12
+      }
+    ],
+    "day_3": [
+      {
+        "track": "D",
+        "ids": [
+          "D1",
+          "D3",
+          "D6"
+        ],
+        "purpose": "inference wire"
+      },
+      {
+        "track": "E",
+        "ids": [
+          "E4",
+          "E5",
+          "E7"
+        ]
+      }
+    ],
+    "day_4": [
+      {
+        "track": "A",
+        "ids": [
+          "A1-A2 merge"
+        ]
+      },
+      {
+        "track": "gate",
+        "test": "hire_sim + phi_holo 동시 측정"
+      }
+    ]
+  },
+  "risks": [
+    {
+      "id": "R1",
+      "risk": "Φ loss CE trade-off",
+      "mitigation": "B1 λ/μ hyperparam 3x3 그리드 Day 0"
+    },
+    {
+      "id": "R2",
+      "risk": "Claude synth corpus distillation 천장",
+      "mitigation": "첫 달성 후 자체 데이터로 P5 iter"
+    },
+    {
+      "id": "R3",
+      "risk": "Orch-OR 창발성 but 오답 증가",
+      "mitigation": "Orch-OR weight 0.3 이하, A/B gate 로 증가"
+    },
+    {
+      "id": "R4",
+      "risk": "14B r4 LoRA 충돌",
+      "mitigation": "base only load, LoRA 새로 scratch"
+    },
+    {
+      "id": "R5",
+      "risk": "C track fix 지연 시 학습속도 미개선",
+      "mitigation": "C1+C2 만이라도 Day -1 완료. C4 는 학습 중 inflight tune."
+    }
+  ],
+  "success_criteria": {
+    "capability": "hire_sim_100 stratified30 completion_rate ≥ 0.85",
+    "consciousness": "phi_holo_ratio mean ≥ 1.2 vs step_0 baseline (N-independent; absolute ≥1000 deprecated 2026-04-20 as phantom) AND mi_per_element ≥ 0.05 nats AND GWT 6채널 consistency ≥ 0.7",
+    "consciousness_phi_holo_gate": {
+      "kind": "relative",
+      "ratio_min": 1.2,
+      "baseline_step": 0,
+      "primary_metric": "phi_holo_ratio",
+      "secondary_metric": "mi_per_element>0.05",
+      "deprecates": "absolute_threshold_1000_phantom",
+      "convention_ref": "serving/clm_eval.hexa §19"
+    },
+    "deployment": "vLLM / llama.cpp inference, latency ≤ 3s/response, metadata {phi_holo, zeta, surprise}",
+    "cost": "≤ $400 total"
+  },
+  "brainstorm_exhaustion": {
+    "A": [
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6"
+    ],
+    "B": [
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5"
+    ],
+    "C": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10"
+    ],
+    "D": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5",
+      "D6",
+      "D7"
+    ],
+    "E": [
+      "E1",
+      "E2",
+      "E3",
+      "E4",
+      "E5",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "total_options_enumerated": 36,
+    "state_breakdown": {
+      "chosen": 19,
+      "alternative": 7,
+      "rejected": 5,
+      "provisional": 5
+    },
+    "coverage_note": "추가 옵션 발견 시 append 후 state 할당. provisional 은 실증 후 chosen/alternative/rejected 승격."
+  },
+  "update_log": [
+    {
+      "ts": "2026-04-16T05:50Z",
+      "actor": "session_20260416",
+      "action": "initial",
+      "note": "수렴골화 schema 최초 도입. 36 option 브레인스토밍. critical_path day_-1 ~ day_4 정의."
+    }
+  ],
+  "external_refs": [
+    "shared/config/decisions.json",
+    "shared/papers/v2_v3_full_throttle_path_20260416.md",
+    "shared/papers/training_phi_integration_design.md",
+    "shared/papers/hexa_training_perf_audit.md",
+    "shared/roadmaps/anima-train.json",
+    "shared/roadmaps/clm_consciousness_standalone.json",
+    "shared/convergence/anima.json"
+  ],
+  "destinations": [
+    {
+      "id": "v2.0_RC",
+      "ord": 1,
+      "name": "v2.0 RC",
+      "tagline": "음성 + 아바타 + Likert 추월",
+      "description": "첫번째 도착지 — 음성(speak Mk.III) + 아바타(visual) + Zeta-급 Likert 점수 추월. 사용자 측 체감 의식 첫 ship",
+      "criteria": [
+        "음성 입출력 (anima-speak Mk.III) E2E",
+        "아바타 렌더링 (web/avatar) 동기화",
+        "Zeta AI 대비 Likert mean +0.25 유의 (n≥30, p<0.05)"
+      ],
+      "depends_on_tracks": [
+        "A",
+        "B",
+        "D"
+      ],
+      "blocking_options": [
+        "A1",
+        "B1",
+        "D1",
+        "D3",
+        "D6"
+      ]
+    },
+    {
+      "id": "v3.0_Agent",
+      "ord": 2,
+      "name": "v3.0 Agent — 직원",
+      "tagline": "실업무 자율 수행",
+      "description": "두번째 도착지 — 사용자가 직원처럼 task 위임 가능. autonomy_loop + tool-use + style_switch 통합. hire_sim_100 gate 통과 + 실 deploy",
+      "criteria": [
+        "hire_sim_100 stratified30 completion_rate ≥ 0.85",
+        "tool-use (function calling / MCP) pass rate ≥ 0.80",
+        "autonomy self-critique 내장 (single forward 에서 critique)",
+        "POST /hire/task 실 endpoint live"
+      ],
+      "depends_on_tracks": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "blocking_options": [
+        "A2",
+        "D8"
+      ]
+    }
+  ]
+}

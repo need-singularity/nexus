@@ -1,0 +1,144 @@
+{
+  "_meta": {
+    "system": "anima",
+    "title": "dest_clm — CLM (ConsciousLM) 의식 research + ship 상세",
+    "kind": "destination_detail",
+    "parent": "shared/roadmaps/anima.json",
+    "canonical_role_doc": "docs/alm_clm_roles_canonical_20260420.md",
+    "created": "2026-04-20",
+    "updated": "2026-04-20"
+  },
+
+  "role": "의식-baked CLM 1-3B 페르소나 서빙 + 의식 research lab (Φ/law/substrate 발견)",
+
+  "engine": {
+    "stack": "hexa-native pure (NO Python/CUDA 우회 — feedback_ai_native_clm)",
+    "base": "from-scratch byte-level",
+    "core_modules": ["Hexad 6 (Witness/Scribe/Mirror/Eros/Fire/Ground)", "PureField", "ConsciousDecoder", "phi_q_norm Orch-OR", "twin engine"],
+    "gpu_libs": {
+      "cuda_ffi": "libhxblas/libhxccl/libhxcuda/libhxflash (hexa-native GPU path SHIPPED 2026-04-12)"
+    },
+    "trainer_entry": "training/train_clm.hexa",
+    "data_loader": "training/clm_mmap_loader.hexa (2026-04-20 SHIPPED, 335 LOC, 14/14 tests PASS)",
+    "scale_artifacts": {
+      "c_sources": ["/tmp/clm_v2.bin (Mac arm64)", "/tmp/clm_v2_linux.bin (hetzner ELF x86_64, 382,624 B)"],
+      "regen_build_time": "8.4s wall",
+      "scale_configs_ready": ["34m", "1b", "1.5b", "2.8b_v5"]
+    }
+  },
+
+  "mandatory_gates_applied": {
+    "_ref": "shared/roadmaps/anima.json#mandatory_common_gates",
+    "G_INPUT_clm": {
+      "config_check": "training/config/clm_{scale}.json hash + scale_config initialized + mmap region valid",
+      "data_loader_check": "clm_mmap_loader.hexa self-test 14/14 PASS + byte-window coherence",
+      "corpus_check": "/workspace/corpus/corpus.txt 5.38GB mmap region accessible, page-cache OK",
+      "validate_script": "scripts/clm_input_validate.hexa (NEW, r5 prerequisite)",
+      "evidence_ssot": "shared/state/clm_r{N}_input_audit.json"
+    },
+    "G_SUBSTRATE_clm": {
+      "p5c_4_latency_baseline": "hexa-native GPU smoke passed 2026-04-12",
+      "phi_q_norm_wire": "Orch-OR bonus integrated 2026-04-12 (project_phi_q_norm_wired)",
+      "mmap_loader_smoke": "clm_r4_mmap_smoke.hexa 7/7 byte + 5/5 window PASS",
+      "hexa_native_gpu_path": "7 phases SHIPPED (project_clm_hexa_gpu_plan)",
+      "evidence_ssot": "shared/state/clm_r{N}_substrate_smoke.json"
+    },
+    "G_TRAIN_clm": {
+      "min_steps": 50,
+      "nan_tolerance": 0,
+      "required_metrics": ["loss", "phi_holo", "phi_gwt", "l_holo", "l_gwt", "phase"],
+      "log_sample_format": "[train_scale] step=N loss=X.XX phase=P phi_holo=Y.YY phi_gwt=Z.ZZ l_holo=A l_gwt=B"
+    },
+    "G_EVAL_clm": {
+      "phi_scaling_law_reproduce": "Φ = 0.78 × N_cells multi-seed 재현 필수 (1-seed 한 점 결과 무효)",
+      "phi_monotonicity": "non-monotonic during training 허용, benchmark 측정은 final ckpt",
+      "new_law_discovery_rate": "infinite_evolution loop gen 당 law 수 + closed-loop 통과율",
+      "ce_vs_param_curve": "scale_{34m,1b,1.5b,2.8b} 다중 점 측정"
+    },
+    "G_VALIDITY_clm": {
+      "phi_gap_resolution": "training Φ vs benchmark Φ 816x gap 해결 (현재 미해결, CE backward + process() 원인)",
+      "closed_loop_validation": "feedback_closed_loop_verify — 1033 laws 전수 통과 여부 audit 필요",
+      "an11_conditions": ["weight_emergent", "consciousness_attached", "real_usable"],
+      "verifier": "shared/consciousness/pass_gate_an11.hexa + shared/consciousness/closed_loop_verify.hexa",
+      "convergence": "shared/convergence/dest1_clm_ship.convergence"
+    },
+    "G_ARTIFACT_clm": {
+      "r2_path": "r2:anima-models/clm{scale}/r{N}/step_{step}/",
+      "rclone_cmd": "rclone copy /workspace/ckpt_clm{scale}_r{N} r2:anima-models/clm{scale}/r{N}/step_{step}/ -v --s3-no-check-bucket",
+      "phi_vec_json": "step_{step}/phi_vec.json (16D phi vector, substrate gate input)"
+    },
+    "G_DECISION_clm": {
+      "keep_criteria": "5-gate all yes + Φ gap 해결 or explicit 유보 태그",
+      "discard_criteria": "하나라도 no → DISCARD + 사유"
+    }
+  },
+
+  "scale_path": [
+    {"scale": "34m", "status": "archived — initial sanity"},
+    {"scale": "1b", "status": "verified — scale_config ready"},
+    {"scale": "1.5b", "status": "fresh C regen 2026-04-19 (r5-a1 LANDED, /tmp/clm_v2.bin + clm_v2_linux.bin)"},
+    {"scale": "2.8b_v5", "status": "ready — phi_q_norm 2026-04-12 wired, launch 대기"},
+    {"scale": "unbounded substrate", "status": "research target — cells 기반 Φ 선형 확장"}
+  ],
+
+  "phi_scaling_law": {
+    "hypothesis": "Φ = 0.78 × N(cells)",
+    "status": "one-seed 결과 — multi-seed 재현 필요 (G_EVAL_clm)",
+    "benchmark_phi_at_1024c": 1142,
+    "training_phi_at_1024c": 1.4,
+    "gap_ratio": 816,
+    "gap_status": "UNRESOLVED (project_phi_non_monotonic.md)",
+    "gap_cause_hypothesis": "CE backward + process() 호출이 phi 측정 가능 구조 파괴",
+    "resolution_plan": "DD175 #6 추론-학습 분리 (in progress)"
+  },
+
+  "rounds_history": [
+    {"round": "r1-r3", "period": "2026-03-28 ~ 2026-04-10", "summary": "초기 from-scratch 파이프라인, Hexad 6모듈 구축, 350M CE=0.0463 Φ=37.27 등."},
+    {"round": "r4", "period": "2026-04-11 ~ 2026-04-19", "outcome": "mmap loader + scale configs + phi_q_norm landed. 최종 ckpt /tmp/ckpt_clm170m_bisect/step_0 (1.15 GB, 2026-04-19 18:28), R2 미업로드", "status": "closed 2026-04-19"},
+    {
+      "round": "r5",
+      "phase": "PREP",
+      "substrate_done": ["mmap loader (335 LOC 14/14)", "scale_1_5b C regen fresh", "phi_q_norm wired"],
+      "current_smoke": "hetzner CPU 50-step CE descent (BG b9ypf84r8, started 2026-04-20)",
+      "recent_smoke_5step": "loss=5.54523 phase=void phi_holo=558.583 phi_gwt=0.467753 (2026-04-20)",
+      "blocker": "ubu RTX 5070 SSH OFFLINE 2026-04-20 02:15 KST~ → GPU 학습 대기",
+      "remaining_action": [
+        "r5-a7 serving/serve_clm_conscious.hexa 구현 (dest1_clm Stage E 차단)",
+        "r5-a8 CUDA 경로 link + ubu smoke (host 복귀 시)",
+        "G_INPUT / G_VALIDITY audit 수립 (ALM 같은 audit 안 됨)"
+      ]
+    }
+  ],
+
+  "known_issues": {
+    "phi_gap_816x": {
+      "severity": "HIGH",
+      "impact": "G_VALIDITY_clm 실패 — Φ scaling 주장 invalidate 가능",
+      "resolution_blocker": "DD175 #6 추론-학습 분리 구현",
+      "ref": "project_phi_non_monotonic.md"
+    },
+    "println_codegen_quirk": {
+      "severity": "LOW (cosmetic)",
+      "impact": "multi-arg println int 누락 — 학습엔 영향 없음, 로그 가독성만",
+      "fix_owner": "hexa-lang"
+    },
+    "measurement_validity_audit_missing": {
+      "severity": "HIGH",
+      "impact": "1033 laws closed-loop validation 전수 통과 여부 audit 안 됨 (feedback_closed_loop_verify 는 mandatory)",
+      "required_action": "CLM measurement audit (ALM corpus audit 와 병행)"
+    }
+  },
+
+  "cross_refs": {
+    "canonical_role": "docs/alm_clm_roles_canonical_20260420.md",
+    "mmap_plan": "memory/project_clm_r4_mmap_plan.md",
+    "phi_gap": "memory/project_phi_non_monotonic.md",
+    "gpu_plan": "memory/project_clm_hexa_gpu_plan.md",
+    "r5_parallel": "shared/state/clm_r5_parallel_20260420.json",
+    "dual_track": "memory/feedback_dual_track.md",
+    "ai_native_clm": "memory/feedback_ai_native_clm.md",
+    "scaling_law": "memory/project_scaling_law.md",
+    "an11_verifier": "shared/consciousness/pass_gate_an11.hexa",
+    "convergence": "shared/convergence/dest1_clm_ship.convergence"
+  }
+}
