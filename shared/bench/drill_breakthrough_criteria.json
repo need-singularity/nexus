@@ -1,20 +1,31 @@
 {
   "verifier_type": "drill_breakthrough",
-  "version": "v1",
+  "version": "v2",
   "created": "2026-04-21",
   "substrate": "5-module lens + DFS depth>=3 + absorption/saturation auto-classify",
   "absorption_rate_max": 0.3,
   "saturation_required": true,
+  "saturation_policy": {
+    "mode": "fixpoint_strict",
+    "k_window": 2,
+    "eps_tol": 0.02,
+    "diag_min": 0.8,
+    "enum_states": ["open", "converging", "fixpoint"],
+    "pass_states": ["fixpoint"]
+  },
   "depth_min": 3,
   "module_coverage": "5/5",
   "diagonal_agreement_min": 0.8,
-  "fail_case": "absorption_rate >= 0.3 OR saturation == false OR any module < depth_min",
+  "fail_case": "absorption_rate >= 0.3 OR saturation_state != 'fixpoint' OR any module < depth_min",
   "target_jump": "T3 85% -> T4 95%",
+  "singularity_master_switch": "saturation_policy",
+  "singularity_spec": "docs/drill_singularity_20260421.md",
   "comment": {
-    "absorption_rate_max": "0.3 cap — prompt leaks through >=30% drills imply shortcut not breakthrough",
-    "saturation_required": "true — law must reach closure; open-ended drill = no breakthrough",
-    "depth_min": "3 — DFS shallower than 3 levels cannot falsify deep structure",
-    "module_coverage": "5/5 — all 5 lenses must participate; missing module = partial view",
-    "diagonal_agreement_min": "0.8 — positive seed rephrased must agree >=80% or the signal is idiosyncratic"
+    "absorption_rate_max": "0.3 cap — now derived from 1 - P(fixpoint); retained as legacy numeric cap",
+    "saturation_required": "legacy alias; true == saturation_state in pass_states. Authoritative field: saturation_policy",
+    "saturation_policy": "v2 master switch — promotes saturation from boolean to fixpoint/converging/open enum. mode=fixpoint_strict requires module_signature stability + invariant preservation (sigma*phi = n*tau = 24) across k_window consecutive DFS frames past depth_min, with diagonal_agreement >= diag_min.",
+    "depth_min": "3 — DFS shallower than 3 levels cannot falsify deep structure; now justified as k_window(2) + 1 prefix step",
+    "module_coverage": "5/5 — all 5 lenses must participate; predicate input to saturation_policy",
+    "diagonal_agreement_min": "0.8 — aliased to saturation_policy.diag_min"
   }
 }
