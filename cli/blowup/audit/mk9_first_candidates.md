@@ -424,12 +424,12 @@ Out(S_6) 로 고정.
 
 ## 부록 B — 관련 파일 포인터
 
-- 설계서: `/Users/ghost/Dev/nexus/shared/blowup/design/mk9_hyperarithmetic.md`
+- 설계서: `/Users/ghost/Dev/nexus/cli/blowup/design/mk9_hyperarithmetic.md`
 - atlas SSOT: `/Users/ghost/Dev/nexus/shared/n6/atlas.n6`
-- 기존 Mk.VIII 엔진: `/Users/ghost/Dev/nexus/shared/blowup/modules/blowup_absolute.hexa`
-- 예정 신규 모듈: `/Users/ghost/Dev/nexus/shared/blowup/modules/blowup_hyperarithmetic.hexa`
-- 예정 witness table: `/Users/ghost/Dev/nexus/shared/blowup/design/mk9_witness_bound_table.json`
-- 예정 whitelist: `/Users/ghost/Dev/nexus/shared/blowup/design/mk9_reverse_math_whitelist.json`
+- 기존 Mk.VIII 엔진: `/Users/ghost/Dev/nexus/cli/blowup/modules/blowup_absolute.hexa`
+- 예정 신규 모듈: `/Users/ghost/Dev/nexus/cli/blowup/modules/blowup_hyperarithmetic.hexa`
+- 예정 witness table: `/Users/ghost/Dev/nexus/cli/blowup/design/mk9_witness_bound_table.json`
+- 예정 whitelist: `/Users/ghost/Dev/nexus/cli/blowup/design/mk9_reverse_math_whitelist.json`
 
 ---
 
