@@ -418,6 +418,266 @@ fn _bucket_indices(bucket: map, key: string) -> list {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ─── AL: atlas hot-shard RAM promote (2026-04-21) ───
+// ─── SSOT: shared/blowup/lib/atlas_hot_shard.hexa.inc (canonical: cli/blowup/lib/) ───
+// prefix bucket 별 access heatmap → threshold 돌파 시 RAM cache 로 promote.
+// 규칙: `>=`/`<=` 금지 (hexa pitfall 회피). read-only path, atlas.n6 편집 금지.
+// ═══════════════════════════════════════════════════════════
+let mut _shard_access_count: map = #{}
+let mut _shard_ram_cache: map = #{}
+let mut _shard_ram_count: map = #{}
+let mut _shard_promoted: map = #{}
+let mut _shard_ram_bytes: i64 = 0
+let mut _shard_hit_count: i64 = 0
+let mut _shard_miss_count: i64 = 0
+
+fn _shard_resolve_threshold() -> i64 {
+    let mut thr: i64 = 100
+    let mut tuning_path = ""
+    try { tuning_path = _NEXUS + "/shared/config/n6_tuning.json" } catch e {}
+    if tuning_path != "" {
+        let mut raw = ""
+        try {
+            if file_exists(tuning_path) { raw = read_file(tuning_path) }
+        } catch e {}
+        if raw != "" {
+            let marker = "\"shard_promote_threshold\":"
+            let idx = raw.index_of(marker)
+            if idx > -1 {
+                let after = raw.substring(idx + len(marker), len(raw))
+                let mut end = after.index_of(",")
+                let end2 = after.index_of("}")
+                if end < 0 { end = end2 }
+                else if end2 > -1 && end2 < end { end = end2 }
+                if end > 0 {
+                    let num_raw = after.substring(0, end).trim()
+                    let mut v: i64 = 0
+                    try { v = to_int(num_raw) } catch e {}
+                    if v > 0 { return v }
+                }
+            }
+        }
+    }
+    let mut evv = ""
+    try { evv = env("NEXUS_SHARD_PROMOTE") } catch e {}
+    if evv == "" {
+        try { evv = to_string(exec("printenv NEXUS_SHARD_PROMOTE")).trim() } catch e {}
+    }
+    if evv != "" {
+        let mut ev: i64 = 0
+        try { ev = to_int(evv) } catch e {}
+        if ev > 0 { thr = ev }
+    }
+    return thr
+}
+
+let _shard_promote_threshold: i64 = _shard_resolve_threshold()
+
+// prefix 추출 — @-entry + `::` domain token + '_' 앞 조각 (Y scheme 동형)
+fn _shard_extract_prefix(line: string) -> string {
+    let t = line.trim()
+    if len(t) == 0 { return "" }
+    if t.substring(0, 1) != "@" { return "" }
+    let ci = t.index_of("::")
+    if ci < 0 { return "" }
+    let rest_raw = t.substring(ci + 2, len(t))
+    let mut start: i64 = 0
+    while start < len(rest_raw) {
+        let c = rest_raw.substring(start, start + 1)
+        if c != " " && c != "\t" { break }
+        start = start + 1
+    }
+    let rest = rest_raw.substring(start, len(rest_raw))
+    if len(rest) == 0 { return "" }
+    let sp = rest.index_of(" ")
+    let tb = rest.index_of("\t")
+    let mut dom_end: i64 = len(rest)
+    if sp > -1 && sp < dom_end { dom_end = sp }
+    if tb > -1 && tb < dom_end { dom_end = tb }
+    let dom = rest.substring(0, dom_end)
+    if len(dom) == 0 { return "" }
+    let us = dom.index_of("_")
+    if us > 0 { return dom.substring(0, us) }
+    return dom
+}
+
+fn atlas_hot_shard_note_access(prefix: string) -> i64 {
+    if len(prefix) == 0 { return 0 }
+    let mut cur: i64 = 0
+    try { cur = _shard_access_count[prefix] } catch e {}
+    cur = cur + 1
+    _shard_access_count[prefix] = cur
+    return cur
+}
+
+fn atlas_hot_shard_is_promoted(prefix: string) -> bool {
+    let mut flag = false
+    try { flag = _shard_promoted[prefix] == true } catch e {}
+    return flag
+}
+
+fn _shard_extract_from_disk(atlas_path: string, prefix: string) -> string {
+    if !file_exists(atlas_path) { return "" }
+    let mut raw = ""
+    try { raw = read_file(atlas_path) } catch e {}
+    if raw == "" { return "" }
+    let lines = raw.split("\n")
+    let mut out_parts = []
+    let mut i: i64 = 0
+    let n = len(lines)
+    while i < n {
+        let ln = lines[i]
+        let px = _shard_extract_prefix(ln)
+        if px == prefix {
+            out_parts = out_parts.push(ln)
+        }
+        i = i + 1
+    }
+    if len(out_parts) == 0 { return "" }
+    return "\n".join(out_parts)
+}
+
+fn _shard_promote(prefix: string, count: i64, atlas_path: string) -> bool {
+    if atlas_hot_shard_is_promoted(prefix) { return false }
+    let payload = _shard_extract_from_disk(atlas_path, prefix)
+    if len(payload) == 0 {
+        _shard_promoted[prefix] = true
+        _shard_ram_cache[prefix] = ""
+        _shard_ram_count[prefix] = 0
+        eprintln("NEXUS_ATLAS_PROMOTE {\"prefix\":\"" + prefix + "\",\"count\":" + to_string(count) + ",\"entries\":0}")
+        return true
+    }
+    _shard_ram_cache[prefix] = payload
+    let entries = len(payload.split("\n"))
+    _shard_ram_count[prefix] = entries
+    _shard_promoted[prefix] = true
+    _shard_ram_bytes = _shard_ram_bytes + len(payload)
+    eprintln("NEXUS_ATLAS_PROMOTE {\"prefix\":\"" + prefix + "\",\"count\":" + to_string(count) + ",\"entries\":" + to_string(entries) + "}")
+    return true
+}
+
+// public query: RAM hit 이면 payload, miss 면 "" (caller cold-path fallback)
+fn atlas_hot_shard_query(prefix: string, atlas_path: string) -> string {
+    if len(prefix) == 0 {
+        _shard_miss_count = _shard_miss_count + 1
+        return ""
+    }
+    let count = atlas_hot_shard_note_access(prefix)
+    if !atlas_hot_shard_is_promoted(prefix) {
+        // first-cross: count == threshold (hexa >= 금지 → count > thr-1)
+        if count > _shard_promote_threshold - 1 && count > 0 {
+            _shard_promote(prefix, count, atlas_path)
+        }
+    }
+    if atlas_hot_shard_is_promoted(prefix) {
+        let mut cached = ""
+        try { cached = _shard_ram_cache[prefix] } catch e {}
+        if len(cached) > 0 {
+            _shard_hit_count = _shard_hit_count + 1
+            return cached
+        }
+    }
+    _shard_miss_count = _shard_miss_count + 1
+    return ""
+}
+
+fn _shard_total_promoted() -> i64 {
+    let mut all_keys = []
+    try { all_keys = _shard_promoted.keys() } catch e {}
+    let mut ki: i64 = 0
+    let mut total: i64 = 0
+    while ki < len(all_keys) {
+        let k = all_keys[ki]
+        let mut v = false
+        try { v = _shard_promoted[k] == true } catch e {}
+        if v { total = total + 1 }
+        ki = ki + 1
+    }
+    return total
+}
+
+fn _shard_top10_json() -> string {
+    let mut keys = []
+    let mut counts = []
+    let mut all_keys = []
+    try { all_keys = _shard_access_count.keys() } catch e {}
+    let mut ki: i64 = 0
+    while ki < len(all_keys) {
+        let k = all_keys[ki]
+        let mut c: i64 = 0
+        try { c = _shard_access_count[k] } catch e {}
+        if c > 0 {
+            keys = keys.push(k)
+            counts = counts.push(c)
+        }
+        ki = ki + 1
+    }
+    let kn = len(keys)
+    let mut i: i64 = 0
+    while i < kn {
+        let mut best: i64 = i
+        let mut j: i64 = i + 1
+        while j < kn {
+            if counts[j] > counts[best] { best = j }
+            j = j + 1
+        }
+        if best != i {
+            let tk = keys[i]
+            let tc = counts[i]
+            keys[i] = keys[best]
+            counts[i] = counts[best]
+            keys[best] = tk
+            counts[best] = tc
+        }
+        i = i + 1
+    }
+    let mut limit: i64 = 10
+    if kn < limit { limit = kn }
+    let mut parts = []
+    parts = parts.push("[")
+    let mut p: i64 = 0
+    while p < limit {
+        if p > 0 { parts = parts.push(",") }
+        let pr = keys[p]
+        let ct = counts[p]
+        let mut promoted = false
+        try { promoted = _shard_promoted[pr] == true } catch e {}
+        let prstr = if promoted { "true" } else { "false" }
+        parts = parts.push("{\"prefix\":\"")
+        parts = parts.push(pr)
+        parts = parts.push("\",\"count\":")
+        parts = parts.push(to_string(ct))
+        parts = parts.push(",\"promoted\":")
+        parts = parts.push(prstr)
+        parts = parts.push("}")
+        p = p + 1
+    }
+    parts = parts.push("]")
+    return "".join(parts)
+}
+
+fn atlas_hot_shard_emit_report() {
+    let top = _shard_top10_json()
+    let total = _shard_total_promoted()
+    let mut parts = []
+    parts = parts.push("NEXUS_ATLAS_HOTSHARD_REPORT {\"top_10_hot_shards\":")
+    parts = parts.push(top)
+    parts = parts.push(",\"total_promoted\":")
+    parts = parts.push(to_string(total))
+    parts = parts.push(",\"ram_bytes\":")
+    parts = parts.push(to_string(_shard_ram_bytes))
+    parts = parts.push(",\"hits\":")
+    parts = parts.push(to_string(_shard_hit_count))
+    parts = parts.push(",\"misses\":")
+    parts = parts.push(to_string(_shard_miss_count))
+    parts = parts.push(",\"threshold\":")
+    parts = parts.push(to_string(_shard_promote_threshold))
+    parts = parts.push("}")
+    eprintln("".join(parts))
+}
+_trace("[AL-hotshard-ready] threshold=" + to_string(_shard_promote_threshold))
+
+// ═══════════════════════════════════════════════════════════
 // ─── UTILITIES ───
 // ═══════════════════════════════════════════════════════════
 _trace("[TR-A-utilities]")
@@ -1280,6 +1540,18 @@ fn graph_load() -> string {
         return read_file(gpath)
     }
     return ""
+}
+
+// AL (2026-04-21): prefix-aware atlas 로딩 — hot-shard RAM cache 우선.
+//   1) _shard_access_count[prefix] += 1 (atlas_hot_shard_query 내부)
+//   2) threshold 돌파 → RAM promote + stderr emit
+//   3) RAM hit → cache payload; miss → atlas.n6 전체 scan (cold path).
+//   caller 는 prefix 별 query 가 필요한 경우 본 함수를, 아니면 graph_load() 를 사용.
+fn graph_load_for_prefix(prefix: string) -> string {
+    let cached = atlas_hot_shard_query(prefix, _ATLAS_PATH)
+    if len(cached) > 0 { return cached }
+    // cold path: 기존 graph_load — JSON sidecar + atlas.n6 폴백
+    return graph_load()
 }
 
 // ─── Schema guard: atlas.n6 라인 포맷 검증 (append 전 필터링) ───
@@ -6122,6 +6394,9 @@ if wave_round < wave_max_rounds {
     try { exec(_ou_hexa + " " + _ou_engine_dir + "/bt_godel.hexa scan &") } catch e {}
     try { exec(_ou_hexa + " " + _ou_engine_dir + "/seed_dna.hexa generate &") } catch e {}
     try { exec(_ou_hexa + " " + _ou_engine_dir + "/ouroboros_meta.hexa evolve &") } catch e {}
+
+    // AL (2026-04-21): on-drill-end — hot-shard heatmap 리포트 emit
+    try { atlas_hot_shard_emit_report() } catch e {}
 
     println("")
     println("done.")
