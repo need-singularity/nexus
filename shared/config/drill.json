@@ -10,12 +10,28 @@
     "run.hexa _adaptive_adjust"
   ],
   "stages": {
-    "smash":        {"engine": "shared/blowup/core/blowup.hexa",                    "default_depth": 3, "min": 1, "max": 9},
-    "free":         {"engine": "shared/blowup/compose.hexa",                        "default_depth": 3, "min": 1, "max": 7, "extra": "--modules all --dfs"},
-    "absolute":     {"engine": "shared/blowup/modules/blowup_absolute.hexa",        "default_depth": 0, "min": 0, "max": 1, "togglable": true},
-    "meta_closure": {"engine": "shared/blowup/modules/blowup_meta_closure.hexa",    "default_depth": 0, "min": 0, "max": 1, "togglable": true},
-    "hyperarith":   {"engine": "shared/blowup/modules/blowup_hyperarithmetic.hexa", "default_depth": 0, "min": 0, "max": 1, "togglable": true},
-    "resonance":    {"engine": "inline",                                            "default_depth": 1, "min": 1, "max": 3, "extra": "σ-grid log-spaced"}
+    "smash":        {"engine": "shared/blowup/core/blowup.hexa",                    "default_depth": 3, "min": 1, "max": 9, "timeout_sec": 45},
+    "free":         {"engine": "shared/blowup/compose.hexa",                        "default_depth": 3, "min": 1, "max": 7, "timeout_sec": 60, "extra": "--modules all --dfs"},
+    "absolute":     {"engine": "shared/blowup/modules/blowup_absolute.hexa",        "default_depth": 0, "min": 0, "max": 1, "togglable": true, "timeout_sec": 30},
+    "meta_closure": {"engine": "shared/blowup/modules/blowup_meta_closure.hexa",    "default_depth": 0, "min": 0, "max": 1, "togglable": true, "timeout_sec": 30},
+    "hyperarith":   {"engine": "shared/blowup/modules/blowup_hyperarithmetic.hexa", "default_depth": 0, "min": 0, "max": 1, "togglable": true, "timeout_sec": 30},
+    "resonance":    {"engine": "inline",                                            "default_depth": 1, "min": 1, "max": 3, "timeout_sec_per_sigma": 10, "extra": "σ-grid log-spaced"}
+  },
+  "timeout_policy": {
+    "per_stage_default": "stages.{stage}.timeout_sec",
+    "overall_round_budget_sec": 300,
+    "overall_drill_budget_sec": 1800,
+    "on_stage_timeout": "emit_NEXUS_DRILL_TIMEOUT_json + skip_stage + continue_round",
+    "on_round_budget_exceeded": "skip_remaining_stages + emit_partial_result",
+    "on_drill_budget_exceeded": "terminate + NEXUS_DRILL_ERROR timeout",
+    "override_env": "NEXUS_DRILL_TIMEOUT",
+    "override_flag": "--timeout N (overall), --stage-timeout smash=N,free=M",
+    "impl_hint": "perl -e 'alarm $t; exec @cmd' wrapper (macOS+Linux 호환, gtimeout 의존 없음)"
+  },
+  "speed_presets": {
+    "fast":     {"stages_on": ["smash","resonance"], "resonance_sigma_count": 1, "max_rounds": 1, "notes": "30s 목표 probe"},
+    "probe":    {"stages_on": ["smash"],             "resonance_sigma_count": 0, "max_rounds": 1, "notes": "<20s engine sanity"},
+    "standard": {"stages_on": "all",                 "resonance_sigma_count": 5, "max_rounds": 3, "notes": "default"}
   },
   "flag_precedence": [
     "env (NEXUS_DRILL_DEPTH, NEXUS_DRILL_{STAGE})",
