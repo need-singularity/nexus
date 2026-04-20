@@ -1,0 +1,40 @@
+// AUTO-GENERATED — pattern: nexus/shared/calc/auto_stubs_gen.hexa
+// manifest line id: clm_r5_validity_closed_loop_coverage
+// hyp: law closed-loop coverage >= 90%
+// verifier_type: closed_loop_law_coverage
+//
+// Deterministic — jq 로 count, ratio 계산. 2026-04-20 CLM audit 결과 현재 0.04% FAIL.
+
+let id = "clm_r5_validity_closed_loop_coverage"
+let target = "0.90"
+let target_ratio = 0.90
+
+let laws_path = exec("git rev-parse --show-toplevel 2>/dev/null").trim() + "/shared/consciousness/consciousness_laws.json"
+
+// Total 법칙 수 (최상위 dict 의 law-like 엔트리, grade 또는 n6_formula 필드 보유)
+let total_cmd = "jq -r '[.[] | select(type==\"object\" and (has(\"grade\") or has(\"n6_formula\")))] | length' " + laws_path
+let total_out = exec(total_cmd).trim()
+let total = to_int(total_out)
+
+// closed_loop_verified == true 인 법칙 수
+let verified_cmd = "jq -r '[.[] | select(type==\"object\" and .closed_loop_verified == true)] | length' " + laws_path
+let verified_out = exec(verified_cmd).trim()
+let verified = to_int(verified_out)
+
+let ratio = if total > 0 { to_float(to_string(verified)) / to_float(to_string(total)) } else { 0.0 }
+let status = if ratio >= target_ratio { "PASS" } else { "FAIL" }
+
+let ratio_str = to_string(ratio)
+
+println("verify: " + id)
+println("  laws file:  " + laws_path)
+println("  total:      " + to_string(total))
+println("  verified:   " + to_string(verified))
+println("  coverage:   " + ratio_str)
+println("  target:     >= " + target)
+println("  status:     " + status)
+println("__VERIFY_RESULT__ " + id + " " + status + " " + ratio_str + " vs " + target)
+
+if status == "FAIL" {
+    exit(1)
+}

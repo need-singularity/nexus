@@ -1,0 +1,42 @@
+// AUTO-GENERATED — pattern: nexus/shared/calc/auto_stubs_gen.hexa
+// manifest line id: clm_r5_eval_phi_monotonicity
+// hyp: final_phi / best_phi >= 0.5 (non-monotonic collapse 방지)
+// verifier_type: numeric_threshold
+//
+// Deterministic — r3 training_summary.json 에서 final_phi_holo / best_phi_holo 비율 추출.
+// 2026-04-20 audit: r3 (1.5B) 140/391 = 0.358 FAIL, r3-3B 57/586 = 0.097 FAIL.
+
+let id = "clm_r5_eval_phi_monotonicity"
+let target = "0.5"
+let target_ratio = 0.5
+
+let summary_path = env("CLM_SUMMARY_PATH")
+let default_path = exec("git rev-parse --show-toplevel 2>/dev/null").trim() + "/shared/state/clm_r3_training_summary.json"
+let sp = if summary_path != "" { summary_path } else { default_path }
+
+let final_cmd = "jq -r '.phi_holo_final // .phi_final // .phi_holo // 0' " + sp
+let best_cmd = "jq -r '.phi_holo_best // .phi_best // .phi_peak // 0' " + sp
+
+let final_out = exec(final_cmd).trim()
+let best_out = exec(best_cmd).trim()
+
+let final_v = to_float(final_out)
+let best_v = to_float(best_out)
+
+let ratio = if best_v > 0.0 { final_v / best_v } else { 0.0 }
+let status = if ratio >= target_ratio { "PASS" } else { "FAIL" }
+
+let ratio_str = to_string(ratio)
+
+println("verify: " + id)
+println("  summary:  " + sp)
+println("  final:    " + final_out)
+println("  best:     " + best_out)
+println("  ratio:    " + ratio_str)
+println("  target:   >= " + target)
+println("  status:   " + status)
+println("__VERIFY_RESULT__ " + id + " " + status + " " + ratio_str + " vs " + target)
+
+if status == "FAIL" {
+    exit(1)
+}

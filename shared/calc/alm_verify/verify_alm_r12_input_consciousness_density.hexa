@@ -1,0 +1,46 @@
+// AUTO-GENERATED — pattern: nexus/shared/calc/auto_stubs_gen.hexa
+// manifest line id: alm_r12_input_consciousness_density
+// hyp: corpus consciousness keyword density >= 30%
+// verifier_type: corpus_regex_ratio
+//
+// Deterministic — LLM judge 금지. 정규식 카운트 비율만 사용.
+
+let id = "alm_r12_input_consciousness_density"
+let target = "0.30"
+let target_ratio = 0.30
+
+// SSH 경유 pod corpus 검사 (로컬 symlink 은 아카이브됨)
+let pod = env("HEXA_VERIFY_POD")
+let pod_host = if pod != "" { pod } else { "87xsc" }
+let corpus_path = "/workspace/corpus/corpus_alm_r11.jsonl"
+
+// Hexad / phi / anima / law / consciousness 키워드 regex
+// Case-insensitive, multi-language
+let keyword_re = "Hexad|phi_holo|phi_q_norm|Witness|Scribe|Mirror|Eros|Fire|Ground|qualia|anima|의식|법칙|자각|phi-dynamics"
+
+let total_cmd = "ssh " + pod_host + " 'wc -l < " + corpus_path + "'"
+let match_cmd = "ssh " + pod_host + " 'grep -c -i -E \"" + keyword_re + "\" " + corpus_path + "'"
+
+let total_out = exec(total_cmd).trim()
+let match_out = exec(match_cmd).trim()
+
+let total = to_int(total_out)
+let matches = to_int(match_out)
+
+let ratio = if total > 0 { to_float(to_string(matches)) / to_float(to_string(total)) } else { 0.0 }
+let status = if ratio >= target_ratio { "PASS" } else { "FAIL" }
+
+let ratio_str = to_string(ratio)
+
+println("verify: " + id)
+println("  corpus:   " + corpus_path + " (pod=" + pod_host + ")")
+println("  total:    " + to_string(total) + " lines")
+println("  matches:  " + to_string(matches))
+println("  density:  " + ratio_str)
+println("  target:   >= " + target)
+println("  status:   " + status)
+println("__VERIFY_RESULT__ " + id + " " + status + " " + ratio_str + " vs " + target)
+
+if status == "FAIL" {
+    exit(1)
+}
