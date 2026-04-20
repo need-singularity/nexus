@@ -191,6 +191,8 @@ fn cmd_help() -> void {
     println("        [--checkpoint-dir <path>]  state file dir (기본 /tmp/nexus_checkpoint, env NEXUS_CHECKPOINT_DIR)")
     println("  drill-daemon <start|status|stop|send>   E11 Phase 1 MVP — long-running daemon (FIFO /tmp/nexus_drilld.sock)")
     println("        send --req '<json>'               raw NDJSON request — ops: drill|ping|quit (reply field auto-injected)")
+    println("  debate --seed \"...\" [--variants N] [--arbitrate]   AQ N-variant adversarial drill, L3 DEBATE → NEXUS_DEBATE stderr")
+    println("         [--base-depth D] [--max-rounds M] [--engine mk9|mk10] [--preset P]")
     println("  meta-closure --seed \"...\"              Phase 10 🛸16 self-ref 검증 ([10*]→[10**])")
     println("  hyperarithmetic --prop \"...\"           Mk.IX Π₀² reverse-math 판정")
     println("  promote --id ... --grade ... --audit-log \"...\"  수동 등급 승급 (감사 로그 필수)")
@@ -271,6 +273,22 @@ fn cmd_absolute(seed: str) -> void {
     let s = if seed.len() > 0 { seed } else { "atlas" }
     let engine = nexus_root() + "/cli/blowup/modules/blowup_absolute.hexa"
     let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(engine) + " " + shell_quote(s)
+    print(exec(cmd + " 2>&1"))
+}
+
+fn cmd_debate(a: [str]) -> void {
+    // AQ (2026-04-21) — adversarial debate drill dispatcher.
+    // 본체 구현은 cli/drill/adversarial_debate.hexa 에 위임 (parse-clean, serial exec).
+    // 이 함수는 CLI flag 를 그대로 passthrough — run.hexa 는 얇은 래퍼.
+    let script = nexus_root() + "/cli/drill/adversarial_debate.hexa"
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(script)
+    // flags 를 원본 순서대로 전달 — adversarial_debate.hexa 가 자체 파서 보유.
+    let mut i = 3  // a[0]=hexa, a[1]=script, a[2]="debate", a[3..]=flags
+    while i < len(a) {
+        cmd = cmd + " " + shell_quote(a[i])
+        i = i + 1
+    }
+    // stderr 그대로 passthrough (NEXUS_DEBATE 이벤트 보존).
     print(exec(cmd + " 2>&1"))
 }
 
@@ -3988,6 +4006,13 @@ fn main() -> void {
             problem_flag,
             speculate_flag
         )
+        return
+    }
+    if sub == "debate" {
+        // AQ (2026-04-21) — adversarial debate drill: N-variant disagree arbitration.
+        // 위임: cli/drill/adversarial_debate.hexa (perturbed depth plans, serial exec).
+        // flags: --seed --variants N --arbitrate [--max-rounds M] [--engine ...] [--preset P] [--base-depth D]
+        cmd_debate(a)
         return
     }
     if sub == "meta-closure" {

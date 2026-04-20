@@ -1,0 +1,420 @@
+// adversarial_debate.hexa — AQ N-variant disagree arbitration
+//
+// 역할 (2026-04-21, AQ):
+//   동일 seed 에 대해 N(=3) 변종 drill 을 직렬 실행하고, 결과 agreement 를 3-level 로 판정.
+//   disagree 수준이 크면 `NEXUS_DEBATE` 이벤트 emit — meta-verification 트리거.
+//
+// 변종 (orthogonal perturbation — 다른 depth / 다른 stage emphasis):
+//   A: 표준 flow (base depth, 평균 가중)
+//   B: stage 순서 "역전" 시뮬레이션 — tail(resonance/hyper) depth+2, head(smash/free) depth-1
+//   C: smash-heavy — smash depth+2, 나머지 depth-1
+//   N>3 일 경우 추가 변종은 base 에 sign-alternating delta 주입.
+//
+// Agreement level:
+//   L1 CONSENSUS   : 모든 변종 총흡수 byte-exact 동일 (total 문자열까지 동일)
+//   L2 SOFT_AGREE  : max/min 흡수비 ≤ 1.20 (20% 이내) — 수치 재현가능 consensus
+//   L3 DEBATE      : max/min > 1.20 — NEXUS_DEBATE JSON stderr emit 후 JSON report 반환.
+//
+// 호출:
+//   hexa run cli/drill/adversarial_debate.hexa --seed <s> [--variants N] [--arbitrate]
+//                                              [--max-rounds M] [--engine mk9|mk10] [--preset P]
+//
+// 출력:
+//   stdout: human 요약 + JSON report (last block)
+//   stderr: NEXUS_DEBATE {"variants":[{"n":X,...},...],"arbitration":"meta_required"} (L3 only)
+//
+// 설계 주의:
+//   - 변종은 반드시 직렬 (SPEC — Mac load 우려).
+//   - stage 순서를 run.hexa 에서 직접 역전할 수단은 없다. 따라서 "순서 역전" 은 depth 가중
+//     역전으로 근사 (tail-heavy depth). 이는 perturbation orthogonality 를 유지한다.
+//   - 파싱은 stdout "▎ total absorptions: N" 한 줄에 의존 (cmd_drill L2954/L2918).
+//     SATURATED / max-rounds 두 경로 모두 동일 문자열 emit. zero-yield 경로는 total=0.
+//   - hexa 제약: `>=`/`<=` 미사용 — SPEC. 모든 비교 `>` 와 `<` 로만 표현.
+//
+// @hexa-guard: adversarial-debate-drill
+
+fn ad_nexus_root() -> str {
+    let n = env("NEXUS")
+    if n.len() > 0 { return n }
+    return env("HOME") + "/Dev/nexus"
+}
+
+fn ad_hexa_bin() -> str {
+    let h = env("HEXA")
+    if h.len() > 0 { return h }
+    let cands = [env("HOME") + "/Dev/hexa-lang/hexa", env("HOME") + "/.hx/bin/hexa", ad_nexus_root() + "/shared/bin/hexa"]
+    let mut i = 0
+    while i < len(cands) {
+        let c = cands[i]
+        let chk = exec("[ -x '" + c + "' ] && echo y || echo n").trim()
+        if chk == "y" { return c }
+        i = i + 1
+    }
+    return "hexa"
+}
+
+fn ad_shell_quote(s: str) -> str {
+    return "'" + s.replace("'", "'\\''") + "'"
+}
+
+fn ad_find_flag(a: [str], flag: str, default_val: str) -> str {
+    let n = len(a)
+    let mut i = 0
+    while i < n {
+        if a[i] == flag {
+            if i + 1 < n { return a[i + 1] }
+        }
+        i = i + 1
+    }
+    return default_val
+}
+
+fn ad_has_flag(a: [str], flag: str) -> bool {
+    let n = len(a)
+    let mut i = 0
+    while i < n {
+        if a[i] == flag { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// ─── variant depth plan ───
+// plan index: 0=smash 1=free 2=absolute 3=meta 4=hyper 5=resonance
+// 변종 delta 는 base_depth 에 가감. clamp [1..6] (engine guard 에 무관하게 sane 값 유지).
+
+fn ad_clamp_depth(v: int) -> int {
+    if v < 1 { return 1 }
+    if v > 6 { return 6 }
+    return v
+}
+
+fn ad_variant_delta(idx: int) -> [int] {
+    // A=0 B=1 C=2 — spec 참조.
+    // N>3 (idx>2) 인 경우 sign-alternating per-stage delta.
+    if idx == 0 {
+        return [0, 0, 0, 0, 0, 0]
+    }
+    if idx == 1 {
+        // stage 역전: head(smash/free) depth-1, tail(resonance/hyper) depth+2.
+        // 중간 (abs/meta) 는 0 유지 — 순서 역전의 weight shift 근사.
+        return [-1, -1, 0, 0, 2, 2]
+    }
+    if idx == 2 {
+        // smash-heavy: smash+2, 나머지 -1.
+        return [2, -1, -1, -1, -1, -1]
+    }
+    // idx > 2 — alternating pattern (orthogonal diversity).
+    let s = if (idx % 2) == 0 { 1 } else { -1 }
+    return [s, -s, s, -s, s, -s]
+}
+
+fn ad_variant_label(idx: int) -> str {
+    if idx == 0 { return "A" }
+    if idx == 1 { return "B" }
+    if idx == 2 { return "C" }
+    return "V" + to_string(idx)
+}
+
+fn ad_variant_describe(idx: int) -> str {
+    if idx == 0 { return "standard flow (baseline)" }
+    if idx == 1 { return "reversed (tail-heavy: resonance/hyper +2, smash/free -1)" }
+    if idx == 2 { return "smash-heavy (smash +2, others -1)" }
+    return "alternating delta (sign-flipped per stage)"
+}
+
+fn ad_build_plan(base: int, delta: [int]) -> [int] {
+    let mut out: [int] = []
+    let mut i = 0
+    while i < 6 {
+        let v = ad_clamp_depth(base + delta[i])
+        out = out + [v]
+        i = i + 1
+    }
+    return out
+}
+
+fn ad_plan_to_flags(plan: [int]) -> str {
+    // run.hexa drill flags: --smash-depth --free-dfs --abs-depth --meta-depth --hyper-depth --res-depth
+    return "--smash-depth " + to_string(plan[0])
+         + " --free-dfs " + to_string(plan[1])
+         + " --abs-depth " + to_string(plan[2])
+         + " --meta-depth " + to_string(plan[3])
+         + " --hyper-depth " + to_string(plan[4])
+         + " --res-depth " + to_string(plan[5])
+}
+
+fn ad_plan_json(plan: [int]) -> str {
+    let mut s = "["
+    let mut i = 0
+    while i < 6 {
+        if i > 0 { s = s + "," }
+        s = s + to_string(plan[i])
+        i = i + 1
+    }
+    return s + "]"
+}
+
+// ─── drill exec + total parse ───
+
+fn ad_str_find(s: str, needle: str) -> i64 {
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    // NOTE: `<=` 금지 (spec) — 등가 표현 i < end + 1.
+    while i < end + 1 {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn ad_extract_total(out: str) -> int {
+    // cmd_drill stdout: "▎ total absorptions: N"
+    let key = "total absorptions: "
+    let idx = ad_str_find(out, key)
+    if idx < 0 { return -1 }
+    let start = idx + key.len()
+    let n = out.len()
+    let mut i = start
+    // digit 수집
+    let mut buf = ""
+    while i < n {
+        let cc = char_code(out, i)
+        // 48..57 = '0'..'9' — spec 금지 토큰 `>=`/`<=` 회피 위해 `cc > 47 && cc < 58`.
+        if cc > 47 && cc < 58 {
+            buf = buf + out.substring(i, i + 1)
+            i = i + 1
+        } else {
+            break
+        }
+    }
+    if buf.len() == 0 { return -1 }
+    let mut v = -1
+    try { v = to_int(buf) } catch e { v = -1 }
+    return v
+}
+
+fn ad_run_variant(seed: str, plan: [int], max_rounds: str, engine_flag: str, preset: str) -> [str] {
+    // returns [total_str, absorption_sig(absorption output signature — stdout byte)]
+    // stdout 은 parse 후 반환. total=-1 이면 zero-yield / 실패.
+    let hexa = ad_hexa_bin()
+    let run_hexa = ad_nexus_root() + "/cli/run.hexa"
+    let mut cmd = ad_shell_quote(hexa) + " run " + ad_shell_quote(run_hexa)
+              + " drill --seed " + ad_shell_quote(seed)
+              + " " + ad_plan_to_flags(plan)
+    if max_rounds.len() > 0 {
+        cmd = cmd + " --max-rounds " + ad_shell_quote(max_rounds)
+    }
+    if engine_flag.len() > 0 {
+        cmd = cmd + " --engine " + ad_shell_quote(engine_flag)
+    }
+    if preset.len() > 0 {
+        cmd = cmd + " --preset " + ad_shell_quote(preset)
+    }
+    // stderr → /dev/null (NEXUS_* 이벤트 소음 차단 — debate 자체 이벤트에만 집중)
+    cmd = cmd + " --fresh 2>/dev/null"
+    let out = exec(cmd)
+    return [out, to_string(ad_extract_total(out))]
+}
+
+// ─── agreement verdict ───
+
+fn ad_abs_int(v: int) -> int {
+    if v < 0 { return -v }
+    return v
+}
+
+fn ad_all_byte_match(outputs: [str]) -> bool {
+    // L1: stdout byte-exact 동일? 단 drill 은 내부 nonce/timestamp 로 바뀌므로 실상 false.
+    // SPEC 명시: "exact byte match of absorption output" — total line 한정으로 해석.
+    let n = len(outputs)
+    if n < 2 { return true }
+    // total absorption line 추출하여 비교
+    let first_tot = ad_extract_total(outputs[0])
+    let first_str = to_string(first_tot)
+    let mut i = 1
+    while i < n {
+        let t = ad_extract_total(outputs[i])
+        if to_string(t) != first_str { return false }
+        if t != first_tot { return false }
+        // 추가 cross-check — stdout 내 SATURATED/max-rounds path identity
+        let a_sat = outputs[0].contains("SATURATED")
+        let b_sat = outputs[i].contains("SATURATED")
+        if a_sat != b_sat { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn ad_soft_agree(totals: [int]) -> bool {
+    // L2: max/min 비율 ≤ 1.20 (20% 이내).
+    // `<=` 금지 — `max * 100 < min * 120 + 1` 로 치환.
+    let n = len(totals)
+    if n < 2 { return true }
+    let mut mn = totals[0]
+    let mut mx = totals[0]
+    let mut i = 1
+    while i < n {
+        let v = totals[i]
+        if v < mn { mn = v }
+        if v > mx { mx = v }
+        i = i + 1
+    }
+    if mn < 1 {
+        // 한 변종이 0 흡수 — disagree 후보. 다른 변종도 0 이면 agree.
+        if mx == 0 { return true }
+        return false
+    }
+    // mx/mn ≤ 1.20 ⇔ mx * 100 < mn * 120 + 1 (정수 비교; `=` 경계 포함)
+    if mx * 100 < mn * 120 + 1 { return true }
+    return false
+}
+
+fn ad_verdict(outputs: [str], totals: [int]) -> str {
+    if ad_all_byte_match(outputs) { return "CONSENSUS" }
+    if ad_soft_agree(totals) { return "SOFT_AGREE" }
+    return "DEBATE"
+}
+
+// ─── emit ───
+
+fn ad_json_report(seed: str, base_depth: int, variants_n: int, plans: [[int]], totals: [int], verdict: str, arbitrate: bool) -> str {
+    let mut v = "["
+    let mut i = 0
+    while i < variants_n {
+        if i > 0 { v = v + "," }
+        v = v + "{\"n\":" + to_string(i)
+            + ",\"label\":\"" + ad_variant_label(i) + "\""
+            + ",\"plan\":" + ad_plan_json(plans[i])
+            + ",\"total\":" + to_string(totals[i])
+            + ",\"desc\":\"" + ad_variant_describe(i) + "\"}"
+        i = i + 1
+    }
+    v = v + "]"
+    let arb = if verdict == "DEBATE" { "meta_required" } else { "none" }
+    let arb_on = if arbitrate { "true" } else { "false" }
+    return "{\"seed_len\":" + to_string(seed.len())
+         + ",\"base_depth\":" + to_string(base_depth)
+         + ",\"variants\":" + v
+         + ",\"verdict\":\"" + verdict + "\""
+         + ",\"arbitration\":\"" + arb + "\""
+         + ",\"arbitrate_flag\":" + arb_on + "}"
+}
+
+fn ad_emit_debate(seed: str, variants_n: int, totals: [int]) -> void {
+    // SPEC: stderr NEXUS_DEBATE {"variants":[{n:X},...],"arbitration":"meta_required"}
+    let mut v = "["
+    let mut i = 0
+    while i < variants_n {
+        if i > 0 { v = v + "," }
+        v = v + "{\"n\":" + to_string(i)
+            + ",\"label\":\"" + ad_variant_label(i) + "\""
+            + ",\"total\":" + to_string(totals[i]) + "}"
+        i = i + 1
+    }
+    v = v + "]"
+    eprintln("NEXUS_DEBATE {\"variants\":" + v + ",\"arbitration\":\"meta_required\",\"seed_len\":" + to_string(seed.len()) + "}")
+}
+
+// ─── entry ───
+
+fn ad_main() -> void {
+    let raw = args()
+    // run.hexa 경유 호출 규약 모방: [hexa, script, user_args...] 또는 [hexa, run, script, user_args...]
+    let mut _script_idx = -1
+    let mut _scan_i = 0
+    while _scan_i < raw.len() {
+        if raw[_scan_i].ends_with(".hexa") { _script_idx = _scan_i; break }
+        _scan_i = _scan_i + 1
+    }
+    let _user_start = if _script_idx > -1 { _script_idx + 1 } else { 2 }
+    let mut a: [str] = []
+    let mut _ua_i = _user_start
+    while _ua_i < raw.len() {
+        a = a + [raw[_ua_i]]
+        _ua_i = _ua_i + 1
+    }
+
+    if ad_has_flag(a, "--help") || ad_has_flag(a, "-h") {
+        println("usage: adversarial_debate.hexa --seed <s> [--variants N] [--arbitrate]")
+        println("                               [--max-rounds M] [--engine mk9|mk10] [--preset fast|probe|coarse|standard]")
+        println("                               [--base-depth D]")
+        println("")
+        println("  N variants (default 3) of drill with perturbed depth plans.")
+        println("  agreement: L1 CONSENSUS (byte-exact total) / L2 SOFT_AGREE (≤20% diverge) / L3 DEBATE.")
+        println("  L3 emits NEXUS_DEBATE to stderr.")
+        return
+    }
+
+    let seed = ad_find_flag(a, "--seed", "")
+    if seed.len() == 0 {
+        eprintln("adversarial_debate: --seed required")
+        return
+    }
+    let vn_s = ad_find_flag(a, "--variants", "3")
+    let mut vn = 3
+    try { vn = to_int(vn_s) } catch e { vn = 3 }
+    if vn < 2 { vn = 2 }
+    if vn > 8 { vn = 8 }
+    let arbitrate = ad_has_flag(a, "--arbitrate")
+    let max_rounds = ad_find_flag(a, "--max-rounds", "")
+    let engine_flag = ad_find_flag(a, "--engine", "")
+    let preset = ad_find_flag(a, "--preset", "")
+    let base_s = ad_find_flag(a, "--base-depth", "3")
+    let mut base = 3
+    try { base = to_int(base_s) } catch e { base = 3 }
+    if base < 1 { base = 1 }
+    if base > 6 { base = 6 }
+
+    println("🛸 adversarial debate — seed='" + seed + "', variants=" + to_string(vn) + ", base_depth=" + to_string(base))
+    if arbitrate { println("    [--arbitrate] DEBATE verdict → NEXUS_DEBATE stderr emit + meta_required flag") }
+
+    let mut plans: [[int]] = []
+    let mut outputs: [str] = []
+    let mut totals: [int] = []
+    let mut vi = 0
+    while vi < vn {
+        let delta = ad_variant_delta(vi)
+        let plan = ad_build_plan(base, delta)
+        plans = plans + [plan]
+        let label = ad_variant_label(vi)
+        println("▎ variant " + label + " (" + ad_variant_describe(vi) + ") — plan=" + ad_plan_json(plan))
+        // 직렬 실행 (SPEC — Mac load).
+        let res = ad_run_variant(seed, plan, max_rounds, engine_flag, preset)
+        let out = res[0]
+        let tot_s = res[1]
+        let mut tot = -1
+        try { tot = to_int(tot_s) } catch e { tot = -1 }
+        outputs = outputs + [out]
+        totals = totals + [tot]
+        println("    → total=" + to_string(tot))
+        vi = vi + 1
+    }
+
+    let verdict = ad_verdict(outputs, totals)
+    println("")
+    println("▎ verdict: " + verdict)
+    if verdict == "DEBATE" {
+        if arbitrate {
+            ad_emit_debate(seed, vn, totals)
+            println("    → NEXUS_DEBATE emitted (stderr) — meta-verification required.")
+        } else {
+            println("    → variants diverge >20% but --arbitrate not set. pass --arbitrate to emit NEXUS_DEBATE.")
+        }
+    } else if verdict == "SOFT_AGREE" {
+        println("    → variants agree within 20% — soft consensus.")
+    } else {
+        println("    → variants byte-exact match — strict consensus.")
+    }
+
+    let report = ad_json_report(seed, base, vn, plans, totals, verdict, arbitrate)
+    println("")
+    println("NEXUS_DEBATE_REPORT " + report)
+}
+
+ad_main()
