@@ -3368,7 +3368,18 @@ while depth < max_depth {
 
     // OPT-15: corollary cap per depth (DIAG-01 fix) — buf_lines.push O(n²) array copy 제한
     // hexa immutable array: push O(n) copy × n pushes = O(n²) total. cap으로 n 제한.
-    let _corollary_cap: i64 = 200
+    // ROI#48d: cap depth-dep — D1 bias_jitter (0.03→0.10) 효과 Phase 4 총량 분기 가능하게.
+    //   1-based effective depth = depth + 1 (depth 는 0-based loop 변수).
+    //   매핑: eff=1 → 100, eff=2 → 200 (기존 baseline), eff=3 → 400, eff=4 → 800,
+    //         eff=5 → 1600, eff>=6 → 2000 (upper bound).
+    //   backward compat: depth=1 (eff=2) cap=200 그대로. eff=1 은 첫 iter 라 cur_n 작음 → 100 충분.
+    //   깊어질수록 axiom pool 커져 corollary 폭증 여력 확보 (D1 jitter 분기가 실제 출력 수에 반영).
+    let _corollary_cap: i64 = if depth + 1 <= 1 { 100 }
+                              else if depth + 1 == 2 { 200 }
+                              else if depth + 1 == 3 { 400 }
+                              else if depth + 1 == 4 { 800 }
+                              else if depth + 1 == 5 { 1600 }
+                              else { 2000 }
 
     let cur_n = ax_n
     let phi_g = 1.618033988749895
