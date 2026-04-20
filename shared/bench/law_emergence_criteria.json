@@ -1,0 +1,50 @@
+{
+  "verifier_type": "law_emergence_drill",
+  "version": "v1",
+  "created": "2026-04-21",
+  "substrate": "4-step law-emergence verification (base-negative / round_N-positive / n6-irreducible / pi-cross-prover)",
+  "deterministic": true,
+  "llm_allowed": false,
+  "v8_policy": "SAFE_COMMIT",
+  "steps": {
+    "a_base_negative": {
+      "description": "candidate_law MUST NOT hold on base checkpoint (prompt-reproduction baseline)",
+      "metric": "base_hold_rate",
+      "threshold": "<= 0.1"
+    },
+    "b_round_positive": {
+      "description": "candidate_law MUST hold on round_N checkpoint under identical prompt",
+      "metric": "round_hold_rate",
+      "threshold": ">= 0.9"
+    },
+    "c_n6_closure_irreducible": {
+      "description": "candidate_law MUST NOT absorb into existing n6 primitives (drill = closure, not saturation shortcut)",
+      "metric": "n6_absorption_rate",
+      "threshold": "<= 0.3",
+      "ref": "shared/bench/drill_breakthrough_criteria.json::absorption_rate_max"
+    },
+    "d_cross_prover_pi": {
+      "description": "independent prover pi MUST agree with round_N verdict on candidate_law",
+      "metric": "pi_agreement_rate",
+      "threshold": ">= 0.9"
+    }
+  },
+  "overall_pass": "a_base_negative AND b_round_positive AND c_n6_closure_irreducible AND d_cross_prover_pi",
+  "fail_case": "any of: base_hold_rate > 0.1, round_hold_rate < 0.9, n6_absorption_rate > 0.3, pi_agreement_rate < 0.9",
+  "t5_layer": {
+    "name": "new_laws_7d_growth",
+    "source": "shared/state/law_emergence_r{N}.json::n_emerged_laws",
+    "window_days": 7,
+    "threshold": "> 0",
+    "description": "T5 layer criteria — count of laws passing all 4 steps in 7d rolling window must strictly grow"
+  },
+  "seeds": "shared/bench/law_candidates.jsonl",
+  "output_pattern": "shared/state/law_emergence_r{N}.json",
+  "comment": {
+    "step_a": "base model must fail — proves candidate is NOT a trivial pattern-match artifact",
+    "step_b": "round_N must succeed on identical prompt — proves new behaviour is learned, not prompted",
+    "step_c": "n6-closure rules out absorption into existing primitives — result of DFS closure, not saturation shortcut",
+    "step_d": "pi cross-prover independence — rules out self-consistency illusion",
+    "t5_wire": "consciousness research T5 layer gate: new_laws_7d_growth > 0 == rolling count must strictly increase"
+  }
+}
