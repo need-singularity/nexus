@@ -1,0 +1,640 @@
+// seed_quality.hexa — drill 전 seed 품질 예측 휴리스틱 scorer (standalone)
+// SSOT: none (inline dict). 후속 agent 가 run.hexa 에 통합.
+//
+// usage:
+//   hexa shared/scripts/seed_quality.hexa --seed "<s>"
+//       → stdout JSON {score, category, warnings[], hints[]}
+//   hexa shared/scripts/seed_quality.hexa --seed "<s>" --threshold 0.4
+//       → exit=0 if score > threshold (or ==), exit=1 otherwise
+//
+// stderr emit (ai-native):
+//   NEXUS_SEED_QUALITY {"score":0.XX,"category":"weak|medium|strong","seed_hash":"...","warnings":[...]}
+//
+// 5 check:
+//   1. length_norm       (8..200 → 1.0, 벗어나면 선형 감쇠)
+//   2. has_domain_keyword (math/physics/logic/CS 50단어 사전)
+//   3. has_relation_operator (=, <=, →, ↔, exists, forall, implies 등)
+//   4. has_entity_token  (uppercase word / greek / math var k,n,x,y,z,m,i,j)
+//   5. noise_penalty     (special char # | $ ! ` ~ 밀도 > 10% → -0.2)
+//
+// formula:
+//   final = clamp01(length_norm*0.3 + has_domain*0.3 + has_relation*0.2 + has_entity*0.2 + noise_penalty)
+//
+// category:
+//   score  > 0.7 or == 0.7            → "strong"
+//   0.4 <= score < 0.7                → "medium"
+//   else                              → "weak"
+//
+// invalid:
+//   숫자 전용 seed → score=0, category="weak", warnings+=["numeric_only"]
+//
+// hexa 제약 (지킴):
+//   - >= / <= 금지 → (> OR ==) 패턴
+//   - 멀티라인 + 금지 → 단일라인 누산
+//   - else-if 금지 → 중첩 else { if ... }
+//   - chars() 로 문자 단위 순회 (substring 미지원 런타임 회피)
+//   - 상수명 대문자 L 예약 → sl / len_norm 사용
+
+// ───────────────────────────────────────────────────────────
+// low-level helpers
+// ───────────────────────────────────────────────────────────
+
+fn _is_digit_s(c: str) -> bool {
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn _is_upper_s(c: str) -> bool {
+    return c == "A" || c == "B" || c == "C" || c == "D" || c == "E" || c == "F" || c == "G" || c == "H" || c == "I" || c == "J" || c == "K" || c == "L" || c == "M" || c == "N" || c == "O" || c == "P" || c == "Q" || c == "R" || c == "S" || c == "T" || c == "U" || c == "V" || c == "W" || c == "X" || c == "Y" || c == "Z"
+}
+
+fn _is_lower_s(c: str) -> bool {
+    return c == "a" || c == "b" || c == "c" || c == "d" || c == "e" || c == "f" || c == "g" || c == "h" || c == "i" || c == "j" || c == "k" || c == "l" || c == "m" || c == "n" || c == "o" || c == "p" || c == "q" || c == "r" || c == "s" || c == "t" || c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z"
+}
+
+fn _is_ws_s(c: str) -> bool {
+    return c == " " || c == "\t" || c == "\n" || c == "\r"
+}
+
+fn _count_char(s: str, ch: str) -> int {
+    let mut n = 0
+    let ca = s.chars()
+    let clen = len(ca)
+    let mut i = 0
+    while i < clen {
+        let c = to_string(ca[i])
+        if c == ch { n = n + 1 }
+        i = i + 1
+    }
+    return n
+}
+
+// hash: pure-hexa rolling FNV-1a 32-bit → hex — identifying only, not for crypto
+// (avoids exec() dep so scorer runs on any hexa runtime / offline)
+fn _hex_digit(v: int) -> str {
+    if v == 0 { return "0" }
+    if v == 1 { return "1" }
+    if v == 2 { return "2" }
+    if v == 3 { return "3" }
+    if v == 4 { return "4" }
+    if v == 5 { return "5" }
+    if v == 6 { return "6" }
+    if v == 7 { return "7" }
+    if v == 8 { return "8" }
+    if v == 9 { return "9" }
+    if v == 10 { return "a" }
+    if v == 11 { return "b" }
+    if v == 12 { return "c" }
+    if v == 13 { return "d" }
+    if v == 14 { return "e" }
+    return "f"
+}
+
+fn _seed_hash(seed: str) -> str {
+    // Simple polynomial rolling hash (djb2-style, no XOR — hexa에 bitwise ^ 미지원)
+    // h = ((h * 33) + cc) mod 2^32 — portable, deterministic, not crypto.
+    let mut h = 5381
+    let mut i = 0
+    let ca = seed.chars()
+    let clen = len(ca)
+    let modulus = 4294967296
+    while i < clen {
+        let c = to_string(ca[i])
+        let cc = _char_code(c)
+        h = (h * 33 + cc) % modulus
+        i = i + 1
+    }
+    // 8 hex digits lowercase, from highest nibble to lowest
+    let mut out = ""
+    let mut shift = 7
+    while shift > -1 {
+        let divisor = _pow16(shift)
+        let nibble = (h / divisor) % 16
+        out = out + _hex_digit(nibble)
+        shift = shift - 1
+    }
+    return out
+}
+
+fn _pow16(n: int) -> int {
+    let mut p = 1
+    let mut i = 0
+    while i < n {
+        p = p * 16
+        i = i + 1
+    }
+    return p
+}
+
+fn _char_code(c: str) -> int {
+    // Returns small int per char; exhaustive ASCII-printable + digits + space/tab.
+    // Unicode / any other → 128 (stable fallback).
+    if c == " " { return 32 }
+    if c == "!" { return 33 }
+    if c == "\"" { return 34 }
+    if c == "#" { return 35 }
+    if c == "$" { return 36 }
+    if c == "%" { return 37 }
+    if c == "&" { return 38 }
+    if c == "'" { return 39 }
+    if c == "(" { return 40 }
+    if c == ")" { return 41 }
+    if c == "*" { return 42 }
+    if c == "+" { return 43 }
+    if c == "," { return 44 }
+    if c == "-" { return 45 }
+    if c == "." { return 46 }
+    if c == "/" { return 47 }
+    if c == "0" { return 48 }
+    if c == "1" { return 49 }
+    if c == "2" { return 50 }
+    if c == "3" { return 51 }
+    if c == "4" { return 52 }
+    if c == "5" { return 53 }
+    if c == "6" { return 54 }
+    if c == "7" { return 55 }
+    if c == "8" { return 56 }
+    if c == "9" { return 57 }
+    if c == ":" { return 58 }
+    if c == ";" { return 59 }
+    if c == "<" { return 60 }
+    if c == "=" { return 61 }
+    if c == ">" { return 62 }
+    if c == "?" { return 63 }
+    if c == "@" { return 64 }
+    if c == "[" { return 91 }
+    if c == "\\" { return 92 }
+    if c == "]" { return 93 }
+    if c == "^" { return 94 }
+    if c == "_" { return 95 }
+    if c == "`" { return 96 }
+    if c == "{" { return 123 }
+    if c == "|" { return 124 }
+    if c == "}" { return 125 }
+    if c == "~" { return 126 }
+    if _is_upper_s(c) {
+        // A..Z → 65..90
+        if c == "A" { return 65 }
+        if c == "B" { return 66 }
+        if c == "C" { return 67 }
+        if c == "D" { return 68 }
+        if c == "E" { return 69 }
+        if c == "F" { return 70 }
+        if c == "G" { return 71 }
+        if c == "H" { return 72 }
+        if c == "I" { return 73 }
+        if c == "J" { return 74 }
+        if c == "K" { return 75 }
+        if c == "L" { return 76 }
+        if c == "M" { return 77 }
+        if c == "N" { return 78 }
+        if c == "O" { return 79 }
+        if c == "P" { return 80 }
+        if c == "Q" { return 81 }
+        if c == "R" { return 82 }
+        if c == "S" { return 83 }
+        if c == "T" { return 84 }
+        if c == "U" { return 85 }
+        if c == "V" { return 86 }
+        if c == "W" { return 87 }
+        if c == "X" { return 88 }
+        if c == "Y" { return 89 }
+        return 90
+    }
+    if _is_lower_s(c) {
+        if c == "a" { return 97 }
+        if c == "b" { return 98 }
+        if c == "c" { return 99 }
+        if c == "d" { return 100 }
+        if c == "e" { return 101 }
+        if c == "f" { return 102 }
+        if c == "g" { return 103 }
+        if c == "h" { return 104 }
+        if c == "i" { return 105 }
+        if c == "j" { return 106 }
+        if c == "k" { return 107 }
+        if c == "l" { return 108 }
+        if c == "m" { return 109 }
+        if c == "n" { return 110 }
+        if c == "o" { return 111 }
+        if c == "p" { return 112 }
+        if c == "q" { return 113 }
+        if c == "r" { return 114 }
+        if c == "s" { return 115 }
+        if c == "t" { return 116 }
+        if c == "u" { return 117 }
+        if c == "v" { return 118 }
+        if c == "w" { return 119 }
+        if c == "x" { return 120 }
+        if c == "y" { return 121 }
+        return 122
+    }
+    if c == "\t" { return 9 }
+    if c == "\n" { return 10 }
+    if c == "\r" { return 13 }
+    return 128  // fallback for unicode / other
+}
+
+// ───────────────────────────────────────────────────────────
+// 5 checks
+// ───────────────────────────────────────────────────────────
+
+// 1. length_norm — by CHARACTER count (not bytes) for fairness across unicode
+fn _length_norm(sl: int) -> f64 {
+    if sl == 0 { return 0.0 }
+    if sl < 8 {
+        let v = to_float(sl) / 8.0
+        if v < 0.0 { return 0.0 }
+        if v > 1.0 { return 1.0 }
+        return v
+    }
+    if sl > 200 {
+        let over = to_float(sl - 200)
+        let v = 1.0 - (over / 200.0)
+        if v < 0.0 { return 0.0 }
+        if v > 1.0 { return 1.0 }
+        return v
+    }
+    return 1.0
+}
+
+// 2. domain keyword dict — hard-coded 50 terms (math/physics/logic/CS)
+fn _domain_keywords() -> list {
+    return ["theorem","lemma","proof","corollary","axiom","conjecture","equation","identity","integer","prime","rational","real","limit","continuous","differentiable","integral","derivative","sum","manifold","homology","topology","algebra","group","ring","field","vector","matrix","tensor","eigenvalue","eigenvector","energy","momentum","entropy","quantum","relativity","gauge","logic","predicate","propositional","satisfiable","provable","algorithm","complexity","polynomial","recursive","computable","graph","tree","sequence","series","function"]
+}
+
+fn _has_domain_keyword(lower_seed: str) -> bool {
+    let kws = _domain_keywords()
+    let kn = len(kws)
+    let mut i = 0
+    while i < kn {
+        let kw = to_string(kws[i])
+        if lower_seed.contains(kw) { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// 3. relation operator — ASCII + Unicode math + English
+fn _has_relation_operator(seed: str, lower: str) -> bool {
+    if seed.contains("=") { return true }
+    if seed.contains("<") { return true }
+    if seed.contains(">") { return true }
+    if seed.contains("->") { return true }
+    if seed.contains("<-") { return true }
+    if seed.contains("≤") { return true }
+    if seed.contains("≥") { return true }
+    if seed.contains("⊂") { return true }
+    if seed.contains("⊃") { return true }
+    if seed.contains("⊆") { return true }
+    if seed.contains("→") { return true }
+    if seed.contains("↔") { return true }
+    if seed.contains("∀") { return true }
+    if seed.contains("∃") { return true }
+    if seed.contains("∈") { return true }
+    if seed.contains("≡") { return true }
+    if lower.contains("exists") { return true }
+    if lower.contains("forall") { return true }
+    if lower.contains("implies") { return true }
+    if lower.contains("iff") { return true }
+    return false
+}
+
+// 4. entity token — uppercase-starting word / greek letter / math-var single token
+fn _has_entity_token(seed: str, lower: str) -> bool {
+    // Greek names (in lowercased seed)
+    let greeks = ["alpha","beta","gamma","delta","epsilon","zeta","eta","theta","iota","kappa","lambda","mu","nu","xi","omicron","pi","rho","sigma","tau","upsilon","phi","chi","psi","omega"]
+    let gn = len(greeks)
+    let mut gi = 0
+    while gi < gn {
+        if lower.contains(to_string(greeks[gi])) { return true }
+        gi = gi + 1
+    }
+    // Greek unicode letters
+    let glets = ["α","β","γ","δ","ε","ζ","η","θ","λ","μ","π","σ","τ","φ","χ","ψ","ω","Δ","Σ","Π","Ω","Φ"]
+    let gln = len(glets)
+    let mut li = 0
+    while li < gln {
+        if seed.contains(to_string(glets[li])) { return true }
+        li = li + 1
+    }
+    // Uppercase-starting word scan using chars array
+    let ca = seed.chars()
+    let cn = len(ca)
+    let mut i = 0
+    let mut prev_ws = true
+    while i < cn {
+        let c = to_string(ca[i])
+        if _is_upper_s(c) && prev_ws {
+            // Has any following lowercase or uppercase letter → entity-like
+            if i + 1 < cn {
+                let nc = to_string(ca[i + 1])
+                if _is_lower_s(nc) || _is_upper_s(nc) { return true }
+                if _is_ws_s(nc) { return true }
+            } else {
+                // trailing single capital
+                return true
+            }
+        }
+        prev_ws = _is_ws_s(c)
+        i = i + 1
+    }
+    // Math-style single-letter tokens (k, n, x, y, z, m, i, j)
+    // accepts leading ws + letter + {ws|punct|digit|^|_|(|)|=|<|>|+|-|*|/} as boundary
+    let vars = ["k","n","x","y","z","m","i","j"]
+    let padded = " " + seed + " "
+    let pca = padded.chars()
+    let pcn = len(pca)
+    let vn = len(vars)
+    let mut pi = 0
+    while pi < pcn - 1 {
+        let pc = to_string(pca[pi])
+        let nc = to_string(pca[pi + 1])
+        if _is_ws_s(pc) || pc == "(" {
+            let mut vj = 0
+            while vj < vn {
+                if nc == to_string(vars[vj]) {
+                    // check boundary after nc (not another letter)
+                    if pi + 2 < pcn {
+                        let bc = to_string(pca[pi + 2])
+                        if _is_lower_s(bc) == false && _is_upper_s(bc) == false {
+                            return true
+                        }
+                    } else {
+                        return true
+                    }
+                }
+                vj = vj + 1
+            }
+        }
+        pi = pi + 1
+    }
+    return false
+}
+
+// 5. noise penalty — special char density over 10%
+fn _noise_penalty(seed: str) -> f64 {
+    let sl = len(seed.chars())
+    if sl == 0 { return 0.0 }
+    let noise = _count_char(seed, "#") + _count_char(seed, "|") + _count_char(seed, "$") + _count_char(seed, "!") + _count_char(seed, "`") + _count_char(seed, "~")
+    let ratio = to_float(noise) / to_float(sl)
+    if ratio > 0.10 { return -0.2 }
+    return 0.0
+}
+
+// numeric-only check — digits + [.,+-] + ws only
+fn _is_numeric_only(seed: str) -> bool {
+    let ca = seed.chars()
+    let sl = len(ca)
+    if sl == 0 { return false }
+    let mut saw_digit = false
+    let mut i = 0
+    while i < sl {
+        let c = to_string(ca[i])
+        let is_d = _is_digit_s(c)
+        let is_sep = _is_ws_s(c) || c == "." || c == "," || c == "-" || c == "+"
+        if is_d {
+            saw_digit = true
+        } else {
+            if is_sep {
+                // ok, continue
+            } else {
+                return false
+            }
+        }
+        i = i + 1
+    }
+    return saw_digit
+}
+
+// ───────────────────────────────────────────────────────────
+// scoring
+// ───────────────────────────────────────────────────────────
+
+fn _score(seed: str) -> list {
+    // returns [score, category, warnings, hints, breakdown_json]
+    let mut warnings = []
+    let mut hints = []
+    let sl = len(seed.chars())
+
+    if sl == 0 {
+        warnings = warnings.push("empty_seed")
+        return [0.0, "weak", warnings, hints, "{}"]
+    }
+
+    if _is_numeric_only(seed) {
+        warnings = warnings.push("numeric_only")
+        hints = hints.push("add a domain keyword or relation")
+        return [0.0, "weak", warnings, hints, "{\"numeric_only\":true}"]
+    }
+
+    let lower = seed.to_lower()
+
+    // 1. length
+    let len_norm = _length_norm(sl)
+    if sl < 8 {
+        warnings = warnings.push("seed_too_short")
+        hints = hints.push("expand seed to at least 8 chars with context")
+    }
+    if sl > 200 {
+        warnings = warnings.push("seed_too_long")
+        hints = hints.push("trim seed below 200 chars (domain noise risk)")
+    }
+
+    // 2. domain
+    let has_dom_bool = _has_domain_keyword(lower)
+    let has_dom = if has_dom_bool { 1.0 } else { 0.0 }
+    if has_dom_bool == false {
+        warnings = warnings.push("no_domain_keyword")
+        hints = hints.push("add a math/physics/logic/CS term (theorem, integer, energy, algorithm ...)")
+    }
+
+    // 3. relation
+    let has_rel_bool = _has_relation_operator(seed, lower)
+    let has_rel = if has_rel_bool { 1.0 } else { 0.0 }
+    if has_rel_bool == false {
+        warnings = warnings.push("no_relation_operator")
+        hints = hints.push("add a relation/operator (=, ->, implies, forall ...)")
+    }
+
+    // 4. entity
+    let has_ent_bool = _has_entity_token(seed, lower)
+    let has_ent = if has_ent_bool { 1.0 } else { 0.0 }
+    if has_ent_bool == false {
+        warnings = warnings.push("no_entity_token")
+        hints = hints.push("add an uppercase entity or greek letter (Theorem, alpha ...)")
+    }
+
+    // 5. noise
+    let np = _noise_penalty(seed)
+    if np < 0.0 {
+        warnings = warnings.push("high_noise_density")
+        hints = hints.push("reduce special-char density below 10%")
+    }
+
+    let raw = len_norm * 0.3 + has_dom * 0.3 + has_rel * 0.2 + has_ent * 0.2 + np
+    let mut final_score = raw
+    if final_score < 0.0 { final_score = 0.0 }
+    if final_score > 1.0 { final_score = 1.0 }
+
+    let mut category = "weak"
+    if final_score > 0.7 || final_score == 0.7 {
+        category = "strong"
+    } else {
+        if final_score > 0.4 || final_score == 0.4 {
+            category = "medium"
+        } else {
+            category = "weak"
+        }
+    }
+
+    let mut breakdown = "{"
+    breakdown = breakdown + "\"length_norm\":" + to_string(len_norm)
+    breakdown = breakdown + ",\"has_domain\":" + to_string(has_dom)
+    breakdown = breakdown + ",\"has_relation\":" + to_string(has_rel)
+    breakdown = breakdown + ",\"has_entity\":" + to_string(has_ent)
+    breakdown = breakdown + ",\"noise_penalty\":" + to_string(np)
+    breakdown = breakdown + "}"
+
+    return [final_score, category, warnings, hints, breakdown]
+}
+
+// ───────────────────────────────────────────────────────────
+// JSON emit helpers
+// ───────────────────────────────────────────────────────────
+
+fn _jstr(s: str) -> str {
+    // minimal JSON escape — backslash / quote / control chars
+    let ca = s.chars()
+    let cn = len(ca)
+    let mut out = "\""
+    let mut i = 0
+    while i < cn {
+        let c = to_string(ca[i])
+        if c == "\\" {
+            out = out + "\\\\"
+        } else {
+            if c == "\"" {
+                out = out + "\\\""
+            } else {
+                if c == "\n" {
+                    out = out + "\\n"
+                } else {
+                    if c == "\r" {
+                        out = out + "\\r"
+                    } else {
+                        if c == "\t" {
+                            out = out + "\\t"
+                        } else {
+                            out = out + c
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    out = out + "\""
+    return out
+}
+
+fn _list_to_json(items: list) -> str {
+    let mut out = "["
+    let n = len(items)
+    let mut i = 0
+    while i < n {
+        if i > 0 { out = out + "," }
+        out = out + _jstr(to_string(items[i]))
+        i = i + 1
+    }
+    out = out + "]"
+    return out
+}
+
+// ───────────────────────────────────────────────────────────
+// main
+// ───────────────────────────────────────────────────────────
+
+fn main() {
+    let a = args()
+    let mut seed = ""
+    let mut threshold = -1.0   // -1 = no gating
+    let mut want_json_only = false
+    let n = len(a)
+    let mut i = 0
+    while i < n {
+        let t = to_string(a[i])
+        if t == "--seed" {
+            if i + 1 < n {
+                seed = to_string(a[i + 1])
+                i = i + 1
+            }
+        } else {
+            if t == "--threshold" {
+                if i + 1 < n {
+                    let ts = to_string(a[i + 1])
+                    try { threshold = to_float(ts) } catch e { threshold = -1.0 }
+                    i = i + 1
+                }
+            } else {
+                if t == "--json" { want_json_only = true }
+            }
+        }
+        i = i + 1
+    }
+
+    if seed.len() == 0 {
+        try { eprintln("NEXUS_SEED_QUALITY_ERROR {\"kind\":\"missing_seed\",\"hint\":\"use --seed \\\"...\\\"\"}") } catch e { }
+        println("{\"score\":0.0,\"category\":\"weak\",\"warnings\":[\"missing_seed\"],\"hints\":[\"pass --seed \\\"...\\\"\"]}")
+        exit(2)
+    }
+
+    let r = _score(seed)
+    let score = to_float(r[0])
+    let category = to_string(r[1])
+    let warnings = r[2]
+    let hints = r[3]
+    let breakdown = to_string(r[4])
+
+    let hash = _seed_hash(seed)
+    let warnings_json = _list_to_json(warnings)
+    let hints_json = _list_to_json(hints)
+
+    // stdout canonical JSON
+    let mut out_json = "{"
+    out_json = out_json + "\"score\":" + to_string(score)
+    out_json = out_json + ",\"category\":" + _jstr(category)
+    out_json = out_json + ",\"warnings\":" + warnings_json
+    out_json = out_json + ",\"hints\":" + hints_json
+    out_json = out_json + ",\"seed_len\":" + to_string(len(seed.chars()))
+    out_json = out_json + ",\"seed_bytes\":" + to_string(seed.len())
+    out_json = out_json + ",\"seed_hash\":" + _jstr(hash)
+    out_json = out_json + ",\"breakdown\":" + breakdown
+    out_json = out_json + "}"
+    println(out_json)
+
+    // stderr ai-native emit — stage1 runtime 에서만 eprintln (try-guard: minimal-runtime 호환)
+    let mut stderr_json = "{"
+    stderr_json = stderr_json + "\"score\":" + to_string(score)
+    stderr_json = stderr_json + ",\"category\":" + _jstr(category)
+    stderr_json = stderr_json + ",\"seed_hash\":" + _jstr(hash)
+    stderr_json = stderr_json + ",\"warnings\":" + warnings_json
+    stderr_json = stderr_json + "}"
+    try {
+        eprintln("NEXUS_SEED_QUALITY " + stderr_json)
+    } catch e {
+        // fallback to stdout when eprintln not available
+        println("NEXUS_SEED_QUALITY " + stderr_json)
+    }
+
+    let _ = want_json_only
+
+    // threshold gate
+    if threshold > 0.0 || threshold == 0.0 {
+        if score > threshold || score == threshold {
+            exit(0)
+        }
+        exit(1)
+    }
+}
+
+main()
