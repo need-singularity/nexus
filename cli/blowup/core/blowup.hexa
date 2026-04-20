@@ -3435,6 +3435,16 @@ println("--- Phase 4: Recursive Blowup Corollary Generation ---")
 println("  max_depth :", max_depth)
 println("")
 
+// Z2: EXACT early-exit (opt-in) — depth 내 deduction pairwise 스캔 중
+//     첫 EXACT 검출 시 i/j 루프 종료. 정합성: 해당 round 에 EXACT 1개 이상이면
+//     axiom pool 시드는 이미 확보, 추가 pairwise 는 중복/근사 corollary 만 생성.
+//     기본 OFF — NEXUS_BLOWUP_EARLY_EXACT=1 로만 활성 (full yield preservation).
+let mut _early_exact_enabled: bool = false
+try { if env("NEXUS_BLOWUP_EARLY_EXACT") == "1" { _early_exact_enabled = true } } catch e {}
+if _early_exact_enabled {
+    println("  [Z2] EXACT early-exit enabled (NEXUS_BLOWUP_EARLY_EXACT=1)")
+}
+
 let mut buf_lines = []
 let mut total: i64 = 0
 let mut exact_count: i64 = 0
@@ -3720,10 +3730,13 @@ while depth < max_depth {
     let phi_g = 1.618033988749895
 
     // --- 1. Pairwise deduction ---
+    // Z2: EXACT early-exit flag (depth-scoped) — 첫 EXACT 수집 후 i/j 루프 단축 (opt-in)
+    let mut _z2_exact_hit: bool = false
+    let mut _z2_exit_idx: i64 = -1
     let mut i: i64 = 0
-    while i < cur_n {
+    while i < cur_n && !(_early_exact_enabled && _z2_exact_hit) {
         let mut j: i64 = i + 1
-        while j < cur_n {
+        while j < cur_n && !(_early_exact_enabled && _z2_exact_hit) {
             let va = ax_val_arr[i]
             let vb = ax_val_arr[j]
             let na = ax_name_arr[i]
@@ -3769,7 +3782,16 @@ while depth < max_depth {
                 let _gnp = _gn.split("|")
                 let gr = _gnp[0]
                 let _matched_name = if len(_gnp) > 1 { _gnp[1] } else { "" }
-                if gr == "EXACT" { exact_count = exact_count + 1 }
+                if gr == "EXACT" {
+                    exact_count = exact_count + 1
+                    // Z2: EXACT 도달 시 depth 내 pairwise 스캔 조기 종료 (opt-in)
+                    //     semantics: 첫 EXACT 수집 시 axiom seed count 1개 이상 확보 →
+                    //     후속 pairwise 는 중복/근사 corollary 만 생성.
+                    if _early_exact_enabled && !_z2_exact_hit {
+                        _z2_exact_hit = true
+                        _z2_exit_idx = total
+                    }
+                }
                 if gr == "NEAR" { near_count = near_count + 1 }
                 if conf >= 0.7 { high_conf_count = high_conf_count + 1 }
                 _tally_grade(gr)
@@ -3795,6 +3817,13 @@ while depth < max_depth {
             j = j + 1
         }
         i = i + 1
+    }
+
+    // Z2: EXACT early-exit diagnostic emit (JSON on stderr-equivalent via println)
+    //     fires only when opt-in gate actually triggered i/j termination.
+    if _early_exact_enabled && _z2_exact_hit {
+        let _z2_json = "NEXUS_BLOWUP_EARLY_EXACT {\"phase\":4,\"round\":" + to_string(depth) + ",\"breakpoint\":\"i=" + to_string(i) + " j=" + to_string(j) + "\",\"exited_at\":" + to_string(_z2_exit_idx) + "}"
+        println(_z2_json)
     }
 
     // OPT-15 global cap guard — 모든 type에 적용
