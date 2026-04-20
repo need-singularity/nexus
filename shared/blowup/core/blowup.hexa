@@ -209,6 +209,15 @@ while _nfi < _n6_dyn_count {
 }
 _trace("[03-bucket-ok] n6 hash bucket built")
 
+// ─── ROI#48c D3 (2026-04-21): seed-dependent match_name scan offset ───
+// 문제: Phase 4 corollary 값이 여러 n6 상수에 threshold 내로 들어가는 경우 match_name 이
+//   `for i in 0..N` 선형 스캔의 첫 매치를 반환 → 같은 hash bucket 에 매핑된 다른 round 의
+//   값이 "동일 corollary 라벨" 을 얻어 흡수 집합이 round 간 충돌.
+// 해결: 스캔 시작점을 seed 의존 offset 으로 회전 (ring permutation). 매치 후보 집합은 불변,
+//   순서만 섞임 → "첫 매치" 가 round 마다 다른 이름을 고르게 됨. 결정론 유지 (same seed → same offset).
+// _match_scan_offset: Phase 2 진입 시 (_verify_seed_bias 와 동시에) set. 0 이면 레거시 동작.
+let mut _match_scan_offset: i64 = 0
+
 // 버킷 탐색 헬퍼: 해당 버킷의 인덱스 리스트 반환
 fn _bucket_indices(bucket: map, key: string) -> list {
     let mut result: list = []
@@ -469,20 +478,79 @@ fn _frac01(x: f64) -> f64 {
     return v
 }
 
+// ─── ROI#48c D2 (2026-04-21): round_salt prefix 추출 + slot-별 독립 mix ───
+// Day-3 nonce 는 `#iter-nonce=<N>` suffix 를 hash 했지만, drill 의 round_salt prefix
+// `round=N-r<salt>|...` 는 sanitize 후 `round_N-r<salt>_...` 로만 남아 seed_to_features 의
+// 8-slot 이 FNV/DJB2/SHA64 bucket collision 으로 round 간 동일값 반환 → corollary 분기 실패.
+// 해결: round_salt 을 별도로 추출, slot-별 독립 constant 로 mix (nonce mix 와 직교).
+// 입력 s 는 sanitize 전/후 모두 가능 — `round=N-r<salt>|` 또는 `round_N-r<salt>_` 둘 다 매칭.
+// prefix 부재 시 반환=0 → 기존 도메인 동작 100% 호환.
+fn _extract_round_salt(s: string) -> string {
+    if s.len() < 7 { return "" }
+    // 빠른 prefix 판정: "round=" 또는 "round_" (sanitize 후)
+    let head6 = s.substring(0, 6)
+    if head6 != "round=" && head6 != "round_" { return "" }
+    // delimiter: sanitize 전 `|`, sanitize 후 `_` — 첫 번째 출현 위치까지
+    // _raw_d 원본은 `round=N-r<salt>|domain...` → delimiter `|`
+    // sanitize 후는 `round_N-r<salt>_domain...` → delimiter `_` (단, 이미 prefix 에도 `_` 존재)
+    // sanitize 경우를 위해: "round_N-rSALT_..." 에서 3번째 `_` 까지가 prefix.
+    if head6 == "round=" {
+        let p = s.split("|")
+        if p.len() < 2 { return s }
+        return p[0]
+    }
+    // sanitize 변형: "round_<digits>-r<salt>_" 패턴.
+    // 3번째 `_` 인덱스 찾기 (1=round_, 2=digits_, 3=salt_)
+    let mut under_cnt: i64 = 0
+    let mut i: i64 = 0
+    let n = s.len()
+    while i < n {
+        if char_code(s, i) == 95 {  // '_'
+            under_cnt = under_cnt + 1
+            if under_cnt == 3 { return s.substring(0, i) }
+        }
+        i = i + 1
+    }
+    return s
+}
+
+// slot-specific salt mix: FNV-1a-like hash 을 prefix + slot 상수로.
+// nonce_mix 와 다른 prime 사용 (1597334677, 3266489917) → 독립 분포.
+// 반환 범위 [0.0, 1.0); prefix 빈 문자열이면 0.0.
+fn _slot_salt_mix(prefix: string, slot_idx: i64) -> f64 {
+    if prefix.len() == 0 { return 0.0 }
+    let mut h: i64 = 1597334677
+    let mut i: i64 = 0
+    let n = prefix.len()
+    while i < n {
+        let cc = char_code(prefix, i)
+        h = ((h + cc) * 3266489917) % 4294967296
+        i = i + 1
+    }
+    // slot decorrelation
+    let s_off = slot_idx * 2971215073
+    let mut hh = (h + s_off) % 4294967296
+    if hh < 0 { hh = 0 - hh }
+    return to_float(hh % 1000000) / 1000000.0
+}
+
 // 8-slot feature 벡터 반환.
 // 슬롯: [0]length, [1]entropy, [2]digit, [3]domain, [4]FNV, [5]DJB2, [6]SHA64-low, [7]words
 // Day-3: iter-nonce (seed 내 #iter-nonce=<N> suffix) 를 각 slot 에 독립 mix.
+// ROI#48c D2: round_salt prefix (round=N-r<salt>|... / round_N-r<salt>_...) 도 slot-별 독립 mix.
+//   → round 간 seed 문자열 분화가 모든 8-slot 에 전파 (FNV/DJB2 bucket collision 회피).
 fn seed_to_features(s: string) -> list {
     let nonce = _extract_iter_nonce(s)
+    let salt_p = _extract_round_salt(s)
     let mut feat = []
-    feat = feat.push(_frac01(_length_norm(s)        + _slot_nonce_mix(nonce, 0)))
-    feat = feat.push(_frac01(_shannon_entropy_norm(s) + _slot_nonce_mix(nonce, 1)))
-    feat = feat.push(_frac01(_digit_ratio(s)         + _slot_nonce_mix(nonce, 2)))
-    feat = feat.push(_frac01(_domain_token_match(s)  + _slot_nonce_mix(nonce, 3)))
-    feat = feat.push(_frac01(_fnv1a_hash(s)          + _slot_nonce_mix(nonce, 4)))
-    feat = feat.push(_frac01(_djb2_hash_norm(s)      + _slot_nonce_mix(nonce, 5)))
-    feat = feat.push(_frac01(_sha64_low_norm(s)      + _slot_nonce_mix(nonce, 6)))
-    feat = feat.push(_frac01(_word_count_norm(s)     + _slot_nonce_mix(nonce, 7)))
+    feat = feat.push(_frac01(_length_norm(s)        + _slot_nonce_mix(nonce, 0) + _slot_salt_mix(salt_p, 0)))
+    feat = feat.push(_frac01(_shannon_entropy_norm(s) + _slot_nonce_mix(nonce, 1) + _slot_salt_mix(salt_p, 1)))
+    feat = feat.push(_frac01(_digit_ratio(s)         + _slot_nonce_mix(nonce, 2) + _slot_salt_mix(salt_p, 2)))
+    feat = feat.push(_frac01(_domain_token_match(s)  + _slot_nonce_mix(nonce, 3) + _slot_salt_mix(salt_p, 3)))
+    feat = feat.push(_frac01(_fnv1a_hash(s)          + _slot_nonce_mix(nonce, 4) + _slot_salt_mix(salt_p, 4)))
+    feat = feat.push(_frac01(_djb2_hash_norm(s)      + _slot_nonce_mix(nonce, 5) + _slot_salt_mix(salt_p, 5)))
+    feat = feat.push(_frac01(_sha64_low_norm(s)      + _slot_nonce_mix(nonce, 6) + _slot_salt_mix(salt_p, 6)))
+    feat = feat.push(_frac01(_word_count_norm(s)     + _slot_nonce_mix(nonce, 7) + _slot_salt_mix(salt_p, 7)))
     return feat
 }
 
@@ -655,8 +723,15 @@ fn n6_conf(value: f64) -> f64 {
 
 fn match_name(value: f64) -> string {
     // Dynamic: n6_constants.jsonl 전체 상수 대상 매칭 (float cache 사용)
-    let mut i: i64 = 0
-    while i < _n6_dyn_count {
+    // ROI#48c D3(2026-04-21): seed-dependent ring permutation —
+    //   스캔 시작 인덱스를 _match_scan_offset 으로 회전. 매치 결과 집합은 불변이나
+    //   multi-candidate 시드에서 "첫 매치" 가 round 마다 달라져 corollary 라벨 분기.
+    //   offset=0 (기본값) 이면 i' = i % N → 레거시 0..N 스캔과 동일.
+    if _n6_dyn_count == 0 { return "" }
+    let start = if _match_scan_offset > 0 { _match_scan_offset % _n6_dyn_count } else { 0 }
+    let mut k: i64 = 0
+    while k < _n6_dyn_count {
+        let i = (start + k) % _n6_dyn_count
         let cv: f64 = _n6_fcache[i]
         // 값 크기에 따른 적응적 threshold
         let mut threshold = 0.005
@@ -664,7 +739,7 @@ fn match_name(value: f64) -> string {
         else if abs_f(cv) >= 1.0 { threshold = 0.0001 }
         else if abs_f(cv) >= 0.01 { threshold = 0.001 }
         if abs_f(value - cv) < threshold { return to_string(_n6_dyn_names[i]) }
-        i = i + 1
+        k = k + 1
     }
     return ""
 }
@@ -2943,7 +3018,14 @@ println("--- Phase 2: OUROBOROS Evolution ---")
 // S5 (2026-04-19): seed ingress to verify_score — domain 을 seed_n6_ratio 에 투입
 _verify_seed_str = domain
 _verify_seed_bias = seed_n6_ratio(domain)
-println("  seed bias      : " + domain + " → seed_n6_ratio=" + to_string(_verify_seed_bias))
+// ROI#48c D3(2026-04-21): match_name 스캔 offset 을 seed 의존으로 고정.
+//   _raw_d (sanitize 전) 의 round_salt prefix 를 hash 하여 round 간 분기 유발.
+//   prefix 부재 시 domain 전체 DJB2 fallback → 기존 결정론 유지.
+let _seed_perm_src = if _extract_round_salt(_raw_d) != "" { _extract_round_salt(_raw_d) } else { domain }
+let _perm_hash = _djb2_hash_norm(_seed_perm_src)  // [0,1)
+_match_scan_offset = to_int(_perm_hash * 1000000.0)
+if _match_scan_offset < 0 { _match_scan_offset = 0 - _match_scan_offset }
+println("  seed bias      : " + domain + " → seed_n6_ratio=" + to_string(_verify_seed_bias) + ", scan_offset=" + to_string(_match_scan_offset))
 // Build seed values from domain metrics
 let mut seed_parts: [string] = []
 let mut si: i64 = 0
@@ -3227,8 +3309,8 @@ if ext_seeds.len() > 0 {
     //   라운드마다 salt/nonce 가 다른 domain 문자열 → seed_n6_ratio 가 다름 → 각 axiom 값에
     //   축별 고유 잔여량이 추가되어 Phase 4 corollary 값 스트림이 라운드마다 분화.
     //   n=6 invariant 보존: σ·φ=n·τ=24 scalar 관계는 값 perturbation 과 독립 (구조 불변).
-    //   규모: |bias_jitter| <= 1e-3 × m_val 로 clamp — match_grade(d<0.01=EXACT, d<0.05=NEAR)
-    //   threshold 보다 한 자릿수 작아 EXACT 후보는 보존하되 경계 시드에서 분기 유발.
+    //   규모: ROI#48c D1(2026-04-21) ceiling 0.03 → 0.10 — match_grade(d<0.01=EXACT, d<0.05=NEAR)
+    //   threshold 를 넘도록 확대해 round_salt 간 corollary 집합 분기 보장.
     //   bias = 0 (seed 없음/zero) 이면 perturb=0 → 기존 동작 100% 호환.
     let bias = _verify_seed_bias
     // Day-3: seed-aware 8-slot feature 도 추출 (slot-별 독립 jitter 소스)
@@ -3243,14 +3325,16 @@ if ext_seeds.len() > 0 {
         //   slot-specific: _seed_feat[i % 8] ∈ [0,1) — 8-slot feature (len/entropy/fnv1a/djb2/...)
         //                  각 slot 이 nonce/salt/round-prefix 에서 독립 mix 되어 round 마다 분화됨
         //   × 2 - 1 → [-1, 1]
-        //   × 0.03 × |base_val| + 0.03 ||base_val|≈0 시 absolute offset → |perturb| ≈ 3% × base
-        //   threshold: match_grade NEAR=0.05, EXACT=0.01 → 3% 는 경계에서 분기 유발 충분
+        //   ROI#48c D1(2026-04-21): ceiling 0.03 → 0.10 으로 확대 — round_salt 독립성 강화.
+        //     3% 는 match_grade EXACT(0.01)/NEAR(0.05) 경계를 못 넘어 r1 vs r2 분기 실패 (smoke 관찰).
+        //     10% 는 경계 시드를 NEAR↔MISS / EXACT↔NEAR 전이시켜 round 별 corollary 집합 분화 보장.
+        //     n=6 invariant 은 값 perturbation 과 독립 (scalar 관계식만 보존).
         let _slot_idx = init_i % 8
         let _slot_v = to_float(_seed_feat[_slot_idx])
         let _jitter_unit = _slot_v * 2.0 - 1.0
         let mut _abs_v = _base_val
         if _abs_v < 0.0 { _abs_v = 0.0 - _abs_v }
-        let _perturb = _jitter_unit * 0.03 * (_abs_v + 0.1)
+        let _perturb = _jitter_unit * 0.10 * (_abs_v + 0.1)
         ax_val_arr = ax_val_arr.push(_base_val + _perturb)
         ax_n = ax_n + 1
         init_i = init_i + 1
