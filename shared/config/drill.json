@@ -1,0 +1,92 @@
+{
+  "id": "drill-config",
+  "kind": "drill_sot",
+  "schema": "v1",
+  "role": "nexus drill 6-stage 깊이/자율 조정/프리셋/관찰성 SSOT",
+  "updated": "2026-04-20",
+  "consumers": [
+    "run.hexa cmd_drill",
+    "run.hexa _resolve_depth",
+    "run.hexa _adaptive_adjust"
+  ],
+  "stages": {
+    "smash":        {"engine": "shared/blowup/core/blowup.hexa",                    "default_depth": 3, "min": 1, "max": 9},
+    "free":         {"engine": "shared/blowup/compose.hexa",                        "default_depth": 3, "min": 1, "max": 7, "extra": "--modules all --dfs"},
+    "absolute":     {"engine": "shared/blowup/modules/blowup_absolute.hexa",        "default_depth": 0, "min": 0, "max": 1, "togglable": true},
+    "meta_closure": {"engine": "shared/blowup/modules/blowup_meta_closure.hexa",    "default_depth": 0, "min": 0, "max": 1, "togglable": true},
+    "hyperarith":   {"engine": "shared/blowup/modules/blowup_hyperarithmetic.hexa", "default_depth": 0, "min": 0, "max": 1, "togglable": true},
+    "resonance":    {"engine": "inline",                                            "default_depth": 1, "min": 1, "max": 3, "extra": "σ-grid log-spaced"}
+  },
+  "flag_precedence": [
+    "env (NEXUS_DRILL_DEPTH, NEXUS_DRILL_{STAGE})",
+    "master (--depth N)",
+    "preset (--preset)",
+    "per-stage (--smash-depth N etc)",
+    "runtime_adaptive (--depth auto 이면 round 결과로 덮어쓰기)"
+  ],
+  "presets": {
+    "light":    {"smash": 2, "free": 2, "absolute": 0, "meta_closure": 0, "hyperarith": 0, "resonance": 1},
+    "normal":   {"smash": 3, "free": 3, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 1},
+    "deep":     {"smash": 5, "free": 4, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 2},
+    "paranoid": {"smash": 7, "free": 5, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 3},
+    "riemann":     {"smash": 4, "free": 3, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 2},
+    "bsd":         {"smash": 3, "free": 3, "absolute": 1, "meta_closure": 0, "hyperarith": 1, "resonance": 1},
+    "hodge":       {"smash": 3, "free": 4, "absolute": 1, "meta_closure": 1, "hyperarith": 0, "resonance": 1},
+    "navier":      {"smash": 5, "free": 3, "absolute": 0, "meta_closure": 1, "hyperarith": 1, "resonance": 2},
+    "p_vs_np":     {"smash": 3, "free": 3, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 1},
+    "poincare":    {"smash": 3, "free": 5, "absolute": 1, "meta_closure": 1, "hyperarith": 0, "resonance": 1},
+    "yang_mills":  {"smash": 4, "free": 3, "absolute": 1, "meta_closure": 1, "hyperarith": 1, "resonance": 2}
+  },
+  "adaptive": {
+    "mode_default": "absorption_gradient+saturation_hunt",
+    "policies": {
+      "absorption_gradient": {
+        "signal": "round_absorption - prev_round_absorption",
+        "if_positive_big":   "keep_depth",
+        "if_positive_small": "depth_steady",
+        "if_zero":           "saturation_hunt_trigger",
+        "if_negative":       "depth_minus_1"
+      },
+      "saturation_hunt": {
+        "trigger": "3_consecutive_rounds_same_total",
+        "action":  "smash_depth_plus_1",
+        "ceiling": "stage.max"
+      },
+      "stage_balance": {
+        "signal": "per_stage_absorption_variance",
+        "action": "bottom_stage_depth_plus_1_cap_at_max"
+      },
+      "cost_cap": {
+        "signal": ["wall_time_round_sec", "rss_bytes"],
+        "threshold": {"wall_time_round_sec": 300, "rss_bytes": 2147483648},
+        "action": "global_depth_minus_1"
+      }
+    },
+    "floor": 1,
+    "ceiling_global": "stages.{stage}.max",
+    "hysteresis": "±1_oscillation_blocked_for_2_rounds"
+  },
+  "observability": {
+    "stdout_format":    "  {stage}:   +{absorb} absorbs depth={depth}",
+    "stderr_trace_key": "NEXUS_DRILL_DEPTH",
+    "ndjson_path":      "/tmp/nexus_drill_depth.ndjson",
+    "ndjson_rotate":    "last_100_rounds"
+  },
+  "failure_modes": {
+    "adaptive_runaway":       {"detect": "3_consecutive_rounds_at_max",     "recover": "cap_at_half+warn"},
+    "oscillation":            {"detect": "high_freq_plus_minus_1",          "recover": "hysteresis_gate"},
+    "stage_balance_collapse": {"detect": "one_stage_monopoly",              "recover": "floor_2_on_bottom_stage"},
+    "oom_imminent":           {"detect": "rss > 80_percent_host",           "recover": "global_depth_minus_1+checkpoint_flush"},
+    "sigint":                 {"detect": "SIGINT",                          "recover": "finish_current_round+graceful_exit"}
+  },
+  "checkpoint": {
+    "path":    "/tmp/nexus_drill_ckpt_{seed_hash}.json",
+    "emit_on": "round_complete",
+    "resume":  "--resume reads matching hash"
+  },
+  "anti_replay": {
+    "lru_size": 200,
+    "key":      "round_seed_hash",
+    "on_hit":   "skip_round+advance_counter"
+  }
+}
