@@ -501,7 +501,7 @@ fn _cross_iter_check_and_append(total: int, seed: str) -> void {
 //       최근 500 entry 내 match 검색. 히트면 skip_round + NEXUS_DRILL_LRU_SKIP JSON emit, 미스면
 //       append. bypass: NEXUS_DRILL_LRU_OFF=1.
 // 충돌 회피: 모든 함수 prefix `_anti_replay_lru_*`. 상태 파일은 /tmp 전용 (git X).
-// hash: python3 부재 가정 — awk 로 FNV1a-64 계산 후 하위 16 hex. macOS + Linux 호환.
+// hash: python3 one-liner 로 FNV1a-64 → 16 hex. 부재 시 md5sum / openssl fallback.
 
 fn _anti_replay_lru_path() -> str {
     return "/tmp/nexus_drill_lru.jsonl"
@@ -535,12 +535,14 @@ fn _anti_replay_lru_hash(seed: str, round: int) -> str {
 }
 
 fn _anti_replay_lru_check(hash: str) -> int {
-    // 최근 500 entry 에 hash 존재? 존재하면 hit 수 반환, 없으면 0.
+    // 최근 500 entry 에 hash 존재? 존재하면 match 수 반환, 없으면 0.
+    //   grep -c 는 always "0" 출력 (exit=1 on 0 match) → inner || true 로 exit-1 흡수.
+    //   `-F` (fixed string) 로 hash 를 literal. file 부재면 빈 stdin → grep 0.
     let path = _anti_replay_lru_path()
     let q_path = shell_quote(path)
     let q_hash = shell_quote(hash)
-    let cmd = "[ -f " + q_path + " ] && tail -n 500 " + q_path
-        + " | grep -c " + q_hash + " 2>/dev/null || echo 0"
+    let cmd = "{ [ -f " + q_path + " ] && tail -n 500 " + q_path + " || true; } "
+        + "| { grep -c -F " + q_hash + " 2>/dev/null || true; }"
     let out = exec(cmd).trim()
     let mut n = 0
     try { n = to_int(out) } catch e { n = 0 }
