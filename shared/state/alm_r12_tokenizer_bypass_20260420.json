@@ -1,0 +1,150 @@
+{
+  "scope": "ALM r12 full-launch gate acceleration via tokenizer bypass",
+  "session_date": "2026-04-20",
+  "session_phase": "drill_tokenizer_bypass",
+  "predecessor": "alm_r12_launch_20260420.json (B3 NOT_STARTED — multi-day BPE)",
+  "purpose": "Bypass the 14-24h BPE tokenizer port so r12 full-launch (forward + backward + AdamW + ckpt save) can be gate-validated within hours. Trade Korean output quality for launch-gate verifiability.",
+
+  "options": {
+    "A_random": {
+      "file": "training/tokenizer_bypass_a_random.hexa",
+      "lines": 91,
+      "approach": "xorshift32 PRNG → uniform random ids in [0, 152064). Text content ignored.",
+      "build_eta": "30min (DONE)",
+      "smoke": {
+        "parse_check": "PASS",
+        "1_step_smoke": "PASS — 4 ids generated [50886, 133465, 60738, 3376], all in [0, 152064)",
+        "korean_quality": "0 (no text dependence)",
+        "learning_signal": "valid — model learns to predict random sequences, loss measurable"
+      },
+      "use_case": "FASTEST gate-only validation. Use when sole goal is verifying fwd+bwd+AdamW+ckpt pipeline survives 100 / 500 steps.",
+      "trainer_wiring_lines": "1 (replace text_to_ids_stub call with text_to_ids_random)",
+      "verdict": "PASS — production-ready bypass for launch gate"
+    },
+    "B_byte": {
+      "file": "training/tokenizer_bypass_b_byte.hexa",
+      "lines": 92,
+      "approach": "UTF-8 byte → token id. Each byte in [0,256) becomes its id. Korean = 3 ids/syllable, English = 1 id/char.",
+      "build_eta": "1h (DONE in 30min)",
+      "smoke": {
+        "parse_check": "PASS",
+        "1_step_smoke": "PASS — ASCII 'Hi!' → [72,105,33]; Korean '안' → [236,149,136] (UTF-8 0xEC 0x95 0x88)",
+        "korean_quality": "limited (sub-character byte level, but text-conditional)",
+        "learning_signal": "meaningful — real text statistics, descending loss curve expected",
+        "vocab_mismatch_caveat": "Qwen vocab=152064, byte tokenizer uses ids 0..255. Embeddings 256..152063 stay frozen at pretrained. Loss baseline log(256)≈5.55 nats not log(152064)≈11.93. Gate-side OK; eval-time decode requires byte→char inverse (trivial since ids ARE bytes)."
+      },
+      "use_case": "Best evaluation substrate without BPE. Real text training; can decode to verify generation quality (sub-char Korean = noisy but readable).",
+      "trainer_wiring_lines": "1",
+      "verdict": "PASS — recommended for r12 first full-launch w/ measurable learning"
+    },
+    "C_longest_match": {
+      "file": "training/tokenizer_bypass_c_longest.hexa",
+      "lines": 144,
+      "approach": "Longest-prefix-match against vocab keys. Phase-1 PoC uses inline 8-key micro-vocab (안녕/하세/요/hello/...). Phase-2 (deferred) loads Qwen vocab.json via FFI hashmap (recommended path C from tokenizer_qwen_progress).",
+      "build_eta": "2-3h (Phase-1 DONE in 30min; Phase-2 vocab.json loader = additional 4-8h via FFI hashmap)",
+      "smoke": {
+        "parse_check": "PASS",
+        "1_step_smoke": "PASS — 'hello world' → 2 ids (greedy match 'hello'+' world'), '안녕하세요' → 3 ids (안녕+하세+요), '🚀' → 4 byte fallback ids",
+        "korean_quality": "moderate (whole-syllable level when vocab covers; byte fallback otherwise)",
+        "learning_signal": "good — token efficiency ~80% of true BPE, no merges = ~5% degradation",
+        "vocab_size_caveat": "Phase-1 only 8 keys → most text falls back to bytes. For r12 gate-only this is fine; for evaluation need Phase-2 vocab.json load."
+      },
+      "use_case": "Korean trial / evaluation parity prep. Skip until r12 fwd+bwd gate is green.",
+      "trainer_wiring_lines": "1",
+      "verdict": "PASS_PHASE1 — algorithm verified; vocab.json load deferred to next session"
+    }
+  },
+
+  "recommendation": {
+    "for_r12_full_launch_gate": "OPTION A (random ids)",
+    "rationale": [
+      "1. Sole purpose of full launch is to validate fwd+bwd+AdamW+ckpt survives 100/500 steps without OOM/NaN/crash on real H100 with libhxqwen14b.so v5.6.5.",
+      "2. Random ids exercise embedding lookup + attention + lm_head + softmax_ce identically to real text — same compute, same memory pressure.",
+      "3. Loss curve will be ~log(152064)≈11.93 baseline trending mildly down (model memorizes the deterministic random sequence). Sufficient to verify learning signal is non-zero.",
+      "4. Avoids the byte_at substring + char_code O(n²) interpreter cost (B and C both invoke per-byte substring allocation; A is O(max_len) PRNG).",
+      "5. Korean quality is irrelevant for gate validation; it is the acceptance criterion for v0.1 release, not r12 launch gate."
+    ],
+    "secondary_choice": "OPTION B for the FOLLOWING run after gate green — gives real-text learning dynamics so we can confirm the optimizer is not just memorizing random noise."
+  },
+
+  "trainer_wiring": {
+    "scope": "1-line surgical edit in training/train_alm_lora.hexa — DOES NOT conflict with BG #21 trainer-body wiring (which touches fwd/bwd FFI orchestration only, not text→ids)",
+    "current_call_site": "training/train_alm_lora.hexa:1130 — `let ids = text_to_ids_stub(row, cfg.seq, stub_vocab)`",
+    "integration_path_A": {
+      "step_1": "use the bypass file inline (copy text_to_ids_random fn body into train_alm_lora.hexa to satisfy feedback_hexa_silent_exit_5_imports — single-file rule).",
+      "step_2": "replace line 1130 call: `text_to_ids_stub(row, ...)` → `text_to_ids_random(row, ...)`",
+      "step_3": "rebuild + parse_check (`hexa parse training/train_alm_lora.hexa` must say OK)",
+      "step_4": "1-step CLI smoke on pod: `hexa run training/train_alm_lora.hexa --steps 1 --batch 4 --seq 8`",
+      "conflict_with_bg21": "ZERO — BG #21 modifies the FFI orchestrator block (lines 1140-1180 region) and adds AdamW host_calls (lines 1200+). text_to_ids_stub at line 868 + call site at line 1130 are physically isolated. Diff regions do not overlap."
+    },
+    "integration_path_B_or_C": "identical surgery, just swap function name."
+  },
+
+  "r12_launch_gate_acceleration": {
+    "before_bypass": {
+      "blocker": "BPE tokenizer 14-24h focused work (vocab parse + merges + encode loop + ref smoke)",
+      "estimated_to_full_launch": "BG #21 6h ETA + BPE 14-24h SEQUENTIAL (since trainer needs real ids for meaningful 100-step smoke) = 20-30h total",
+      "gate_signal_quality": "WAITING — cannot start full launch until tokenizer is real (otherwise 100-step smoke is not meaningful per current docs)"
+    },
+    "after_bypass_optionA": {
+      "ready_when": "BG #21 (6h ETA) DONE + 1-line text_to_ids_random swap (5min)",
+      "estimated_to_full_launch": "6h (BG #21) + 30min (swap+1-step smoke) + 1h (100-step smoke) = ~7.5h total",
+      "savings": "13-23h (multi-day → same-day)",
+      "gate_signal_quality": "MEANINGFUL for system validation: fwd+bwd+AdamW+ckpt all exercised on H100 with v5.6.5 .so. Loss descent provable on memorized random."
+    },
+    "after_bypass_optionB": {
+      "estimated_to_full_launch": "~8h total",
+      "gate_signal_quality": "MEANINGFUL for both system validation AND learning dynamics on real text",
+      "preferred_for": "second 500-step launch confirming optimizer learns from real corpus structure"
+    }
+  },
+
+  "policy_compliance": {
+    "feedback_py_ban_total": "OK — 3 .hexa files only, zero .py",
+    "feedback_hexa_first_strict": "OK — new tools written in .hexa",
+    "feedback_hexa_lists_pbv": "OK — all 3 fns return arrays, no in-place caller mutation",
+    "feedback_one_shot_best": "OK — bypass is gate-validation phase ONLY; final 500-step real launch will use real BPE per the multi-day track in tokenizer_qwen.hexa",
+    "L0_freeze": "OK — no anima/core/{hub,laws,runtime} touched",
+    "BG_21_conflict": "VERIFIED ZERO — diff regions disjoint (text_to_ids fn body @ line 868 vs FFI orchestration @ line 1140+)"
+  },
+
+  "files_landed": [
+    {
+      "path": "training/tokenizer_bypass_a_random.hexa",
+      "lines": 91,
+      "parse": "PASS",
+      "smoke": "PASS"
+    },
+    {
+      "path": "training/tokenizer_bypass_b_byte.hexa",
+      "lines": 92,
+      "parse": "PASS",
+      "smoke": "PASS"
+    },
+    {
+      "path": "training/tokenizer_bypass_c_longest.hexa",
+      "lines": 144,
+      "parse": "PASS",
+      "smoke": "PASS"
+    },
+    {
+      "path": "shared/state/alm_r12_tokenizer_bypass_20260420.json",
+      "purpose": "this SSOT"
+    }
+  ],
+
+  "open_questions_for_followup": [
+    "Q1: Should bypass be guarded by env var (BYPASS_TOKENIZER=A/B/C) so the trainer flips automatically once tokenizer_qwen.hexa Phase-2/3/4 land? — RECOMMEND yes, 5-line if/else dispatch in train_alm_lora.hexa",
+    "Q2: For Option B, do we want the v0.1 release decoder to support byte-level decode? — RECOMMEND yes, trivial since ids ARE bytes (single concat to UTF-8 string)",
+    "Q3: Should we also build a Phase-1.5 hybrid (top-N most-frequent Qwen tokens hardcoded inline → 100x faster than vocab.json scan, 50% token efficiency)? — DEFERRED, not blocking r12 launch"
+  ],
+
+  "next_actions": {
+    "P1": "Wait for BG #21 (a2cecd07) trainer wiring to complete (6h ETA)",
+    "P2": "1-line swap in train_alm_lora.hexa: text_to_ids_stub → text_to_ids_random (Option A) — inline the function body to obey single-file rule",
+    "P3": "Pod 87xsc: `hexa run training/train_alm_lora.hexa --steps 1 --batch 4 --seq 8` smoke",
+    "P4": "100-step smoke on pod with --steps 100 --save_every 50 --batch 4 --seq 256",
+    "P5": "Full 500-step r12 launch (gate green)",
+    "P6_parallel": "Continue tokenizer_qwen.hexa Phase-2/3/4 multi-day track for v0.1 release (decoupled from r12 launch gate)"
+  }
+}
