@@ -1,0 +1,603 @@
+// ═══════════════════════════════════════════════════════════
+// atlas_zstd.hexa — atlas.n6 bucket-segmented zstd container
+//
+// 배경:
+//   atlas.n6 (≈ 2 MB plain text, 31 k lines) cold-start = full-file read.
+//   Y agent bucket index (prefix → line_indices) 가 O(1+k) lookup 을 주지만
+//   payload 는 여전히 raw. 각 bucket 을 독립 zstd frame 으로 압축 →
+//   prefix 매칭 시 해당 frame 만 decompress.
+//
+// 컨테이너 포맷 (atlas.n6.zst):
+//   offset  0..4   magic "ATN6"
+//   offset  4      version (u8) = 1
+//   offset  5      zstd level (u8)
+//   offset  6..8   reserved (0x00 0x00)
+//   offset  8..12  segment_count (u32 LE)
+//   offset 12..16  index_json_len (u32 LE)
+//   offset 16..16+L   index JSON (UTF-8)
+//   offset ...         concatenated zstd frames
+//
+// index JSON:
+//   { "src":"...", "mtime":"...", "line_count":N, "level":19,
+//     "segments":[
+//        {"prefix":"math","offset":0,"clen":...,"ulen":...,"lines":[i,j,...]},
+//        ...,
+//        {"prefix":"_misc","offset":...,"clen":...,"ulen":...,"lines":[...]}
+//     ]}
+//
+// "_misc" 는 '@' 로 시작하지 않는 모든 line (blank/comment/continuation)
+// 을 품어 full round-trip 을 보장한다.
+//
+// 사용:
+//   hexa cli/scripts/atlas_zstd.hexa encode <src.n6> <out.zst> [level=19]
+//   hexa cli/scripts/atlas_zstd.hexa decode_all <in.zst> <out.n6>
+//   hexa cli/scripts/atlas_zstd.hexa decode_bucket <in.zst> <prefix>
+//   hexa cli/scripts/atlas_zstd.hexa stat <in.zst>
+//
+// 외부 의존: zstd CLI (ubu2 = /usr/bin/zstd), awk, stat, wc, od, printf.
+// atlas.n6 본체는 read-only. 원본 보존, 새 경로 atlas.n6.zst 로 출력.
+//
+// 규칙: hexa `>=`/`<=` 금지 — 본 파일 전부 `<`/`>` 만 사용.
+// ═══════════════════════════════════════════════════════════
+
+// ─── util: shell-safe single-quote escaping ───
+fn _shq(s: string) -> string {
+    // wrap 'X' → 'X', escape embedded ' as '\''
+    let mut parts: [string] = []
+    parts.push("'")
+    let n = len(s)
+    let mut i: i64 = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "'" { parts.push("'\\''") } else { parts.push(c) }
+        i = i + 1
+    }
+    parts.push("'")
+    return parts.join("")
+}
+
+// ─── util: BSD/GNU stat mtime ───
+fn _mtime_of(path: string) -> string {
+    let mut r = ""
+    try {
+        let raw = to_string(exec("stat -c '%Y' " + _shq(path) + " 2>/dev/null || stat -f '%m' " + _shq(path) + " 2>/dev/null"))
+        r = raw.trim()
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+
+// ─── util: file byte size (wc -c) ───
+fn _fsize(path: string) -> i64 {
+    let mut v: i64 = 0
+    try {
+        let raw = to_string(exec("wc -c < " + _shq(path))).trim()
+        v = to_int(raw)
+    } catch e {}  // @allow-silent-catch
+    return v
+}
+
+// ─── util: wc -l ───
+fn _fwcl(path: string) -> i64 {
+    let mut v: i64 = 0
+    try {
+        let raw = to_string(exec("wc -l < " + _shq(path))).trim()
+        v = to_int(raw)
+    } catch e {}  // @allow-silent-catch
+    return v
+}
+
+// ─── util: ns clock for duration_ms ───
+fn _ns_now() -> i64 {
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec("date +%s%N")).trim()  // @allow-bare-exec
+        r = to_int(raw)
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+
+// ─── util: printf octal byte escape "\NNN" (3-digit base-8) ───
+fn _oct3(x: i64) -> string {
+    let b0: i64 = x % 8
+    let b1: i64 = (x / 8) % 8
+    let b2: i64 = (x / 64) % 8
+    return to_string(b2) + to_string(b1) + to_string(b0)
+}
+fn _u32le_esc(v: i64) -> string {
+    let b0: i64 = v % 256
+    let b1: i64 = (v / 256) % 256
+    let b2: i64 = (v / 65536) % 256
+    let b3: i64 = (v / 16777216) % 256
+    return "\\" + _oct3(b0) + "\\" + _oct3(b1) + "\\" + _oct3(b2) + "\\" + _oct3(b3)
+}
+
+// ─── util: u32 LE read from a 4-byte hex dump ───
+fn _u32le_read(path: string, off: i64) -> i64 {
+    // od -An -tu1 -N4 -j<off> <path>  → "  B0 B1 B2 B3"
+    let cmd = "od -An -tu1 -N4 -j" + to_string(off) + " " + _shq(path)
+    let raw = to_string(exec(cmd)).trim()
+    let parts = raw.split(" ")
+    // drop empties
+    let mut ns: [i64] = []
+    for p in parts {
+        let pt = p.trim()
+        if pt != "" {
+            try { ns.push(to_int(pt)) } catch e {}  // @allow-silent-catch
+        }
+    }
+    if len(ns) < 4 { return -1 }
+    return ns[0] + ns[1] * 256 + ns[2] * 65536 + ns[3] * 16777216
+}
+
+// ─── util: read byte range as UTF-8 ───
+fn _slice_text(path: string, off: i64, n: i64) -> string {
+    let cmd = "dd if=" + _shq(path) + " bs=1 skip=" + to_string(off) + " count=" + to_string(n) + " status=none"
+    return to_string(exec(cmd))
+}
+
+// ─── util: append bytes of src-file to dst-file ───
+fn _append_file(dst: string, src: string) {
+    let cmd = "cat " + _shq(src) + " >> " + _shq(dst)
+    let _ = exec(cmd)
+}
+
+// ─── util: parse JSON int (flat key only) ───
+fn _json_int(raw: string, key: string) -> i64 {
+    let m = "\"" + key + "\":"
+    let i = raw.index_of(m)
+    if i < 0 { return 0 }
+    let after = raw.substring(i + len(m), len(raw))
+    let mut e = after.index_of(",")
+    let e2 = after.index_of("}")
+    if e < 0 { e = e2 }
+    else if e2 > -1 && e2 < e { e = e2 }
+    if e < 1 { return 0 }
+    let mut v: i64 = 0
+    try { v = to_int(after.substring(0, e).trim()) } catch x {}  // @allow-silent-catch
+    return v
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BUCKET SPLIT — awk 1-pass produces <tmp>/map.tsv : "idx\tprefix"
+//  prefix rule: first token after "::" before "_" for lines starting
+//  with '@'. 나머지 전부 _misc.
+// ═══════════════════════════════════════════════════════════
+fn _build_map(src: string, map_path: string) {
+    let awk_src = "{"
+        + "  idx = NR - 1;"
+        + "  s = $0;"
+        + "  sub(/^[ \\t]+/, \"\", s); sub(/[ \\t]+$/, \"\", s);"
+        + "  if (s==\"\" || substr(s,1,1)==\"#\" || substr(s,1,2)==\"//\") { print idx \"\\t_misc\"; next }"
+        + "  if (substr(s,1,1) != \"@\") { print idx \"\\t_misc\"; next }"
+        + "  ci = index(s, \"::\");"
+        + "  if (ci == 0) { print idx \"\\t_misc\"; next }"
+        + "  rest = substr(s, ci+2); sub(/^[ \\t]+/, \"\", rest);"
+        + "  if (rest == \"\") { print idx \"\\t_misc\"; next }"
+        + "  sp = index(rest, \" \"); tb = index(rest, \"\\t\");"
+        + "  dom = rest;"
+        + "  if (sp>0 && (tb==0 || sp<tb)) dom = substr(rest, 1, sp-1);"
+        + "  else if (tb>0) dom = substr(rest, 1, tb-1);"
+        + "  if (dom == \"\") { print idx \"\\t_misc\"; next }"
+        + "  us = index(dom, \"_\");"
+        + "  if (us>0) pfx = substr(dom, 1, us-1); else pfx = dom;"
+        + "  if (pfx == \"\") { print idx \"\\t_misc\"; next }"
+        + "  print idx \"\\t\" pfx;"
+        + "}"
+    let cmd = "awk '" + awk_src + "' " + _shq(src) + " > " + _shq(map_path)
+    let _ = exec(cmd)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MATERIALIZE — awk 1-pass reads map.tsv into memory, then streams
+//  src and appends each line to segments/<pfx>.txt.  Also writes
+//  lines/<pfx>.lines (one index per row).
+//  prefixes.txt = order-of-first-appearance (determinism).
+// ═══════════════════════════════════════════════════════════
+fn _materialize(src: string, map_path: string, segdir: string, linedir: string, prefixes_path: string) {
+    // prefixes.txt — awk first-seen ordering from map.tsv
+    let pcmd = "awk -F'\\t' '!seen[$2]++{print $2}' " + _shq(map_path) + " > " + _shq(prefixes_path)
+    let _ = exec(pcmd)
+
+    // segments + lines write
+    let awk_src = "BEGIN {"
+        + "  while ((getline ln < MAP) > 0) {"
+        + "    split(ln, a, \"\\t\");"
+        + "    bucket[a[1]+0] = a[2];"
+        + "  }"
+        + "  close(MAP);"
+        + "}"
+        + "{"
+        + "  idx = NR - 1;"
+        + "  pfx = bucket[idx];"
+        + "  if (pfx == \"\") pfx = \"_misc\";"
+        + "  path = SEGDIR \"/\" pfx \".txt\";"
+        + "  lpath = LINEDIR \"/\" pfx \".lines\";"
+        + "  if (written[pfx]) printf \"\\n\" >> path;"
+        + "  printf \"%s\", $0 >> path;"
+        + "  written[pfx] = 1;"
+        + "  print idx >> lpath;"
+        + "}"
+    let cmd = "awk -v MAP=" + _shq(map_path)
+        + " -v SEGDIR=" + _shq(segdir)
+        + " -v LINEDIR=" + _shq(linedir)
+        + " '" + awk_src + "' " + _shq(src)
+    let _ = exec(cmd)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ENCODE
+// ═══════════════════════════════════════════════════════════
+fn cmd_encode(src: string, out: string, level: i64) -> i64 {
+    if !file_exists(src) {
+        eprintln("atlas_zstd: source not found: " + src)
+        return 1
+    }
+    if level < 0 { eprintln("atlas_zstd: bad level: " + to_string(level)); return 1 }
+    if level > 22 { eprintln("atlas_zstd: bad level: " + to_string(level)); return 1 }
+
+    let t0 = _ns_now()
+    // mktemp
+    let work = to_string(exec("mktemp -d -t atlaszstd.XXXXXX")).trim()
+    if work == "" { eprintln("atlas_zstd: mktemp failed"); return 1 }
+    let _ = exec("mkdir -p " + _shq(work + "/segments") + " " + _shq(work + "/lines"))
+
+    let map_path = work + "/map.tsv"
+    let prefixes_path = work + "/prefixes.txt"
+    _build_map(src, map_path)
+    _materialize(src, map_path, work + "/segments", work + "/lines", prefixes_path)
+
+    // compress each segment, collect offsets
+    let mtime = _mtime_of(src)
+    let line_count = _fwcl(src)
+    let frames_bin = work + "/frames.bin"
+    let _ = exec(": > " + _shq(frames_bin))
+
+    let prefixes_raw = read_file(prefixes_path)
+    let lines = prefixes_raw.split("\n")
+    let mut seg_parts: [string] = []
+    seg_parts.push("[")
+    let mut first = true
+    let mut offset: i64 = 0
+    let mut seg_count: i64 = 0
+    let nprefixes = len(lines)
+    let mut pi: i64 = 0
+    while pi < nprefixes {
+        let pfx = lines[pi].trim()
+        pi = pi + 1
+        if pfx == "" { continue }
+        let seg_txt = work + "/segments/" + pfx + ".txt"
+        let seg_zst = work + "/segments/" + pfx + ".zst"
+        let lines_path = work + "/lines/" + pfx + ".lines"
+        let ulen = _fsize(seg_txt)
+        let zcmd = "zstd -q -f -" + to_string(level) + " " + _shq(seg_txt) + " -o " + _shq(seg_zst)
+        let _z = exec(zcmd)
+        let clen = _fsize(seg_zst)
+        _append_file(frames_bin, seg_zst)
+        // lines csv
+        let lines_csv = to_string(exec("tr '\\n' ',' < " + _shq(lines_path) + " | sed 's/,$//'"))
+        if first { first = false } else { seg_parts.push(",") }
+        seg_parts.push("{\"prefix\":\"")
+        seg_parts.push(pfx)
+        seg_parts.push("\",\"offset\":")
+        seg_parts.push(to_string(offset))
+        seg_parts.push(",\"clen\":")
+        seg_parts.push(to_string(clen))
+        seg_parts.push(",\"ulen\":")
+        seg_parts.push(to_string(ulen))
+        seg_parts.push(",\"lines\":[")
+        seg_parts.push(lines_csv)
+        seg_parts.push("]}")
+        offset = offset + clen
+        seg_count = seg_count + 1
+    }
+    seg_parts.push("]")
+
+    let mut idx_parts: [string] = []
+    idx_parts.push("{\"src\":\"")
+    idx_parts.push(src)
+    idx_parts.push("\",\"mtime\":\"")
+    idx_parts.push(mtime)
+    idx_parts.push("\",\"line_count\":")
+    idx_parts.push(to_string(line_count))
+    idx_parts.push(",\"level\":")
+    idx_parts.push(to_string(level))
+    idx_parts.push(",\"segments\":")
+    idx_parts.push(seg_parts.join(""))
+    idx_parts.push("}")
+    let idx_json = idx_parts.join("")
+    let idx_path = work + "/index.json"
+    write_file(idx_path, idx_json)
+    let ilen = _fsize(idx_path)
+
+    // Build header file (16 bytes) using printf with octal escapes.
+    //   "ATN6" + ver=1 + level + 0x00 0x00 + u32le(seg_count) + u32le(ilen)
+    let magic_esc = "ATN6"
+    let ver_esc = "\\" + _oct3(1)
+    let lvl_esc = "\\" + _oct3(level)
+    let rsv_esc = "\\000\\000"
+    let segc_esc = _u32le_esc(seg_count)
+    let ilen_esc = _u32le_esc(ilen)
+    let header_path = work + "/header.bin"
+    let hcmd = "printf '" + magic_esc + ver_esc + lvl_esc + rsv_esc + segc_esc + ilen_esc + "' > " + _shq(header_path)
+    let _ = exec(hcmd)
+
+    // Concatenate header + index + frames → out
+    let concat = "cat " + _shq(header_path) + " " + _shq(idx_path) + " " + _shq(frames_bin) + " > " + _shq(out)
+    let _ = exec(concat)
+
+    let _ = exec("rm -rf " + _shq(work))
+    let t1 = _ns_now()
+    let dur_ms = (t1 - t0) / 1000000
+    let out_size = _fsize(out)
+    let src_size = _fsize(src)
+    let mut log_parts: [string] = []
+    log_parts.push("NEXUS_ATLAS_ZSTD_ENCODE {\"src_bytes\":")
+    log_parts.push(to_string(src_size))
+    log_parts.push(",\"out_bytes\":")
+    log_parts.push(to_string(out_size))
+    log_parts.push(",\"segments\":")
+    log_parts.push(to_string(seg_count))
+    log_parts.push(",\"level\":")
+    log_parts.push(to_string(level))
+    log_parts.push(",\"duration_ms\":")
+    log_parts.push(to_string(dur_ms))
+    log_parts.push("}")
+    eprintln(log_parts.join(""))
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HEADER READ
+//    returns [level, seg_count, ilen]  via out parameters (tuple-lite)
+// ═══════════════════════════════════════════════════════════
+fn _read_header(zst: string) -> [i64] {
+    let mut r: [i64] = []
+    // magic
+    let magic_cmd = "dd if=" + _shq(zst) + " bs=1 count=4 status=none"
+    let magic = to_string(exec(magic_cmd))
+    if magic != "ATN6" {
+        eprintln("atlas_zstd: bad magic (" + magic + ") in " + zst)
+        return r
+    }
+    // level (byte 5), seg_count (8..12), ilen (12..16)
+    let lvl_cmd = "od -An -tu1 -N1 -j5 " + _shq(zst)
+    let lvl_s = to_string(exec(lvl_cmd)).trim()
+    let mut lvl: i64 = 0
+    try { lvl = to_int(lvl_s) } catch e {}  // @allow-silent-catch
+    let segc = _u32le_read(zst, 8)
+    let ilen = _u32le_read(zst, 12)
+    r.push(lvl)
+    r.push(segc)
+    r.push(ilen)
+    return r
+}
+
+fn _read_index_json(zst: string, ilen: i64) -> string {
+    return _slice_text(zst, 16, ilen)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STAT
+// ═══════════════════════════════════════════════════════════
+fn cmd_stat(zst: string) -> i64 {
+    if !file_exists(zst) { eprintln("atlas_zstd: not found: " + zst); return 1 }
+    let hdr = _read_header(zst)
+    if len(hdr) < 3 { return 1 }
+    let lvl = hdr[0]
+    let segc = hdr[1]
+    let ilen = hdr[2]
+    let total = _fsize(zst)
+    println("file: " + zst)
+    println("  total_bytes: " + to_string(total))
+    println("  magic:       ATN6")
+    println("  level:       " + to_string(lvl))
+    println("  seg_count:   " + to_string(segc))
+    println("  index_len:   " + to_string(ilen))
+    println("  header_end:  " + to_string(16 + ilen))
+    println("  index_json:  ")
+    let idx = _read_index_json(zst, ilen)
+    println(idx)
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Parse index JSON: extract a segment record by prefix.
+//  Returns [offset, clen, ulen] or empty on miss.
+// ═══════════════════════════════════════════════════════════
+fn _find_segment(idx: string, prefix: string) -> [i64] {
+    let mut r: [i64] = []
+    let marker = "\"prefix\":\"" + prefix + "\""
+    let p = idx.index_of(marker)
+    if p < 0 { return r }
+    let after = idx.substring(p, len(idx))
+    let close = after.index_of("}")
+    if close < 0 { return r }
+    let rec = after.substring(0, close + 1)
+    let off = _json_int(rec, "offset")
+    let cl = _json_int(rec, "clen")
+    let ul = _json_int(rec, "ulen")
+    r.push(off); r.push(cl); r.push(ul)
+    return r
+}
+
+// Extract the "lines":[...] CSV for a named prefix.
+fn _find_segment_lines_csv(idx: string, prefix: string) -> string {
+    let marker = "\"prefix\":\"" + prefix + "\""
+    let p = idx.index_of(marker)
+    if p < 0 { return "" }
+    let after = idx.substring(p, len(idx))
+    let lm = after.index_of("\"lines\":[")
+    if lm < 0 { return "" }
+    let rest = after.substring(lm + 9, len(after))
+    let rb = rest.index_of("]")
+    if rb < 0 { return "" }
+    return rest.substring(0, rb)
+}
+
+// Enumerate all segment prefixes (in file order).
+fn _all_prefixes(idx: string) -> [string] {
+    let mut out: [string] = []
+    let mut cur = idx
+    let marker = "\"prefix\":\""
+    while true {
+        let p = cur.index_of(marker)
+        if p < 0 { return out }
+        let start = p + len(marker)
+        let rest = cur.substring(start, len(cur))
+        let qe = rest.index_of("\"")
+        if qe < 0 { return out }
+        out.push(rest.substring(0, qe))
+        cur = rest.substring(qe + 1, len(rest))
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DECODE_BUCKET — extract a single bucket to stdout
+// ═══════════════════════════════════════════════════════════
+fn _decompress_range(zst: string, off: i64, clen: i64, dst_txt: string) -> i64 {
+    // dd range → zstd -d  > dst
+    let cmd = "dd if=" + _shq(zst) + " bs=1 skip=" + to_string(off) + " count=" + to_string(clen) + " status=none | zstd -d -q -o " + _shq(dst_txt) + " -f"
+    let _ = exec(cmd)
+    if !file_exists(dst_txt) { return 1 }
+    return 0
+}
+
+fn cmd_decode_bucket(zst: string, prefix: string) -> i64 {
+    if !file_exists(zst) { eprintln("atlas_zstd: not found: " + zst); return 1 }
+    let hdr = _read_header(zst)
+    if len(hdr) < 3 { return 1 }
+    let ilen = hdr[2]
+    let idx = _read_index_json(zst, ilen)
+    let seg = _find_segment(idx, prefix)
+    if len(seg) < 3 { eprintln("atlas_zstd: bucket not found: " + prefix); return 2 }
+    let frame_base = 16 + ilen
+    let abs_off = frame_base + seg[0]
+    let tmp = to_string(exec("mktemp -t atlasdec.XXXXXX")).trim()
+    let rc = _decompress_range(zst, abs_off, seg[1], tmp)
+    if rc != 0 { eprintln("atlas_zstd: decompress failed"); return 1 }
+    let payload = read_file(tmp)
+    print(payload)
+    if !payload.ends_with("\n") { println("") }
+    let _ = exec("rm -f " + _shq(tmp))
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DECODE_ALL — reconstruct original file (round-trip check)
+// ═══════════════════════════════════════════════════════════
+fn cmd_decode_all(zst: string, out: string) -> i64 {
+    if !file_exists(zst) { eprintln("atlas_zstd: not found: " + zst); return 1 }
+    let hdr = _read_header(zst)
+    if len(hdr) < 3 { return 1 }
+    let ilen = hdr[2]
+    let idx = _read_index_json(zst, ilen)
+    let line_count = _json_int(idx, "line_count")
+    let frame_base = 16 + ilen
+
+    let work = to_string(exec("mktemp -d -t atlasdecall.XXXXXX")).trim()
+    if work == "" { eprintln("atlas_zstd: mktemp failed"); return 1 }
+
+    // accumulate line_map: we use parallel arrays
+    //   line_text[i] = string for line i
+    // 이 배열 크기 line_count — 수만 수준 허용.
+    let mut line_text: [string] = []
+    let mut i: i64 = 0
+    while i < line_count { line_text.push(""); i = i + 1 }
+
+    let prefixes = _all_prefixes(idx)
+    let np = len(prefixes)
+    let mut k: i64 = 0
+    while k < np {
+        let pfx = prefixes[k]
+        k = k + 1
+        let seg = _find_segment(idx, pfx)
+        if len(seg) < 3 { continue }
+        let abs_off = frame_base + seg[0]
+        let tmp = work + "/" + pfx + ".txt"
+        let rc = _decompress_range(zst, abs_off, seg[1], tmp)
+        if rc != 0 { eprintln("atlas_zstd: decompress failed for " + pfx); return 1 }
+        let payload = read_file(tmp)
+        // split by "\n" — segment payload joined by \n (no trailing)
+        let seg_lines = payload.split("\n")
+        let csv = _find_segment_lines_csv(idx, pfx)
+        let idxs = csv.split(",")
+        let nidx = len(idxs)
+        let nlines = len(seg_lines)
+        if nidx != nlines {
+            eprintln("atlas_zstd: segment line mismatch " + pfx + ": " + to_string(nidx) + " vs " + to_string(nlines))
+            return 1
+        }
+        let mut j: i64 = 0
+        while j < nidx {
+            let pt = idxs[j].trim()
+            if pt != "" {
+                let li = to_int(pt)
+                if li > -1 && li < line_count { line_text[li] = seg_lines[j] }
+            }
+            j = j + 1
+        }
+    }
+
+    // reconstruct — append \n between lines + trailing \n (source had trailing \n per wc -l).
+    let mut parts: [string] = []
+    let mut n: i64 = 0
+    while n < line_count {
+        parts.push(line_text[n])
+        parts.push("\n")
+        n = n + 1
+    }
+    write_file(out, parts.join(""))
+    let _ = exec("rm -rf " + _shq(work))
+    println("atlas_zstd: decoded " + to_string(line_count) + " lines → " + out)
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CLI dispatch
+// ═══════════════════════════════════════════════════════════
+let a = args()
+let mut sub = "help"
+if len(a) > 2 { sub = a[2] }
+
+if sub == "encode" {
+    if len(a) < 5 {
+        println("usage: atlas_zstd.hexa encode <src.n6> <out.zst> [level=19]")
+        exit(1)  // @allow-silent-exit
+    }
+    let src = a[3]
+    let out = a[4]
+    let mut lvl: i64 = 19
+    if len(a) > 5 { try { lvl = to_int(a[5]) } catch e {} }  // @allow-silent-catch
+    let rc = cmd_encode(src, out, lvl)
+    exit(rc)  // @allow-silent-exit
+} else if sub == "decode_all" {
+    if len(a) < 5 {
+        println("usage: atlas_zstd.hexa decode_all <in.zst> <out.n6>")
+        exit(1)  // @allow-silent-exit
+    }
+    let rc = cmd_decode_all(a[3], a[4])
+    exit(rc)  // @allow-silent-exit
+} else if sub == "decode_bucket" {
+    if len(a) < 5 {
+        println("usage: atlas_zstd.hexa decode_bucket <in.zst> <prefix>")
+        exit(1)  // @allow-silent-exit
+    }
+    let rc = cmd_decode_bucket(a[3], a[4])
+    exit(rc)  // @allow-silent-exit
+} else if sub == "stat" {
+    if len(a) < 4 {
+        println("usage: atlas_zstd.hexa stat <in.zst>")
+        exit(1)  // @allow-silent-exit
+    }
+    let rc = cmd_stat(a[3])
+    exit(rc)  // @allow-silent-exit
+} else {
+    println("atlas_zstd.hexa — atlas.n6 bucket-segmented zstd container")
+    println("usage:")
+    println("  hexa cli/scripts/atlas_zstd.hexa encode        <src.n6> <out.zst> [level=19]")
+    println("  hexa cli/scripts/atlas_zstd.hexa decode_all    <in.zst> <out.n6>")
+    println("  hexa cli/scripts/atlas_zstd.hexa decode_bucket <in.zst> <prefix>")
+    println("  hexa cli/scripts/atlas_zstd.hexa stat          <in.zst>")
+    exit(0)
+}

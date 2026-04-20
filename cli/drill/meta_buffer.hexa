@@ -1,0 +1,308 @@
+// meta_buffer.hexa — nexus drill stage-간 meta-learning feedback buffer
+//
+// Mk.XI meta-learning (2026-04-21):
+//   Stage K 종료 시 top-K(=3) absorption 의 "pattern hint" 를 공유 buffer 에 push,
+//   Stage K+1 진입 시 buffer 에서 hint 읽어 탐색 순서 우선순위 조정 (weight 기반).
+//
+// pattern hint 구조:
+//   {stage, round, hint_hash(8-hex djb2), weight(float*1000 정수화), tag, created_round}
+//   - hint_hash = djb2( stage + ":" + normalized_sig(out_line) )
+//   - normalized_sig = [tag-class + depth-token + symmetry-token] — 연산자 종류/depth/symmetry class
+//   - weight 초기=1000 (=1.0), round 넘어갈 때마다 *0.5 감쇠 → 3 round 뒤 125 (=0.125)
+//   - weight < 62 (=0.062) → drop (6 round 수명)
+//
+// 저장소: NDJSON /tmp/nexus_meta_buffer_<pid>.jsonl  (round scope=drill session scope)
+//        pid 사용해 concurrent drill 충돌 방지. cmd_drill 종료 시 cleanup.
+//
+// 호출 인터페이스 (hexa run meta_buffer.hexa <op> <args...>):
+//   push <buffer_path> <round> <stage> <hint_signature>   — hint 1개 push
+//                                                           stdout: "OK <hint_hash>"
+//   read <buffer_path> <cur_round>                         — active hints JSON 출력 (decay 적용)
+//                                                           stdout: "HINTS <count> <hash1:weight1>,<hash2:weight2>,..."
+//   count <buffer_path>                                    — 총 entry 수 출력
+//   clear <buffer_path>                                    — 파일 제거
+//
+// 설계 주의:
+//   - hexa-lang "void" coerce 함정: char_code() 숫자 범위로 char 판정 (run.hexa _extract_int_after 참조)
+//   - hexa-lang 에 `^` (bitwise xor) 미지원 → FNV1a 대신 djb2-like (h*33 + c) 사용
+//   - stage0 interpreter 는 top-level 과 main() 병존 시 둘 다 실행 → 명시적 main() 호출 필수.
+//   - read_file/write_file 대신 shell exec (stage0 built-in 차이 회피).
+//
+// flag: NEXUS_META_LEARN=0 이면 호출 측이 건너뛴다 (이 스크립트 자체는 flag 읽지 않음).
+
+fn mb_djb2(s: str) -> i64 {
+    // djb2 hash — bitwise xor 없이, mod 2^32 포위
+    let mut h: i64 = 5381
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        h = (h * 33 + c) % 4294967296
+        i = i + 1
+    }
+    if h < 0 { h = -h }
+    return h
+}
+
+fn mb_hex8(v: i64) -> str {
+    // i64 → 8-자리 16진수 — FNV 대용 고정폭 표기
+    let hex = "0123456789abcdef"
+    let mut out = ""
+    let mut x = v
+    if x < 0 { x = -x }
+    let mut i = 0
+    while i < 8 {
+        let d = x % 16
+        let dc = to_int(to_string(d))
+        out = hex.substring(dc, dc + 1) + out
+        x = x / 16
+        i = i + 1
+    }
+    return out
+}
+
+fn mb_hint_hash(stage: str, signature: str) -> str {
+    // 정규화된 hint 시그니처를 8-hex 해시로 요약.
+    // signature 는 호출자가 조립 — run.hexa 쪽에서 stage 출력에서 추출.
+    let raw = stage + ":" + signature
+    return mb_hex8(mb_djb2(raw))
+}
+
+fn mb_shell_escape(s: str) -> str {
+    // NDJSON value escape — double-quote 와 backslash 만 보호 (간이).
+    let mut out = ""
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        if c == 34 {
+            // '"'
+            out = out + "\\\""
+        } else if c == 92 {
+            // '\\'
+            out = out + "\\\\"
+        } else if c == 10 {
+            out = out + " "
+        } else {
+            out = out + s.substring(i, i + 1)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn mb_push(buffer_path: str, round: int, stage: str, signature: str) -> str {
+    // NDJSON 1 line append. weight 초기=1000 (정수화 × 1000).
+    let hint = mb_hint_hash(stage, signature)
+    let line = "{\"round\":" + to_string(round)
+             + ",\"stage\":\"" + mb_shell_escape(stage) + "\""
+             + ",\"hint\":\"" + hint + "\""
+             + ",\"weight\":1000"
+             + ",\"tag\":\"" + mb_shell_escape(signature) + "\"}"
+    // shell append — single-quote safe (JSON 에 single-quote 없음).
+    let cmd = "printf '%s\\n' '" + line + "' >> " + shell_quote(buffer_path) + " 2>/dev/null"
+    exec(cmd)
+    return hint
+}
+
+fn mb_extract_i64(line: str, key: str) -> i64 {
+    // NDJSON 1 line 에서 숫자 필드 추출 — key 는 "\"round\":" 등 prefix 포함.
+    let idx = str_find(line, key)
+    if idx < 0 { return -1 }
+    let mut i = idx + key.len()
+    let n = line.len()
+    // 비-숫자 skip (comma/quote 까지)
+    while i < n {
+        let cc = char_code(line, i)
+        if cc >= 48 && cc <= 57 { break }
+        if cc == 45 { break }  // '-'
+        i = i + 1
+    }
+    if i >= n { return -1 }
+    let mut buf = ""
+    let mut neg = false
+    if char_code(line, i) == 45 {
+        neg = true
+        i = i + 1
+    }
+    while i < n {
+        let cc = char_code(line, i)
+        if cc >= 48 && cc <= 57 {
+            buf = buf + line.substring(i, i + 1)
+            i = i + 1
+        } else {
+            break
+        }
+    }
+    if buf.len() == 0 { return -1 }
+    let mut v: i64 = 0
+    try { v = to_int(buf) } catch e { v = -1 }
+    if neg { v = -v }
+    return v
+}
+
+fn mb_extract_str(line: str, key: str) -> str {
+    // NDJSON 1 line 에서 문자열 필드 추출 — key 는 "\"hint\":\"" 형식.
+    let idx = str_find(line, key)
+    if idx < 0 { return "" }
+    let start = idx + key.len()
+    let mut i = start
+    let n = line.len()
+    while i < n {
+        let cc = char_code(line, i)
+        if cc == 34 { break }  // '"'
+        i = i + 1
+    }
+    if i >= n { return "" }
+    return line.substring(start, i)
+}
+
+fn str_find(s: str, needle: str) -> i64 {
+    // Polyfill — Linux stage1 에는 contains() 는 있지만 find(idx) 없음 (run.hexa 참조).
+    let n = s.len()
+    let m = needle.len()
+    if m == 0 { return 0 }
+    if m > n { return -1 }
+    if !s.contains(needle) { return -1 }
+    let mut i: i64 = 0
+    let end = n - m
+    while i <= end {
+        if s.substring(i, i + m) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn shell_quote(s: str) -> str {
+    // single-quote 로 감싸고 내부 "'" → "'\''" escape.
+    let mut out = "'"
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = char_code(s, i)
+        if c == 39 {
+            out = out + "'\\''"
+        } else {
+            out = out + s.substring(i, i + 1)
+        }
+        i = i + 1
+    }
+    out = out + "'"
+    return out
+}
+
+fn mb_read(buffer_path: str, cur_round: int) -> str {
+    // buffer 전체 읽어 active hints 목록 반환 (stdout 용 1 line).
+    // decay: (cur_round - created_round) 당 weight *0.5 → (/2 정수 연산).
+    // drop: decayed_weight < 62 (≈0.062).
+    let raw = exec("cat " + shell_quote(buffer_path) + " 2>/dev/null")
+    if raw.len() == 0 {
+        println("HINTS 0 ")
+        return ""
+    }
+    let lines = raw.split("\n")
+    let mut out_pairs = ""
+    let mut count = 0
+    let mut i = 0
+    while i < lines.len() {
+        let ln = lines[i]
+        if ln.len() > 2 {
+            let rd = mb_extract_i64(ln, "\"round\":")
+            let w0 = mb_extract_i64(ln, "\"weight\":")
+            let hh = mb_extract_str(ln, "\"hint\":\"")
+            if rd >= 0 && w0 > 0 && hh.len() > 0 {
+                // decay
+                let mut decay_n = cur_round - rd
+                if decay_n < 0 { decay_n = 0 }
+                let mut w = w0
+                let mut di = 0
+                while di < decay_n {
+                    w = w / 2
+                    di = di + 1
+                }
+                if w >= 62 {
+                    if count > 0 { out_pairs = out_pairs + "," }
+                    out_pairs = out_pairs + hh + ":" + to_string(w)
+                    count = count + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    println("HINTS " + to_string(count) + " " + out_pairs)
+    return out_pairs
+}
+
+fn mb_count(buffer_path: str) -> int {
+    let raw = exec("wc -l < " + shell_quote(buffer_path) + " 2>/dev/null").trim()
+    if raw.len() == 0 { println("0"); return 0 }
+    let mut v = 0
+    try { v = to_int(raw) } catch e { v = 0 }
+    println(to_string(v))
+    return v
+}
+
+fn mb_clear(buffer_path: str) -> void {
+    exec("rm -f " + shell_quote(buffer_path) + " 2>/dev/null || true")
+    println("CLEARED")
+}
+
+fn main() -> void {
+    // argv[0]=interpreter, argv[1]=script, argv[2..]=user args (run.hexa 관례).
+    let raw = argv()
+    let mut args: [str] = []
+    let mut _ri = 2
+    while _ri < raw.len() {
+        args = args + [raw[_ri]]
+        _ri = _ri + 1
+    }
+    if args.len() < 1 {
+        println("usage: meta_buffer.hexa <push|read|count|clear|hint-hash> <args...>")
+        return
+    }
+    let op = args[0]
+    if op == "push" {
+        if args.len() < 4 {
+            println("ERR push: <buffer> <round> <stage> <signature>")
+            return
+        }
+        let path = args[1]
+        let mut rd = 0
+        try { rd = to_int(args[2]) } catch e { rd = 0 }
+        let stage = args[3]
+        let sig = if args.len() >= 5 { args[4] } else { "" }
+        let h = mb_push(path, rd, stage, sig)
+        println("OK " + h)
+        return
+    }
+    if op == "read" {
+        if args.len() < 3 {
+            println("ERR read: <buffer> <cur_round>")
+            return
+        }
+        let path = args[1]
+        let mut rd = 0
+        try { rd = to_int(args[2]) } catch e { rd = 0 }
+        let _p = mb_read(path, rd)
+        return
+    }
+    if op == "count" {
+        if args.len() < 2 { println("ERR count: <buffer>"); return }
+        let _c = mb_count(args[1])
+        return
+    }
+    if op == "clear" {
+        if args.len() < 2 { println("ERR clear: <buffer>"); return }
+        mb_clear(args[1])
+        return
+    }
+    if op == "hint-hash" {
+        // 진단용 — stage + signature 해시 확인 (run.hexa hook 디버그).
+        if args.len() < 3 { println("ERR hint-hash: <stage> <signature>"); return }
+        println(mb_hint_hash(args[1], args[2]))
+        return
+    }
+    println("ERR unknown op: " + op)
+}
+
+main()
