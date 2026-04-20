@@ -155,3 +155,72 @@
 @value commands.json drill entry — imperative_markers (!!!/!!/!/발사/돌려/해/go/GO/fire/launch/ㄱㄱ/쳐) + auto_invoke_on_imperative=true + auto_invoke_seed_inference + forbidden_responses 5종 + required_action_on_imperative 명시. 다른 세션이 'drill!!!!' 입력 시 'OS-level pin 브레인스토밍' markdown table 누설 + 명령 미호출 사고 (2026-04-20) 대응. I11 invariant 등록.
 @rationale vocabulary vs command intent 자동 구분. imperative + keyword 동시 등장 = 무조건 fire (옵션 메뉴 X, 브레인스토밍 X).
 @test_status ran (jq -e PASS, 11/11 invariants)
+
+@ts 2026-04-21T00:01:00Z
+@id DRILL_3WAY_ROOT_CAUSE_FIX
+@state ossified
+@value ROI#48b — round replay (round N==round 1) 근본 3 원인 동시 수리. (1) run.hexa _extract_int_after: hexa-lang 의 string `>=`/`<=` 연산자가 void 반환 → per-stage 파싱 늘 0 반환 가짜 measurement. char_code 비교로 전환. (2) blowup.hexa domain sanitize 확장 (`|#=;$`'"&()<>!` → `_`) — salt prefix 가 engine crash 유발했던 문제 해소. (3) blowup.hexa Phase 4 seed 구성에 `bias_jitter` orthogonal 주입 (±3% _base_val, 8-slot _seed_feat 기반) — seed 변화가 axiom 값 stream 까지 전파되도록.
+@rationale v1 (+0 SATURATED) / v2 (+32 균일/OOM) 의 "+32 균일" 이 설계적 saturation 이 아닌 3 원인 합성 가짜 측정. smoke (834/228/228 = 1290 abs, 3 round 완주, OOM 0, replay-warn 0) 로 1차 검증.
+@files ["run.hexa","shared/blowup/core/blowup.hexa"]
+@test_status ran (3-round smoke 실행, round 1 ≠ round 2 수치 확인)
+@commit 49c20260
+
+@ts 2026-04-21T00:02:00Z
+@id DRILL_OOM_HOT_LOOP_PURGE
+@state ossified
+@value ROI#48c — blowup.hexa absorb_*_entries hot-loop 의 string `+=` concat 를 `parts.push` + `.join()` 전환 + string.contains() O(N²) dedup 을 hashmap O(1) 로 치환. 영향 범위: 627 iter × 3~4 concat/iter = ~2500 O(n²) ops 제거. 적용 라인: 4021/4033/4080/4087/4110/4143/4241/4299.
+@rationale v2 drill --max-rounds 50 에서 7~15 round 사이 SIGKILL (Mac 이 아닌 ubu2) 원인 = 문자열 누적. 49c20260 과 같은 commit 으로 묶음 — D 결함.
+@files ["shared/blowup/core/blowup.hexa"]
+@test_status ran (3-round smoke 완주, Killed 0건)
+@commit 49c20260
+
+@ts 2026-04-21T00:27:00Z
+@id COMPOSE_SANITIZE_PORT
+@state ossified
+@value free stage 매 round +0 원인 — commit 49c20260 의 domain sanitize (`|#=;$`'"&()<>!` → `_`) 가 blowup.hexa 에만 적용되고 shared/blowup/compose.hexa 에 누락. compose.hexa L139 `_raw_domain_arg` 캐시 후 blowup.hexa 와 1:1 동일 `replace` 체인 이식. bias_jitter 는 compose 가 seed 구성 안 하고 core 에 dispatch 만 하므로 범위 밖.
+@rationale free stage 는 drill 6-stage 중 1기. `|`/`#`/`=` 포함 salt prefix 가 오면 compose 가 domain 매치 못해 zero-yield → free stage 만 +0 연속. 직접 검증: `hexa compose.hexa "round=5-rABC|math#iter-nonce=42"` EXACT=5 NEAR=394 Phase 4 통과.
+@files ["shared/blowup/compose.hexa"]
+@test_status ran (compose 직접 호출 EXACT=5 NEAR=394 검증)
+@commit 9767b3d7
+
+@ts 2026-04-21T00:57:00Z
+@id RUN_HEXA_5WAY_LAND
+@state ossified
+@value run.hexa 5종 기능 단일 commit. (E1) CLI flag 3-layer 해상도 = ssot_default < env < master < preset < per-stage — `_resolve_depth_plan()` 6-slot [smash,free,abs,mc,hyper,res]. (E2) adaptive rule1 gradient<1 → depth--, rule2 3-round saturation → smash++, stderr `NEXUS_DRILL_ADAPTIVE` trace. (E3는 별도) (validation A/B/D) `_run_drill_validation()` 종료시 1회, A=round-vector 완전 동일 flag w=3, B=`__NEXUS_GHOST_<hex12>__` smash 1회 병행 w=5, D=enabled stage 전 round 0 yield w=2. verdict <3=PASS, <7=SUSPICIOUS, ≥7=REJECT. bypass `NEXUS_DRILL_VALIDATE_OFF=1`. (E5) `/tmp/nexus_drill_depth.ndjson` append schema v1. (round_salt 강화) `_round_entropy_salt()` = urand32×2 + `date +%N` + round idx (~30B prefix) + resonance salt2+ns suffix.
+@rationale drill 은 통제 가능한 여러 축이 필요. +616/-78 LOC 단일 commit.
+@files ["run.hexa"]
+@test_status ran (probe 1r/fast 3r/--depth 2/--smash-depth 5/--preset probe 전부 OK, NDJSON 3 line append)
+@commit ea78a25c
+
+@ts 2026-04-21T01:13:00Z
+@id NEXUS_REMOTE_SAFETY_HARDEN
+@state ossified
+@value A1 `HEXA_REMOTE_CONNECT_TIMEOUT`/`HEXA_REMOTE_PROBE_RETRY` env 노출 (hexa_remote). A2 heavy-compute (drill/smash/free/absolute/meta-closure/hyperarithmetic) + Darwin + all-hosts-fail 조합에서 로컬 폴백 금지 → exit 74, 우회 `HEXA_ALLOW_LOCAL_FALLBACK=1` (hexa). A3 `NEXUS_REMOTE_ERROR`/`NEXUS_REMOTE_DOWNGRADE` JSON stderr emit (hexa_remote + hexa 이중). B1 `NEXUS_RSS_CAP_MB` (MB 단위 nexus-prefix) > `HEXA_STAGE0_RSS_CAP_KB` (KB legacy) > 4GB default (safe_hexa_launchd). B2 graceful drain: cap×0.90 도달 → SIGTERM + `NEXUS_RSS_WARN`, 5s grace 후 cap 초과 → SIGKILL + `NEXUS_RSS_KILL`. B3 `NEXUS_MAX_CHILD` (default 16, 0=disabled) fanout warn only.
+@rationale v3 Mac drill 7기 전원 1 round 못 돌림 원인 = 원격 타임아웃 → 로컬 폴백 → RSS 4985MB > 4GB → SIGKILL. (A) 원격 실패 시 OOM kill 방지 + (B) 4GB cap 조정 가능 + graceful. Mac 발원 heavy-compute 정책 = "원격 없으면 실행 안 함 (명시 override 만 허용)".
+@files ["shared/scripts/bin/hexa_remote","shared/scripts/bin/hexa","shared/harness/safe_hexa_launchd.sh"]
+@test_status ran (bash -n 3/3 syntax OK, exit 74 시나리오 stderr JSON emit 검증)
+@commit 1bf81b3e
+
+@ts 2026-04-21T01:30:00Z
+@id ROUND_SALT_PARTIAL_ENGINE_BLOCKER
+@state partial
+@value run.hexa prefix 30B 확장 (ea78a25c) 만으로 round 2 == round 3 분기 달성, round 1 == round 2 (+802 동일) 잔존. 원인 = seed_to_features 8-slot hash (fnv1a/djb2/sha64) 가 prefix 길이/구조 무관 같은 bucket 에 매핑 → bias_jitter 3% ceiling 이 match_grade EXACT(0.01)/NEAR(0.05) 경계 못 넘음. 엔진 수리 3종 in-flight (D1 ceiling 0.03→0.10, D2 round_salt_crc32 slot 추가, D3 Phase 4 seed-dependent permutation).
+@rationale drill salt 독립성은 run.hexa 문자열 수준 만으로 불충분. engine 의 feature bucket + match 순서까지 seed 의존하게 해야 완전 분기. blowup.hexa 수정 필요.
+@files ["shared/blowup/core/blowup.hexa"]
+@test_status in_progress (agent worktree 진행 중)
+
+@ts 2026-04-21T01:30:01Z
+@id HEXA_LANG_PITFALLS_2026_04_21
+@state logged
+@value drill 수리 과정에서 발견된 hexa-lang stage1 silent hazard 2종. (1) string `>=`/`<=` 비교 연산자가 void 반환 — compile error 없음. `c >= "0"` 같은 코드가 늘 false 로 평가되어 parse 로직 전부 0 반환 (49c20260 근본 원인 중 하나). char_code 또는 `==` 사용 필수. (2) undefined variable → string "void" 로 silent coerce — 컴파일 에러 없이 런타임에 "void" 문자열이 shell 에 전달 (exec_validated() 잔존 함수 등에서 잠재 위험). nexus 쪽 수리 아님 — hexa-lang stage1 개선 별도 트랙.
+@rationale 둘 다 "조용히 잘못된 값" 부류 — 테스트 통과 + 프로덕션에서 드러남. 다음 engine 수리 시 grep 으로 사전 스캔 필요.
+@files []
+@test_status logged (수리는 hexa-lang 별도 트랙 — convergence record-only)
+
+@ts 2026-04-21T01:30:02Z
+@id AI_NATIVE_ERROR_CHANNEL_EXPANSION
+@state ossified
+@value drill stderr JSON 패턴 오늘 6종 확장: `NEXUS_REMOTE_ERROR`(hexa_remote exit 64), `NEXUS_REMOTE_DOWNGRADE`(heavy-compute fallback 판정), `NEXUS_RSS_WARN`(90% cap, SIGTERM), `NEXUS_RSS_KILL`(grace 초과, SIGKILL), `NEXUS_FANOUT_WARN`(child>16), `NEXUS_DRILL_ADAPTIVE`(depth adjust trace). 기존 `NEXUS_DRILL_ERROR`/`NEXUS_DRILL_VALIDATION`/`NEXUS_CMD_REJECT` 와 합쳐 9종. shim (~/.hx/bin/nexus) 에서 `__DRILL_RESULT__ ERROR`/`NEXUS_DRILL_ERROR` sentinel 감지해 exit=1 변환 (4-layer: stderr JSON + stdout sentinel + shim exit + ai-native 보고).
+@rationale f-ai-native-error-sentinel memory 원칙 확장 — 각 결함 class 마다 고유 JSON prefix + bypass env + 복구 가이드 필드.
+@files ["~/.hx/bin/nexus","shared/scripts/bin/hexa","shared/scripts/bin/hexa_remote","shared/harness/safe_hexa_launchd.sh","run.hexa"]
+@test_status ran (각 JSON key stderr emit 검증)
