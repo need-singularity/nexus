@@ -1,0 +1,80 @@
+{
+  "schema": "h100_remote_probe.v1",
+  "probe_date": "2026-04-21",
+  "probe_ts_utc": "2026-04-20T16:56:04Z",
+  "probe_host": "mac-ghost (darwin 24.6.0)",
+  "method": "ssh nvidia-smi read-only probe (ConnectTimeout=5, BatchMode=yes)",
+  "airgenome_doctor": {
+    "attempted": true,
+    "outcome": "hang_timeout",
+    "note": "airgenome doctor/status hung with no output within 30s — local daemon/throttle check, not remote GPU probe. Skipped in favor of direct SSH probes."
+  },
+  "hosts": [
+    {
+      "name": "ubu",
+      "aliases": ["ubu1"],
+      "address": "192.168.50.119:22",
+      "online": false,
+      "gpu_model": null,
+      "util": null,
+      "mem": null,
+      "last_error": "Connection timed out during banner exchange (port 22). Also ubu-d:2222 refused. Matches roadmap 6 blocker: ubu RTX 5070 SSH offline."
+    },
+    {
+      "name": "ubu-ts",
+      "aliases": ["tailscale"],
+      "address": "100.96.193.56:22",
+      "online": false,
+      "gpu_model": null,
+      "util": null,
+      "mem": null,
+      "last_error": "ssh: connect to host 100.96.193.56 port 22: Operation timed out (tailscale route to ubu also down)"
+    },
+    {
+      "name": "ubu2",
+      "aliases": ["ubu2-relay"],
+      "address": "192.168.50.60:22",
+      "online": true,
+      "gpu_model": "NVIDIA RTX 5070 (PCI 10de:2f04) — detected, driver NOT installed",
+      "util": null,
+      "mem": null,
+      "last_error": "nvidia-smi: command not found. nvidia-driver-580 recommended (ubuntu-drivers devices). Host reachable; GPU hardware present but unusable until driver install."
+    },
+    {
+      "name": "hetzner",
+      "aliases": ["htz", "htz1"],
+      "address": "157.180.8.154:22",
+      "online": true,
+      "gpu_model": "none (AMD Raphael iGPU only, no NVIDIA)",
+      "util": null,
+      "mem": null,
+      "last_error": "nvidia-smi: command not found. lspci shows only AMD Raphael integrated graphics — this Hetzner AX102 box is CPU-only (no H100, no discrete NVIDIA)."
+    },
+    {
+      "name": "htz-d",
+      "aliases": ["hetzner alt port"],
+      "address": "157.180.8.154:2222",
+      "online": true,
+      "gpu_model": "none (same host as hetzner — CPU-only)",
+      "util": null,
+      "mem": null,
+      "last_error": "Reachable on 2222 but same hardware: no NVIDIA GPU."
+    }
+  ],
+  "summary": {
+    "total_candidates": 5,
+    "online": 3,
+    "offline": 2,
+    "h100_available": false,
+    "any_nvidia_usable": false,
+    "nvidia_hardware_present_unusable": ["ubu2 (RTX 5070 — no driver)"],
+    "nvidia_hardware_absent": ["hetzner/htz-d (AMD Raphael CPU-only)"],
+    "clm_r6_blocker_resolvable": false,
+    "clm_r6_blocker_reason": "No H100 exposed to this Mac; ubu (RTX 5070) SSH still offline; ubu2 RTX 5070 driver missing; hetzner is CPU-only — not an H100 node. HEXA_REMOTE=1 dispatch cannot find an NVIDIA target.",
+    "unblock_paths": [
+      "Path A (fastest, no H100 required): install nvidia-driver-580 on ubu2 (has RTX 5070 hw, online) — reruns CLM r6 smoke on 5070 instead of H100.",
+      "Path B: restore ubu (192.168.50.119) network/sshd — physical access likely needed since both :22 and :2222 unreachable and tailscale down.",
+      "Path C: provision an actual H100 (Hetzner AX102 at 157.180.8.154 is CPU-only; need separate GPU-bearing box — e.g. Hetzner GEX44/GPU cloud or RunPod)."
+    ]
+  }
+}
