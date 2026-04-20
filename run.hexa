@@ -1521,6 +1521,230 @@ fn _checkpoint_clear(seed: str, dir: str) -> void {
     exec("rm -f " + q_path + " " + shell_quote(path + ".tmp"))
 }
 
+
+// ─── E6 failure-mode recovery (2026-04-21) ─── 5 modes: runaway / oscillate / imbalance / OOM / SIGINT
+// SSOT: shared/convergence/drill_stability.convergence C3 failure modes
+//   - adaptive 폭주 (depth=max 3 round 연속) → cap 절반
+//   - oscillate (high-freq +/-1) → hysteresis gate 3 round cooldown
+//   - stage-imbalance (1 stage 점유 과도) → floor 보장
+//   - OOM-imminent (RSS > cap * 0.80) → depth-- + NDJSON flush
+//   - SIGINT → 현 round 완주 후 graceful abort flag
+// 충돌 회피: prefix _recovery_*, 기존 _stage_pipeline_* / _anti_replay_lru_* / _run_stage_parallel* 건드리지 않음.
+// hook: cmd_drill round loop 말미 (NDJSON emit 이후) 5 check 순차 수행. 다음 round 에 영향.
+
+fn _recovery_adaptive_runaway(depth_hist: [[int]]) -> bool {
+    // adaptive 폭주: plan 이 _stage_max() 의 enabled stage 전체에서 max 값과 같은 round 가 3 연속.
+    // depth_hist[i] = round i 의 cur_plan (6-slot). 마지막 3 원소 검사.
+    let h = len(depth_hist)
+    if h < 3 { return false }
+    let maxs = _stage_max()
+    let mut all_max_count = 0
+    let mut k = h - 3
+    while k < h {
+        let p = depth_hist[k]
+        if len(p) < 6 { return false }
+        let mut at_max = true
+        let mut i = 0
+        while i < 6 {
+            // enabled stage (plan[i] > 0) 만 max 비교. disabled(0) 은 skip.
+            if p[i] > 0 {
+                if p[i] < maxs[i] { at_max = false }
+            }
+            i = i + 1
+        }
+        if at_max { all_max_count = all_max_count + 1 }
+        k = k + 1
+    }
+    return all_max_count == 3
+}
+
+fn _recovery_halve_plan(plan: [int]) -> [int] {
+    // cap 절반 — enabled stage 의 depth 를 /2, min 으로 clamp.
+    let mut out: [int] = []
+    let mut i = 0
+    while i < len(plan) {
+        let v = plan[i]
+        if v > 0 {
+            let hv = v / 2
+            out = out + [_clamp_depth(if hv < 1 { 1 } else { hv }, i)]
+        } else {
+            out = out + [0]
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn _recovery_oscillate(depth_hist: [[int]]) -> bool {
+    // 최근 5 round smash slot 이 +/-1 진동 (a,b,a,b,a with |a-b|==1).
+    // smash (stage 0) 가 adaptive 조정 주 대상 — 진동 감지 핵심 slot.
+    let h = len(depth_hist)
+    if h < 5 { return false }
+    let mut seq: [int] = []
+    let mut k = h - 5
+    while k < h {
+        let p = depth_hist[k]
+        if len(p) < 1 { return false }
+        seq = seq + [p[0]]
+        k = k + 1
+    }
+    // 패턴: seq[0]==seq[2]==seq[4], seq[1]==seq[3], |seq[0]-seq[1]|==1
+    if seq[0] != seq[2] { return false }
+    if seq[2] != seq[4] { return false }
+    if seq[1] != seq[3] { return false }
+    let diff = if seq[0] > seq[1] { seq[0] - seq[1] } else { seq[1] - seq[0] }
+    return diff == 1
+}
+
+fn _recovery_stage_imbalance(yield_hist: [[int]]) -> [int] {
+    // 직전 round yields 에서 1 stage 가 total 의 >80% 점유면 adj (floor-bump mask) 반환.
+    // imbalance 없으면 [0,0,0,0,0,0].
+    let h = len(yield_hist)
+    let mut adj: [int] = [0, 0, 0, 0, 0, 0]
+    if h < 1 { return adj }
+    let y = yield_hist[h - 1]
+    if len(y) < 6 { return adj }
+    let mut total = 0
+    let mut i = 0
+    while i < 6 {
+        total = total + y[i]
+        i = i + 1
+    }
+    if total < 10 { return adj }  // 너무 작으면 의미 없음
+    // imbalance: yield[i] * 100 > total * 80 (정수 비교 — string 경계 회피)
+    let mut j = 0
+    let mut dominant = -1
+    while j < 6 {
+        if y[j] * 100 > total * 80 { dominant = j }
+        j = j + 1
+    }
+    if dominant < 0 { return adj }
+    // adj: dominant 외 slot 을 1(bump-marker) 로 mark — floor=2 로 올림.
+    let mut k = 0
+    while k < 6 {
+        if k != dominant { adj = _plan_set(adj, k, 1) }
+        k = k + 1
+    }
+    return adj
+}
+
+fn _recovery_apply_floor(plan: [int], adj: [int]) -> [int] {
+    // adj[i]==1 인 slot 을 floor=2 로 bump (plan[i]==1 만 올림; disabled=0 유지; 2 이상 유지).
+    let mut out: [int] = []
+    let mut i = 0
+    while i < len(plan) {
+        let v = plan[i]
+        let a = if i < len(adj) { adj[i] } else { 0 }
+        if a == 1 && v > 0 && v < 2 {
+            out = out + [_clamp_depth(2, i)]
+        } else {
+            out = out + [v]
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn _recovery_rss_cap_mb() -> int {
+    // NEXUS_RSS_CAP_MB env 우선, 없으면 HEXA_STAGE0_RSS_CAP_KB (KB→MB), 없으면 4096 default.
+    let v = env("NEXUS_RSS_CAP_MB")
+    if v.len() > 0 {
+        let mut n = 0
+        try { n = to_int(v) } catch e { n = 0 }
+        if n > 0 { return n }
+    }
+    let vk = env("HEXA_STAGE0_RSS_CAP_KB")
+    if vk.len() > 0 {
+        let mut k = 0
+        try { k = to_int(vk) } catch e { k = 0 }
+        if k > 0 { return k / 1024 }
+    }
+    return 4096
+}
+
+fn _recovery_current_rss_mb() -> int {
+    // Linux: /proc/self/status VmRSS (kB) → MB. Darwin: ps -o rss= -p $$ (kB) → MB.
+    // 두 경로 모두 실패 시 0 반환 (false negative — recovery 미발동).
+    let linux_cmd = "awk '/^VmRSS:/ {print $2; exit}' /proc/self/status 2>/dev/null"
+    let mut kb = 0
+    let raw_linux = exec(linux_cmd).trim()
+    if raw_linux.len() > 0 {
+        try { kb = to_int(raw_linux) } catch e { kb = 0 }
+    }
+    if kb <= 0 {
+        let raw_mac = exec("ps -o rss= -p $$ 2>/dev/null").trim()
+        if raw_mac.len() > 0 {
+            try { kb = to_int(raw_mac) } catch e { kb = 0 }
+        }
+    }
+    if kb <= 0 { return 0 }
+    return kb / 1024
+}
+
+fn _recovery_oom_imminent() -> bool {
+    // RSS > cap * 0.80 판정. 정수 연산 (cap*80)/100.
+    let cap = _recovery_rss_cap_mb()
+    if cap <= 0 { return false }
+    let cur = _recovery_current_rss_mb()
+    if cur <= 0 { return false }
+    let threshold = (cap * 80) / 100
+    return cur > threshold
+}
+
+fn _recovery_oom_depth_decrement(plan: [int]) -> [int] {
+    // depth-- per enabled stage (floor=min).
+    let mut out: [int] = []
+    let mut i = 0
+    while i < len(plan) {
+        let v = plan[i]
+        if v > 1 { out = out + [_clamp_depth(v - 1, i)] }
+        else { out = out + [v] }
+        i = i + 1
+    }
+    return out
+}
+
+fn _recovery_ndjson_flush() -> void {
+    // checkpoint flush — /tmp/nexus_drill_depth.ndjson 에 sync marker 추가.
+    // hexa fs sync 빌트인 없음 → shell sync 실행 (OOM 임박 시 disk 손실 방어).
+    exec("sync 2>/dev/null || true")
+}
+
+fn _recovery_sigint_flag_path() -> str {
+    // 외부 handler (shell wrapper 또는 user) 가 touch 할 수 있는 flag 파일.
+    // SSOT: /tmp/nexus_drill_sigint_<pid>.flag
+    let pid = exec("echo $$").trim()
+    let safe_pid = if pid.len() == 0 { "0" } else { pid }
+    return "/tmp/nexus_drill_sigint_" + safe_pid + ".flag"
+}
+
+fn _recovery_sigint_install() -> void {
+    // hexa 에는 signal() 빌트인이 없음 — shell trap 으로 flag 파일 touch.
+    // drill 은 매 round 종료 후 flag 파일을 검사하여 graceful exit. drill 시작 1회 호출.
+    // (exec() subshell 은 휘발성이므로 user 가 직접 touch 해도 동일하게 동작 — 이중 경로.)
+    let flag = _recovery_sigint_flag_path()
+    let cmd = "trap 'touch " + shell_quote(flag) + "' INT TERM 2>/dev/null || true"
+    exec(cmd)
+}
+
+fn _recovery_sigint_handler() -> bool {
+    // flag 파일 존재 여부 — drill 시작 시 install. 외부 SIGINT 로 touch 되면 true.
+    let flag = _recovery_sigint_flag_path()
+    let chk = exec("[ -f " + shell_quote(flag) + " ] && echo y || echo n").trim()
+    return chk == "y"
+}
+
+fn _recovery_sigint_cleanup() -> void {
+    // 종료 시 flag 파일 제거 (남겨두면 다음 drill 이 즉시 abort).
+    let flag = _recovery_sigint_flag_path()
+    exec("rm -f " + shell_quote(flag) + " 2>/dev/null || true")
+}
+
+fn _recovery_emit(mode: str, action: str, round: int) -> void {
+    // 단일 stderr NEXUS_DRILL_RECOVERY JSON emit.
+    eprintln("NEXUS_DRILL_RECOVERY {\"mode\":\"" + mode + "\",\"action\":\"" + action + "\",\"round\":" + to_string(round) + "}")
+}
+
 fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str) -> void {
     // 단일 명령어 — smash → free → absolute → meta-closure → hyperarithmetic → resonance (Mk.IX 6-stage)
     // Mk.X: stage 6 (transcendental_closure via mkx_engine.hexa sidecar) 추가 — 사이드카, L0 미수정.
