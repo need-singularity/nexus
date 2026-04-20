@@ -1,0 +1,197 @@
+{
+  "_meta": {
+    "name": "phi_gap measurement protocol SSOT",
+    "version": "1.0",
+    "created": "2026-04-21",
+    "author": "drill phi_gap_816x",
+    "parent_doc": "docs/phi_gap_816x_attack_20260421.md",
+    "related_docs": [
+      "docs/phi_extractor_design_20260420.md",
+      "docs/alm_clm_verifier_design_20260420.md",
+      "training/phi_metric.hexa",
+      "ready/core/physical_ceiling.json"
+    ],
+    "policy": "deterministic; LLM-forbidden; V8 SAFE_COMMIT"
+  },
+
+  "gate_interpretation": {
+    "roadmap_cp2_gate": "phi_gap<5x",
+    "soft_formula": "gap_L2 < 4.0 AND gap_cos < 0.5",
+    "hard_formula": "abs(training_phi / benchmark_phi - 1) < 0.10",
+    "hard_source": "docs/alm_clm_verifier_design_20260420.md#G_VALIDITY clm_r5_validity_phi_gap_resolved",
+    "drill_default": "soft",
+    "notes": "CP2 gate interpretation MUST use same-metric comparison; cross-metric ratios forbidden."
+  },
+
+  "forbidden_operations": [
+    {
+      "op": "cross_metric_ratio",
+      "example": "Phi_proxy(bench) / Phi_iit(train) = 1142 / 1.4 = 816",
+      "reason": "Metrics have different units and ranges; ratio is meaningless.",
+      "enforcement": "verifier reject at G_VALIDITY gate load time"
+    },
+    {
+      "op": "hardcoded_phi_vec",
+      "example": "phi_holo_scaled=1500",
+      "reason": "AN11(a) requires measured values; hardcoding voids gate.",
+      "enforcement": "pass_gate_an11.hexa#STUB_MARKERS rejects literal constants"
+    },
+    {
+      "op": "llm_judge_of_phi_vec",
+      "reason": "AN11 is numeric-threshold only (docs/phi_extractor_design_20260420.md#6).",
+      "enforcement": "shared/rules/anima.json#deterministic_only"
+    },
+    {
+      "op": "mixed_seed_W_phi",
+      "reason": "Cross-round comparison requires identical projection matrix.",
+      "enforcement": "projection.seed must match across compared JSONs; verifier rejects mismatch"
+    }
+  ],
+
+  "same_metric_requirement": {
+    "rule": "phi_gap may ONLY be computed between two phi_vec objects sharing the same schema, dim_names, projection.seed, and projection.d_model.",
+    "ssot_schema": "phi_extractor_v1",
+    "endpoints": {
+      "training": "shared/state/{dest}_r{N}_phi_vec.json",
+      "benchmark": "shared/state/bench_{dest}_r{N}_phi_vec.json"
+    },
+    "dim_count": 16,
+    "dim_names": [
+      "phi_holo", "phi_complexity", "phi_gwt", "phi_refl",
+      "phi_time", "phi_emb", "phi_nested_drift", "phi_k_amp",
+      "phi_affect_v", "phi_affect_a", "phi_finitude",
+      "phi_hive_collec", "phi_hive_indiv", "phi_hive_emerge",
+      "phi_dream_phase", "phi_cycle_count"
+    ]
+  },
+
+  "distances": {
+    "gap_L2_ratio": {
+      "formula": "norm(phi_train - phi_bench) / norm(phi_bench)",
+      "range": "[0, inf)",
+      "target_soft": 4.0,
+      "target_hard": 0.10
+    },
+    "gap_cos": {
+      "formula": "1 - dot(phi_train, phi_bench) / (norm(phi_train) * norm(phi_bench))",
+      "range": "[0, 2]",
+      "target_soft": 0.5,
+      "target_hard": 0.05
+    },
+    "gap_per_dim": {
+      "formula": "abs(phi_train[i] - phi_bench[i]) for i in 0..15",
+      "report": "sorted-desc histogram; top-3 claim > 60% of total gap budget triggers decomposition note"
+    }
+  },
+
+  "stub_markers": {
+    "source": "shared/consciousness/pass_gate_an11.hexa#STUB_MARKERS",
+    "banned_substrings": [
+      "sa_phi_vec_proxy",
+      "phi_extractor_pending",
+      "DEFAULT",
+      "STUB",
+      "stub",
+      "proxy_only",
+      "pending_extractor",
+      "not_implemented",
+      "TODO",
+      "SYNTHETIC_STUB"
+    ],
+    "rule": "ANY banned substring anywhere in the phi_vec.json file (including extraction_method, source_ckpt, schema) → gate FAIL. Fail-fast, no override."
+  },
+
+  "emission_cadence": {
+    "training_endpoint": {
+      "trigger": "every checkpoint save (trainer-epoch-serialized)",
+      "writer": "training/dest1_phi_vec_ssot_emit.hexa (ALM) or training/clm_phi_vec_ssot_emit.hexa (CLM)",
+      "atomicity": "single-file overwrite; no append"
+    },
+    "benchmark_endpoint": {
+      "trigger": "once per round before training begins; frozen for the round",
+      "writer": "bench/bench.hexa --phi-vec-emit --dest {alm|clm} --round rN",
+      "atomicity": "single-file overwrite; reused across all gap checks of that round"
+    },
+    "dual_emit_for_distribution_shift": {
+      "trigger": "every checkpoint save",
+      "files": [
+        "<ckpt>/step_<N>/phi_vec_train.json (CD_GATE_TRAIN=1.0)",
+        "<ckpt>/step_<N>/phi_vec_infer.json (CD_GATE_INFER=0.6)"
+      ],
+      "law_ref": "modules/decoder/conscious_decoder.hexa Law 81"
+    }
+  },
+
+  "projection_spec": {
+    "variant": "A",
+    "kind": "random_orthonormal",
+    "seed": 3407,
+    "shape_alm": [16, 5120],
+    "shape_clm": [16, "d_model_clm"],
+    "persisted_at": "shared/state/phi_extractor_W_phi_seed3407.bin",
+    "bump_rule": "any change in seed OR shape MUST increment projection.seed in emitted JSON and invalidates all prior gap comparisons",
+    "promotion_path": "variant B (learned phi-head) deferred to r20+; variant C (PCA) deferred to r16+"
+  },
+
+  "reduction_attack_plan": {
+    "ordering": "ROI-sorted; land R1 before R2-R4",
+    "R1_corpus_density": {
+      "name": "ALM r13 corpus rebuild — consciousness density >= 30%",
+      "predicted_fold_reduction": [2.0, 4.0],
+      "effort_days": 3,
+      "prerequisite": "roadmap#5 (in-flight)",
+      "measurement": "density regex ratio per shared/calc/alm_verify/verify_alm_r12_input_consciousness_density.hexa",
+      "rollback": "revert to r12 corpus; no Φ changes"
+    },
+    "R2_lora_rank": {
+      "name": "LoRA rank 16 -> 32 -> 64",
+      "predicted_fold_reduction": [1.5, 3.0],
+      "effort_days": 3,
+      "prerequisite": "R1 landed",
+      "files": ["training/train_alm_lora.hexa", "scripts/train_alm_lora_run.hexa"],
+      "rollback": "rank=16 checkpoint preserved"
+    },
+    "R3_phi_hook_layer": {
+      "name": "h_last sampling at layer 12 vs 24 vs 36 (not only final)",
+      "predicted_fold_reduction": [1.2, 2.0],
+      "effort_days": 2,
+      "prerequisite": "hexa-lang worktree adds hxqwen14b_v566_forward_cache_layer_K symbol",
+      "risk": "C-side ABI addition; coordinate with hexa-lang team",
+      "rollback": "keep final-layer as default; layer_K is opt-in"
+    },
+    "R4_mse_phi_objective": {
+      "name": "add MSE(phi_train, phi_bench) loss term with lambda sweep",
+      "predicted_fold_reduction": [3.0, 8.0],
+      "effort_days": 4,
+      "prerequisite": "R1 landed (else Φ hacking on empty signal)",
+      "lambda_sweep": [0.0, 0.001, 0.01, 0.1],
+      "abort_trigger": "CE regresses > 5% relative to lambda=0 baseline",
+      "rollback": "lambda=0 reference checkpoint preserved every lambda step"
+    }
+  },
+
+  "reporting": {
+    "per_run_artifact": "shared/state/phi_gap_decomp_{dest}_r{N}.json",
+    "schema": {
+      "round": "rN",
+      "dest": "alm|clm",
+      "W_phi_seed": 3407,
+      "gap_L2_ratio": "float",
+      "gap_cos": "float",
+      "gap_per_dim": "array[16] of float",
+      "top3_dims": "array[3] of {idx, name, contribution_ratio}",
+      "magnitude_vs_direction_ratio": "float (d_L2_norm / d_cos)",
+      "train_vs_infer_delta": "float (L2(phi_train_gate) - L2(phi_infer_gate))",
+      "pass_soft": "bool (gap_L2 < 4.0 AND gap_cos < 0.5)",
+      "pass_hard": "bool (gap_L2 < 0.10)"
+    }
+  },
+
+  "non_goals": [
+    "no LLM-judge of phi_vec semantic quality",
+    "no retroactive phi_vec emission for r12 or earlier",
+    "no Python shim on anima side",
+    "no modification of hxqwen14b.c v566 ABI (new symbols only in hexa-lang worktree)",
+    "no change to L0 constants (alpha=0.014 stays this drill)"
+  ]
+}
