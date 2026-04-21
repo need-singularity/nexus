@@ -1,0 +1,79 @@
+// install.hexa — hx build hook for nexus.
+//
+// Invoked by `hx install nexus` (hexa-lang package manager) right after
+// the GitHub checkout (or symlink from ~/core/nexus) lands in $HX_PKG_DIR.
+//
+// hx passes:
+//   HX_PKG_DIR   — absolute path to the package root
+//   HX_BIN_DIR   — ~/.hx/bin
+//   HX_PKG_NAME  — "nexus"
+//
+// Responsibilities (each idempotent):
+//   1. Verify canonical entry cli/run.hexa exists.
+//   2. Ensure ~/.hx/bin/nexus shim points at $HX_PKG_DIR/cli/run.hexa
+//      (hx generates this after the hook returns; this file only
+//      performs verification + workspace registration — no shim write).
+//   3. Register nexus as command in ~/core/.workspace (if present).
+//   4. Guarded install of com.hexa.nexus-guard.plist LaunchAgent
+//      (only if nexus/launchd/ provides the plist template).
+//
+// raw#9 hexa-only, raw#11 snake_case, raw#15 no-hardcode (HX_PKG_DIR-relative).
+
+fn main() -> void {
+    let mut root = env("HX_PKG_DIR")
+    if root == "" { root = exec("pwd").trim() }
+    println("[nexus/install] HX_PKG_DIR=" + root)
+
+    let entry_src = root + "/cli/run.hexa"
+    if file_exists(entry_src) == false {
+        eprintln("[nexus/install] ERROR: canonical entry missing: " + entry_src)
+        exit(1)
+    }
+    println("[nexus/install] canonical entry OK: cli/run.hexa")
+
+    ensure_workspace_command(root)
+    maybe_install_launchd(root)
+
+    println("[nexus/install] done — hx will generate " + env("HX_BIN_DIR") + "/nexus shim from registry entry")
+}
+
+// Register `command nexus` block in ~/core/.workspace (idempotent).
+// Adds the block only when absent — keeps workspace_sync lint clean.
+fn ensure_workspace_command(root: string) -> void {
+    let ws = env("HOME") + "/core/.workspace"
+    if file_exists(ws) == false {
+        println("[nexus/install] ~/core/.workspace not found — skip workspace register")
+        return
+    }
+    let present = exec("grep -qE '^command nexus ' '" + ws + "' && echo y || echo n").trim()
+    if present == "y" {
+        println("[nexus/install] workspace: command nexus already registered")
+        return
+    }
+    let block = "\ncommand nexus \"nexus perfect-number engine (n6-guard auto-start, drill/thinking/smash)\"\n" +
+                "  owner    nexus\n" +
+                "  bin      nexus\n" +
+                "  entry    cli/run.hexa\n" +
+                "  source   cli/run.hexa\n" +
+                "  keywords nexus drill thinking smash absolute\n"
+    let quoted = block.replace("'", "'\\''")
+    let _ = exec("printf '%s' '" + quoted + "' >> '" + ws + "'")
+    println("[nexus/install] appended command nexus to ~/core/.workspace")
+    let sync = env("HOME") + "/core/hexa-lang/tool/workspace_sync.hexa"
+    if file_exists(sync) {
+        let _ = exec("hexa '" + sync + "' --regen-lock 2>/dev/null || true")
+    }
+}
+
+// Install launchd plist template if present (idempotent; skip if already loaded).
+fn maybe_install_launchd(root: string) -> void {
+    let plist_src = root + "/launchd/com.hexa.nexus-guard.plist.template"
+    if file_exists(plist_src) == false { return }
+    let plist_dst = env("HOME") + "/Library/LaunchAgents/com.hexa.nexus-guard.plist"
+    if file_exists(plist_dst) {
+        println("[nexus/install] launchd plist already present — skip")
+        return
+    }
+    let _ = exec("cp '" + plist_src + "' '" + plist_dst + "'")
+    println("[nexus/install] launchd plist staged (not loaded — user opts in via launchctl bootstrap)")
+}
