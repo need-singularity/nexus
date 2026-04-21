@@ -203,6 +203,9 @@ fn cmd_help() -> void {
     println("  self-check                      harness self-check")
     println("  doctor [--remote|--all] [--host H] [--timeout N]   로컬/원격 dispatch 진단 + 복구 가이드")
     println("  chain --seed \"...\" [--engines nexus,anima] [--report <path>]  W (2026-04-21) cross-engine drill chain (nexus→anima, graceful-missing)")
+    println("  revive [--max-iter N] [--apply]   2026-04-22 엔진+지도 v2 무한루프 (3-로직: bisect+bracket+Bellman)")
+    println("  canary [--seed-id ID] [--depth N] [--timeout SEC]   L1/L4 verdict 단발 호출")
+    println("  solve \"<problem>\" | --route \"<problem>\"   3-로직 자동 라우팅 (drift→fixpoint, trade-off→bracket, backlog→atomize)")
     println("  contracts                       integration_contracts.json (외부 연동 SSOT)")
     println("  verify                          I1~I10 invariants 자동 검증")
     println("  sync [--apply]                  spec ↔ cmd_* drift 검출")
@@ -323,6 +326,25 @@ fn _check_stage_err(out: str, stage: str) -> bool {
     return false
 }
 
+// drill.json stages.{name}.timeout_sec 강제 (2026-04-22 ROI fix)
+// 배경: blowup.hexa 가 fresh seed + smash depth=4 에서 무한 행어링 → drill 전체 hang.
+// drill.json 에 timeout 정의돼있으나 미구현 — 여기서 'timeout' (coreutils) 로 enforce.
+// 의존: macOS 는 brew install coreutils; Linux 는 기본. NEXUS_DRILL_NO_TIMEOUT=1 로 opt-out.
+fn _stage_timeout_prefix(stage: str) -> str {
+    if env("NEXUS_DRILL_NO_TIMEOUT") == "1" { return "" }
+    // Per-stage override via env (초 단위) — NEXUS_DRILL_TIMEOUT_{smash|free|absolute|meta_closure|hyperarith|resonance}
+    let ov = env("NEXUS_DRILL_TIMEOUT_" + stage)
+    let sec = if ov.len() > 0 { to_int(ov) }
+        else if stage == "smash" { 45 }
+        else if stage == "free" { 60 }
+        else if stage == "absolute" { 30 }
+        else if stage == "meta_closure" { 30 }
+        else if stage == "hyperarith" { 30 }
+        else if stage == "resonance" { 60 }
+        else { 60 }
+    // --kill-after=5: SIGTERM at sec, SIGKILL at sec+5 (process-group escape hatch)
+    return "timeout --kill-after=5 " + to_string(sec) + " "
+}
 
 fn _extract_int_after(text: str, marker: str) -> int {
     // marker 직후 비-숫자 스킵 후 정수 파싱 (예: "discovery_log  : +12 EXACT" → 12)
@@ -3282,7 +3304,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
             } else if cur_plan[0] > 0 {
                 let _pg_t0_s = _progress_now_ms()
                 _progress_emit(round, "smash", "start", 0)
-                let smash_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(blow_core) + " " + qrseed + " " + to_string(cur_plan[0]) + " 2>&1"
+                let smash_cmd = _stage_timeout_prefix("smash") + shell_quote(hexa_bin()) + " run " + shell_quote(blow_core) + " " + qrseed + " " + to_string(cur_plan[0]) + " 2>&1"
                 let smash_out = exec(smash_cmd)
                 if _check_stage_err(smash_out, "smash") { err_stages = err_stages + "smash,"; err_count = err_count + 1 }
                 s_new = _count_discoveries(smash_out)
@@ -3303,7 +3325,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
             } else if cur_plan[1] > 0 {
                 let _pg_t0_f = _progress_now_ms()
                 _progress_emit(round, "free", "start", 0)
-                let free_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(compose) + " " + qrseed + " --modules all --dfs " + to_string(cur_plan[1]) + " 2>&1"
+                let free_cmd = _stage_timeout_prefix("free") + shell_quote(hexa_bin()) + " run " + shell_quote(compose) + " " + qrseed + " --modules all --dfs " + to_string(cur_plan[1]) + " 2>&1"
                 let free_out = exec(free_cmd)
                 if _check_stage_err(free_out, "free") { err_stages = err_stages + "free,"; err_count = err_count + 1 }
                 f_new = _count_discoveries(free_out)
@@ -3337,7 +3359,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 } else if cur_plan[2] > 0 {
                     let _pg_t0_a = _progress_now_ms()
                     _progress_emit(round, "absolute", "start", 0)
-                    let abs_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(abs_eng) + " " + qrseed + " 2>&1"
+                    let abs_cmd = _stage_timeout_prefix("absolute") + shell_quote(hexa_bin()) + " run " + shell_quote(abs_eng) + " " + qrseed + " 2>&1"
                     let abs_out = exec(abs_cmd)
                     if _check_stage_err(abs_out, "absolute") { err_stages = err_stages + "absolute,"; err_count = err_count + 1 }
                     a_pass = _count_marker(abs_out, "ABSOLUTE-PASS") + _count_marker(abs_out, "[11*]")
@@ -3355,7 +3377,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 } else if cur_plan[3] > 0 {
                     let _pg_t0_m = _progress_now_ms()
                     _progress_emit(round, "meta_closure", "start", 0)
-                    let mc_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(mc_eng) + " " + qrseed + " 2>&1"
+                    let mc_cmd = _stage_timeout_prefix("meta_closure") + shell_quote(hexa_bin()) + " run " + shell_quote(mc_eng) + " " + qrseed + " 2>&1"
                     let mc_out = exec(mc_cmd)
                     if _check_stage_err(mc_out, "meta-closure") { err_stages = err_stages + "meta-closure,"; err_count = err_count + 1 }
                     // META-CLOSED 마커 부재 — meta_closed/promoted 숫자 직접 파싱 + [10**] 매치
@@ -3377,7 +3399,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
                 } else if cur_plan[4] > 0 {
                     let _pg_t0_h = _progress_now_ms()
                     _progress_emit(round, "hyperarith", "start", 0)
-                    let hy_cmd = shell_quote(hexa_bin()) + " run " + shell_quote(hyper_eng) + " " + qrseed + " 2>&1"
+                    let hy_cmd = _stage_timeout_prefix("hyperarith") + shell_quote(hexa_bin()) + " run " + shell_quote(hyper_eng) + " " + qrseed + " 2>&1"
                     let hy_out = exec(hy_cmd)
                     if _check_stage_err(hy_out, "hyperarith") { err_stages = err_stages + "hyperarith,"; err_count = err_count + 1 }
                     hy_pass = _count_marker(hy_out, "REVERSE-PROVEN") + _count_marker(hy_out, "ABSOLUTE-PASS-PI02")
@@ -4466,6 +4488,52 @@ fn main() -> void {
             find_flag(a, "--report", "")
         )
         if rc != 0 { exit(rc) }
+        return
+    }
+    if sub == "revive" {
+        // 2026-04-22 — 엔진+지도 v2 무한루프 (3-로직: bisect + bracket + Bellman/DAG)
+        // nexus revive [--max-iter N] [--apply] [--quiet]
+        let revive_entry = nexus_root() + "/cli/revive/revive.hexa"
+        let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(revive_entry)
+        let mut k = 3
+        while k < n { cmd = cmd + " " + shell_quote(a[k]); k = k + 1 }
+        print(exec(cmd + " 2>&1"))
+        return
+    }
+    if sub == "canary" {
+        // L1/L4 verdict 직접 호출 (debug/inspect)
+        let canary_tool = nexus_root() + "/tool/canary_drill.hexa"
+        let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(canary_tool)
+        let mut k = 3
+        while k < n { cmd = cmd + " " + shell_quote(a[k]); k = k + 1 }
+        print(exec(cmd + " 2>&1"))
+        return
+    }
+    if sub == "solve" {
+        // 2026-04-22 — deprecated. `nexus solve` → `hxq solve`.
+        // 3-로직 라우터는 hexa-lang 소유 (logics + router + CLI 모두 hexa-lang).
+        // 이 shim 은 과도기 호환용 — hxq 가 PATH 에 있으면 위임, 없으면 안내.
+        let mut text = ""
+        let mut route_only = ""
+        if n >= 4 {
+            if a[3] == "--route" {
+                route_only = "route "
+                if n >= 5 { text = a[4] }
+            } else { text = a[3] }
+        }
+        if text.len() == 0 {
+            eprintln("nexus solve: deprecated. use `hxq solve \"<problem>\"` instead.")
+            eprintln("  hxq solve \"<problem>\"          → route + execute")
+            eprintln("  hxq solve --route \"<problem>\"  → route only")
+            return
+        }
+        let hxq = env("HOME") + "/.hx/bin/hxq"
+        if file_exists(hxq) == false {
+            eprintln("nexus solve: hxq not found at " + hxq + " — install hexa-lang first.")
+            return
+        }
+        let cmd = shell_quote(hxq) + " solve " + route_only + shell_quote(text)
+        print(exec(cmd + " 2>&1"))
         return
     }
     eprintln("nexus: unknown subcommand '" + sub + "'")
