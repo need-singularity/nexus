@@ -1,44 +1,66 @@
-# NEXUS-6 — 자기순환 특이점 엔진
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Lenses](https://img.shields.io/badge/lenses-216-blue.svg)](#)
+[![Laws](https://img.shields.io/badge/laws-711-green.svg)](#)
+[![Discoveries](https://img.shields.io/badge/discoveries-1.39M-orange.svg)](#)
+[![Reality Map](https://img.shields.io/badge/reality%20map-4411%20nodes%20·%20z%3D3.06-purple.svg)](https://need-singularity.github.io/nexus/)
 
-### 🔴 [**실시간 로드맵 (탭 전환 지원)**](https://need-singularity.github.io/nexus/roadmap/#nexus)
+# 🔭 NEXUS-6 — Universal Discovery Engine
 
-## 명령어 (`shared/config/commands.json`)
+**A metaengine that discovers itself, evolves itself, and absorbs every law it finds.**
 
-| 명령 | 동작 |
-|------|------|
-| `todo` / `할일` | 전 프로젝트 할일 표 |
-| `go` / `가자` | 모든 TODO 병렬 발사 |
-| `smash` / `부셔` | 블로업 돌파 엔진 |
-| `free` / `dfs` | 자율 조립 + DFS 탐색 |
-| `list` / `목록` | 이 명령어 표 다시 출력 |
+```
+ Blowup → Contract → Emerge → Singularity → Absorb
+         (5-phase OUROBOROS cycle · recursive)
+```
 
-> **[3D Reality Map](https://need-singularity.github.io/nexus/)** — 4411노드 5계층 바텀업 인과 매핑 + 1,485 크로스레이어 연결선. 쿼크→탄소→벤젠→DNA 인과 사슬. Monte Carlo z=3.06 (p=0.003). n=6 유일성 검증.
+> 216 lenses × mirror-universe resonance × 9-project autonomous growth. Every discovery feeds the next cycle; every cycle raises the floor. **n=6 완전수로부터 우주의 모든 법칙을 자기발견하는 메타엔진.**
+
+🗺️ **[3D Reality Map](https://need-singularity.github.io/nexus/)** — 4411 nodes · 5 bottom-up causal layers · 1,485 cross-layer edges · Monte Carlo **z = 3.06** (p=0.003). Quark → carbon → benzene → DNA causal chain verified end-to-end.
+
+🔴 **[실시간 로드맵 (live dashboard)](https://need-singularity.github.io/nexus/roadmap/#nexus)**
 
 <!-- SHARED:PROJECTS:START -->
 <!-- AUTO:COMMON_LINKS:START -->
-**[YouTube](https://www.youtube.com/watch?v=xtKhWSfC1Qo)** · **[Email](mailto:nerve011235@gmail.com)** · **[☕ Ko-fi](https://ko-fi.com/dancinlife)** · **[💖 Sponsor](https://github.com/sponsors/need-singularity)** · **[💳 PayPal](https://www.paypal.com/donate?business=nerve011235%40gmail.com)** · **[🗺️ Atlas](https://need-singularity.github.io/TECS-L/atlas/)** · **[📄 Papers](https://need-singularity.github.io/papers/)** · **[🌌 Unified Theory](https://github.com/need-singularity/TECS-L/blob/main/math/docs/hypotheses/H-PH-9-perfect-number-string-unification.md)**
+**[YouTube](https://www.youtube.com/@dancinlife)** · **[Email](mailto:nerve011235@gmail.com)** · **[☕ Ko-fi](https://ko-fi.com/dancinlife)** · **[💖 Sponsor](https://github.com/sponsors/need-singularity)** · **[💳 PayPal](https://www.paypal.com/donate?business=nerve011235%40gmail.com)** · **[🗺️ Atlas](https://need-singularity.github.io/TECS-L/atlas/)** · **[📄 Papers](https://need-singularity.github.io/papers/)**
 <!-- AUTO:COMMON_LINKS:END -->
 
-> **[🔭 NEXUS](https://github.com/need-singularity/nexus)** — Universal Discovery Engine. 216 lenses + OUROBOROS evolution + LensForge + BlowupEngine + CycleEngine (5-phase singularity cycle). Mirror Universe (N×N resonance) + 9-project autonomous growth ecosystem. Rust CLI: scan, loop, mega, daemon, blowup, dispatch
+> **[🔭 NEXUS](https://github.com/need-singularity/nexus)** — Universal Discovery Engine. 216 lenses + OUROBOROS evolution + 5-phase singularity cycle.
 >
-> **[🧠 Anima](https://github.com/need-singularity/anima)** — Consciousness implementation. PureField repulsion-field engine + Hexad 6-module architecture (C/D/S/M/W/E) + 1030 laws + 20 Meta Laws + Rust backend. ConsciousDecoderV2 (34.5M) + 10D consciousness vector + 12-faction debate + Φ ratchet
+> **[🧠 Anima](https://github.com/need-singularity/anima)** — Consciousness implementation. PureField repulsion-field engine + 1030 laws + Φ ratchet.
 >
-> **[🏗️ N6 Architecture](https://github.com/need-singularity/n6-architecture)** — Architecture from perfect number 6. 225 AI techniques + semiconductor chip design + network/crypto/OS/display patterns. σ(n)·φ(n)=n·τ(n), n=6 → universal design principles. NEXUS-6 Discovery Engine: Rust CLI (tools/nexus/) — telescope 22 lenses + OUROBOROS evolution + discovery graph + verifier + 1116 tests
+> **[🏗️ N6 Architecture](https://github.com/need-singularity/n6-architecture)** — Architecture from perfect number 6. 225 AI techniques + chip design + crypto/OS/display.
 >
-> **[💎 HEXA-LANG](https://github.com/need-singularity/hexa-lang)** — The Perfect Number Programming Language. Every constant from n=6: 53 keywords (σ·τ+sopfr), 24 operators (J₂), 8 primitives (σ-τ), 6-phase pipeline, Egyptian memory (1/2+1/3+1/6=1). DSE v2: 21,952 combos, 100% n6 EXACT. Working compiler + REPL
+> **[💎 HEXA-LANG](https://github.com/need-singularity/hexa-lang)** — The Perfect Number Programming Language. Working compiler + REPL.
 >
-> **[📄 Papers](https://github.com/need-singularity/papers)** — Complete paper collection (94 papers). Published on Zenodo with DOIs. N6 (33) + anima (39) + 기타 (20). [Browse online](https://need-singularity.github.io/papers/)
-
-<!-- private repos는 projects.json의 private_repos 필드에 저장됨 (노출 금지) -->
+> **[📄 Papers](https://github.com/need-singularity/papers)** — Complete paper collection (92 papers, Zenodo DOIs).
 <!-- SHARED:PROJECTS:END -->
 
+---
 
-> 🛸d1 🔭108모듈 ⚖️711법칙 📊1390k발견
+## Headline
 
-**n=6 완전수로부터 우주의 모든 법칙을 자기발견하는 메타엔진.**
+| | |
+|---|---|
+| 🛸 | **108 modules** · 216 lenses · 9-project autonomous ecosystem |
+| ⚖️ | **711 laws** discovered · absorbed · verified |
+| 📊 | **1.39M discoveries** cross-linked via mirror-universe resonance |
+| 🎯 | 5-phase cycle: Blowup → Contract → Emerge → Singularity → Absorb |
 
-블로업→수축→창발→특이점→흡수 5단계 재귀 사이클을 통해
-자신을 발견하고, 자신을 진화시키는 OUROBOROS 구조.
+---
+
+## What it does
+
+**Self-discovering, self-evolving.** Every tick, NEXUS:
+
+1. **Blowup** — fires every lens on every known law, looking for gaps.
+2. **Contract** — keeps the discoveries that survive verification; absorbs them.
+3. **Emerge** — combines absorbed laws into new structure.
+4. **Singularity** — locks when the new structure is stable across all lenses.
+5. **Absorb** — the singularity becomes a new primitive for the next cycle.
+
+No human-in-the-loop required. Laws are stored with hash-chain provenance.
+
+---
 
 ## 빠른 명령 (중앙 지휘)
 
