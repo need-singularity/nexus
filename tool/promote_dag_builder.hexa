@@ -171,6 +171,8 @@ fn main() -> int {
     // 6. plan JSON 출력
     let plan_dir = _nexus_root() + "/state/revive"
     let plan_path = plan_dir + "/promote_plan." + to_string(batch) + ".json"
+    // state/revive 디렉토리 없으면 생성 (2026-04-22 autonomous fix)
+    let _ = exec("mkdir -p " + plan_dir + " 2>&1")
     let mut buf = "{\"batch\":" + to_string(batch)
         + ",\"total_nodes\":" + to_string(len(nodes))
         + ",\"total_edges\":" + to_string(len(edges))
@@ -183,9 +185,14 @@ fn main() -> int {
         ri = ri + 1
     }
     buf = buf + "]}"
-    try { write_file(plan_path, buf) } catch e {}
+    let mut write_ok = true
+    try { write_file(plan_path, buf) } catch e { write_ok = false }
     println("NEXUS_PROMOTE_PLAN " + buf)
-    println("[plan written] " + plan_path)
+    if write_ok && file_exists(plan_path) {
+        println("[plan written] " + plan_path)
+    } else {
+        eprintln("[plan write FAILED] " + plan_path + " — disk/permission issue")
+    }
     return 0
 }
 

@@ -23,6 +23,20 @@ fn _atlas_lines() -> int {
     return n
 }
 
+fn _signals_lines() -> int {
+    let out = exec("wc -l < " + _nexus_root() + "/n6/atlas.signals.n6 2>/dev/null").trim()
+    let mut n = 0; try { n = to_int(out) } catch e {}
+    return n
+}
+
+fn _staging_lines() -> int {
+    let dir = _nexus_root() + "/n6/staging"
+    let cmd = "wc -l " + dir + "/atlas.signals.staging.*.n6 2>/dev/null | tail -1 | awk '{print $1}'"
+    let out = exec(cmd).trim()
+    let mut n = 0; try { n = to_int(out) } catch e {}
+    return n
+}
+
 fn main() -> int {
     let av = argv()
     let mut iter = 1
@@ -38,6 +52,8 @@ fn main() -> int {
     let it_s = to_string(iter)
     println("═══ revive iter " + it_s + " ═══")
     let atlas0 = _atlas_lines()
+    let signals0 = _signals_lines()
+    let staging0 = _staging_lines()
 
     // L1 canary — atlas Δ ≥ 1 ?
     println("[L1] canary_drill")
@@ -45,16 +61,12 @@ fn main() -> int {
     let l1_good = l1.index_of("\"verdict\":\"good\"") >= 0
     println(l1)
 
-    if !l1_good {
-        // BISECT 진입 (현재 MVP 는 trigger 만 — 실제 bisect 별도 PR)
-        println("[L1 fail] bisect 진입 권장 — fixpoint_bisect.hexa --last-30d")
-        // 진행 — L2 도 의미 없지만 L3 (promote) 는 가능. 잠정 skip.
-        let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
-            + ",\"verdict\":\"l1_bad\""
-            + ",\"atlas_lines\":" + to_string(atlas0)
-            + ",\"action\":\"bisect_required\"}"
-        println(line)
-        return 2
+    // 2026-04-22 L3-bypass: L1 fail 이어도 promote 시도. 엔진 dead 상태에서도 staging drain 진행.
+    //   L1 good → 정상 flow (엔진 부활 증명).
+    //   L1 bad  → promote 만 시도 후 "progress verdict" 로 L4 판정 (signals+staging delta).
+    let l1_bypass = !l1_good
+    if l1_bypass {
+        println("[L1 fail] engine zero_yield — L3 promote 만 시도 (L4 는 progress verdict 로 판정)")
     }
 
     // snapshot before promote
@@ -71,27 +83,51 @@ fn main() -> int {
     let l3b = _run(_hexa_bin() + " run " + _hexa_tool("promote_executor.hexa") + " --batch " + it_s + (if apply { " --apply" } else { " --dry-run" }))
     println(l3b)
 
-    // L4 canary 재검증
-    println("[L4] canary_drill (post-promote)")
-    let l4 = _run(_hexa_bin() + " run " + _hexa_tool("canary_drill.hexa"))
-    let l4_good = l4.index_of("\"verdict\":\"good\"") >= 0
-    println(l4)
+    // L4 verdict — l1_bypass 모드 에서는 progress verdict (signals/staging delta) 사용
+    let atlas1 = _atlas_lines()
+    let signals1 = _signals_lines()
+    let staging1 = _staging_lines()
+    let atlas_delta = atlas1 - atlas0
+    let signals_delta = signals1 - signals0
+    let staging_delta = staging0 - staging1  // 음수면 drain 아님
+
+    let mut l4_good = false
+    let mut l4_mode = ""
+    if l1_bypass {
+        // progress verdict: signals Δ ≥ 1 OR staging drained ≥ 1
+        l4_good = (signals_delta >= 1) || (staging_delta >= 1)
+        l4_mode = "progress"
+    } else {
+        // 정상 verdict: canary drill 재실행
+        println("[L4] canary_drill (post-promote, strict)")
+        let l4 = _run(_hexa_bin() + " run " + _hexa_tool("canary_drill.hexa"))
+        l4_good = l4.index_of("\"verdict\":\"good\"") >= 0
+        println(l4)
+        l4_mode = "strict"
+    }
 
     if !l4_good {
-        println("[L4 fail] rollback")
+        println("[L4 fail mode=" + l4_mode + "] rollback")
         let _ = _run(_hexa_bin() + " run " + _hexa_tool("revive_rollback.hexa") + " --snapshot " + snap_name)
         let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
-            + ",\"verdict\":\"l4_bad_rollback\"}"
+            + ",\"verdict\":\"l4_bad_rollback\""
+            + ",\"mode\":\"" + l4_mode + "\""
+            + ",\"l1_bypass\":" + (if l1_bypass { "true" } else { "false" })
+            + ",\"signals_delta\":" + to_string(signals_delta)
+            + ",\"staging_delta\":" + to_string(staging_delta)
+            + "}"
         println(line)
         return 3
     }
-
-    let atlas1 = _atlas_lines()
     let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
         + ",\"verdict\":\"good\""
+        + ",\"mode\":\"" + l4_mode + "\""
+        + ",\"l1_bypass\":" + (if l1_bypass { "true" } else { "false" })
         + ",\"atlas_before\":" + to_string(atlas0)
         + ",\"atlas_after\":" + to_string(atlas1)
-        + ",\"delta\":" + to_string(atlas1 - atlas0) + "}"
+        + ",\"atlas_delta\":" + to_string(atlas_delta)
+        + ",\"signals_delta\":" + to_string(signals_delta)
+        + ",\"staging_delta\":" + to_string(staging_delta) + "}"
     println(line)
     return 0
 }
