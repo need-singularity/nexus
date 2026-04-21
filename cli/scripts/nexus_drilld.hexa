@@ -48,6 +48,35 @@ let REQ_FIFO = "/tmp/nexus_drilld.sock"
 let PID_FILE = "/tmp/nexus_drilld.pid"
 let TERM_FLAG = "/tmp/nexus_drilld.term"
 let LOG_FILE = "/tmp/nexus_drilld.log"
+let ATLAS_LOCK = "shared/n6/.atlas.lock"    // Phase 2 §4.2 single-writer (relative to nexus root)
+
+// ─── Phase 2 Step 7 lifetime limits (§2.4 + §5 risk table) ───
+let IDLE_LIMIT_S    = 600      // 10 min without request → self-exit (request boundary only)
+let MAX_LIFETIME_S  = 43200    // 12 h hard cap — launchd will re-spawn (Phase 3)
+let CMD_TIMEOUT_S   = 180      // per-stage hard timeout — wraps exec()
+// FIFO_POLL_S removed 2026-04-21 — htz verify showed hexa exec() + `read -t` lost
+// data. Phase 3 external watchdog will handle true idle termination.
+
+// ─── Phase 2 §4.1 state isolation — round-scoped mutable globals ───
+// Each op handler must call _reset_round(seed) on entry. Boot-persistent state
+// (atlas cache, lens registry, engine registry — §4.2) lives elsewhere and is
+// NOT reset per round. Adding a new round-scoped var here is a **must-update**
+// in _reset_round() — Step 4 byte-identity test guards against omissions.
+let mut g_salt: int = 0
+let mut g_jitter: int = 0
+let mut g_rng_seed: int = 0
+let mut g_partial_graph_delta: str = ""
+let mut g_lens_consensus_buf: str = ""
+let mut g_ouroboros_cycle: int = 0
+let mut g_timer_acc: int = 0
+
+// ─── Phase 2 §4.2 atlas single-writer — boot-only observed state ───
+// Captured once at _setup_lifecycle(); _check_atlas_drift() compares at round
+// end and raises NEXUS_ENGINE_WARN if external write detected. Actual
+// single-writer enforcement (in-proc atlas cache + batched flush) lands in
+// the Step 5 follow-up; Step 6 here scaffolds the observation + lock file.
+let mut g_atlas_boot_size: int = 0
+let mut g_atlas_boot_mtime: int = 0
 
 // ─── util: shell-safe quote ───
 fn _shq(s: str) -> str {
@@ -106,7 +135,7 @@ fn _log(event: str, kv: str) -> void {
 // protocol 은 1-line flat JSON 만 지원: {"op":"drill","seed":"...","max_rounds":3,"reply":"/tmp/xxx"}
 fn _json_str(line: str, key: str) -> str {
     let pat = "\"" + key + "\":\""
-    let i = line.indexof(pat)
+    let i = line.index_of(pat)
     if i < 0 { return "" }
     let start = i + pat.len()
     let mut j = start
@@ -122,7 +151,7 @@ fn _json_str(line: str, key: str) -> str {
 
 fn _json_int(line: str, key: str) -> int {
     let pat = "\"" + key + "\":"
-    let i = line.indexof(pat)
+    let i = line.index_of(pat)
     if i < 0 { return -1 }
     let mut j = i + pat.len()
     let n = line.len()
@@ -147,11 +176,129 @@ fn _json_int(line: str, key: str) -> int {
     return v
 }
 
+fn _json_bool(line: str, key: str) -> bool {
+    // "<key>":true | "<key>":false — unquoted JSON bool.
+    let pat = "\"" + key + "\":"
+    let i = line.index_of(pat)
+    if i < 0 { return false }
+    let mut j = i + pat.len()
+    let n = line.len()
+    while j < n {
+        let c = line.substring(j, j + 1)
+        if c != " " && c != "\t" { break }
+        j = j + 1
+    }
+    if j + 4 <= n && line.substring(j, j + 4) == "true" { return true }
+    return false
+}
+
+fn _json_escape(s: str) -> str {
+    // Minimal JSON string escape for payload building (\" \\ \n).
+    let mut out = ""
+    let mut i = 0
+    let n = s.len()
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "\"" { out = out + "\\\"" }
+        else if c == "\\" { out = out + "\\\\" }
+        else if c == "\n" { out = out + "\\n" }
+        else { out = out + c }
+        i = i + 1
+    }
+    return out
+}
+
 // ─── util: write a single JSON line to reply path (blocking if FIFO) ───
 fn _reply(reply_path: str, payload: str) -> void {
     if reply_path.len() == 0 { return }
     let cmd = "printf '%s\\n' " + _shq(payload) + " > " + _shq(reply_path) + " 2>/dev/null || true"
     exec(cmd)
+}
+
+// ─── util: AI-native engine error stderr channels (design §F') ───
+// err_kind ∈ {"WARN","ERROR","DEAD","CRASH"}:
+//   WARN  — recoverable, daemon keeps going
+//   ERROR — request failed, daemon keeps going
+//   DEAD  — fatal, daemon should restart (boot assert)
+//   CRASH — hexa runtime threw (top-level catch)
+fn _emit_engine_error(err_kind: str, reason: str, cmd: str, seed: str) -> void {
+    let ej = "{\"reason\":\"" + _json_escape(reason)
+        + "\",\"cmd\":\"" + _json_escape(cmd)
+        + "\",\"seed\":\"" + _json_escape(seed) + "\"}"
+    try { eprintln("NEXUS_ENGINE_" + err_kind + " " + ej) } catch e {}  // @allow-silent-catch
+}
+
+// ─── util: djb2 24-bit truncated → 6 hex chars ───
+// Collision-resistant suffix for round_new ids so that same-ms + same-prefix
+// requests do not collide. (daemon_main.hexa 에서 흡수, Phase 2 Step 1.)
+fn _djb2_hex6(s: str) -> str {
+    let mut h = 5381
+    let mut i = 0
+    let n = s.len()
+    let hex = "0123456789abcdef"
+    while i < n {
+        let c = s.substring(i, i + 1)
+        let mut v = 0
+        if "0123456789".contains(c) { v = 48 + "0123456789".index_of(c) }
+        else if "abcdefghijklmnopqrstuvwxyz".contains(c) { v = 97 + "abcdefghijklmnopqrstuvwxyz".index_of(c) }
+        else if "ABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(c) { v = 65 + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".index_of(c) }
+        else { v = 95 }
+        h = ((h * 33) + v) % 16777216
+        i = i + 1
+    }
+    if h < 0 { h = 0 - h }
+    let mut out = ""
+    let mut k = 0
+    while k < 6 {
+        let nib = h % 16
+        out = hex.substring(nib, nib + 1) + out
+        h = h / 16
+        k = k + 1
+    }
+    return out
+}
+
+fn _round_id_from(ts_ms: int, seed: str) -> str {
+    // r_<ts_ms>_<seed_prefix>_<hash6> — daemon_main.hexa 참조.
+    let whitelist = "abcdefghijklmnopqrstuvwxyz0123456789_"
+    let mut sh = seed
+    if sh.len() > 8 { sh = sh.substring(0, 8) }
+    let mut clean = ""
+    let mut i = 0
+    let shl = sh.len()
+    while i < shl {
+        let c = sh.substring(i, i + 1)
+        if whitelist.contains(c) { clean = clean + c }
+        i = i + 1
+    }
+    return "r_" + to_string(ts_ms) + "_" + clean + "_" + _djb2_hex6(seed)
+}
+
+// ─── Phase 2 §4.1 round-state reset ───
+// Derive per-round state purely from seed (deterministic) so same seed yields
+// byte-identical result regardless of prior rounds. Input = seed only. Output =
+// all 7 round-scoped globals above. Step 4 byte-identity test enforces:
+//   response(seed_A, N=1) == response(seed_A, N=3 in seed_A→B→A sequence)
+fn _reset_round(seed: str) -> void {
+    // djb2_hex6(seed) is 6 hex chars = 24-bit integer — fits in `int` safely.
+    let h6 = _djb2_hex6(seed)
+    let hex = "0123456789abcdef"
+    let mut seed_int = 0
+    let mut i = 0
+    let hl = h6.len()
+    while i < hl {
+        let c = h6.substring(i, i + 1)
+        let v = hex.index_of(c)
+        seed_int = seed_int * 16 + v
+        i = i + 1
+    }
+    g_salt = seed_int
+    g_jitter = (seed_int * 7919) % 65536
+    g_rng_seed = seed_int
+    g_partial_graph_delta = ""
+    g_lens_consensus_buf = ""
+    g_ouroboros_cycle = 0
+    g_timer_acc = 0
 }
 
 // ─── boot phase: pre-load engine state (Phase 1 = stat-check warm-up) ───
@@ -174,6 +321,68 @@ fn _preload_state() -> str {
     return parts.join("")
 }
 
+// ─── Phase 2 §4.2 atlas single-writer helpers ───
+fn _atlas_path() -> str {
+    return _nexus_root() + "/shared/n6/atlas.n6"
+}
+
+fn _atlas_size() -> int {
+    let v = exec("wc -c < " + _shq(_atlas_path()) + " 2>/dev/null || echo 0").trim()
+    let mut n = 0
+    try { n = to_int(v) } catch e {}  // @allow-silent-catch
+    return n
+}
+
+fn _atlas_mtime() -> int {
+    // stat -f %m on Darwin, stat -c %Y on Linux — try Darwin first.
+    let v = exec("stat -f %m " + _shq(_atlas_path()) + " 2>/dev/null || stat -c %Y " + _shq(_atlas_path()) + " 2>/dev/null || echo 0").trim()
+    let mut n = 0
+    try { n = to_int(v) } catch e {}  // @allow-silent-catch
+    return n
+}
+
+fn _atlas_lock_acquire() -> bool {
+    // Cheap pidfile-style lock. Step 6 scaffolding — a full flock would use
+    // `flock -x` but daemon runs single-process and we only need detection of
+    // external writers, not atomicity of internal writes (Step 5 follow-up).
+    let root = _nexus_root()
+    let lk = root + "/" + ATLAS_LOCK
+    // if exists + pid alive → another daemon running → refuse
+    let exists = exec("[ -f " + _shq(lk) + " ] && echo y || echo n").trim() == "y"
+    if exists {
+        let other = exec("cat " + _shq(lk) + " 2>/dev/null || echo 0").trim()
+        let alive = exec("kill -0 " + other + " 2>/dev/null && echo y || echo n").trim() == "y"
+        if alive {
+            _emit_engine_error("DEAD", "atlas_lock_busy", "boot", "")
+            return false
+        }
+        // stale lock — reclaim
+    }
+    let pid = exec("echo $$").trim()
+    write_file(lk, pid + "\n")
+    return true
+}
+
+fn _atlas_lock_release() -> void {
+    let root = _nexus_root()
+    let lk = root + "/" + ATLAS_LOCK
+    exec("rm -f " + _shq(lk) + " 2>/dev/null || true")
+}
+
+fn _check_atlas_drift(cmd: str, seed: str) -> void {
+    // Called at end-of-round. If size/mtime moved without our write, flag it.
+    // Current Step 6 scaffolding: warn only. Step 5 follow-up refuses.
+    let sz_now = _atlas_size()
+    let mt_now = _atlas_mtime()
+    if sz_now != g_atlas_boot_size || mt_now != g_atlas_boot_mtime {
+        _emit_engine_error("WARN", "atlas_external_write_detected", cmd, seed)
+        // re-baseline so we do not warn every round — only the first drift
+        // per externally-mutated epoch is actionable.
+        g_atlas_boot_size = sz_now
+        g_atlas_boot_mtime = mt_now
+    }
+}
+
 // ─── lifecycle: PID file, FIFO, TERM trap ───
 fn _setup_lifecycle() -> int {
     // PID file
@@ -194,12 +403,21 @@ fn _setup_lifecycle() -> int {
     exec("rm -f " + _shq(TERM_FLAG) + " 2>/dev/null || true")
     exec("trap 'touch " + _shq(TERM_FLAG) + "' INT TERM 2>/dev/null || true")
 
+    // Phase 2 §4.2 atlas single-writer acquire + baseline observation.
+    if !_atlas_lock_acquire() {
+        eprintln("nexus_drilld: atlas lock busy — another daemon running")
+        return 0
+    }
+    g_atlas_boot_size = _atlas_size()
+    g_atlas_boot_mtime = _atlas_mtime()
+
     let mut v = 0
     try { v = to_int(pid) } catch e { v = 0 }  // @allow-silent-catch
     return v
 }
 
 fn _cleanup_lifecycle() -> void {
+    _atlas_lock_release()
     exec("rm -f " + _shq(REQ_FIFO) + " " + _shq(PID_FILE) + " " + _shq(TERM_FLAG) + " 2>/dev/null || true")
 }
 
@@ -221,6 +439,112 @@ fn _handle_ping(reply: str, served: int, boot_s: int, last_req_s: int) -> void {
         + ",\"pid\":" + pid_safe
         + ",\"version\":\"" + VERSION + "\"}"
     _reply(reply, payload)
+}
+
+// ─── Phase 2 Step 5 — unified stage dispatcher ───
+// Shared body for all 6 stages (smash/free/absolute/meta/hyper/resonance). Each
+// _handle_<stage> is a thin wrapper that calls _dispatch_stage(). Step 2
+// introduced the exec-based scaffolding; Step 5 generalizes it to 5 more stages
+// while keeping Phase 1 drill op untouched (backward compat).
+//
+// Body is still exec-based — Step 5 does NOT convert to in-proc (that is the
+// follow-up work once blowup.hexa gains a --stage selector and state can be
+// shared across stages in a single hexa process).
+fn _dispatch_stage(stage: str, seed: str, depth: int, fast: bool, e14_skip: bool) -> str {
+    // §4.1 reset — must happen on every op entry so same seed across B→A
+    // sequence yields byte-identical result (Step 4 guard).
+    _reset_round(seed)
+    let t0 = _now_ms()
+
+    if seed.len() == 0 {
+        _emit_engine_error("ERROR", "seed_empty", stage, seed)
+        return "{\"ok\":false,\"cmd\":\"" + _json_escape(stage) + "\",\"reason\":\"seed_empty\",\"ms\":0}"
+    }
+    if depth < 1 || depth > 7 {
+        _emit_engine_error("ERROR", "depth_out_of_range", stage, seed)
+        return "{\"ok\":false,\"cmd\":\"" + _json_escape(stage)
+            + "\",\"seed\":\"" + _json_escape(seed)
+            + "\",\"reason\":\"depth_out_of_range\",\"ms\":0}"
+    }
+
+    // E14 LRU compat — zero-work OK with cache_hit=true.
+    if e14_skip {
+        let t1_e = _now_ms()
+        let ms_e = t1_e - t0
+        let round_e = _round_id_from(t1_e, seed)
+        return "{\"ok\":true,\"cmd\":\"" + _json_escape(stage)
+            + "\",\"seed\":\"" + _json_escape(seed)
+            + "\",\"depth\":" + to_string(depth)
+            + ",\"ms\":" + to_string(ms_e)
+            + ",\"round_new\":\"" + round_e
+            + "\",\"metrics\":{\"" + _json_escape(stage) + "\":0,\"cache_hit\":true},\"stage_parallel\":false}"
+    }
+
+    // Exec blowup with stage selector. blowup.hexa is expected to read
+    // NEXUS_BLOWUP_STAGE env (or fall back to legacy smash) — Step 5 uses env
+    // so no blowup.hexa CLI change is required for Phase 2 Step 5 landing.
+    //
+    // Step 7 per-cmd hard timeout — if stage exceeds CMD_TIMEOUT_S, abort with
+    // ERR timeout so a runaway round cannot wedge the daemon.
+    let root = _nexus_root()
+    let blowup = root + "/cli/blowup/core/blowup.hexa"
+    let fast_arg = if fast { " --fast" } else { "" }
+    let cmd = "NEXUS_BLOWUP_STAGE=" + _shq(stage) + " "
+        + "timeout " + to_string(CMD_TIMEOUT_S) + " "
+        + _hexa_bin() + " run " + _shq(blowup) + " math " + to_string(depth)
+        + " --no-graph --seeds " + _shq(seed) + fast_arg + " 2>/dev/null | tail -40; echo RC=$?"
+    let mut new_nodes = 0
+    let mut timed_out = false
+    try {
+        let out = exec(cmd)
+        // `timeout` exits 124 on SIGALRM; we detect via RC= sentinel.
+        if out.contains("RC=124") { timed_out = true }
+        else if out.len() > 0 { new_nodes = 1 }
+    } catch e {
+        _emit_engine_error("CRASH", stage + "_crash", stage, seed)
+        return "{\"ok\":false,\"cmd\":\"" + _json_escape(stage)
+            + "\",\"seed\":\"" + _json_escape(seed)
+            + "\",\"reason\":\"" + _json_escape(stage) + "_crash\",\"ms\":0}"
+    }
+    if timed_out {
+        _emit_engine_error("ERROR", "timeout", stage, seed)
+        return "{\"ok\":false,\"cmd\":\"" + _json_escape(stage)
+            + "\",\"seed\":\"" + _json_escape(seed)
+            + "\",\"reason\":\"timeout\",\"ms\":" + to_string(CMD_TIMEOUT_S * 1000) + "}"
+    }
+
+    let t1 = _now_ms()
+    let ms = t1 - t0
+    let round_new = _round_id_from(t1, seed)
+    // Phase 2 Step 6 — detect external writer drift (warn only; Step 5
+    // follow-up will flush g_partial_graph_delta here and refuse drift).
+    _check_atlas_drift(stage, seed)
+    return "{\"ok\":true,\"cmd\":\"" + _json_escape(stage)
+        + "\",\"seed\":\"" + _json_escape(seed)
+        + "\",\"depth\":" + to_string(depth)
+        + ",\"ms\":" + to_string(ms)
+        + ",\"round_new\":\"" + round_new
+        + "\",\"metrics\":{\"" + _json_escape(stage) + "\":" + to_string(new_nodes)
+        + ",\"cache_hit\":false},\"stage_parallel\":false}"
+}
+
+fn _handle_smash(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("smash", seed, depth, fast, e14_skip))
+}
+fn _handle_free(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("free", seed, depth, fast, e14_skip))
+}
+fn _handle_absolute(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("absolute", seed, depth, fast, e14_skip))
+}
+fn _handle_meta(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("meta", seed, depth, fast, e14_skip))
+}
+fn _handle_hyper(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("hyper", seed, depth, fast, e14_skip))
+}
+fn _handle_resonance(seed: str, depth: int, fast: bool, e14_skip: bool, reply: str) -> void {
+    _reply(reply, _dispatch_stage("resonance", seed, depth, fast, e14_skip))
 }
 
 fn _handle_drill(seed: str, max_rounds: int, reply: str) -> void {
@@ -277,14 +601,52 @@ fn _main_loop(boot_s: int) -> int {
             _log("sigterm_recv", ",\"served\":" + to_string(served))
             break
         }
-        // blocking read one line from FIFO (opening FIFO for read blocks until writer connects).
-        // IFS= 와 -r 로 escape/whitespace 보존. `|| true` 로 writer EOF 시 정상 리턴.
-        let raw = exec("IFS= read -r LINE < " + _shq(REQ_FIFO) + " && printf '%s' \"$LINE\" || true")
+        // Step 7 — max-lifetime + idle checks between requests. Note: FIFO open
+        // itself blocks until a writer connects, so these only fire on the tick
+        // right after a completed request. A Phase 3 launchd watchdog provides
+        // the external guarantee; here we just self-shutdown on the next wake.
+        let now_s = _now_s()
+        if now_s - boot_s > MAX_LIFETIME_S {
+            _log("max_lifetime_exit", ",\"served\":" + to_string(served)
+                + ",\"uptime_s\":" + to_string(now_s - boot_s))
+            draining = true
+            break
+        }
+        if now_s - last_req_s > IDLE_LIMIT_S && served > 0 {
+            _log("idle_exit", ",\"served\":" + to_string(served)
+                + ",\"idle_s\":" + to_string(now_s - last_req_s))
+            draining = true
+            break
+        }
+        // blocking read one line from FIFO — exec("cat FIFO").
+        //
+        // History (2026-04-21 htz verify L1..L3):
+        //   1) exec("bash -c 'IFS= read -r LINE < FIFO && printf %s $LINE'")
+        //      FAILED — hexa exec() wrapper remaps child stdin; `read` never
+        //      sees FIFO bytes. (L1/L2)
+        //   2) read_file(FIFO) FAILED — runtime.c:3189 uses fseek(SEEK_END)
+        //      + ftell + fread(buf,1,len,f); FIFOs report len=0, so fread
+        //      reads zero bytes and returns empty. (L3)
+        //   3) cat FIFO → hexa captures cat stdout via its pipe, no stdin
+        //      redirect involved. cat handles FIFO open/EOF correctly.
+        //
+        // Each client writes one request line (`printf REQ > FIFO`) and closes,
+        // producing FIFO EOF so cat terminates after one message. Multi-line
+        // writers MUST close between messages (docs §3).
+        let raw = exec("cat " + _shq(REQ_FIFO))
         let line = raw.trim()
         if line.len() == 0 { continue }
 
         let op = _json_str(line, "op")
         let reply = _json_str(line, "reply")
+        // Guard: bogus input (no "op" field) must not count as served. L2 htz
+        // verify 2026-04-21 saw the daemon log "served=1,2,.." with op="" due to
+        // the now-fixed FIFO capture bug — keep the check so future transport
+        // glitches don't poison `served` either.
+        if op.len() == 0 {
+            _log("malformed_request", ",\"raw\":\"" + _json_escape(line) + "\"")
+            continue
+        }
         served = served + 1
         last_req_s = _now_s()
         _log("request", ",\"op\":\"" + op + "\",\"served\":" + to_string(served))
@@ -303,6 +665,23 @@ fn _main_loop(boot_s: int) -> int {
             let seed = _json_str(line, "seed")
             let mr = _json_int(line, "max_rounds")
             _handle_drill(seed, mr, reply)
+            continue
+        }
+        // ─── Phase 2 stage ops (smash / free / absolute / meta / hyper / resonance) ───
+        // Each stage shares the _dispatch_stage body; dispatch only differs by op name.
+        if op == "smash" || op == "free" || op == "absolute"
+            || op == "meta" || op == "hyper" || op == "resonance" {
+            let seed = _json_str(line, "seed")
+            let depth_raw = _json_int(line, "depth")
+            let depth = if depth_raw > 0 { depth_raw } else { 3 }
+            let fast = _json_bool(line, "fast")
+            let e14_skip = _json_bool(line, "e14_skip")
+            if op == "smash"     { _handle_smash(seed, depth, fast, e14_skip, reply) }
+            else if op == "free"      { _handle_free(seed, depth, fast, e14_skip, reply) }
+            else if op == "absolute"  { _handle_absolute(seed, depth, fast, e14_skip, reply) }
+            else if op == "meta"      { _handle_meta(seed, depth, fast, e14_skip, reply) }
+            else if op == "hyper"     { _handle_hyper(seed, depth, fast, e14_skip, reply) }
+            else                      { _handle_resonance(seed, depth, fast, e14_skip, reply) }
             continue
         }
         _reply(reply, "{\"status\":\"err\",\"reason\":\"unknown_op\",\"op\":\"" + op + "\"}")
