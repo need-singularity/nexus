@@ -1,31 +1,27 @@
-// Claude Code statusLine dispatcher — CWD-based router to per-project status sources.
-// Registered via single pointer in ~/.claude/settings.json (AG10 compliant — no per-project .claude/settings.json).
-// SSOT: $NEXUS/rules/airgenome.json#AG10.
-// Runs every Claude Code turn; keep fast (no hexa startup cost beyond POSIX exec forks).
+// Claude Code statusLine — generic, project-agnostic dispatcher.
+// Registered once via ~/.claude/settings.json → points here (AG10 single-pointer rule).
+// Per-project SSOT: <project_root>/.hook-commands/active.json
+//   schema: {"stack":[{"command":"drill","seed":"..."}, ...]}
+// Empty stack / missing file / non-git cwd → silent (or idle fallback with basename).
+// Runs every Claude Code turn; must stay under 300ms.
+
+let JQ_PROG = "/Users/ghost/Dev/nexus/tool/claude_statusline.jq"
 
 fn main() {
-    // Detect project root via git (POSIX, no path-library dep).
     let root = to_string(exec("git rev-parse --show-toplevel 2>/dev/null")).trim()  // @allow-bare-exec
     if root.len() == 0 { return }
 
     let name = to_string(exec("basename '" + root + "'")).trim()  // @allow-bare-exec
+    let active = root + "/.hook-commands/active.json"
+    let exists = to_string(exec("test -f '" + active + "' && echo y || echo n")).trim()  // @allow-bare-exec
 
-    if name == "airgenome" {
-        let bin = root + "/bin/airgenome"
-        let exists = to_string(exec("test -x '" + bin + "' && echo y || echo n")).trim()  // @allow-bare-exec
-        if exists == "y" {
-            // AIRGENOME_ROOT must be passed — bin/airgenome reads .hook-commands/active.json from it.
-            let line = to_string(exec("AIRGENOME_ROOT='" + root + "' '" + bin + "' status-line 2>/dev/null")).trim()  // @allow-bare-exec
-            if line.len() > 0 {
-                println(line)
-            } else {
-                println("🧬 airgenome · idle")
-            }
-        } else {
-            println("🧬 airgenome · bin missing")
+    if exists == "y" {
+        let line = to_string(exec("jq -r -f '" + JQ_PROG + "' '" + active + "' 2>/dev/null")).trim()  // @allow-bare-exec
+        if line.len() > 0 {
+            println(line)
+            return
         }
-        return
     }
-    // default project banner so user can see wiring works from any git repo.
-    println("📁 " + name)
+    // idle fallback — same surface for every project.
+    println("📁 " + name + " · idle")
 }
