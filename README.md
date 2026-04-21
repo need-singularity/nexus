@@ -94,17 +94,6 @@ No human-in-the-loop required. Laws are stored with hash-chain provenance. The 3
      ╰── ρ → 1/3 (meta fixed pt) ────╯
 ```
 
-| Symbol | Phase | Meaning |
-|:---:|-------|---------|
-| ◯ | **seed** | start from the perfect number n = 6 |
-| ╱╲ | **unfold** | seed → mutate → verify → graph |
-| ╱╲ | **emerge** | closure + compression detected |
-| ╱╲ | **singularity** | evolution boost ≥ 0.5 |
-| ╲╱ | **breach** | corollary × 7 × depth |
-| ╲╱ | **converge** | 5-lens consensus verified |
-| ◉ | **absorb** | discovery → constant → seed feedback |
-| ╰→ | **recurse** | re-enter at depth d + 1 — ρ → 1/3 fix point |
-
 ## Three meta-loops
 
 On top of the per-tick OUROBOROS cycle, three higher-order loops drive self-reinforcement:
