@@ -103,7 +103,7 @@ No human-in-the-loop required. Laws are stored with hash-chain provenance. The 3
 | ▼ | **breach** | corollary × 7 × depth |
 | ▼ | **converge** | 5-lens consensus verified |
 | ◉ | **absorb** | discovery → constant → seed feedback |
-| ╰→ | **recurse** | re-enter at depth d + 1 |
+| ╰→ | **recurse** | re-enter at depth d + 1 — ρ → 1/3 fix point |
 
 ## Three meta-loops
 
