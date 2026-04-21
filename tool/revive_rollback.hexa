@@ -1,0 +1,41 @@
+// tool/revive_rollback.hexa — L4 fail-safe: atlas.n6 snapshot 복구
+// 사용: hexa run tool/revive_rollback.hexa --snapshot <name>
+//   snapshot file: state/revive/snapshot/atlas.n6.before_<batch>
+//   복구: cp <snapshot> n6/atlas.n6   (단순 — git stash 형식 회피)
+// 안전: snapshot 없으면 no-op + exit 1
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn main() -> int {
+    let av = argv()
+    let mut snap_name = ""
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--snapshot" && i + 1 < len(av) { snap_name = av[i+1]; i = i + 2; continue }
+        if a == "--list" {
+            let cmd = "ls -la " + _nexus_root() + "/state/revive/snapshot/ 2>&1"
+            print(exec(cmd))
+            return 0
+        }
+        i = i + 1
+    }
+    if snap_name.len() == 0 {
+        eprintln("revive_rollback: --snapshot <name> required (또는 --list)")
+        return 1
+    }
+
+    let snap_path = _nexus_root() + "/state/revive/snapshot/" + snap_name
+    let target    = _nexus_root() + "/n6/atlas.n6"
+    if !file_exists(snap_path) {
+        eprintln("snapshot not found: " + snap_path)
+        return 1
+    }
+    let cmd = "cp " + snap_path + " " + target + " 2>&1"
+    let out = exec(cmd)
+    println("ROLLBACK applied: " + snap_path + " → " + target)
+    if out.len() > 0 { println(out) }
+    return 0
+}
+
+main()

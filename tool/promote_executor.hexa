@@ -1,0 +1,43 @@
+// tool/promote_executor.hexa — L3 실행: plan.json → atlas_auto_promote.py 호출
+// 단순: state/revive/promote_plan.<batch>.json 읽고, scripts/n6_ops 3종 실행.
+// 사용: hexa run tool/promote_executor.hexa --batch N [--dry-run]
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn main() -> int {
+    let av = argv()
+    let mut batch = 1
+    let mut dry = true
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--batch" && i + 1 < len(av) { try { batch = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--apply" { dry = false; i = i + 1; continue }
+        if a == "--dry-run" { dry = true; i = i + 1; continue }
+        i = i + 1
+    }
+
+    let plan_path = _nexus_root() + "/state/revive/promote_plan." + to_string(batch) + ".json"
+    if !file_exists(plan_path) {
+        eprintln("plan missing: " + plan_path)
+        return 1
+    }
+    let plan = read_file(plan_path)
+    println("[plan] " + plan_path + " (" + to_string(plan.len()) + " bytes)")
+
+    let n6 = _nexus_root() + "/scripts/n6_ops"
+    let merge = "python3 " + n6 + "/merge_signals.py"
+    let cross = "python3 " + n6 + "/cross_auto_promote.py" + (if dry { "" } else { " --commit" })
+    let auto  = "python3 " + n6 + "/atlas_auto_promote.py " + (if dry { "--dry-run" } else { "--apply" })
+
+    println("=== STEP 1: merge_signals (staging → atlas.signals.n6) ===")
+    println(exec(merge + " 2>&1 | tail -10"))
+    println("=== STEP 2: cross_auto_promote " + (if dry { "(dry)" } else { "(commit)" }) + " ===")
+    println(exec(cross + " 2>&1 | tail -10"))
+    println("=== STEP 3: atlas_auto_promote " + (if dry { "(dry)" } else { "(apply)" }) + " ===")
+    println(exec(auto + " 2>&1 | tail -10"))
+
+    return 0
+}
+
+main()

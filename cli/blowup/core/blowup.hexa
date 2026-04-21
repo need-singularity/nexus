@@ -32,8 +32,9 @@
 // BLOWUP_TRACE=0 환경변수로 끄기 가능
 let _TRACE_PATH = "/tmp/blowup_trace.log"
 let mut _TRACE_ON = true
+// 2026-04-22: exec("printenv ...") → env() 교체 (무방어 subprocess hang 방지)
 try {
-    let off = to_string(exec("printenv BLOWUP_TRACE")).trim()
+    let off = env("BLOWUP_TRACE")
     if off == "0" { _TRACE_ON = false }
 } catch e {}
 // ROI #23: trace 로그를 append_file 기반 _trace() 헬퍼로 일괄 전환 (25 exec → 0 exec)
@@ -47,9 +48,8 @@ _trace("[00-init-start] blowup.hexa load begins")
 // AI-native: env() 네이티브 fn 사용 — 쉘 exec 회피 (metachar 경고 0)
 let mut _HOME = ""
 try { _HOME = env("HOME") } catch e {}
-if _HOME == "" {
-    try { _HOME = to_string(exec("printenv HOME")).trim() } catch e {}
-}
+// 2026-04-22: exec("printenv HOME") fallback 불필요 — env() 가 native (line 49 already)
+// 만약 env("HOME") 실패 시 hexa runtime 자체에 문제 — fallback 제거.
 let _NEXUS = _HOME + "/Dev/nexus"
 let _ATLAS_PATH = _NEXUS + "/n6/atlas.n6"
 // X1 (2026-04-19): atlas-blowup 분리 — JSON-line 결과는 별도 파일.
@@ -710,9 +710,9 @@ fn _shard_resolve_threshold() -> i64 {
     }
     let mut evv = ""
     try { evv = env("NEXUS_SHARD_PROMOTE") } catch e {}
-    if evv == "" {
-        try { evv = to_string(exec("printenv NEXUS_SHARD_PROMOTE")).trim() } catch e {}
-    }
+    // 2026-04-22: shell exec("printenv ...") fallback 제거 — 무방어 subprocess 가 hang
+    //   원인: hexa interpreter 가 sh -c "printenv ..." 응답 무한 대기.
+    //   env() 가 native 이며 process env 동일 source. fallback 불필요.
     if evv != "" {
         let mut ev: i64 = 0
         try { ev = to_int(evv) } catch e {}
@@ -6188,7 +6188,7 @@ _trace("[phase-7.5-autolink] start")
 println("═══ Phase 7.5: Auto-Link ═══")
 
 let hexa_bin = _HEXA_BIN
-let autolink_log = "shared/.autolink_out.log"
+let autolink_log = _NEXUS + "/.autolink_out.log"
 
 // lens_forge — 유일한 현존 auto-link 도구
 // (auto_register, gap_finder, alien_index 는 2026-04 기준 삭제/이동됨)
@@ -6401,7 +6401,7 @@ if logged > 0 {
         println("  전파 seed: " + wave_seed_csv)
 
         // 병렬 파동 발사 (--fast --no-graph, 깊이 2로 경량)
-        let wave_log = "shared/.wave_out.log"
+        let wave_log = _NEXUS + "/.wave_out.log"
         let mut wave_cmd = ""
         let mut wi: i64 = 0
         while wi < len(wave_targets) {
@@ -6948,4 +6948,5 @@ if wave_round < wave_max_rounds {
 
     println("")
     println("done.")
+}
 }

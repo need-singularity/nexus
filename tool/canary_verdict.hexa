@@ -1,0 +1,34 @@
+// tool/canary_verdict.hexa — fixpoint_bisect 호환 verdict wrapper
+// fixpoint_bisect 는 verdict tool exit code 로 판정:
+//   0 → bisect good
+//   2 → bisect bad
+//   else → bisect skip
+// 본 도구는 canary_drill.hexa 를 호출 후 그 exit code 를 그대로 전달.
+// 사용: hexa run tool/canary_verdict.hexa
+//   각 git bisect step 에서 자동 호출됨.
+
+fn _nexus_root() -> string {
+    return env("HOME") + "/core/nexus"
+}
+
+fn main() -> int {
+    let canary = _nexus_root() + "/tool/canary_drill.hexa"
+    let cmd = "hexa run " + canary + " --quiet 2>&1"
+    let out = exec(cmd)
+    // canary_drill 의 exit 를 직접 받지 못하므로 NEXUS_CANARY verdict 파싱
+    let key = "\"verdict\":\""
+    let idx = out.index_of(key)
+    if idx < 0 {
+        eprintln("canary_verdict: NEXUS_CANARY 미검출 → skip")
+        return 125  // git bisect skip
+    }
+    let after = out.substring(idx + key.len(), out.len())
+    let endq = after.index_of("\"")
+    let verdict = if endq > 0 { after.substring(0, endq) } else { "skip" }
+    eprintln("canary_verdict: " + verdict)
+    if verdict == "good" { return 0 }
+    if verdict == "bad" { return 1 }
+    return 125
+}
+
+main()

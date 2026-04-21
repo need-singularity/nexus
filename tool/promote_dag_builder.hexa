@@ -1,0 +1,192 @@
+// tool/promote_dag_builder.hexa — L3: staging+pending → DAG → batch plan
+// nodes  : n6/staging/atlas.signals.staging.*.n6 의 SIG-* 항목 (또는 라인 단위)
+// edges  : n6/signals/cross_repo_pending.jsonl 의 (a_sig, b_sig, sim) — sim>=0.7 만
+// output : state/revive/promote_plan.<batch>.json
+//   { "batch": N, "nodes": ["SIG-..."], "edges": [["A","B",0.78],...], "ready_first": [...] }
+// MVP: roadmap_engine 호출 없이 단순 — sim 점수 기반 top-K + 의존성 없는 ready set 추출
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn _list_staging_files() -> [string] {
+    let dir = _nexus_root() + "/n6/staging"
+    let cmd = "ls " + dir + "/atlas.signals.staging.*.n6 2>/dev/null"
+    let out = exec(cmd)
+    let mut paths: [string] = []
+    let lines = out.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let p = lines[i].trim()
+        if p.len() > 0 { paths = paths + [p] }
+        i = i + 1
+    }
+    return paths
+}
+
+fn _extract_sig_ids(path: string) -> [string] {
+    let mut ids: [string] = []
+    if !file_exists(path) { return ids }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let ln = lines[i]
+        // SIG-XXX-NNN 패턴 검출
+        let idx = ln.index_of("SIG-")
+        if idx >= 0 {
+            let after = ln.substring(idx, ln.len())
+            // SIG-XXX-NNN 까지만 자르기 (공백/콜론/슬래시 등)
+            let mut end = 0
+            while end < after.len() {
+                let c = after.substring(end, end+1)
+                if c == " " || c == "\t" || c == ":" || c == "," || c == "]" || c == ")" { break }
+                end = end + 1
+            }
+            if end > 4 {
+                let sig = after.substring(0, end)
+                ids = ids + [sig]
+            }
+        }
+        i = i + 1
+    }
+    return ids
+}
+
+fn _load_cross_edges() -> [string] {
+    // 반환: ["SIG-A|SIG-B|0.78", ...]  (단순 string list, hexa map 회피)
+    let path = _nexus_root() + "/n6/signals/cross_repo_pending.jsonl"
+    let mut edges: [string] = []
+    if !file_exists(path) { return edges }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let ln = lines[i].trim()
+        if ln.len() == 0 { i = i + 1; continue }
+        // a_sig
+        let ka = "\"a_sig\":\""
+        let ia = ln.index_of(ka)
+        if ia < 0 { i = i + 1; continue }
+        let aft_a = ln.substring(ia + ka.len(), ln.len())
+        let ea = aft_a.index_of("\"")
+        if ea < 0 { i = i + 1; continue }
+        let a_sig = aft_a.substring(0, ea)
+        // b_sig
+        let kb = "\"b_sig\":\""
+        let ib = ln.index_of(kb)
+        if ib < 0 { i = i + 1; continue }
+        let aft_b = ln.substring(ib + kb.len(), ln.len())
+        let eb = aft_b.index_of("\"")
+        if eb < 0 { i = i + 1; continue }
+        let b_sig = aft_b.substring(0, eb)
+        // sim
+        let ks = "\"sim\":"
+        let is = ln.index_of(ks)
+        let mut sim_str = "0.0"
+        if is >= 0 {
+            let aft_s = ln.substring(is + ks.len(), ln.len())
+            let mut ep = 0
+            while ep < aft_s.len() {
+                let c = aft_s.substring(ep, ep+1)
+                if c == "," || c == "}" { break }
+                ep = ep + 1
+            }
+            sim_str = aft_s.substring(0, ep).trim()
+        }
+        edges = edges + [a_sig + "|" + b_sig + "|" + sim_str]
+        i = i + 1
+    }
+    return edges
+}
+
+fn main() -> int {
+    let av = argv()
+    let mut batch = 1
+    let mut max_nodes = 50
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--batch" && i + 1 < len(av) { try { batch = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--max-nodes" && i + 1 < len(av) { try { max_nodes = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        i = i + 1
+    }
+
+    // 1. staging 파일 목록
+    let files = _list_staging_files()
+    eprintln("staging files: " + to_string(len(files)))
+
+    // 2. 모든 SIG-* 추출 (중복 허용 — 어차피 batch 추출 시 dedup)
+    let mut all_ids: [string] = []
+    let mut fi = 0
+    while fi < len(files) {
+        let ids = _extract_sig_ids(files[fi])
+        all_ids = all_ids + ids
+        fi = fi + 1
+    }
+    eprintln("total SIG-* lines: " + to_string(len(all_ids)))
+
+    // 3. 중복 제거 (단순 — O(n²))
+    let mut nodes: [string] = []
+    let mut k = 0
+    while k < len(all_ids) {
+        let id = all_ids[k]
+        let mut dup = false
+        let mut j = 0
+        while j < len(nodes) {
+            if nodes[j] == id { dup = true; break }
+            j = j + 1
+        }
+        if !dup { nodes = nodes + [id] }
+        k = k + 1
+    }
+    eprintln("unique SIG-*: " + to_string(len(nodes)))
+
+    // 4. cross-repo edges 로드
+    let edges = _load_cross_edges()
+    eprintln("cross-repo edges: " + to_string(len(edges)))
+
+    // 5. ready set (MVP: edges 에 등장하지 않는 nodes = 의존성 없음 → ready first)
+    let mut in_edges: [string] = []
+    let mut ei = 0
+    while ei < len(edges) {
+        let parts = edges[ei].split("|")
+        if len(parts) >= 2 {
+            in_edges = in_edges + [parts[0]] + [parts[1]]
+        }
+        ei = ei + 1
+    }
+    let mut ready: [string] = []
+    let mut ni = 0
+    while ni < len(nodes) && len(ready) < max_nodes {
+        let id = nodes[ni]
+        let mut in_e = false
+        let mut x = 0
+        while x < len(in_edges) {
+            if in_edges[x] == id { in_e = true; break }
+            x = x + 1
+        }
+        if !in_e { ready = ready + [id] }
+        ni = ni + 1
+    }
+
+    // 6. plan JSON 출력
+    let plan_dir = _nexus_root() + "/state/revive"
+    let plan_path = plan_dir + "/promote_plan." + to_string(batch) + ".json"
+    let mut buf = "{\"batch\":" + to_string(batch)
+        + ",\"total_nodes\":" + to_string(len(nodes))
+        + ",\"total_edges\":" + to_string(len(edges))
+        + ",\"ready_count\":" + to_string(len(ready))
+        + ",\"ready\":["
+    let mut ri = 0
+    while ri < len(ready) {
+        if ri > 0 { buf = buf + "," }
+        buf = buf + "\"" + ready[ri] + "\""
+        ri = ri + 1
+    }
+    buf = buf + "]}"
+    try { write_file(plan_path, buf) } catch e {}
+    println("NEXUS_PROMOTE_PLAN " + buf)
+    println("[plan written] " + plan_path)
+    return 0
+}
+
+main()

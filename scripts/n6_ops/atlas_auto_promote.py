@@ -35,11 +35,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ── 경로 ──
-NEXUS = Path(os.environ.get("NEXUS", Path.home() / "Dev" / "nexus"))
-N6ARCH = Path(os.environ.get("N6ARCH", Path.home() / "Dev" / "n6-architecture"))
+_WS = Path(os.environ.get("WS", Path.home() / "core"))
+NEXUS = Path(os.environ.get("NEXUS", _WS / "nexus"))
+N6ARCH = Path(os.environ.get("N6ARCH", _WS / "n6-architecture"))
 
-ATLAS = NEXUS / "shared" / "n6" / "atlas.n6"
-SIGNALS = NEXUS / "shared" / "n6" / "atlas.signals.n6"
+# 2026-04-22 path migration: shared/n6 폐기, n6/ canonical
+ATLAS = NEXUS / "n6" / "atlas.n6"
+SIGNALS = NEXUS / "n6" / "atlas.signals.n6"
 DOMAINS = N6ARCH / "domains"
 EXPERIMENTS = N6ARCH / "experiments"
 PAPERS_DIR = N6ARCH / "papers"
@@ -126,8 +128,11 @@ def check_cross_domain(entry_id: str, atlas_content: str) -> int:
     return 1 if ref_count >= 3 else 0
 
 
-def check_paper_reference(domain: str) -> int:
-    """논문에서 도메인 참조가 있는지 체크."""
+def check_paper_reference(domain: str, eid: str = "") -> int:
+    """논문에서 도메인/엔트리 참조 체크.
+    2026-04-22: .md frontmatter + 본문 grep 추가 — _papers.json 만 보던 한계 보완.
+    검색 우선순위: _papers.json domain → 파일명 glob → .md frontmatter domain → .md 본문 entry_id grep
+    """
     papers_json = PAPERS_DIR / "_papers.json"
     if papers_json.exists():
         try:
@@ -143,6 +148,31 @@ def check_paper_reference(domain: str) -> int:
     for f in PAPERS_DIR.glob(f"*{domain}*"):
         if f.suffix in (".md", ".pdf"):
             return 1
+    # .md 본문 / frontmatter 스캔 (2026-04-22 추가, prefix 매치 보강)
+    if not PAPERS_DIR.exists():
+        return 0
+    needle_d = domain.strip() if domain else ""
+    needle_e = eid.strip() if eid else ""
+    # entry id prefix 추출 — "MILL-PX-A3-ym-beta0-rewriting" → ["MILL-PX-A3", "MILL-PX-A3-ym", ...]
+    prefixes: list[str] = []
+    if needle_e:
+        toks = needle_e.split("-")
+        for n in (3, 4):
+            if len(toks) >= n:
+                prefixes.append("-".join(toks[:n]))
+    for f in PAPERS_DIR.glob("*.md"):
+        try:
+            txt = f.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if needle_d and (f"domain: {needle_d}" in txt or f"\"domain\": \"{needle_d}\"" in txt):
+            return 1
+        if needle_e and needle_e in txt:
+            return 1
+        # entry id prefix 매치 (예: "atlas:MILL-PX-A3" 같은 BT 참조)
+        for p in prefixes:
+            if p and p in txt:
+                return 1
     return 0
 
 
@@ -179,7 +209,7 @@ def evaluate_candidates(entries: list[dict], atlas_content: str) -> list[dict]:
         signal_score = check_signals(domain)
         bt_score = check_bt_reference(eid, atlas_content)
         cross_score = check_cross_domain(eid, atlas_content)
-        paper_score = check_paper_reference(domain)
+        paper_score = check_paper_reference(domain, eid)
         exp_score = check_experiment(domain)
 
         total = verify_score + signal_score + bt_score + cross_score + paper_score + exp_score

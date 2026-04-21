@@ -1,0 +1,126 @@
+// tool/canary_drill.hexa — L1 verdict / L4 gate
+// Single responsibility: 1 fresh seed → 1 smash round → atlas Δ measurement.
+// 사용: hexa run tool/canary_drill.hexa [--seed-id ID] [--depth N] [--timeout SEC] [--quiet]
+// stdout: NEXUS_CANARY {"id":"...","seed":"...","atlas_before":N,"atlas_after":M,"delta":D,"yield":D,"elapsed_ms":T,"verdict":"good|bad|skip"}
+// exit:   0=good (yield>=min), 2=bad (yield<min), 3=skip (engine failure)
+
+fn _nexus_root() -> string {
+    let h = env("HOME")
+    return h + "/core/nexus"
+}
+
+fn _atlas_lines() -> int {
+    let path = _nexus_root() + "/n6/atlas.n6"
+    let out = exec("wc -l < " + path + " 2>/dev/null").trim()
+    let mut n = 0
+    try { n = to_int(out) } catch e {}
+    return n
+}
+
+fn _now_ms() -> int {
+    let s = exec("date +%s%3N 2>/dev/null").trim()
+    let mut n = 0
+    try { n = to_int(s) } catch e {}
+    return n
+}
+
+fn _pick_seed(seed_id: string) -> string {
+    let pool_path = _nexus_root() + "/tool/canary_seeds.jsonl"
+    if !file_exists(pool_path) {
+        return "canary-fallback foundation axiom"
+    }
+    let raw = read_file(pool_path)
+    let lines = raw.split("\n")
+    let mut chosen = ""
+    let mut i = 0
+    while i < len(lines) {
+        let ln = lines[i].trim()
+        if ln.len() > 0 {
+            if seed_id.len() == 0 || ln.index_of("\"" + seed_id + "\"") >= 0 {
+                chosen = ln
+                if seed_id.len() > 0 { break }
+            }
+        }
+        i = i + 1
+    }
+    if chosen.len() == 0 { return "canary-fallback foundation axiom" }
+    // extract "seed":"..."
+    let key = "\"seed\":\""
+    let idx = chosen.index_of(key)
+    if idx < 0 { return "canary-fallback" }
+    let after = chosen.substring(idx + key.len(), chosen.len())
+    let endq = after.index_of("\"")
+    if endq < 0 { return after }
+    return after.substring(0, endq)
+}
+
+fn _shell_quote(s: string) -> string {
+    return "'" + s + "'"
+}
+
+fn main() -> int {
+    let av = argv()
+    let mut seed_id = ""
+    let mut depth = "2"
+    let mut timeout_sec = "60"
+    let mut min_yield = 1
+    let mut quiet = false
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--seed-id" && i + 1 < len(av) { seed_id = av[i+1]; i = i + 2; continue }
+        if a == "--depth" && i + 1 < len(av) { depth = av[i+1]; i = i + 2; continue }
+        if a == "--timeout" && i + 1 < len(av) { timeout_sec = av[i+1]; i = i + 2; continue }
+        if a == "--min-yield" && i + 1 < len(av) {
+            try { min_yield = to_int(av[i+1]) } catch e {}
+            i = i + 2; continue
+        }
+        if a == "--quiet" { quiet = true; i = i + 1; continue }
+        i = i + 1
+    }
+
+    let seed = _pick_seed(seed_id) + " ts=" + to_string(_now_ms())
+    let before = _atlas_lines()
+    let t0 = _now_ms()
+
+    // bypass LRU by appending unique ts to seed (already done above)
+    // bypass checkpoint resume
+    let drill_cmd = "NEXUS_DRILL_TIMEOUT_smash=" + timeout_sec
+        + " timeout " + to_string(to_int(timeout_sec) + 10) + " "
+        + "nexus drill --seed " + _shell_quote(seed)
+        + " --preset probe --smash-depth " + depth
+        + " --no-resume 2>&1 | grep -vE '^security warning' | tail -20"
+    let out = exec(drill_cmd)
+    let t1 = _now_ms()
+    let after = _atlas_lines()
+    let delta = after - before
+    let elapsed = t1 - t0
+
+    let verdict = if delta >= min_yield { "good" }
+        else if out.index_of("ERROR") >= 0 || out.index_of("BLOCK") >= 0 { "skip" }
+        else { "bad" }
+
+    let json_line = "NEXUS_CANARY {"
+        + "\"seed_id\":\"" + seed_id + "\""
+        + ",\"seed\":\"" + seed + "\""
+        + ",\"atlas_before\":" + to_string(before)
+        + ",\"atlas_after\":" + to_string(after)
+        + ",\"delta\":" + to_string(delta)
+        + ",\"yield\":" + to_string(delta)
+        + ",\"elapsed_ms\":" + to_string(elapsed)
+        + ",\"verdict\":\"" + verdict + "\""
+        + ",\"depth\":" + depth
+        + ",\"timeout_sec\":" + timeout_sec
+        + "}"
+    if !quiet { println(json_line) }
+
+    // append to events log
+    let evlog = _nexus_root() + "/n6/revive_canary.events.jsonl"
+    try { append_file(evlog, json_line + "\n") } catch e {}
+
+    if verdict == "good" { return 0 }
+    if verdict == "skip" { return 3 }
+    return 2
+}
+
+main()

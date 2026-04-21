@@ -1,0 +1,90 @@
+// cli/revive/revive.hexa — entry: L1→L2→L3→L4 무한루프 (config/revive.json max_iter 까지)
+// 사용: hexa run cli/revive/revive.hexa [--max-iter N] [--apply] [--quiet]
+// 종료:
+//   - L0 reached         → exit 0
+//   - max-iter reached   → exit 1
+//   - consecutive fail   → exit 2
+// 출력: 매 iter NEXUS_REVIVE_ITER + 마지막 NEXUS_REVIVE_FINAL
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn _read_config_int(key: string, default_v: int) -> int {
+    let path = _nexus_root() + "/config/revive.json"
+    if !file_exists(path) { return default_v }
+    let raw = read_file(path)
+    let marker = "\"" + key + "\":"
+    let idx = raw.index_of(marker)
+    if idx < 0 { return default_v }
+    let after = raw.substring(idx + marker.len(), raw.len())
+    let mut end = 0
+    while end < after.len() {
+        let c = after.substring(end, end+1)
+        if c == "," || c == "\n" || c == "}" { break }
+        end = end + 1
+    }
+    let val = after.substring(0, end).trim()
+    let mut n = default_v
+    try { n = to_int(val) } catch e {}
+    return n
+}
+
+fn main() -> int {
+    let av = argv()
+    let mut max_iter = _read_config_int("max_iter_default", 12)
+    let mut max_consec_fail = _read_config_int("abort_on_consecutive_fail", 3)
+    let mut apply = false
+    let mut quiet = false
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--max-iter" && i + 1 < len(av) { try { max_iter = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--apply" { apply = true; i = i + 1; continue }
+        if a == "--quiet" { quiet = true; i = i + 1; continue }
+        i = i + 1
+    }
+
+    println("╔══════════════════════════════════════════════════════════╗")
+    println("║ nexus revive — 엔진+지도 v2 무한루프 (max_iter=" + to_string(max_iter) + ", apply=" + (if apply { "Y" } else { "N" }) + ")  ║")
+    println("╚══════════════════════════════════════════════════════════╝")
+
+    let loop_tool = _nexus_root() + "/cli/revive/revive_loop.hexa"
+    let mut iter = 1
+    let mut consec_fail = 0
+    let mut final_verdict = "max_iter_reached"
+
+    while iter <= max_iter {
+        let cmd = "hexa run " + loop_tool + " --iter " + to_string(iter) + (if apply { " --apply" } else { "" }) + " 2>&1"
+        let out = exec(cmd)
+        if !quiet { println(out) }
+
+        // exit code 추론 — L0 reached?
+        if out.index_of("\"reached\":true") >= 0 {
+            final_verdict = "l0_reached"
+            iter = iter + 1
+            break
+        }
+        if out.index_of("\"verdict\":\"good\"") >= 0 {
+            consec_fail = 0
+        } else {
+            consec_fail = consec_fail + 1
+            if consec_fail >= max_consec_fail {
+                final_verdict = "abort_consec_fail"
+                break
+            }
+        }
+        iter = iter + 1
+    }
+
+    let line = "NEXUS_REVIVE_FINAL {"
+        + "\"iters_completed\":" + to_string(iter - 1)
+        + ",\"verdict\":\"" + final_verdict + "\""
+        + ",\"consecutive_fail\":" + to_string(consec_fail)
+        + "}"
+    println(line)
+
+    if final_verdict == "l0_reached" { return 0 }
+    if final_verdict == "abort_consec_fail" { return 2 }
+    return 1
+}
+
+main()

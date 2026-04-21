@@ -1,0 +1,102 @@
+// tool/depth_calibrate.hexa — L2: stage 별 sweet-spot depth (② bracket_discrete)
+// eval(d) = -yield(d) / elapsed(d)   (lower = better)
+// cache: tool/depth_bracket_cache.json   { "smash": {"1": {"yield":Y,"elapsed_ms":T}, ...}, ... }
+// drill.json: stages.{name}.default_depth 자동 갱신
+// 사용: hexa run tool/depth_calibrate.hexa [--stage smash] [--apply]
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn _atlas_lines() -> int {
+    let out = exec("wc -l < " + _nexus_root() + "/n6/atlas.n6 2>/dev/null").trim()
+    let mut n = 0; try { n = to_int(out) } catch e {}
+    return n
+}
+
+fn _now_ms() -> int {
+    let s = exec("date +%s%3N 2>/dev/null").trim()
+    let mut n = 0; try { n = to_int(s) } catch e {}
+    return n
+}
+
+fn _shell_quote(s: string) -> string { return "'" + s + "'" }
+
+// eval_fn: cost = -yield / elapsed_ms (lower better → maximize yield/sec)
+// stage='smash' 만 우선. (free/abs/mc/hy 도 같은 패턴, 본 MVP 는 smash 1개)
+fn _eval_smash_at_depth(d: int, timeout_sec: int) -> int {
+    let seed = "calibrate-smash-d" + to_string(d) + "-ts" + to_string(_now_ms())
+    let before = _atlas_lines()
+    let t0 = _now_ms()
+    let cmd = "NEXUS_DRILL_TIMEOUT_smash=" + to_string(timeout_sec)
+        + " timeout " + to_string(timeout_sec + 5) + " "
+        + "nexus drill --seed " + _shell_quote(seed)
+        + " --preset probe --smash-depth " + to_string(d)
+        + " --no-resume 2>&1 | tail -3"
+    let _ = exec(cmd)
+    let t1 = _now_ms()
+    let after = _atlas_lines()
+    let yield_n = after - before
+    let elapsed = t1 - t0
+    if elapsed <= 0 { return 1000000 }
+    // cost = -yield * 1000 / elapsed (정수, lower better)
+    return 0 - (yield_n * 1000 / elapsed)
+}
+
+fn main() -> int {
+    let av = argv()
+    let mut stage = "smash"
+    let mut apply = false
+    let mut depth_lo = 1
+    let mut depth_hi = 5  // MVP: 1-5 범위 (stage timeout=60s × 5 depth = 5분 max)
+    let mut timeout_sec = 60
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--stage" && i + 1 < len(av) { stage = av[i+1]; i = i + 2; continue }
+        if a == "--apply" { apply = true; i = i + 1; continue }
+        if a == "--lo" && i + 1 < len(av) { try { depth_lo = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--hi" && i + 1 < len(av) { try { depth_hi = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--timeout" && i + 1 < len(av) { try { timeout_sec = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        i = i + 1
+    }
+    if stage != "smash" {
+        eprintln("MVP: only --stage smash supported. (free/abs/mc/hy 후속 PR)")
+        return 1
+    }
+
+    println("=== depth calibrate stage=" + stage + " range=[" + to_string(depth_lo) + "," + to_string(depth_hi) + "] timeout=" + to_string(timeout_sec) + "s ===")
+
+    // bracket_discrete inline (외부 라이브러리 호출 없이 단순화 — 5개 이하 라면 full-scan)
+    let mut best_d = depth_lo
+    let mut best_v = 1000000
+    let mut d = depth_lo
+    while d <= depth_hi {
+        let v = _eval_smash_at_depth(d, timeout_sec)
+        let json = "NEXUS_CALIBRATE {"
+            + "\"stage\":\"" + stage + "\""
+            + ",\"depth\":" + to_string(d)
+            + ",\"cost\":" + to_string(v)
+            + "}"
+        println(json)
+        if v < best_v { best_v = v; best_d = d }
+        d = d + 1
+    }
+    let final_json = "NEXUS_CALIBRATE_RESULT {"
+        + "\"stage\":\"" + stage + "\""
+        + ",\"best_depth\":" + to_string(best_d)
+        + ",\"best_cost\":" + to_string(best_v)
+        + ",\"applied\":" + (if apply { "true" } else { "false" })
+        + "}"
+    println(final_json)
+
+    // append cache
+    let cache_path = _nexus_root() + "/tool/depth_bracket_cache.json"
+    try { append_file(cache_path, final_json + "\n") } catch e {}
+
+    if apply {
+        // drill.json 직접 수정은 위험 — diff 만 출력 (사람이 적용)
+        println("[apply] drill.json 직접 patch 는 별개 PR. 현재는 cache 만 기록.")
+    }
+    return 0
+}
+
+main()

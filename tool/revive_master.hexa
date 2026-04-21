@@ -1,0 +1,97 @@
+// tool/revive_master.hexa — single-iter sequencer: L1 → (bisect 또는) L2 → L3 → L4
+// 사용: hexa run tool/revive_master.hexa --iter N [--apply]
+// stdout: NEXUS_REVIVE_ITER {"iter":N,"l1":...,"l2":...,"l3":...,"l4":...,"verdict":"good|fail|l0_reached"}
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn _run(cmd: string) -> string { return exec(cmd + " 2>&1") }
+
+fn _hexa_tool(name: string) -> string { return _nexus_root() + "/tool/" + name }
+
+fn _snapshot_atlas(snap_name: string) -> bool {
+    let src = _nexus_root() + "/n6/atlas.n6"
+    let dst = _nexus_root() + "/state/revive/snapshot/" + snap_name
+    let _ = exec("cp " + src + " " + dst + " 2>&1")
+    return file_exists(dst)
+}
+
+fn _atlas_lines() -> int {
+    let out = exec("wc -l < " + _nexus_root() + "/n6/atlas.n6").trim()
+    let mut n = 0; try { n = to_int(out) } catch e {}
+    return n
+}
+
+fn main() -> int {
+    let av = argv()
+    let mut iter = 1
+    let mut apply = false
+    let mut i = 0
+    while i < len(av) {
+        let a = av[i]
+        if a == "--iter" && i + 1 < len(av) { try { iter = to_int(av[i+1]) } catch e {}; i = i + 2; continue }
+        if a == "--apply" { apply = true; i = i + 1; continue }
+        i = i + 1
+    }
+
+    let it_s = to_string(iter)
+    println("═══ revive iter " + it_s + " ═══")
+    let atlas0 = _atlas_lines()
+
+    // L1 canary — atlas Δ ≥ 1 ?
+    println("[L1] canary_drill")
+    let l1 = _run("hexa run " + _hexa_tool("canary_drill.hexa"))
+    let l1_good = l1.index_of("\"verdict\":\"good\"") >= 0
+    println(l1)
+
+    if !l1_good {
+        // BISECT 진입 (현재 MVP 는 trigger 만 — 실제 bisect 별도 PR)
+        println("[L1 fail] bisect 진입 권장 — fixpoint_bisect.hexa --last-30d")
+        // 진행 — L2 도 의미 없지만 L3 (promote) 는 가능. 잠정 skip.
+        let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
+            + ",\"verdict\":\"l1_bad\""
+            + ",\"atlas_lines\":" + to_string(atlas0)
+            + ",\"action\":\"bisect_required\"}"
+        println(line)
+        return 2
+    }
+
+    // snapshot before promote
+    let snap_name = "atlas.n6.before_iter" + it_s
+    let _ = _snapshot_atlas(snap_name)
+    println("[L4 prep] snapshot=" + snap_name)
+
+    // L3 build plan + execute
+    println("[L3a] promote_dag_builder --batch " + it_s)
+    let l3a = _run("hexa run " + _hexa_tool("promote_dag_builder.hexa") + " --batch " + it_s)
+    println(l3a)
+
+    println("[L3b] promote_executor --batch " + it_s + (if apply { " --apply" } else { " --dry-run" }))
+    let l3b = _run("hexa run " + _hexa_tool("promote_executor.hexa") + " --batch " + it_s + (if apply { " --apply" } else { " --dry-run" }))
+    println(l3b)
+
+    // L4 canary 재검증
+    println("[L4] canary_drill (post-promote)")
+    let l4 = _run("hexa run " + _hexa_tool("canary_drill.hexa"))
+    let l4_good = l4.index_of("\"verdict\":\"good\"") >= 0
+    println(l4)
+
+    if !l4_good {
+        println("[L4 fail] rollback")
+        let _ = _run("hexa run " + _hexa_tool("revive_rollback.hexa") + " --snapshot " + snap_name)
+        let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
+            + ",\"verdict\":\"l4_bad_rollback\"}"
+        println(line)
+        return 3
+    }
+
+    let atlas1 = _atlas_lines()
+    let line = "NEXUS_REVIVE_ITER {\"iter\":" + it_s
+        + ",\"verdict\":\"good\""
+        + ",\"atlas_before\":" + to_string(atlas0)
+        + ",\"atlas_after\":" + to_string(atlas1)
+        + ",\"delta\":" + to_string(atlas1 - atlas0) + "}"
+    println(line)
+    return 0
+}
+
+main()

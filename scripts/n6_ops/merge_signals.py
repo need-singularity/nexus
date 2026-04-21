@@ -23,6 +23,19 @@ STAGES = [
     ("[NX] — Agent A 흡수 (nexus 전체)", STAGE_DIR / "atlas.signals.staging.nx.n6"),
     ("[N6] — Agent B 흡수 (n6-arch 전체)", STAGE_DIR / "atlas.signals.staging.n6arch.n6"),
     ("[AN] — Agent C 흡수 (anima 전체)", STAGE_DIR / "atlas.signals.staging.an.n6"),
+    # 2026-04-22 추가 — 12개 staging 파일이 그동안 누락됨 (4406-line backlog 의 원인)
+    ("[MILL2] — Millennium2 도메인",   STAGE_DIR / "atlas.signals.staging.mill2.n6"),
+    ("[META] — meta-layer signals",    STAGE_DIR / "atlas.signals.staging.meta.n6"),
+    ("[SIGMA7] — Σ-7 cluster",          STAGE_DIR / "atlas.signals.staging.sigma7.n6"),
+    ("[DFS27] — DFS round 27",          STAGE_DIR / "atlas.signals.staging.dfs27.n6"),
+    ("[BIG] — bulk import",             STAGE_DIR / "atlas.signals.staging.big.n6"),
+    ("[WRITER] — writer-emitted",       STAGE_DIR / "atlas.signals.staging.writer.n6"),
+    ("[COMMIT] — commit-bound",         STAGE_DIR / "atlas.signals.staging.commit.n6"),
+    ("[BERN17] — Bernoulli-17 series",  STAGE_DIR / "atlas.signals.staging.bern17.n6"),
+    ("[WILD] — wild domain",            STAGE_DIR / "atlas.signals.staging.wild.n6"),
+    ("[APPL] — application domain",     STAGE_DIR / "atlas.signals.staging.appl.n6"),
+    ("[SESSION] — session-scoped",      STAGE_DIR / "atlas.signals.staging.session.n6"),
+    ("[PRECOMPACT] — precompactness",   STAGE_DIR / "atlas.signals.staging.precompact.n6"),
 ]
 
 

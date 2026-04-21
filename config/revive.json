@@ -1,0 +1,78 @@
+{
+  "id": "revive-config",
+  "kind": "revive_sot",
+  "schema": "v1",
+  "role": "엔진+지도 v2 — 3-로직 부활 마스터 SSOT",
+  "updated": "2026-04-22",
+  "consumers": [
+    "cli/revive/revive.hexa",
+    "cli/revive/revive_loop.hexa",
+    "tool/revive_master.hexa",
+    "tool/canary_drill.hexa",
+    "tool/depth_calibrate.hexa",
+    "tool/promote_dag_builder.hexa"
+  ],
+
+  "loop": {
+    "max_iter_default": 12,
+    "iter_budget_sec": 600,
+    "abort_on_consecutive_fail": 3,
+    "state_dir": "state/revive",
+    "snapshot_dir": "state/revive/snapshot"
+  },
+
+  "l0_fixpoint": {
+    "min_consecutive_good_canary": 5,
+    "max_staging_remaining": 0,
+    "depth_stable_eps": 1,
+    "_doc": "L0 도달: 최근 N=5 canary 연속 yield≥1 ∧ staging 잔여 0 ∧ depth bracket 변화 < eps"
+  },
+
+  "l1_canary": {
+    "stage": "smash",
+    "depth": 2,
+    "timeout_sec": 60,
+    "min_yield": 1,
+    "seed_pool": "tool/canary_seeds.jsonl",
+    "_doc": "L1: bisect verdict — fresh seed (rotate) → atlas Δ ≥ min_yield ?"
+  },
+
+  "l2_calibrate": {
+    "stages": ["smash", "free", "absolute", "meta_closure", "hyperarith"],
+    "depth_range": [1, 9],
+    "eval_metric": "yield_per_sec",
+    "cache_path": "tool/depth_bracket_cache.json",
+    "drill_json_target": "config/drill.json",
+    "_doc": "L2: bracket_discrete 로 stage 별 sweet-spot depth"
+  },
+
+  "l3_promote": {
+    "staging_glob": "n6/staging/atlas.signals.staging.*.n6",
+    "pending_paths": [
+      "n6/signals/cross_repo_pending.jsonl",
+      "n6/signals/pending_post_write.jsonl",
+      "n6/signals/pending_session_end.jsonl"
+    ],
+    "edge_sim_threshold": 0.7,
+    "batch_size_max": 50,
+    "executor": "scripts/n6_ops/atlas_auto_promote.py",
+    "_doc": "L3: staging+pending → DAG → Bellman critical_path → batch K"
+  },
+
+  "l4_gate": {
+    "snapshot_before": true,
+    "verdict": "l1_canary",
+    "rollback_on_fail": true,
+    "events_log": "n6/revive_canary.events.jsonl",
+    "_doc": "L4: batch 적용 후 canary 재실행 → fail 시 atlas snapshot 복구"
+  },
+
+  "bisect": {
+    "good_anchor_default": "73e5f74b",
+    "good_anchor_date": "2026-04-06",
+    "bad_anchor": "HEAD",
+    "verdict_tool": "tool/canary_verdict.hexa",
+    "session_path": "state/revive/bisect_session.json",
+    "_doc": "L1 fail 시 fixpoint_bisect 진입점"
+  }
+}

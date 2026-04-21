@@ -1,0 +1,55 @@
+// cli/revive/revive_l0_check.hexa — L0 fixpoint 도달 판정
+// L0 = ∀ batch K, canary(K) yield≥1 ∧ staging_remaining=0 ∧ depth ε-stable
+// 사용: hexa run cli/revive/revive_l0_check.hexa
+// stdout: NEXUS_L0 {"reached":true|false,"reason":"..."}
+// exit:   0 = L0 reached, 1 = not yet
+
+fn _nexus_root() -> string { return env("HOME") + "/core/nexus" }
+
+fn _staging_remaining() -> int {
+    let dir = _nexus_root() + "/n6/staging"
+    let cmd = "wc -l " + dir + "/atlas.signals.staging.*.n6 2>/dev/null | tail -1 | awk '{print $1}'"
+    let out = exec(cmd).trim()
+    let mut n = 0; try { n = to_int(out) } catch e {}
+    return n
+}
+
+fn _consecutive_good_canary(min_n: int) -> int {
+    let path = _nexus_root() + "/n6/revive_canary.events.jsonl"
+    if !file_exists(path) { return 0 }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let total = len(lines)
+    let mut count = 0
+    let mut idx = total - 1
+    while idx >= 0 {
+        let ln = lines[idx]
+        if ln.trim().len() == 0 { idx = idx - 1; continue }
+        if ln.index_of("\"verdict\":\"good\"") >= 0 {
+            count = count + 1
+            if count >= min_n { return count }
+        } else {
+            return count
+        }
+        idx = idx - 1
+    }
+    return count
+}
+
+fn main() -> int {
+    let staging = _staging_remaining()
+    let good_n  = _consecutive_good_canary(5)
+
+    let l0 = (staging == 0) && (good_n >= 5)
+    let line = "NEXUS_L0 {"
+        + "\"reached\":" + (if l0 { "true" } else { "false" })
+        + ",\"staging_remaining\":" + to_string(staging)
+        + ",\"consecutive_good_canary\":" + to_string(good_n)
+        + ",\"required_consec\":5"
+        + "}"
+    println(line)
+    if l0 { return 0 }
+    return 1
+}
+
+main()
