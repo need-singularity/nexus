@@ -14,10 +14,18 @@ fn main() {
         let bin = root + "/bin/airgenome"
         let exists = to_string(exec("test -x '" + bin + "' && echo y || echo n")).trim()  // @allow-bare-exec
         if exists == "y" {
-            let line = to_string(exec(bin + " status-line 2>/dev/null")).trim()  // @allow-bare-exec
-            if line.len() > 0 { println(line) }
+            // AIRGENOME_ROOT must be passed — bin/airgenome reads .hook-commands/active.json from it.
+            let line = to_string(exec("AIRGENOME_ROOT='" + root + "' '" + bin + "' status-line 2>/dev/null")).trim()  // @allow-bare-exec
+            if line.len() > 0 {
+                println(line)
+            } else {
+                println("🧬 airgenome · idle")
+            }
+        } else {
+            println("🧬 airgenome · bin missing")
         }
         return
     }
-    // default: silent — add other projects as they gain status-line commands.
+    // default project banner so user can see wiring works from any git repo.
+    println("📁 " + name)
 }
