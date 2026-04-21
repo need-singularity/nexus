@@ -50,6 +50,23 @@ for a in "$@"; do
   ARGS_XML+=$'\n'"    <string>$(xml_escape "$a")</string>"
 done
 
+# Env allowlist: PATH/HOME/HEXA_NO_LAUNCHD (always) + any var whose name
+# matches the hook/tooling prefixes below. Without this, launchd's explicit
+# EnvironmentVariables dict drops everything not listed — observed 2026-04-21:
+# airgenome hooks could not see HOOK_EVENT_JSON, AIRGENOME_HOOK_ROOT, etc.
+ENV_XML="    <key>PATH</key><string>$(xml_escape "${PATH}")</string>
+    <key>HOME</key><string>$(xml_escape "${HOME}")</string>
+    <key>HEXA_NO_LAUNCHD</key><string>1</string>"
+while IFS='=' read -r k v; do
+  case "$k" in
+    HEXA_NO_LAUNCHD|PATH|HOME) continue ;;
+    HOOK_*|AIRGENOME_*|CLAUDE_*|HEXA_*|NEXUS_*)
+      ENV_XML+="
+    <key>$(xml_escape "$k")</key><string>$(xml_escape "$v")</string>"
+      ;;
+  esac
+done < <(env)
+
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,9 +97,7 @@ ${ARGS_XML}
   <key>StandardErrorPath</key><string>${ERR}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>${PATH}</string>
-    <key>HOME</key><string>${HOME}</string>
-    <key>HEXA_NO_LAUNCHD</key><string>1</string>
+${ENV_XML}
   </dict>
 </dict>
 </plist>
@@ -90,9 +105,14 @@ EOF
 
 launchctl bootstrap gui/$UID_N "$PLIST"
 
-tail -F "$OUT" 2>/dev/null &
+# -s 0.1 : poll every 100ms so short-lived jobs (hook handlers, <1s) don't
+# exit before the default 1s tail-poll cycle, which silently drops their
+# stdout. Observed 2026-04-21 with airgenome hook dispatch — 137-byte JSON
+# responses from user_prompt.hexa were lost because the child completed in
+# <500ms and tail never polled.
+tail -F -s 0.1 "$OUT" 2>/dev/null &
 TAIL_OUT_PID=$!
-tail -F "$ERR" >&2 2>/dev/null &
+tail -F -s 0.1 "$ERR" >&2 2>/dev/null &
 TAIL_ERR_PID=$!
 
 # Poll until job actually exits. We can't trust state== "running" because
@@ -233,11 +253,31 @@ while true; do
   sleep 0.5
 done
 
-# flush tail buffers, then emit any tail-missed bytes from the files
+# Give tails one full poll interval to flush then kill. tail -s 0.1 = 100ms poll.
 sleep 0.3
 [ -n "$TAIL_OUT_PID" ] && kill "$TAIL_OUT_PID" 2>/dev/null
 [ -n "$TAIL_ERR_PID" ] && kill "$TAIL_ERR_PID" 2>/dev/null
 TAIL_OUT_PID=""
 TAIL_ERR_PID=""
+
+# Defensive re-emit: if the child's entire lifecycle fit inside a single tail
+# poll window, tail may have streamed zero bytes even after -s 0.1 + 0.3s
+# flush sleep. We can't tell what tail emitted vs missed without an offset
+# tracker, so we compare sizes: if tail appears to have missed everything
+# (common for hook handlers returning ~100 bytes in <200ms), emit from file.
+# The heuristic is a size threshold (<4096 bytes) — for larger outputs we
+# accept tail as the streaming path and skip re-emit.
+if [ -r "$OUT" ]; then
+  OUT_SZ=$(wc -c <"$OUT" 2>/dev/null | tr -d ' ')
+  if [ -n "$OUT_SZ" ] && [ "$OUT_SZ" -gt 0 ] && [ "$OUT_SZ" -lt 4096 ]; then
+    cat "$OUT" 2>/dev/null || true
+  fi
+fi
+if [ -r "$ERR" ]; then
+  ERR_SZ=$(wc -c <"$ERR" 2>/dev/null | tr -d ' ')
+  if [ -n "$ERR_SZ" ] && [ "$ERR_SZ" -gt 0 ] && [ "$ERR_SZ" -lt 4096 ]; then
+    cat "$ERR" >&2 2>/dev/null || true
+  fi
+fi
 
 exit "${EXIT_CODE:-0}"
