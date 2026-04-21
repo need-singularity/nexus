@@ -195,7 +195,7 @@ fn main() {
     // Replaces deleted CLAUDE.md session-start context. Cache TTL 1800s — roughly once per active session/30m-idle resume.
     // SSOT: $NEXUS/rules/airgenome.json (AG10).
     if is_fresh("ag10_banner", 1800) == false {
-        println("[AG10] hexa-only harness gate — DO NOT create CLAUDE.md, Claude Code hooks, or .claude/skills/ files. All automation and policy enforcement lives in raw rules only: edit $NEXUS/rules/airgenome.json (AG*) and $NEXUS/tool/enforcement_registry.json (H-*); implement handlers in prompt_scan.hexa / pre_tool_guard.hexa / lint.hexa. Bypass: NEXUS_HOOK_OK=1 (explicit user approval only).")
+        println("[AG10] hexa-only harness gate — DO NOT create CLAUDE.md, Claude Code hooks, or .claude/skills/ files. All automation and policy enforcement lives in raw rules only: edit $NEXUS/rules/airgenome.json (AG*) and $NEXUS/tool/enforcement_registry.json (H-*); implement handlers in prompt_scan.hexa / pre_tool_guard.hexa / lint.hexa. On every user prompt, call: hexa run $NEXUS/tool/entry.hexa prompt \"<user_text>\" — this surfaces [CMD]/[H-*] gates and writes matched commands to <project_root>/.hook-commands/active.json (drives statusLine). When [CMD] drill is emitted, dispatch via: ~/.hx/bin/nexus drill --seed \"<inferred>\". Bypass: NEXUS_HOOK_OK=1 (explicit user approval only).")
         mark_fresh("ag10_banner")
     }
 
@@ -302,6 +302,20 @@ fn main() {
     }
 
     println(msg)
+
+    // AG10 — push matched command to <project_root>/.hook-commands/active.json
+    //        so the universal statusLine dispatcher surfaces it instantly.
+    //        Cap stack at 10 (LIFO). SSOT schema: {"stack":[{"command","seed"}, ...]}.
+    let proj_root = to_string(exec("git rev-parse --show-toplevel 2>/dev/null")).trim()  // @allow-bare-exec
+    if proj_root.len() > 0 {
+        let active_dir = proj_root + "/.hook-commands"
+        exec("mkdir -p '" + active_dir + "' 2>/dev/null")  // @allow-bare-exec
+        let active_path = active_dir + "/active.json"
+        exec("[ -f '" + active_path + "' ] || printf '{\"stack\":[]}' > '" + active_path + "'")  // @allow-bare-exec
+        let seed_j = seed.replace("\\", "\\\\").replace("\"", "\\\"")
+        let jq_expr = ".stack = ([{command:\"" + matched + "\",seed:\"" + seed_j + "\"}] + (.stack // []))[0:10]"
+        exec("jq '" + jq_expr + "' '" + active_path + "' > '" + active_path + ".tmp' && mv '" + active_path + ".tmp' '" + active_path + "'")  // @allow-bare-exec
+    }
 
     // R35 H-MINPATH: 'go'/'가자'/'진행' 감지 시 최소 경로 SSOT 적용 hint
     if matched == "go" || matched == "keep" {
