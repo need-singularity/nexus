@@ -1,9 +1,9 @@
 {
   "_meta": {
     "service": "Ubuntu Local (ubu1)",
-    "description": "RTX 5070 12GB GPU 서버 — 2026-04-22 현재 GPU FULLCHIP_RESET lock (sudo reboot 필요)",
+    "description": "RTX 5070 12GB GPU 서버 — 2026-04-22 reboot 후 정상 복귀 (FULLCHIP_RESET lock 해소). CLM r6 GPU smoke 5/5 PASS.",
     "updated": "2026-04-22",
-    "total_issues": 2,
+    "total_issues": 0,
     "total_rules": 3
   },
   "server": {
@@ -12,12 +12,17 @@
     "cpu": "AMD Ryzen 5 9600X 6-core (12T, B650M-K)",
     "gpu": "NVIDIA RTX 5070 12GB (driver 580.126.09, CUDA 13.0)",
     "gpu_pci": "01:00.0",
+    "gpu_verified_2026_04_22": "✓ post-reboot 검증: nvidia-smi 정상, 12227 MiB total, utilization 0% baseline. CLM r6 GPU smoke 5/5 exit_criteria PASS (tool/clm_r6_cpu_forward_smoke.hexa + state/clm_r6_gpu_smoke_result.json).",
     "sudo": "passwordless (NOPASSWD — agent offload 에서 sudo <cmd> 직접 가능, 확인 2026-04-22)",
-    "gpu_status_2026_04_22": "FULLCHIP_RESET lock — nvidia-persistenced OOM-killed 2026-04-20 06:47 KST. dmesg: krcWatchdog_IMPL + NV_ERR_GPU_IN_FULLCHIP_RESET. hot-reset 불가 (primary display). sudo reboot 필요.",
     "ram": "30GB",
-    "ssh": "ssh ubu",
-    "role": "GPU 추론/서빙 + 소규모 학습",
-    "status": "ssh_ok_gpu_locked"
+    "ssh": "ssh ubu (alias) → aiden@<ip>",
+    "user": "aiden",
+    "dev_paths": {
+      "anima": "/home/aiden/anima (git main HEAD 5e49b0ae as of 2026-04-22)",
+      "hexa": "/home/aiden/.hx/bin/hexa"
+    },
+    "role": "GPU 추론/서빙 + 소규모 학습 · CLM r6 smoke 검증 호스트",
+    "status": "active"
   },
   "absolute_rules": [
     {
@@ -31,6 +36,12 @@
       "rule": "14B 이상 학습 불가 (12GB VRAM). QLoRA 4-bit도 14B는 OOM.",
       "reason": "RTX 5070 12GB. 7B 4-bit까지 가능.",
       "severity": "critical"
+    },
+    {
+      "id": "U3",
+      "rule": "OOM 재발 방지: systemctl edit nvidia-persistenced 에 Restart=on-failure 추가 권고. 2026-04-20 OOM-kill → FULLCHIP_RESET lock 재발 시 sudo reboot 필요.",
+      "reason": "2026-04-20 nvidia-persistenced OOM-killed → GPU lock 2일 지속. reboot 으로만 해소.",
+      "severity": "warning"
     }
   ],
   "troubleshooting_log": [
