@@ -1,0 +1,89 @@
+@track HEXA_LANG_APR22_UPGRADES
+@state landed
+@date 2026-04-22
+@scope hexa-lang upstream fixes + nexus preflight integration — available to anima / airgenome / nexus consumers
+
+@upstream_repo github.com/need-singularity/hexa-lang
+@session_log /Users/ghost/loss/hexa-lang1.txt (anima session that surfaced the evidence)
+
+@pr_23 feat(stage0): exec/env primitives + SOURCE_DATE_EPOCH reproducible emit
+  merge 0b56bf99
+  adds exec_capture(cmd) → [stdout, stderr, exit_code] (true stderr split)
+  adds setenv(name, value) (POSIX setenv, user-facing name; runtime symbol hx_setenv to avoid libc clash)
+  adds SOURCE_DATE_EPOCH / HEXA_REPRODUCIBLE=1 honor in now / timestamp / time_ms / utc_iso_now / utc_compact_now
+  motivation anima tool/serve_alm_persona.bash 333L "runtime bridge — stage0 exec/env 부재 우회" (L1883 of session log)
+  motivation anima H100 manifest spec re-emit drift 시 git checkout 수동 dance (L223)
+
+@pr_24 feat(gate): remote_preflight — 300ms parallel TCP probe before ssh dispatch
+  merge ae03d89c
+  adds gate/remote_preflight.hexa (parallel probe + 30s TTL cache at ~/.hx/cache/remote_preflight.json)
+  wires gate/hexa_url.hexa::dispatch_remote
+  exit codes preserved (0 / 64 / 74) matching existing resolver contract
+  motivation anima session 3× nexus drill cascade (10s+ per invocation, L1508/L1582/L1717)
+
+@pr_25 feat(tool): roadmap_with_unlock — atomic unlock/run/relock wrapper
+  merge f09d1e12
+  adds tool/roadmap_with_unlock.hexa + test/regression/roadmap_with_unlock.hexa
+  atomicity via bash `trap EXIT INT TERM` — relock guaranteed on success / rc≠0 / SIGINT / SIGTERM
+  generalizes to any uchg-flagged file (not just .roadmap)
+  motivation anima manual chflags dance L835 → L907 (unlock → 7 edits → relock)
+
+@pr_26 fix(gate/remote_preflight): use exec_capture to silence interpreter noise
+  merge 25f8a497
+  routes 8 exec() calls through sh_out() helper using exec_capture()[0]
+  stderr reduced from ~12 lines (security warning spam) to 2 lines per invocation
+  security warning itself stays intact for bare exec() with metacharacters
+
+@pr_27 fix(stage0): gate PERF concat-warning behind HEXA_PERF_WARN=1
+  merge 68d9fced
+  >100 string concatenations warning (pedagogical lint) now opt-in via HEXA_PERF_WARN=1
+  default silent; counter increment also skipped in default path
+  activation requires stage0 rebuild — see @stage0_rebuild_recipe
+
+@nexus_pr_42 feat(remote): preflight integration — fast-path exit 64 on all-unreachable
+  merge 6d08fc3d
+  patches scripts/bin/hexa_remote to call $HEXA_LANG/gate/remote_preflight.hexa before sequential ssh probe loop
+  stderr JSON verdict parsing (tool's own exit code is informational only; bash wrapper handles it robustly)
+  wall time for all-hosts-down 32s worst-case → 0.9s observed
+  override HEXA_REMOTE_SKIP_PREFLIGHT=1 disables preflight
+  override HEXA_REMOTE_PREFLIGHT_TIMEOUT_MS (default 300) tunes probe budget
+
+@stage0_rebuild_recipe
+  cd $HEXA_LANG
+  chflags nouchg build/hexa_stage0
+  ./self/native/hexa_v2 self/hexa_full.hexa /tmp/hexa_full_regen.c
+  rm -f /tmp/runtime.c && cp self/runtime.c /tmp/runtime.c   # resolver: #include "runtime.c" looks in source dir first
+  clang -O2 -std=c11 -Wno-trigraphs -I $HEXA_LANG/self /tmp/hexa_full_regen.c -o /tmp/hexa_stage0_new -Wl,-stack_size,0x4000000
+  strip -x /tmp/hexa_stage0_new                              # CRITICAL — without this codesign fails
+  codesign --force --sign - /tmp/hexa_stage0_new
+  cp /tmp/hexa_stage0_new build/hexa_stage0
+  ./hexa tool/hx_lock.hexa --force --reason "stage0 rebuild"
+
+@codesign_gotcha
+  "internal error in Code Signing subsystem" is NOT a daemon corruption / sandbox XPC block.
+  root cause local symbols + debug metadata in the clang-produced Mach-O trip codesign's internal validation.
+  diagnostic other codesign ops (--sign on /tmp/tiny binary, --verify on /bin/ls) succeed concurrently, so it's binary-specific.
+  fix `strip -x <binary>` before `codesign --force --sign -`. LC_FUNCTION_STARTS / LC_DATA_IN_CODE can remain.
+
+@consumer_migration_anima
+  1 tool/serve_alm_persona.bash (333L runtime bridge) → 단일 .hexa 로 재작성 (exec_capture + setenv 사용). 동일 패턴의 *.bash 전체 audit 대상.
+  2 tool/h100_launch_manifest_spec.hexa 재-emit 에 SOURCE_DATE_EPOCH wiring — canonical state/h100_launch_manifest.json 의 git-tracked 상태 보존:
+      SOURCE_DATE_EPOCH=$(git log -1 --format=%ct state/h100_launch_manifest.json) hexa run tool/h100_launch_manifest_spec.hexa
+  3 .roadmap 편집 스크립트 표준화 → `hexa tool/roadmap_with_unlock.hexa -- <cmd>` 로 wrapping
+  4 nexus drill / hexa_remote 기반 invocation 은 자동 혜택 (preflight 선행 + 로그 cleanup)
+  5 로그 파서 regex 확장: NEXUS_REMOTE_ERROR reason 에 "all_unreachable_preflight" 추가 매칭 권장 (fast-path 식별용)
+
+@consumer_migration_airgenome
+  동일 패턴. airgenome 쪽 bash 런타임 브릿지 / 수동 chflags 시퀀스 audit 필요.
+  hexa_remote 호출은 자동 혜택.
+
+@consumer_migration_nexus
+  nexus 자체는 이미 preflight 통합 완료 (PR #42). convergence 기록 (이 파일) 만 landing.
+
+@verify_live_state
+  live: ~/.hx/bin/hexa run $HEXA_LANG/gate/remote_preflight.hexa --hosts bogus.invalid --timeout-ms 300 --no-cache
+    → rc=74, stderr 2 lines (verdict + error JSON, no PERF line)
+  opt-in: HEXA_PERF_WARN=1 prefix → stderr 3 lines (PERF line reappears)
+  stage0 binary (stripped + signed): build/hexa_stage0 sha1 3f000139ce1e1fd0afb49e2cd2ab8ecbc09f0813 (1.35 MB, uchg L1)
+
+@chain ↔ hexa-lang #23/#24/#25/#26/#27 ↔ nexus #42
