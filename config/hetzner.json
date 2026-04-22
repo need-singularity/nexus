@@ -1,25 +1,30 @@
 {
   "_meta": {
-    "service": "Hetzner",
-    "description": "AX102-U CPU 전담 서버 (EPYC 7950X3D)",
-    "updated": "2026-04-09",
+    "service": "Hetzner AX102 (htz)",
+    "description": "AX102 CPU 전담 서버 — AMD Ryzen 9 7950X3D + iGPU Raphael (AMD ROCm /dev/kfd present). Discrete GPU 없음 (2026-04-22 lspci 확정).",
+    "updated": "2026-04-22",
     "total_issues": 0,
-    "total_rules": 2
+    "total_rules": 3
   },
   "server": {
-    "name": "AX102-U",
-    "cpu": "AMD EPYC 7950X3D 32T",
+    "name": "AX102",
+    "hostname": "anima-ax102",
+    "kernel": "Linux 6.8.0-100-generic",
+    "cpu": "AMD Ryzen 9 7950X3D 16-core / 32T (Raphael, not EPYC — Hetzner consumer-chip server)",
+    "gpu_integrated": "AMD Raphael iGPU (0x1002:0x164e, amdgpu loaded, /dev/dri/card0 + renderD128)",
+    "gpu_discrete": null,
+    "rocm_compute": "/dev/kfd 존재 — ROCm 이론적 가능하나 rocm-smi 미설치",
     "ram": "124GB",
     "ssh": "ssh hetzner",
     "location": "Germany",
-    "role": "CPU 서빙 + 전처리 + OUROBOROS 진화",
+    "role": "CPU 서빙 + 전처리 + OUROBOROS 진화 + 병렬 delegation (heavy load 주의)",
     "status": "active"
   },
   "absolute_rules": [
     {
       "id": "H1",
-      "rule": "GPU 학습 금지 — CPU 전용 서버. 학습은 Vast.ai/Ubuntu로.",
-      "reason": "GPU 미탑재. CPU 학습은 극도로 느림 (0.18 step/s).",
+      "rule": "NVIDIA GPU 학습 금지 — CUDA 하드웨어 없음. 학습은 Vast.ai/Ubuntu ubu1/ubu2(드라이버 설치 후)로.",
+      "reason": "2026-04-22 lspci 확인: AMD Raphael iGPU 만 존재, NVIDIA/CUDA 부재. CPU 학습은 극도로 느림 (0.18 step/s).",
       "severity": "warning"
     },
     {
@@ -27,6 +32,12 @@
       "rule": "tmux 세션으로 실행. SSH 끊김 시 프로세스 유지.",
       "reason": "nohup보다 tmux가 안정적. attach로 모니터링 가능.",
       "severity": "warning"
+    },
+    {
+      "id": "H3",
+      "rule": "AMD ROCm 가능성 — /dev/kfd 존재, 단 rocm-smi 미설치. iGPU ROCm compute 는 성능 매우 낮음 (experimental only).",
+      "reason": "hexa libhxblas 는 CPU BLAS 경로로 작동, ROCm 은 사용 안 하는 게 실용적.",
+      "severity": "info"
     }
   ],
   "troubleshooting_log": [],
