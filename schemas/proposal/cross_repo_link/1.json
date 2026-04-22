@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nexus/proposal/cross_repo_link/1",
+  "title": "Cross-Repo Proposal Link",
+  "description": "Atomic link between proposals across sister repos (anima/hexa-lang/airgenome/nexus). Emitted by tool/proposal_sync_hub.hexa. SSOT 는 각 repo 의 state/proposals/inventory.json _meta.cross_repo_links[].",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "src_repo",
+    "src_id",
+    "tgt_repo",
+    "tgt_id",
+    "link_type",
+    "first_linked_ts",
+    "last_verified_ts",
+    "verified_by",
+    "auto_link_score"
+  ],
+  "properties": {
+    "schema": {
+      "const": "nexus/proposal/cross_repo_link/1"
+    },
+    "id": {
+      "type": "string",
+      "description": "Deterministic dedup key: sha256(src_repo + src_id + tgt_repo + tgt_id + link_type), 16 hex chars",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "src_repo": {
+      "type": "string",
+      "enum": ["anima", "hexa-lang", "airgenome", "nexus"]
+    },
+    "src_id": {
+      "type": "string",
+      "description": "Proposal id with repo-prefix (e.g. anima-20260422-042, hxa-20260422-007, agm-20260422-001, nxs-20260422-003)",
+      "pattern": "^(anima|hxa|agm|nxs)-[0-9]{8}-[0-9]{3,}$"
+    },
+    "tgt_repo": {
+      "type": "string",
+      "enum": ["anima", "hexa-lang", "airgenome", "nexus"]
+    },
+    "tgt_id": {
+      "type": "string",
+      "pattern": "^(anima|hxa|agm|nxs)-[0-9]{8}-[0-9]{3,}$"
+    },
+    "link_type": {
+      "type": "string",
+      "enum": ["depends_on", "satisfies", "conflicts_with", "mirrors", "cluster_member"],
+      "description": "depends_on: src needs tgt to be implemented first. satisfies: src problem solved by tgt. conflicts_with: cannot coexist. mirrors: parallel proposal in tgt repo. cluster_member: 5+ proposals form a cluster (xrp-NNN super-proposal)."
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Optional: file path that triggered the link detection",
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string"},
+        "snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$|^$"},
+        "field": {"type": "string"}
+      }
+    },
+    "first_linked_ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC, first detection time"
+    },
+    "last_verified_ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC, last hub run that re-confirmed this link"
+    },
+    "verified_by": {
+      "type": "string",
+      "description": "Tool that emitted/verified (typically proposal_sync_hub.hexa)"
+    },
+    "auto_link_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Confidence 0-100. <30 = weak (manual review), 30-70 = medium, 70+ = strong (auto-mirror OK)"
+    },
+    "user_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, link is sticky — auto-decay disabled"
+    },
+    "decay_after_misses": {
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "description": "If hub fails to re-detect this link N consecutive runs, mark stale and move to debate folder"
+    },
+    "_misses": {
+      "type": "integer",
+      "default": 0,
+      "description": "Internal: hub run miss counter"
+    }
+  }
+}

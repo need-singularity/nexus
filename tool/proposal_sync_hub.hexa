@@ -1,0 +1,221 @@
+// proposal_sync_hub.hexa — 4-repo cross-repo proposal sync hub.
+// G3 (G axis = meta) — anima paradigm §10 의 nexus 구현체.
+//
+// 역할:
+//   1. 4 repo (anima/hexa-lang/airgenome/nexus) 의 state/proposals/inventory.json 읽기
+//   2. proposal evidence_sources[].path 가 다른 repo 파일 가리키면 cross_repo_link emit
+//   3. _meta.cross_repo_links[] 에 dedup (sha256 id) 추가
+//   4. --dry default (실제 mutate 는 --apply)
+//   5. log: state/cross_repo_sync_log.jsonl
+//
+// schema: nexus/proposal/cross_repo_link/1
+//
+// SSOT: 각 repo 의 state/proposals/inventory.json
+//   _meta.cross_repo_links[]  ← 본 hub 가 emit/refresh
+//
+// INVARIANT (paradigm §6):
+//   - state/proposals/ 외 디렉토리 mutate 금지
+//   - .roadmap 자동 수정 금지
+//   - cross_repo_link dedup: sha256(src_repo + src_id + tgt_repo + tgt_id + link_type)[:16]
+//   - max 50 new links / cycle (flood protect)
+//   - repo unreachable 시 graceful skip + log
+//
+// Usage:
+//   hexa run tool/proposal_sync_hub.hexa            # --dry (default)
+//   hexa run tool/proposal_sync_hub.hexa --apply    # 실제 inventory 갱신
+//
+// @allow-bare-exec
+
+let CORE = env("HOME") + "/core"
+let HUB_VERSION = "0.1.0-skeleton"
+let MAX_NEW_LINKS_PER_CYCLE: i64 = 50
+
+// repo registry — paradigm §10 + cross_repo_link/1 schema enum 일치
+let REPO_NAMES = ["anima", "hexa-lang", "airgenome", "nexus"]
+let REPO_PREFIXES = ["anima", "hxa", "agm", "nxs"]
+
+fn sh_q(s: str) -> str {
+    let mut out = "'"
+    let n = s.len()
+    let mut i = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "'" { out = out + "'\\''" } else { out = out + c }
+        i = i + 1
+    }
+    return out + "'"
+}
+
+fn now_utc() -> str {
+    return to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()  // @allow-bare-exec
+}
+
+fn sha256_hex16(s: str) -> str {
+    // dedup id = sha256(input)[:16]. shasum 위임 (paradigm §6 dedup_key).
+    let cmd = "printf '%s' " + sh_q(s) + " | /usr/bin/shasum -a 256 2>/dev/null | /usr/bin/cut -c1-16"
+    return to_string(exec(cmd)).trim()  // @allow-bare-exec
+}
+
+fn inventory_path(repo: str) -> str {
+    return CORE + "/" + repo + "/state/proposals/inventory.json"
+}
+
+fn log_path(repo: str) -> str {
+    return CORE + "/" + repo + "/state/cross_repo_sync_log.jsonl"
+}
+
+fn read_inventory_safe(repo: str) -> str {
+    // graceful: file 없으면 "" 반환 (해당 repo skip)
+    let p = inventory_path(repo)
+    let mut raw = ""
+    try { raw = read_file(p) } catch e { raw = "" }
+    return raw
+}
+
+fn append_log(repo: str, line: str) -> void {
+    let p = log_path(repo)
+    exec("printf '%s\\n' " + sh_q(line) + " >> " + sh_q(p))  // @allow-bare-exec
+}
+
+// ── text-based JSON field extract (json_parse 회피, roadmap_engine 패턴) ────
+// inventory.json 은 schema 고정이므로 line scan 으로 충분.
+// proposal_id_list_in_inventory(raw) → ["anima-20260422-001", ...]
+fn proposal_ids_from_inventory(raw: str) -> [str] {
+    let mut ids: [str] = []
+    let lines = raw.split("\n")
+    let mut i = 0
+    while i < lines.len() {
+        let line = lines[i].trim()
+        // entries[]/proposals[] 에서 "id": "..." 추출
+        let idx = line.find("\"id\":")
+        if idx >= 0 {
+            let rest = line.substring(idx + 5, line.len()).trim()
+            // " 부터 다음 " 까지
+            let qstart = rest.find("\"")
+            if qstart >= 0 {
+                let afterq = rest.substring(qstart + 1, rest.len())
+                let qend = afterq.find("\"")
+                if qend > 0 {
+                    let id = afterq.substring(0, qend)
+                    if id.len() > 0 { ids.push(id) }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return ids
+}
+
+// ── proposal-level evidence path scan ───────────────────────────────────────
+// pending/<id>_*.json 또는 approved/ 내 파일들에서 evidence_sources[].path 추출.
+// path 가 다른 repo 의 root prefix 와 매칭되면 cross_repo_link 후보.
+fn detect_cross_repo_path(path: str, src_repo: str) -> str {
+    // path 가 절대경로인 경우 — repo prefix 매칭
+    let mut i = 0
+    while i < REPO_NAMES.len() {
+        let r = REPO_NAMES[i]
+        if r != src_repo {
+            let prefix = CORE + "/" + r + "/"
+            if path.find(prefix) == 0 { return r }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+fn emit_link(src_repo: str, src_id: str, tgt_repo: str, tgt_id: str,
+             link_type: str, evidence_path: str, ts: str) -> str {
+    // schema: nexus/proposal/cross_repo_link/1 의 minimal JSON
+    let key = src_repo + "|" + src_id + "|" + tgt_repo + "|" + tgt_id + "|" + link_type
+    let id = sha256_hex16(key)
+    let mut json = "{"
+    json = json + "\"schema\":\"nexus/proposal/cross_repo_link/1\","
+    json = json + "\"id\":\"" + id + "\","
+    json = json + "\"src_repo\":\"" + src_repo + "\","
+    json = json + "\"src_id\":\"" + src_id + "\","
+    json = json + "\"tgt_repo\":\"" + tgt_repo + "\","
+    json = json + "\"tgt_id\":\"" + tgt_id + "\","
+    json = json + "\"link_type\":\"" + link_type + "\","
+    json = json + "\"evidence\":{\"path\":\"" + evidence_path + "\"},"
+    json = json + "\"first_linked_ts\":\"" + ts + "\","
+    json = json + "\"last_verified_ts\":\"" + ts + "\","
+    json = json + "\"verified_by\":\"proposal_sync_hub.hexa@" + HUB_VERSION + "\","
+    json = json + "\"auto_link_score\":50"
+    json = json + "}"
+    return json
+}
+
+fn main() -> i64 {
+    let mut apply = false
+    let mut i = 1
+    while i < args.len() {
+        if args[i] == "--apply" { apply = true }
+        if args[i] == "--help" || args[i] == "-h" {
+            println("usage: hexa run tool/proposal_sync_hub.hexa [--apply]")
+            println("       --dry (default): scan only, print would-emit links")
+            println("       --apply        : write inventory _meta.cross_repo_links[]")
+            return 0
+        }
+        i = i + 1
+    }
+
+    let mode = if apply { "apply" } else { "dry" }
+    let ts = now_utc()
+    println("proposal_sync_hub v" + HUB_VERSION + " mode=" + mode + " ts=" + ts)
+
+    // 1. read all 4 inventories (graceful skip)
+    let mut reachable = 0
+    let mut id_counts: [i64] = []
+    let mut r = 0
+    while r < REPO_NAMES.len() {
+        let raw = read_inventory_safe(REPO_NAMES[r])
+        let ids = proposal_ids_from_inventory(raw)
+        id_counts.push(ids.len())
+        if raw.len() > 0 { reachable = reachable + 1 }
+        println("  " + REPO_NAMES[r] + ": " + to_string(ids.len()) + " ids" +
+                if raw.len() == 0 { " (UNREACHABLE — skip)" } else { "" })
+        r = r + 1
+    }
+
+    if reachable < 2 {
+        println("FATAL: <2 reachable repos — sync impossible. exit 1.")
+        return 1
+    }
+
+    // 2. TODO (next batch): scan each repo's pending/approved/*.json 의 evidence_sources[].path
+    //    → detect_cross_repo_path() → emit_link() → dedup → flood-protect 50/cycle
+    //    skeleton 단계라 스캐닝 logic 은 후속. 본 run 은 connectivity check + id count 만.
+
+    // 3. log
+    let mut log_line = "{\"ts\":\"" + ts + "\",\"hub_version\":\"" + HUB_VERSION
+    log_line = log_line + "\",\"mode\":\"" + mode + "\",\"reachable\":" + to_string(reachable)
+    log_line = log_line + ",\"id_counts\":["
+    let mut j = 0
+    while j < id_counts.len() {
+        if j > 0 { log_line = log_line + "," }
+        log_line = log_line + to_string(id_counts[j])
+    }
+    log_line = log_line + "]}"
+
+    // 모든 reachable repo 의 sync log 에 동일 entry append (own audit trail)
+    if apply {
+        let mut k = 0
+        while k < REPO_NAMES.len() {
+            let invp = inventory_path(REPO_NAMES[k])
+            let mut raw = ""
+            try { raw = read_file(invp) } catch e { raw = "" }
+            if raw.len() > 0 {
+                append_log(REPO_NAMES[k], log_line)
+            }
+            k = k + 1
+        }
+        println("logged to " + to_string(reachable) + " repos.")
+    } else {
+        println("(dry) would log: " + log_line)
+    }
+
+    println("done. reachable=" + to_string(reachable) + "/" + to_string(REPO_NAMES.len()))
+    return 0
+}
+
+exit(main())
