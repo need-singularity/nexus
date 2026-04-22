@@ -1,6 +1,6 @@
 #!/bin/bash
-# hexa_remote — rsync + ssh wrapper to run hexa on a remote host (ubu default).
-# Purpose: AG6 Mac-compute-ZERO — heavy hexa work offloaded to ubu/hetzner.
+# hexa_remote — rsync + ssh wrapper to run hexa on a remote host (ubu1 default).
+# Purpose: AG6 Mac-compute-ZERO — heavy hexa work offloaded to ubu1/hetzner.
 #
 # Eligibility is decided by the caller (shared/scripts/bin/hexa resolver).
 # This script trusts inputs and performs:
@@ -9,7 +9,7 @@
 #   3. ssh -T exec of hexa with the same args, at mapped cwd
 #
 # Env:
-#   HEXA_REMOTE_HOST             remote host (default: ubu)
+#   HEXA_REMOTE_HOST             remote host (default: ubu1)
 #   HEXA_REMOTE_BIN              remote hexa path (default: $HOME/.hx/bin/hexa_real)
 #   HEXA_REMOTE_NO_SYNC          skip rsync (assume tree already fresh)
 #   HEXA_REMOTE_CONNECT_TIMEOUT  ssh ConnectTimeout seconds (default: 8)
@@ -19,13 +19,15 @@
 
 set -u
 
-# Pick host. Priority: HEXA_REMOTE_HOST env → dispatch_state.json compute → ubu.
-# Zero-defect reachability (2026-04-20):
-#   - multi-host fallback: preferred → ubu → ubu2 (host sshd 22/TCP, hexa binary 위치에 직결)
+# Pick host. Priority: HEXA_REMOTE_HOST env → dispatch_state.json compute → ubu1.
+# Zero-defect reachability (2026-04-20, 2026-04-22 htz 추가):
+#   - multi-host fallback: preferred → ubu1 → ubu2 → htz (host sshd 22/TCP, hexa binary 위치에 직결)
 #   - ConnectTimeout 3→8s (heavy load 대응)
 #   - ServerAliveInterval 로 BannerTimeout hang 방지
 #   - 최초 probe 실패 시 다음 후보로 (이전엔 exit 64 즉시 fallback → Mac SIGKILL)
-#   - htz 는 nexus drill 에서 remote 대상 제외 (compute workload 충돌 방지)
+#   - 2026-04-22: htz(hetzner anima-ax102) 를 자동 fallback 체인 말단에 포함 —
+#     ubu1/ubu2 동시 장애(LAN 이슈) 시 compute 복원 경로 확보.
+#     (airgenome offload 쪽에서 htz alias 재사용, ssh config Host htz → 157.180.8.154.)
 pick_preferred_host() {
     if [ -n "${HEXA_REMOTE_HOST:-}" ]; then
         printf '%s' "$HEXA_REMOTE_HOST"; return
@@ -33,13 +35,13 @@ pick_preferred_host() {
     local state="$HOME/Dev/nexus/shared/dispatch_state.json"
     if [ -r "$state" ] && command -v jq >/dev/null 2>&1; then
         local h
-        h="$(jq -r '.selection.compute // "ubu"' "$state" 2>/dev/null)"
+        h="$(jq -r '.selection.compute // "ubu1"' "$state" 2>/dev/null)"
         case "$h" in
-            ubu|ubu2) printf '%s' "$h"; return ;;
+            ubu1|ubu2) printf '%s' "$h"; return ;;
             none|mac|htz|hetzner|"") ;;
         esac
     fi
-    printf 'ubu'
+    printf 'ubu1'
 }
 _probe_host() {
     local cand="$1"
@@ -85,10 +87,12 @@ PREFERRED="$(pick_preferred_host)"
 # Normalize htz → hetzner (ssh config 의 canonical alias).
 [ "$PREFERRED" = "htz" ] && PREFERRED="hetzner"
 
-# Build fallback chain — preferred 먼저, 그 다음 ubu/ubu2 (compute host).
-# htz(hetzner) 는 명시 override 로만 사용, 자동 fallback 엔 포함 X (default 루트 드리프트 방지).
+# Build fallback chain — preferred 먼저, 그 다음 ubu1/ubu2/htz (compute host).
+# 2026-04-22: htz 를 체인 말단에 추가. ubu1/ubu2 동시 unreachable (LAN 장애) 시에도
+# remote dispatch 가 hetzner anima-ax102 로 복원되도록. htz alias 는 ssh config
+# (Host hetzner htz htz1) 에서 157.180.8.154 (root) 로 풀림 — airgenome 쪽과 동일.
 FALLBACK_CHAIN="$PREFERRED"
-for cand in ubu ubu2; do
+for cand in ubu1 ubu2 htz; do
     case " $FALLBACK_CHAIN " in
         *" $cand "*) ;;
         *) FALLBACK_CHAIN="$FALLBACK_CHAIN $cand" ;;
@@ -121,7 +125,7 @@ if [ -z "$HOST" ]; then
 fi
 
 # 2026-04-22: 구 default ($HOME/Dev/hexa-lang/hexa) 는 4월14 빌드 — `^` / `&` 비트연산자 파서 미지원.
-#   ubu 기준 $HOME/.hx/bin/hexa_real 은 4월19+ 빌드 — run.hexa line 1048 ($HOME/.hx/packages/nexus/cli/run.hexa FNV-hash) 파싱 성공.
+#   ubu1 기준 $HOME/.hx/bin/hexa_real 은 4월19+ 빌드 — run.hexa line 1048 ($HOME/.hx/packages/nexus/cli/run.hexa FNV-hash) 파싱 성공.
 #   rebuild 전까지 default 교체.
 REMOTE_HEXA="${HEXA_REMOTE_BIN:-\$HOME/.hx/bin/hexa_real}"
 
@@ -214,9 +218,29 @@ quote_args() {
 # P1: 원격 shell EXIT 시 자식 hexa_stage0/hexa.real 정리 (ssh 채널 끊김 → orphan 방지).
 REMOTE_TRAP="trap 'rc=\$?; pkill -P \$\$ -f hexa_stage0 2>/dev/null; pkill -P \$\$ -f hexa.real 2>/dev/null; exit \$rc' EXIT INT TERM"
 # 2026-04-22: HEXA=$REMOTE_HEXA export — run.hexa 내부 stage 호출 ($HOME/Dev/hexa-lang/hexa 우선 pick)
-# 이 ubu 의 4월14 구빌드로 떨어져 smash/free 가 parser-silent (0 absorption) 되는 것 차단.
+# 이 ubu1 의 4월14 구빌드로 떨어져 smash/free 가 parser-silent (0 absorption) 되는 것 차단.
 # run.hexa 의 hexa_bin() 는 env("HEXA") 를 최우선 — 명시 export 시 모든 inner stage 가 hexa_real 로 통일.
-REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 $REMOTE_HEXA$(quote_args "$@")"
+# 2026-04-22 (L14): stage0/hexa_real 을 systemd-run --scope cgroup 으로 wrap — MemoryMax=8G cap.
+# ubu1+ubu2 동시 OOM 사고(ubu1 stage0 7.6GB RSS / ubu2 hexa_real 30GB RSS → 호스트 전역 OOM-kill)
+# 원인: per-process RAM cap 부재. stage 단위 cgroup MemoryMax=12G / MemoryHigh=10G / TasksMax=512.
+# (L7 사고 ubu1 stage0 RSS 7.6GB 관찰 — 정상 범위 6-10G. cap 12G 는 단일 stage 여유 + 동시 2 stage OS 6G.)
+# htz(root) 는 system scope, ubu1/ubu2(유저) 는 --user scope + XDG_RUNTIME_DIR 필수
+# (ssh non-interactive 세션에서 DBUS 소켓 경로 누락 시 systemd-run --user 가 silent fail).
+# systemd-run 미설치 또는 XDG_RUNTIME_DIR dir 부재 시 bare exec.
+# Override: HEXA_REMOTE_NO_CAP=1 (debug 전용).
+if [ "$HOST" = "hetzner" ] || [ "$HOST" = "htz" ]; then
+    _SD_CHECK='command -v systemd-run >/dev/null 2>&1'
+    _SD_WRAP='systemd-run --scope --quiet -p MemoryMax=12G -p MemoryHigh=10G -p TasksMax=512 --'
+else
+    _SD_CHECK='command -v systemd-run >/dev/null 2>&1 && [ -d "/run/user/$(id -u)" ]'
+    _SD_WRAP='export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemd-run --user --scope --quiet -p MemoryMax=12G -p MemoryHigh=10G -p TasksMax=512 --'
+fi
+_ARG_QUOTED="$(quote_args "$@")"
+if [ "${HEXA_REMOTE_NO_CAP:-0}" = "1" ]; then
+    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && $REMOTE_HEXA$_ARG_QUOTED"
+else
+    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && if $_SD_CHECK; then $_SD_WRAP $REMOTE_HEXA$_ARG_QUOTED; else $REMOTE_HEXA$_ARG_QUOTED; fi"
+fi
 
 # -T = no pty, ServerAlive = 장시간 compute (drill) 중 네트워크 끊기면 30s 내 감지 후 종료.
 # P3: stderr 직통 (2>/dev/null 제거 — 원격 진단정보 surface).

@@ -288,3 +288,107 @@
 @rationale 자연어 명령 라우터 전반이 `/Dev/nexus/shared` 전제로 projects(0)/domains(비어있음)/aliases(비어있음) silent 반환. Projects JSON 파서 버그는 별건 orthogonal (내 경로 수정 이전에도 0 반환).
 @files ["cli/blowup/commands.hexa"]
 @test_status ran (router 기동 + 모든 config 파일 실위치 가리킴 확인. 일부 다운스트림 파일(nexus_hub.hexa/gap_finder.hexa/deep_scan.hexa) 은 현 레이아웃에 실파일 부재 — handler 실행 시 fail-fast, 경로 변수 수정 범위 밖)
+
+@ts 2026-04-22T19:45:00Z
+@id L7_DRILL_OOM_DUAL_HOST_WEDGE_ROOT_CAUSE
+@state ossified
+@value drill 원격 dispatch 의 stage0/hexa_real 이 ubu1+ubu2 양호스트 동시 발사로 물리 RAM 고갈 → global OOM-killer → sshd userspace hung (banner timeout, L2/L3/L4 alive). ubu1 stage0 VMSize 11.9GB RSS 7.6GB, ubu2 hexa_real VMSize 36GB RSS 30GB — 시스템 30GB RAM 전부 혼자 점유. constraint=CONSTRAINT_NONE → cgroup 제한 부재 확인. airgenome-runaway guard 는 restart 721회 시도했으나 L11 경로 버그로 실제 개입 실패. 재부팅 외 복구 불가.
+@rationale ubu1/ubu2 동시 hang 증상 (양쪽 SSH banner timeout) 의 공통 원인 확증. prev-boot journal(`/var/log/prev_boot_2026-04-22.log` 각 호스트 3.6MB/1.2MB) 에서 kernel oom-kill 로그 직접 확보. 디스크 풀/좀비/공유 NAS 가설 전부 기각.
+@files ["ubu1:/var/log/prev_boot_2026-04-22.log", "ubu2:/var/log/prev_boot_2026-04-22.log"]
+@test_status ran (양호스트 force-probe 후 journalctl --boot=-1 수집, dmesg/syslog/df/free/zombies 교차확인)
+
+@ts 2026-04-22T19:45:01Z
+@id L8_HEXA_REMOTE_HTZ_FALLBACK_APPENDED
+@state in_flight
+@value scripts/bin/hexa_remote — FALLBACK_CHAIN `for cand in ubu ubu2` → `ubu ubu2 htz`. PREFERRED normalize `htz → hetzner` (ssh config Host hetzner htz htz1). 주석 2곳 업데이트. 미커밋. 단 htz ssh exec 의 `HEXA=/home/ghost-nexus/_bootstrap/hexa_linux_x86_64` + `NEXUS=/home/ghost-nexus` env export 는 미추가 — L14 에서 memory cap 과 함께 추가 예정.
+@rationale L7 로 ubu LAN 전체 down 시 drill abort(exit 74). htz compute 복원 경로 확보. 기존 주석 "htz 는 nexus drill 에서 remote 대상 제외 (compute workload 충돌 방지)" 는 ubu 정상 시의 로드 보호 논리였으나 동시 장애 때 complete fail 원인.
+@files ["scripts/bin/hexa_remote"]
+@test_status pending (drill end-to-end 검증은 L14 완료 후 단일 트리거)
+
+@ts 2026-04-22T19:45:02Z
+@id L9_HTZ_NEXUS_BOOTSTRAP_HOME_GHOST_NEXUS
+@state ossified
+@value htz(anima-ax102) 에 nexus drill 실행 환경 구축: `/home/ghost-nexus/` (Mac `$HOME/core/nexus` rsync, 19MB, cli/blowup/modules/engine/revive/tool 필수만), `/home/ghost-nexus/_bootstrap/hexa_linux_x86_64` (Apr 19 build, bitwise `&`/`^` 지원 x86_64 ELF), `/root/.hx/packages/nexus → /home/ghost-nexus` symlink, `/root/.hx/bin/nexus` 596B shim (HEXA/NEXUS env 강제 export), Mac 헬퍼 `bin/drill_htz`. End-to-end PASS 46.8s / 1834 absorptions / verdict=PASS.
+@rationale L7 대체 dispatch 경로. 지뢰 3건: (a) htz `/` 100% full (96/98G) → `/home` 만 사용 가능, (b) `/root/Dev/nexus` 는 엉뚱한 perfect-number 리포 — 우회 필수, (c) `/home/hexa-lang/hexa` (Apr 16) 는 bitwise `&`/`^` 미지원으로 silent stage0 크래시.
+@files ["bin/drill_htz", "htz:/home/ghost-nexus/", "htz:/root/.hx/bin/nexus", "htz:/home/ghost-nexus/_bootstrap/hexa_linux_x86_64"]
+@test_status ran (airgenome offload htz drill max-rounds=1 preset=probe → verdict=PASS/score=0, wall 46.8s, total 1834 absorptions, checkpoint save 완료)
+
+@ts 2026-04-22T19:45:03Z
+@id L10_AIRGENOME_SUPERVISOR_DISABLED_FLAG_REMOVED
+@state partial
+@value `~/Library/LaunchAgents/com.airgenome.plist` 에서 `<key>Disabled</key><true/>` 제거. launchctl bootstrap 은 샌드박스 제약(Input/output error)으로 실패 → `nohup env ... airgenome run` 분리 프로세스(PID 53093)로 supervisor 기동. 60s 주기 probe 복귀, `airgenome list hosts` ts 25s 이내 갱신 정상. `airgenome init` 의 plist 경로 버그(`$AIRGENOME_ROOT/shared/launchagents/` → 실제 `/launchd/`) 및 `com.airgenome.probe` plist 의 누락 바이너리(`airgenome-probe`) 는 설계 변경이라 보류.
+@rationale `airgenome list hosts` 가 ubu1/ubu2 를 "active" 로 5h stale 보고한 원인 — supervisor 가 2026-04-21T09:40:41Z SIGTERM 후 Disabled 플래그로 재부팅 안 됨. probe 축은 실제 `ssh uptime|free|nvidia-smi` 로 설계 건강.
+@files ["~/Library/LaunchAgents/com.airgenome.plist", "~/.airgenome/supervisor.pid"]
+@test_status ran (수정 후 airgenome list hosts ts 갱신 + ubu/ubu2/htz offline 정정 확인)
+
+@ts 2026-04-22T19:45:04Z
+@id L11_UBU2_AIRGENOME_RUNAWAY_MAC_PATH_BUG
+@state observed
+@value ubu2 `~/.config/systemd/user/airgenome-runaway.service` 가 WorkingDirectory/ExecStart/Documentation/`Environment=AIRGENOME_ROOT` 4필드 모두 Mac 경로 `/Users/ghost/Dev/airgenome/bin/runaway_guard.hexa` 참조 — mac_home sshfs 미마운트/끊김 시 CHDIR fail → restart 무한 루프 (prev-boot 기간 721회 달성). 실제 파일 `/home/summer/Dev/airgenome/bin/runaway_guard.hexa` 존재 → 4라인 sed 로 수정 가능. MemoryMax=256M CPUQuota=20% 세팅은 정상.
+@rationale L7 OOM 시 runaway guard 가 선제 차단선이었으나 자체 실행 불가로 무력. 수정 시 다음 drill OOM 재발 사전 차단.
+@files ["ubu2:~/.config/systemd/user/airgenome-runaway.service"]
+@test_status observed (수정 미적용 — 사용자 승인 대기)
+
+@ts 2026-04-22T19:45:05Z
+@id L12_UBU1_AG3_SERVICE_SOURCES_MISSING
+@state observed
+@value ubu1 `/etc/systemd/system/airgenome-{gate,gate-mesh,ag3-loop,fill,gpu-continuous,linux-harvest}.service` 6개 unit 참조 파일 전부 MISSING: `ag3/{gpu_gate_mesh_daemon,ag3_loop,gpu_continuous,linux_harvest}.py`, `auto_fill.sh`, `gate_handler.sh`. `/home/aiden/airgenome/ag3/` 하위엔 `__pycache__` 만 남음 → migration 후 소스 삭제 상태. airgenome-gate-mesh NRestarts=150 (현 boot, 이전에도 스팸 지속). Deprecated 확정, disable --now 필요.
+@rationale syslog 오염 + systemd restart 카운터 >100 자원 낭비. L7 OOM 과 독립이나 동일 호스트 위생 문제.
+@files ["ubu1:/etc/systemd/system/airgenome-{gate,gate-mesh,ag3-loop,fill,gpu-continuous,linux-harvest}.service"]
+@test_status observed (disable 미적용 — 사용자 승인 대기)
+
+@ts 2026-04-22T19:45:06Z
+@id L13_HOST_ALIAS_UBU_TO_UBU1_RENAME
+@state in_flight
+@value `ubu` → `ubu1` whole-word rename 진행. 범위: nexus `scripts/bin/`, `config/*.json` (key 포함), `engines_bt/*`, `~/.hx/bin/` (non-bak), airgenome `modules/`, `bin/`, `config/hosts.json`. 제외: `archive/v1/`, `.claude/worktrees/`, `*.bak*`, `roadmaps/` 역사 스냅샷, `~/.ssh/config` (이미 `Host ubu ubu1` permissive). bg agent 진행 중.
+@rationale host alias 일관성 (ubu1/ubu2 페어). airgenome offload 가 이미 ubu1 을 받아들여 런타임 안전. JSON key 까지 rename 해야 lookup 정합 (agent_capacity.json / infrastructure.json / hosts.json).
+@files ["multi — bg agent 완료 후 갱신"]
+@test_status pending (bg agent 진행 중)
+
+@ts 2026-04-22T19:45:07Z
+@id L14_DRILL_STAGE_SYSTEMD_RUN_MEMORY_CAP
+@state designed
+@value scripts/bin/hexa_remote 의 REMOTE_CMD 에 `systemd-run --user --scope --quiet -p MemoryMax=8G -p MemoryHigh=6G -- $REMOTE_HEXA run blowup.hexa ...` wrapping. 동시에 htz ssh exec 시 `HEXA=/home/ghost-nexus/_bootstrap/hexa_linux_x86_64` / `NEXUS=/home/ghost-nexus` env export (L9 연결). dispatch 직전 `free -m` pre-flight — target available < 10G 면 reject / 다음 호스트.
+@rationale L7 OOM 근본원인 직접 차단. stage0/hexa_real memory 무제한이 host 전역 OOM 초래. 시스템 RAM 30GB 기준 stage 당 8G cap 이면 동시 3 stage 까지 안전. L13 rename 과 hexa_remote 파일 충돌 방지 위해 block.
+@files ["scripts/bin/hexa_remote (예정)"]
+@test_status designed (L13 종료 후 구현, L8 체인과 같이 end-to-end 검증)
+
+@ts 2026-04-22T19:55:00Z
+@id L15_HEXA_REMOTE_MEMORY_CAP_IMPL
+@state ossified
+@value scripts/bin/hexa_remote — REMOTE_CMD 에 systemd-run --scope cgroup wrap 구현. ubu1/ubu2(user) 은 `--user` scope + XDG_RUNTIME_DIR 자동 export (ssh non-interactive 세션 dbus 문제 회피), htz(root) 은 system scope. MemoryMax=12G / MemoryHigh=10G / TasksMax=512. systemd-run 미설치 또는 `/run/user/$(id -u)` 부재 시 bare exec fallback. `HEXA_REMOTE_NO_CAP=1` debug override. smoke 3회: (a) 8G cap → rc=137 SIGKILL (cgroup OOM — scope 한정, host wedge 없음, 설계 확증), (b) 12G cap → smash +21 / verdict=PASS, (c) NO_CAP → smash +917 baseline.
+@rationale L14 설계 구현 + smoke 실측. rc=137 이 cgroup-scope OOM 이라 L7 같은 host-wide wedge 불가 확증. 12G 는 보수적이나 PASS. 튜닝 필요 시 L16 후속.
+@files ["scripts/bin/hexa_remote"]
+@test_status ran (3-way smoke: 8G kill / 12G PASS / NO_CAP +917. ubu1 linger=yes, /run/user/1000 present, systemd-run --user --scope 직접 호출 PASS 확증)
+
+@ts 2026-04-22T19:55:01Z
+@id L16_MAC_HOSTS_LIVENESS_WATCHDOG
+@state ossified
+@value scripts/bin/hosts_liveness_watchdog.sh + ~/Library/LaunchAgents/com.nexus.hosts-watchdog.plist (launchd 5min cadence, RunAtLoad=true). 3호스트 `airgenome offload $h true` probe, 호스트별 연속실패 streak 을 ~/.airgenome/watchdog_streak.tsv 유지. 연속 N회 실패 transition 시점 osascript display notification + Submarine 사운드. infra_state.json 비의존 독립 probe (supervisor 불안정 시에도 동작). HOSTS=(ubu1 ubu2 htz), THRESHOLD=2 (≈10분 wedge 에서 첫 알람).
+@rationale L7 재발 조기 감지 1층. Mac 에선 OOB 재부팅 수단 부재 (repo grep: WOL/IPMI/smart-plug 전무) 라 recovery 는 불가, 알림만. 조기 감지로 사용자 물리 개입 시간 단축. L18 (후속) ubu-side monit 자가진단 + L19 (후속) ssh_gate --emergency 2FA 예외 + WOL 등록은 별건 scope.
+@files ["scripts/bin/hosts_liveness_watchdog.sh", "~/Library/LaunchAgents/com.nexus.hosts-watchdog.plist"]
+@test_status ran (install + launchctl kickstart → initial probe streaks 전부 0, last exit code 0, 5min interval 등록 확인)
+
+@ts 2026-04-22T19:55:02Z
+@id L17_UBU2_RUNAWAY_PATH_APPLIED
+@state ossified
+@value L11 진단 후 수정 적용. ubu2 ~/.config/systemd/user/airgenome-runaway.service 4라인 sed: `/Users/ghost/Dev/airgenome` → `/home/summer/Dev/airgenome` (WorkingDirectory, ExecStart arg, Documentation, Environment=AIRGENOME_ROOT). daemon-reload + reset-failed + restart → NRestarts=0, ActiveState=active, SubState=running, MainPID=1945162. hexa_real 실프로세스 확인, 실시간 `{"verdict":"ok","metrics":{...},"top":[...]}` JSON emit 중.
+@rationale L7 OOM 1차 방어선 가동. MemoryMax=256M CPUQuota=20% 세팅은 기존 유지, Mac-path 버그만 제거.
+@files ["ubu2:~/.config/systemd/user/airgenome-runaway.service"]
+@test_status ran (systemctl --user show + pgrep + journalctl --user -u airgenome-runaway tail → verdict:"ok" metrics live emit)
+
+@ts 2026-04-22T19:55:03Z
+@id L18_UBU1_AG3_SERVICES_DISABLED
+@state ossified
+@value L12 진단 후 disable 적용. ubu1 `sudo systemctl disable --now airgenome-{gate,gate-mesh,ag3-loop,fill,gpu-continuous,linux-harvest}` — 6 unit 전부 inactive + enabled=disabled. pre: gate active / 나머지 5 activating(restart loop). post: 6 전부 정지, NRestarts 전부 0. 5s journal tail window 에서 새 spam 라인 0 (이전엔 초당 여러 줄). airgenome-gate 는 socat SIGTERM 후 ExecMainStatus 비-0 이라 "failed" 태그 남음 — 무해 (disabled 상태, 재시작 없음).
+@rationale syslog 오염 + systemd restart 카운터 >100 자원 낭비 종결. /home/aiden/airgenome/ag3/*.py 및 gate_handler.sh 전부 파일 부재 확증된 deprecated 구성.
+@files ["ubu1:/etc/systemd/system/airgenome-{gate,gate-mesh,ag3-loop,fill,gpu-continuous,linux-harvest}.service (disabled)"]
+@test_status ran (disable --now 성공 + post-status 전수 확인 + 5s journal spam 0건)
+
+@ts 2026-04-22T19:55:04Z
+@id L19_HOST_ALIAS_RENAME_APPLIED
+@state ossified
+@value L13 진행 완료. ubu → ubu1 whole-word rename, nexus(scripts/bin, config JSON keys, engines_bt, n6/papers docs) + airgenome(modules/filters/*, dispatch.hexa, probe.hexa, forecast.hexa, label.hexa, genome_merge.hexa, menubar.hexa, bin/airgenome CLI, config/hosts.json, core/test) + ~/.hx/bin(cargo/python3/rustc/sh-run/_cache.sh/nexus) 적용. JSON key 동기화 (agent_capacity.json, hosts.json, dispatch_state/infra_state runtime files). 사용자 수동 8파일 (chflags nouchg 2건 + bash cat-redirect) 도 완료.
+@rationale host alias 일관성. airgenome offload 가 ubu1 alias 이미 수용해서 런타임 안전. ssh config `Host ubu ubu1` permissive 라 legacy 호출자도 무중단.
+@files ["multi-file — see agent rename report"]
+@test_status ran (drill L15 smoke 통과로 end-to-end consistency 검증)

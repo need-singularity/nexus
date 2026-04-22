@@ -1,0 +1,45 @@
+#!/bin/bash
+# drill_htz — htz (Hetzner, anima-ax102, root) 에서 nexus drill 한줄 호출.
+#
+# 2026-04-22 bootstrap 기록:
+#   - htz /root/Dev/nexus → /home/nexus (perfect-number 다른 프로젝트) 로 가리키는 상태
+#   - 실제 "Mac /Users/ghost/core/nexus" 는 /home/ghost-nexus 에 rsync 설치
+#   - /root/.hx/packages/nexus → /home/ghost-nexus (symlink)
+#   - /root/.hx/bin/nexus (shim, HEXA+NEXUS env 강제 주입)
+#   - /home/ghost-nexus/_bootstrap/hexa_linux_x86_64
+#     (Mac 최신 x86_64 build 복사 — /home/hexa-lang/hexa 가 &/^ bitwise 미지원 → bypass)
+#
+# htz 는 / (root) 100% full 이라 /root/ 에 heavy tree 설치 금지, /home 파티션만 사용.
+# drill 내부 exec("hexa run ...") 는 HEXA env 를 통해 동일 bootstrap binary 로 라우팅.
+#
+# usage:
+#   bin/drill_htz '<seed ≥10 chars>'                 # max-rounds=1, preset=probe (default)
+#   bin/drill_htz '<seed>' 3                         # max-rounds=3
+#   bin/drill_htz '<seed>' 1 standard                # preset 조정
+#
+# SSOT: airgenome offload htz "/root/.hx/bin/nexus drill --seed '...' --max-rounds N --preset P"
+# 와 1:1 매핑. helper 는 seed length 검사 + 인자 escape 만 수행.
+
+set -euo pipefail
+
+SEED="${1:-}"
+ROUNDS="${2:-1}"
+PRESET="${3:-probe}"
+
+if [ -z "$SEED" ] || [ "${#SEED}" -lt 10 ]; then
+    echo "usage: $0 '<seed ≥10 chars>' [max-rounds=1] [preset=probe]" >&2
+    echo "  예: $0 'htz smoke test drill verification 2026'" >&2
+    exit 2
+fi
+
+AIRGENOME_BIN="${AIRGENOME_BIN:-/Users/ghost/core/airgenome/bin/airgenome}"
+if [ ! -x "$AIRGENOME_BIN" ]; then
+    echo "ERROR: airgenome not found at $AIRGENOME_BIN" >&2
+    exit 3
+fi
+
+# Escape single quotes in seed for shell wrapping.
+seed_escaped="$(printf '%s' "$SEED" | sed "s/'/'\\\\''/g")"
+
+exec "$AIRGENOME_BIN" offload htz \
+    "/root/.hx/bin/nexus drill --seed '$seed_escaped' --max-rounds $ROUNDS --preset $PRESET"
