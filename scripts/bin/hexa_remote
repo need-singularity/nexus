@@ -99,6 +99,35 @@ for cand in ubu1 ubu2 htz; do
     esac
 done
 
+# 2026-04-22: preflight — parallel 300ms TCP probe of $FALLBACK_CHAIN via
+# $HEXA_LANG/gate/remote_preflight.hexa (hexa-lang PR#24). Fast-path exit 64
+# when all hosts are down, instead of paying per-host ConnectTimeout×N.
+# Disable with HEXA_REMOTE_SKIP_PREFLIGHT=1. Stderr JSON verdict parsing is
+# used (preflight's own exit code is informational-only until its exit(74)
+# bug is fixed upstream).
+_PREFLIGHT_SRC="${HEXA_LANG:-$HOME/core/hexa-lang}/gate/remote_preflight.hexa"
+_PREFLIGHT_BIN="${HEXA_BIN:-$HOME/.hx/bin/hexa}"
+if [ "${HEXA_REMOTE_SKIP_PREFLIGHT:-0}" != "1" ] \
+   && [ -f "$_PREFLIGHT_SRC" ] \
+   && [ -x "$_PREFLIGHT_BIN" ]; then
+    _pf_csv="$(printf '%s' "$FALLBACK_CHAIN" | tr ' ' ',')"
+    _pf_out="$("$_PREFLIGHT_BIN" run "$_PREFLIGHT_SRC" \
+        --hosts "$_pf_csv" \
+        --timeout-ms "${HEXA_REMOTE_PREFLIGHT_TIMEOUT_MS:-300}" 2>&1 1>/dev/null || true)"
+    case "$_pf_out" in
+        *'"verdict":"all_unreachable"'*)
+            echo "hexa_remote: preflight — all hosts unreachable (tried: $FALLBACK_CHAIN), fast-aborting" >&2
+            _pf_hosts_json=""
+            for _h in $FALLBACK_CHAIN; do
+                if [ -z "$_pf_hosts_json" ]; then _pf_hosts_json="\"$_h\""
+                else _pf_hosts_json="$_pf_hosts_json,\"$_h\""; fi
+            done
+            printf 'NEXUS_REMOTE_ERROR {"hosts_tried":[%s],"reason":"all_unreachable_preflight","exit_code":64}\n' "$_pf_hosts_json" >&2
+            exit 64
+            ;;
+    esac
+fi
+
 HOST=""
 for cand in $FALLBACK_CHAIN; do
     if _probe_host "$cand"; then
