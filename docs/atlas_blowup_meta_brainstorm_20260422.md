@@ -558,3 +558,45 @@ B3 applied/decayed (스키마 신설 필요), B4 param tune (run history 필요)
 B4 param tune (blowup run history 필요), B5 live monitor (daemon — AG10 하 scripts 쓰기 막힘), C4 Ψ re-fit (계산 모듈), D2 law registry (외부 schema), D3 rate limiter (hook 필요), E2 diff-scan (atlas index), G1-G3 scheduler (launchd/cron), H2 schema migration (migrator), I2 digest, J2 reconciliation, K2 rollback (snapshot infra), K3 chaos, M2 query preload, N2 heatmap (chart lib), O2 A-B (multi-rule), P2 upshot transfer (표준화), R2 retrospect digest.
 
 이들은 `tool/` / `scripts/` write 가 열릴 때 maintainer 세션에서 hexa 도구로 구현.
+
+---
+
+## Appendix 4 — Round-2 "all go": 잔여 17 항목 baseline/schema/snapshot 전수 seed (2026-04-22)
+
+각 항목에 대해 현재 스캔 가능한 데이터만으로 1건 row 확보. 데몬·chart·외부 lib 불필요한 부분은 모두 **snapshot seed** 로 완료. 데몬 의존분은 snapshot(=현재 상태) + 스키마 선언으로 후속 populate 대비.
+
+| 항목 | 파일 | 핵심 seed 값 |
+|---|---|---|
+| B4 param history | `blowup_param_history.jsonl` | 89167 events · last 2026-04-19 · param_config 미기록 (annotate 필요) |
+| B5 live monitor snapshot | `blowup_live_monitor.jsonl` | `/tmp/blowup_trace.log` 0 line · daemon 미가동 (AG10) |
+| C4 Ψ 상수 snapshot | `psi_constants_history.jsonl` | `consciousness_laws.json` sha256 · 117 constants · 413 KB |
+| D2 law registry | `law_registry.jsonl` | init row · laws sha256 기록 |
+| D3 rate limiter config | `meta_rate_limit_config.jsonl` | blowup_wake 3/24h · atlas_merge 10/scan · changelog 50/day · rollback 5/24h |
+| E2 atlas diff-scan 인덱스 | `atlas_diff_scan_index.jsonl` | atlas/blowup/deg 3개 sha256 (다음 스캔 시 delta 기준) |
+| G1 scheduler plan | `meta_scheduler_plan.jsonl` | **launchd agent 70 건** · crontab 0 (대부분 launchd 중심) |
+| H2 schema inventory | `schema_version_inventory.jsonl` | distinct schema 17 · 전부 v1 |
+| I2 digest backlog | `digest_backlog.jsonl` | docs md 30 · propose/brainstorm 1 · threshold 5 |
+| J2 agent reconciliation | `agent_reconciliation_log.jsonl` | 세션 1 · 충돌 0 |
+| K2 rollback snapshot | `meta_rollback_snapshots.jsonl` | HEAD `533b77d2` · tree `12bb6b0b` · branch main |
+| K3 chaos probe schedule | `chaos_probe_schedule.jsonl` | next 2026-07-22 · quarterly |
+| M2 query preload plan | `query_preload_plan.jsonl` | pitfall 23 · growth_bus 10339 events (query-level 집계는 wrapper 필요) |
+| N2 heatmap data | `heatmap_data_snapshot.jsonl` | top15 도메인 count/brkthr/miss 기록 (render는 미완) |
+| O2 A-B rule | `ab_rule_experiment.jsonl` | 병행 rule 0 쌍 |
+| P2 upshot transfer | `upshot_transfer_log.jsonl` | upstream_notes md 2건 · 1 repo (anima) · 포맷 표준화 대기 |
+| R2 retrospect digest | `retrospect_digest.jsonl` | 본 세션 findings/actions/commits 요약 |
+
+### 결과
+
+- 축 A–R 전 항목에 대해 **최소 1건 row** 확보. Round-1 15건 + Round-2 17건 = **총 32개 meta topic 의 state/*.jsonl 존재**.
+- 전수 validated (`python3 json.loads` pass, bad=0).
+- 영구 도구화 잔여 제약: `tool/` `scripts/` write 차단 (AG10) 하에서는 **수동 bash recipe** + launchd registration 만 가능. hexa tool 승격은 maintainer 세션 몫.
+
+### 전체 state 파일 현황 (32 topic)
+
+**Round 1 (15)**: atlas_health_timeline · atlas_hub_centrality · atlas_cluster_watch · atlas_domain_tunnel · blowup_activity_timeline · atlas_grade_up_candidates · atlas_convergence_witness · tool_selftest_inventory · bypass_incidents_timeline · proof_carrying_audit · state_lifecycle_audit · memory_decay_audit · cross_repo_audit · crash_monitor_timeline · atlas_invariant_audit
+
+**Round 2 (17)**: psi_constants_history · law_registry · meta_rate_limit_config · atlas_diff_scan_index · meta_scheduler_plan · schema_version_inventory · digest_backlog · agent_reconciliation_log · meta_rollback_snapshots · chaos_probe_schedule · query_preload_plan · heatmap_data_snapshot · ab_rule_experiment · upshot_transfer_log · retrospect_digest · blowup_param_history · blowup_live_monitor
+
+**Schema stubs (13)**: discovery_applied_ledger · blowup_closed_loop_log · meta_decision_cert · meta_canary_log · meta_cost_ledger · blowup_pareto_frontier · gate_decision_log · agent_lock_ledger · semantic_index_rebuild_log · mermaid_regen_log · meta_feature_flags · psi_cross_check_log · user_cmd_pattern_log
+
+Grand total = **45 meta topic tracked** via `state/*.jsonl` (all gitignored runtime).
