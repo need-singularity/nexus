@@ -504,3 +504,57 @@ B3 applied/decayed (스키마 신설 필요), B4 param tune (run history 필요)
 1. **F1 selftest coverage 6.7%** — 444 도구 selftest 부재. 하루 10개씩 추가 = 1.5달 내 100%. ROI 높음.
 2. **F3 rotted SHA 1** — proof-carrying 주장이 이미 무효. 즉시 수정 필요.
 3. **A5 material/bio/music tunnel 공백** — @X ≤7 인 중간 스케일 도메인 5개. blowup 타겟 queue 에 투입.
+
+---
+
+## Appendix 3 — Top findings 대응 + 설계 필요 항목 schema seed (2026-04-22)
+
+### 즉시 해결
+
+- **#3 rotted SHA** — `33fa0388` squash/rebase 추정으로 resolve 불가.
+  - hexa-lang `docs/roadmap_engine_theory.md:84` 에서 `ba3c6eff` (roadmap-engine #36, anima Path B = 6 days verified) 로 참조 이관.
+  - 이력 주석으로 원 SHA (backticks 제거) 보존 → F3 audit 에서는 제외.
+  - hexa-lang commits: `bf0ac9e8` (replace) + `5ce75b31` (strip backticks).
+  - 재측정: `shas_total 10 → 9`, `rotted 1 → 0`.
+
+### 즉시 surface (후속 action 대기)
+
+- **#4 A5 tunnel target queue** → `state/atlas_tunnel_target_queue.jsonl`.
+  - `@X ≤10` sparse domain 28건 (math 8, music/material/genetic 7, n6atlas/linguistics 5, ...).
+  - blowup 깨울 때 이 queue 를 우선 타겟으로 feed 하면 `아이디어→math tunnel` 동형 cross-domain 에지 생성 가능.
+- **#2 F1 selftest gap inventory** → `state/selftest_gap_inventory.jsonl`.
+  - 444 도구 selftest 부재 (n6: 263, tool: 155, scripts: 26). sample 20 기록.
+  - 계획 없이 흐르면 영구 gap; 주 20개씩 = 5.5개월 내 100% 달성.
+
+### Reframe (데이터 반영)
+
+- **#5 B1 "dormant wake" → "over-activity throttle"**.
+  - 원 제안: blowup 2026-04-06 이후 dormant 로 가정 → wake trigger 설계.
+  - 2026-04-22 scan 결과: `last_event_ts 2026-04-19`, 파일 mtime 당일, 89k events. **dormant 아님**.
+  - 따라서 B1 목적 재정의: (a) 과활동 시 cost 억제 rate-limiter (D3 와 결합), (b) 재dormant 시에만 wake trigger. `state/blowup_activity_timeline.jsonl` 의 `last_event_ts` 간격이 >72h 지속될 때 wake, <24h 지속될 때 throttle.
+
+### 설계 필요 항목 — schema seed (영구 스키마 선언)
+
+각 항목 `state/<topic>.jsonl` 에 `schema_declaration` row 1건 append. 실제 데이터는 future maintainer tool 이 populate. 본 초기 seed 는 스키마/필드 계약서 역할.
+
+| 항목 | 파일 | 필드 |
+|---|---|---|
+| B3 applied/decayed | `discovery_applied_ledger.jsonl` | discovery_id · applied_by_commit · applied_ts · track |
+| C1 closed loop | `blowup_closed_loop_log.jsonl` | run_id · pre_health_ref · post_health_ref · verdict · reverted |
+| D1 decision cert | `meta_decision_cert.jsonl` | decision_id · rule_id · input_hash · output_hash · actor · ts |
+| D4 canary | `meta_canary_log.jsonl` | feature_id · shadow_started · actual_started · side_effect_diff · status |
+| E1 cost ledger | `meta_cost_ledger.jsonl` | run_id · tool · wall_clock_ms · cpu_ms · bytes_read · bytes_written |
+| E3 pareto frontier | `blowup_pareto_frontier.jsonl` | param_config_hash · cost · value · grade_count · applied_count |
+| I1 gate log | `gate_decision_log.jsonl` | proposal_id · category · decision · ts · reason |
+| J1 agent lock | `agent_lock_ledger.jsonl` | agent_id · path · claimed_ts · released_ts · conflict |
+| M1 semantic rebuild | `semantic_index_rebuild_log.jsonl` | run_id · mode · delta_nodes · full_rebuild · duration_ms |
+| N1 mermaid regen | `mermaid_regen_log.jsonl` | source · regen_ts · commit · byte_delta |
+| O1 feature flags | `meta_feature_flags.jsonl` | feature_id · enabled_repos · rollout_stage · since |
+| Q2 Ψ cross-check | `psi_cross_check_log.jsonl` | ts · consistency_check · passed · deviation_sigma |
+| R1 user cmd pattern | `user_cmd_pattern_log.jsonl` | cmd · seed_hash · trigger_ctx · ts · accepted |
+
+### 여전 미착수 (runtime / daemon / 외부 의존)
+
+B4 param tune (blowup run history 필요), B5 live monitor (daemon — AG10 하 scripts 쓰기 막힘), C4 Ψ re-fit (계산 모듈), D2 law registry (외부 schema), D3 rate limiter (hook 필요), E2 diff-scan (atlas index), G1-G3 scheduler (launchd/cron), H2 schema migration (migrator), I2 digest, J2 reconciliation, K2 rollback (snapshot infra), K3 chaos, M2 query preload, N2 heatmap (chart lib), O2 A-B (multi-rule), P2 upshot transfer (표준화), R2 retrospect digest.
+
+이들은 `tool/` / `scripts/` write 가 열릴 때 maintainer 세션에서 hexa 도구로 구현.
