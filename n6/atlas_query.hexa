@@ -1,0 +1,303 @@
+// ═══════════════════════════════════════════════════════════
+// atlas_query.hexa — unified atlas prefix-query wrapper (AZ agent)
+//
+// 배경:
+//   atlas.n6 prefix lookup 은 3개 레이어로 분리되어 있다:
+//     · atlas_bloom.hexa         (AI) — O(1) miss-rejection
+//     · atlas_predict_cache.hexa (AV) — warm file prefetch
+//     · atlas_mmap.hexa          (AJ) — cold dual-file awk
+//   atlas_hot_shard.hexa (process-local RAM promote) 는 drill 세션 내에서만
+//   효력 — cold-start CLI 에서는 접근 불가. 따라서 wrapper 는 bloom → predict
+//   → cold 3-stage 로만 합성.
+//
+// 설계 (fast path):
+//   stage 1 (bloom):   /tmp/atlas_bloom.bin exists
+//     → inline awk (bloom_check_awk.awk 파일 재사용) 로 single-token check
+//     → "reject" 면 즉시 종료 {matches:0, stage:"bloom_reject"}
+//   stage 2 (predict): /tmp/atlas_predict_warm/<prefix>.txt 존재 + mtime fresh
+//     → file read → emit lines {stage:"predict_warm"}
+//   stage 3 (cold):    dual-file awk (set_file + atlas) — atlas_mmap 동형
+//     → {stage:"cold_mmap"}
+//
+// hexa 서브프로세스 0 회 목표:
+//   · bloom check = 1 awk invocation (no hexa)
+//   · predict     = 0 (file read only)
+//   · cold        = 1 awk invocation
+//
+// CLI:
+//   hexa run shared/n6/atlas_query.hexa query <prefix>
+//     — 일반 사용, 결과 stdout (entry line list), meta stderr NDJSON
+//   hexa run shared/n6/atlas_query.hexa bench <prefix> <N>
+//     — N 회 반복 query (wall-time/stage breakdown)
+//
+// 편집 금지: atlas.n6 본체, 각 레이어 원본 CLI.
+// 규칙: hexa `>=`/`<=` 금지 — 본 파일은 `<` / `>` 만 사용.
+// ═══════════════════════════════════════════════════════════
+
+let _ATLAS_PATH         = "shared/n6/atlas.n6"
+let _BLOOM_PATH         = "/tmp/atlas_bloom.bin"
+let _BLOOM_META_PATH    = "/tmp/atlas_bloom.bin.meta.json"
+let _BUCKET_IDX_PATH    = "/tmp/atlas_bucket_idx.json"
+let _PREDICT_WARM_DIR   = "/tmp/atlas_predict_warm"
+let _PREDICT_FRESH_SEC: i64 = 300       // atlas_predict_cache 와 동일 정책
+let _QUERY_SET_PATH     = "/tmp/atlas_query_set.txt"
+let _BLOOM_AWK_PATH     = "/tmp/atlas_query_bloom_check.awk"
+
+// ─── ns clock ───
+fn _ns_now() -> i64 {
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec("date +%s%N")).trim()   // @allow-bare-exec
+        r = to_int(raw)
+    } catch e {}   // @allow-silent-catch
+    return r
+}
+
+// ─── mtime (BSD/GNU 양립) ───
+fn _mtime_of(path: string) -> i64 {
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec("stat -c '%Y' '" + path + "' 2>/dev/null || stat -f '%m' '" + path + "' 2>/dev/null")).trim()  // @allow-bare-exec
+        r = to_int(raw)
+    } catch e {}   // @allow-silent-catch
+    return r
+}
+
+// ═══════════════════════════════════════════════════════════
+//  stage 1 — bloom check (SSOT: atlas_bloom.hexa:620 _check_awk)
+//  입력:  prefix (1 token)
+//  출력:  true = "maybe present" (계속 진행), false = "definitely absent"
+//  실패(bloom 없음/meta 부실) 시 conservative true.
+// ═══════════════════════════════════════════════════════════
+fn _write_bloom_awk() -> bool {
+    // SSOT: atlas_bloom.hexa:620 _check_awk(1). 동일 hash(FNV-1 + djb2 double).
+    let mut p: [string] = []
+    p.push("BEGIN{ ")
+    p.push("  cmd = \"cat \" META; mj = \"\"; while ((cmd | getline l) > 0) mj = mj l; close(cmd); ")
+    p.push("  M = 0; K = 0; ")
+    p.push("  if (match(mj, /\"bit_count\":[0-9]+/)) { s=substr(mj,RSTART,RLENGTH); sub(/\"bit_count\":/,\"\",s); M=s+0 } ")
+    p.push("  if (match(mj, /\"hash_count\":[0-9]+/)) { s=substr(mj,RSTART,RLENGTH); sub(/\"hash_count\":/,\"\",s); K=s+0 } ")
+    p.push("  if (M==0 || K==0) { print \"atlas_query: bloom meta invalid\" > \"/dev/stderr\"; exit 1 } ")
+    p.push("  hx[\"0\"]=0; hx[\"1\"]=1; hx[\"2\"]=2; hx[\"3\"]=3; hx[\"4\"]=4; ")
+    p.push("  hx[\"5\"]=5; hx[\"6\"]=6; hx[\"7\"]=7; hx[\"8\"]=8; hx[\"9\"]=9; ")
+    p.push("  hx[\"a\"]=10; hx[\"b\"]=11; hx[\"c\"]=12; hx[\"d\"]=13; hx[\"e\"]=14; hx[\"f\"]=15; ")
+    p.push("  hx[\"A\"]=10; hx[\"B\"]=11; hx[\"C\"]=12; hx[\"D\"]=13; hx[\"E\"]=14; hx[\"F\"]=15; ")
+    p.push("  cmd2 = \"xxd -p -c 1 -s 76 \" BLOOM; ")
+    p.push("  b = 0; while ((cmd2 | getline h) > 0) { ")
+    p.push("    c1 = substr(h,1,1); c2 = substr(h,2,1); byte[b] = hx[c1]*16 + hx[c2]; b++ } close(cmd2); ")
+    p.push("  for (i=0;i<8;i++) bit2[i]=2^i; ")
+    p.push("  for (i=0;i<256;i++) { c=sprintf(\"%c\",i); ord[c]=i } ")
+    p.push("} ")
+    p.push("function fnv1(s,   i,h,n){ h=2166136261; n=length(s); ")
+    p.push("  for(i=1;i<=n;i++){ h=((h+ord[substr(s,i,1)])*16777619)%4294967296 } return h } ")
+    p.push("function djb2(s,   i,h,n){ h=5381; n=length(s); ")
+    p.push("  for(i=1;i<=n;i++){ h=(h*33+ord[substr(s,i,1)])%4294967296 } return h } ")
+    p.push("function bcheck(s,   h1,h2,i,idx,bo,bi,cur,bit,has){ h1=fnv1(s); h2=djb2(s); ")
+    p.push("  if(h2==0) h2=1; ")
+    p.push("  for(i=0;i<K;i++){ idx=(h1+i*h2)%M; if(idx<0) idx+=M; ")
+    p.push("    bo=int(idx/8); bi=idx%8; cur=byte[bo]; bit=bit2[bi]; ")
+    p.push("    has=int(cur/bit)%2; if(has==0) return 0 } return 1 } ")
+    p.push("{ t=$0; sub(/[\\r\\n]+$/,\"\",t); if(t==\"\") next; printf \"%s\\t%d\\n\", t, bcheck(t) }")
+    let src = p.join("")
+    let mut ok = true
+    try { write_file(_BLOOM_AWK_PATH, src) } catch e { ok = false }   // @allow-silent-catch
+    return ok
+}
+
+fn _bloom_maybe(prefix: string) -> bool {
+    if !file_exists(_BLOOM_PATH) { return true }       // no bloom → conservative allow
+    if !file_exists(_BLOOM_META_PATH) { return true }
+    if !_write_bloom_awk() { return true }
+    let probe = "/tmp/atlas_query_probe.tmp"
+    try { write_file(probe, prefix + "\n") } catch e { return true }   // @allow-silent-catch
+    let mut out = ""
+    try {
+        out = to_string(exec("awk -v BLOOM='" + _BLOOM_PATH + "' -v META='" + _BLOOM_META_PATH
+            + "' -f '" + _BLOOM_AWK_PATH + "' '" + probe + "' 2>/dev/null")).trim()   // @allow-bare-exec
+    } catch e { return true }   // @allow-silent-catch
+    if out.index_of("\t0") > -1 { return false }
+    return true
+}
+
+// ═══════════════════════════════════════════════════════════
+//  stage 2 — predict warm cache hit
+//  atlas_predict_cache 가 경로 _PREDICT_WARM_DIR 에 prefix 별 warm 파일 기록.
+//  mtime 이 _PREDICT_FRESH_SEC 이내면 그대로 소비 (awk 회피).
+// ═══════════════════════════════════════════════════════════
+fn _predict_warm_lines(prefix: string) -> [string] {
+    let mut out: [string] = []
+    let wp = _PREDICT_WARM_DIR + "/" + prefix + ".txt"
+    if !file_exists(wp) { return out }
+    let now_s = _ns_now() / 1000000000
+    let wt = _mtime_of(wp)
+    if wt == 0 || now_s - wt > _PREDICT_FRESH_SEC { return out }
+    let mut raw = ""
+    try { raw = read_file(wp) } catch e { return out }   // @allow-silent-catch
+    let lines = raw.split("\n")
+    let nl = len(lines)
+    let mut j: i64 = 0
+    while j < nl {
+        let ln = lines[j]
+        if ln != "" { out.push(ln) }
+        j = j + 1
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+//  stage 3 — cold mmap lookup (SSOT: atlas_mmap.hexa:106 mmap_lookup_by_prefix)
+// ═══════════════════════════════════════════════════════════
+fn _bucket_csv(prefix: string) -> string {
+    if !file_exists(_BUCKET_IDX_PATH) {
+        try { let _ = exec("hexa run shared/n6/atlas_scan_opt.hexa build >/dev/null 2>&1") } catch e {}   // @allow-silent-catch @allow-bare-exec
+    }
+    if !file_exists(_BUCKET_IDX_PATH) { return "" }
+    let raw = read_file(_BUCKET_IDX_PATH)
+    let marker = "\"" + prefix + "\":["
+    let bstart = raw.index_of(marker)
+    if bstart < 0 { return "" }
+    let after = raw.substring(bstart + len(marker), len(raw))
+    let close = after.index_of("]")
+    if close < 0 { return "" }
+    return after.substring(0, close).trim()
+}
+
+fn _cold_lookup(prefix: string) -> [string] {
+    let mut out: [string] = []
+    let csv = _bucket_csv(prefix)
+    if csv == "" { return out }
+    let parts_nl = csv.replace(",", "\n")
+    try { write_file(_QUERY_SET_PATH, parts_nl + "\n") } catch e { return out }   // @allow-silent-catch
+    let awk_src = "NR==FNR{S[$1+1]=1;next} (FNR in S){print $0}"
+    let mut raw = ""
+    try {
+        raw = to_string(exec("awk '" + awk_src + "' '" + _QUERY_SET_PATH + "' '" + _ATLAS_PATH + "' 2>/dev/null"))   // @allow-bare-exec
+    } catch e { return out }   // @allow-silent-catch
+    if raw == "" { return out }
+    let lines = raw.split("\n")
+    let nl = len(lines)
+    let mut j: i64 = 0
+    while j < nl {
+        let ln = lines[j]
+        if ln != "" { out.push(ln) }
+        j = j + 1
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+//  END-TO-END query(prefix) — 3-stage composition
+//    returns: (lines, stage, duration_us_total)
+//  emits NEXUS_ATLAS_QUERY NDJSON on stderr.
+// ═══════════════════════════════════════════════════════════
+fn query(prefix: string) -> [string] {
+    let t0 = _ns_now()
+
+    // stage 1 — bloom
+    let t_b0 = _ns_now()
+    let maybe = _bloom_maybe(prefix)
+    let t_b1 = _ns_now()
+    if !maybe {
+        let tot = (t_b1 - t0) / 1000
+        let mut meta: [string] = []
+        meta.push("NEXUS_ATLAS_QUERY {\"prefix\":\"")
+        meta.push(prefix)
+        meta.push("\",\"stage\":\"bloom_reject\",\"matches\":0,\"duration_us\":")
+        meta.push(to_string(tot))
+        meta.push("}")
+        eprintln(meta.join(""))
+        return []
+    }
+
+    // stage 2 — predict warm
+    let t_p0 = _ns_now()
+    let warm = _predict_warm_lines(prefix)
+    let t_p1 = _ns_now()
+    if len(warm) > 0 {
+        let tot = (t_p1 - t0) / 1000
+        let mut meta: [string] = []
+        meta.push("NEXUS_ATLAS_QUERY {\"prefix\":\"")
+        meta.push(prefix)
+        meta.push("\",\"stage\":\"predict_warm\",\"matches\":")
+        meta.push(to_string(len(warm)))
+        meta.push(",\"duration_us\":")
+        meta.push(to_string(tot))
+        meta.push("}")
+        eprintln(meta.join(""))
+        return warm
+    }
+
+    // stage 3 — cold mmap
+    let t_c0 = _ns_now()
+    let cold = _cold_lookup(prefix)
+    let t_c1 = _ns_now()
+    let tot = (t_c1 - t0) / 1000
+    let mut meta: [string] = []
+    meta.push("NEXUS_ATLAS_QUERY {\"prefix\":\"")
+    meta.push(prefix)
+    meta.push("\",\"stage\":\"cold_mmap\",\"matches\":")
+    meta.push(to_string(len(cold)))
+    meta.push(",\"duration_us\":")
+    meta.push(to_string(tot))
+    meta.push(",\"breakdown_us\":{\"bloom\":")
+    meta.push(to_string((t_b1 - t_b0) / 1000))
+    meta.push(",\"predict\":")
+    meta.push(to_string((t_p1 - t_p0) / 1000))
+    meta.push(",\"cold\":")
+    meta.push(to_string((t_c1 - t_c0) / 1000))
+    meta.push("}}")
+    eprintln(meta.join(""))
+    return cold
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CLI
+// ═══════════════════════════════════════════════════════════
+let a = args()
+let mut cmd = "query"
+if len(a) > 2 { cmd = a[2] }
+
+if cmd == "query" {
+    if len(a) < 4 {
+        println("usage: hexa run shared/n6/atlas_query.hexa query <prefix>")
+        exit(1)   // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let lines = query(prefix)
+    let n = len(lines)
+    let mut i: i64 = 0
+    while i < n {
+        println(lines[i])
+        i = i + 1
+    }
+    exit(0)
+} else if cmd == "bench" {
+    if len(a) < 5 {
+        println("usage: hexa run shared/n6/atlas_query.hexa bench <prefix> <N>")
+        exit(1)   // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let mut nr: i64 = 0
+    try { nr = to_int(a[4]) } catch e {}   // @allow-silent-catch
+    if nr < 1 { nr = 1 }
+    let t0 = _ns_now()
+    let mut matches_last: i64 = 0
+    let mut k: i64 = 0
+    while k < nr {
+        let ls = query(prefix)
+        matches_last = len(ls)
+        k = k + 1
+    }
+    let t1 = _ns_now()
+    let total_us = (t1 - t0) / 1000
+    let avg_us = total_us / nr
+    println("atlas_query: bench prefix=" + prefix
+        + " N=" + to_string(nr)
+        + " matches=" + to_string(matches_last)
+        + " total_us=" + to_string(total_us)
+        + " avg_us=" + to_string(avg_us))
+    exit(0)
+} else {
+    println("usage: hexa run shared/n6/atlas_query.hexa {query <prefix>|bench <prefix> <N>}")
+    exit(1)   // @allow-silent-exit
+}
