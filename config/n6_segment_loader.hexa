@@ -1,0 +1,192 @@
+// ═══════════════════════════════════════════════════════════
+// n6_segment_loader.hexa — SSOT loader for n6 segment tuning
+//
+// SSOT: shared/config/n6_segment.json
+// Consumers: shared/n6/atlas_scan_opt.hexa (향후), cli/blowup/* (향후)
+//
+// 사용:
+//   hexa shared/config/n6_segment_loader.hexa echo    — 모든 필드 출력 (smoke)
+//   hexa shared/config/n6_segment_loader.hexa get block_size   — 단일 필드
+//
+// 설계 원칙:
+//   · Stage1 hexa 친화 JSON parser (atlas_scan_opt _json_int_g 스타일)
+//   · void coerce 회피 — map 반환 대신 parallel arrays
+//   · string 비교 == 만 사용 (>=/<= 금지 규칙)
+// ═══════════════════════════════════════════════════════════
+
+let _CFG_PATH = "shared/config/n6_segment.json"
+
+// ─── helper: nested-key int extractor ───
+// find "<section>": { ... "<key>": { ... "value": <v> ... } ... }
+// 본 SSOT 는 단일 파일 단순 중첩이므로 marker 기반 검색으로 충분.
+// NOTE: 'scope' 는 hexa 예약어 → parameter 이름 'section' 사용.
+fn _scoped_int(raw: string, section: string, key: string) -> i64 {
+    let sec_marker = "\"" + section + "\":"
+    let si = raw.index_of(sec_marker)
+    if si < 0 { return -1 }
+    // section body starts at '{' after marker
+    let after_sec = raw.substring(si + len(sec_marker), len(raw))
+    let brace_open = after_sec.index_of("{")
+    if brace_open < 0 { return -1 }
+    // crude brace-match: find matching "}" by depth counter
+    let body_start = brace_open + 1
+    let n = len(after_sec)
+    let mut depth: i64 = 1
+    let mut i: i64 = body_start
+    let mut body_end: i64 = -1
+    while i < n {
+        let c = after_sec.substring(i, i + 1)
+        if c == "{" { depth = depth + 1 }
+        else if c == "}" {
+            depth = depth - 1
+            if depth == 0 { body_end = i; i = n }
+        }
+        i = i + 1
+    }
+    if body_end < 0 { return -1 }
+    let body = after_sec.substring(body_start, body_end)
+    // within body, find "<key>": { ... "value": <v> ... }
+    let key_marker = "\"" + key + "\":"
+    let ki = body.index_of(key_marker)
+    if ki < 0 { return -1 }
+    let after_key = body.substring(ki + len(key_marker), len(body))
+    // open '{' for key's object
+    let ko = after_key.index_of("{")
+    if ko < 0 { return -1 }
+    // scan for "value":<int> until matching '}'
+    let val_marker = "\"value\":"
+    let vi = after_key.index_of(val_marker)
+    if vi < 0 { return -1 }
+    let after_val = after_key.substring(vi + len(val_marker), len(after_key))
+    // terminate at , or }
+    let mut end = after_val.index_of(",")
+    let end2 = after_val.index_of("}")
+    if end < 0 { end = end2 }
+    else if end2 > -1 && end2 < end { end = end2 }
+    if end < 1 { return -1 }
+    // v_str 은 " <num>" or " \"str\"" 형태. trim 후 숫자만 처리.
+    let v_str = after_val.substring(0, end).trim()
+    if v_str == "" { return -1 }
+    // string value 면 quote 시작 → -1 반환 (int 필드 아님)
+    if v_str.substring(0, 1) == "\"" { return -1 }
+    let mut v: i64 = -1
+    try { v = to_int(v_str) } catch e {}  // @allow-silent-catch
+    return v
+}
+
+fn _scoped_str(raw: string, section: string, key: string) -> string {
+    let sec_marker = "\"" + section + "\":"
+    let si = raw.index_of(sec_marker)
+    if si < 0 { return "" }
+    let after_sec = raw.substring(si + len(sec_marker), len(raw))
+    let brace_open = after_sec.index_of("{")
+    if brace_open < 0 { return "" }
+    let body_start = brace_open + 1
+    let n = len(after_sec)
+    let mut depth: i64 = 1
+    let mut i: i64 = body_start
+    let mut body_end: i64 = -1
+    while i < n {
+        let c = after_sec.substring(i, i + 1)
+        if c == "{" { depth = depth + 1 }
+        else if c == "}" {
+            depth = depth - 1
+            if depth == 0 { body_end = i; i = n }
+        }
+        i = i + 1
+    }
+    if body_end < 0 { return "" }
+    let body = after_sec.substring(body_start, body_end)
+    let key_marker = "\"" + key + "\":"
+    let ki = body.index_of(key_marker)
+    if ki < 0 { return "" }
+    let after_key = body.substring(ki + len(key_marker), len(body))
+    // "value": "<str>" — tolerate whitespace between colon and quote.
+    let val_marker = "\"value\":"
+    let vi = after_key.index_of(val_marker)
+    if vi < 0 { return "" }
+    let post = after_key.substring(vi + len(val_marker), len(after_key))
+    let q1 = post.index_of("\"")
+    if q1 < 0 { return "" }
+    // comma/close before quote → int value, not string
+    let c_stop = post.index_of(",")
+    if c_stop > -1 && c_stop < q1 { return "" }
+    let after_q = post.substring(q1 + 1, len(post))
+    let q2 = after_q.index_of("\"")
+    if q2 < 0 { return "" }
+    return after_q.substring(0, q2)
+}
+
+// ─── top-level API: load + accessors ───
+// 반환: parallel arrays (keys/ints/strs). hexa map iter 제약 회피.
+fn _read_raw() -> string {
+    if !file_exists(_CFG_PATH) {
+        eprintln("n6_segment_loader: config not found: " + _CFG_PATH)
+        return ""
+    }
+    let mut raw = ""
+    try { raw = read_file(_CFG_PATH) } catch e {
+        eprintln("n6_segment_loader: read failed")
+        return ""
+    }
+    return raw
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CLI: echo | get <field>
+// ═══════════════════════════════════════════════════════════
+let a = args()
+let mut cmd = "echo"
+if len(a) > 2 { cmd = a[2] }
+
+let raw = _read_raw()
+if raw == "" { exit(1) }
+
+// 6 필드 + ancillary
+let block_size      = _scoped_int(raw, "segment", "block_size")
+let stride          = _scoped_int(raw, "segment", "stride")
+let compress_codec  = _scoped_str(raw, "segment", "compress_codec")
+let bucket_prefix   = _scoped_int(raw, "bucket",  "prefix_len")
+let scan_window     = _scoped_int(raw, "scan",    "scan_window")
+let evict_threshold = _scoped_int(raw, "evict",   "evict_threshold")
+// meta
+let expected_prefixes = _scoped_int(raw, "bucket", "expected_prefixes")
+let expected_entries  = _scoped_int(raw, "bucket", "expected_entries")
+let build_budget      = _scoped_int(raw, "bucket", "build_budget_ms")
+let hub_threshold     = _scoped_int(raw, "evict",  "hub_threshold")
+
+if cmd == "echo" {
+    println("n6_segment_loader: SSOT = " + _CFG_PATH)
+    println("  block_size       : " + to_string(block_size))
+    println("  stride           : " + to_string(stride))
+    println("  compress_codec   : " + compress_codec)
+    println("  bucket_prefix_len: " + to_string(bucket_prefix))
+    println("  scan_window      : " + to_string(scan_window))
+    println("  evict_threshold  : " + to_string(evict_threshold))
+    println("  (meta) expected_prefixes : " + to_string(expected_prefixes))
+    println("  (meta) expected_entries  : " + to_string(expected_entries))
+    println("  (meta) build_budget_ms   : " + to_string(build_budget))
+    println("  (meta) hub_threshold     : " + to_string(hub_threshold))
+    exit(0)
+} else if cmd == "get" {
+    if len(a) < 4 {
+        println("usage: hexa n6_segment_loader.hexa get <field>")
+        exit(1)  // @allow-silent-exit
+    }
+    let f = a[3]
+    if f == "block_size"        { println(to_string(block_size));      exit(0) }
+    if f == "stride"            { println(to_string(stride));          exit(0) }
+    if f == "compress_codec"    { println(compress_codec);             exit(0) }
+    if f == "bucket_prefix_len" { println(to_string(bucket_prefix));   exit(0) }
+    if f == "scan_window"       { println(to_string(scan_window));     exit(0) }
+    if f == "evict_threshold"   { println(to_string(evict_threshold)); exit(0) }
+    if f == "expected_prefixes" { println(to_string(expected_prefixes)); exit(0) }
+    if f == "expected_entries"  { println(to_string(expected_entries));  exit(0) }
+    if f == "build_budget_ms"   { println(to_string(build_budget));      exit(0) }
+    if f == "hub_threshold"     { println(to_string(hub_threshold));     exit(0) }
+    println("n6_segment_loader: unknown field: " + f)
+    exit(1)  // @allow-silent-exit
+} else {
+    println("usage: hexa n6_segment_loader.hexa {echo|get <field>}")
+    exit(1)  // @allow-silent-exit
+}
