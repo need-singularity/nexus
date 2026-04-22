@@ -222,18 +222,20 @@ REMOTE_TRAP="trap 'rc=\$?; pkill -P \$\$ -f hexa_stage0 2>/dev/null; pkill -P \$
 # run.hexa 의 hexa_bin() 는 env("HEXA") 를 최우선 — 명시 export 시 모든 inner stage 가 hexa_real 로 통일.
 # 2026-04-22 (L14): stage0/hexa_real 을 systemd-run --scope cgroup 으로 wrap — MemoryMax=8G cap.
 # ubu1+ubu2 동시 OOM 사고(ubu1 stage0 7.6GB RSS / ubu2 hexa_real 30GB RSS → 호스트 전역 OOM-kill)
-# 원인: per-process RAM cap 부재. stage 단위 cgroup MemoryMax=12G / MemoryHigh=10G / TasksMax=512.
-# (L7 사고 ubu1 stage0 RSS 7.6GB 관찰 — 정상 범위 6-10G. cap 12G 는 단일 stage 여유 + 동시 2 stage OS 6G.)
+# 원인: per-process RAM cap 부재. stage 단위 cgroup MemoryMax=20G / MemoryHigh=16G / TasksMax=512.
+# (L7 사고 ubu1 stage0 RSS 7.6GB 관찰 — 정상 범위 6-10G. 20G 는 피크 RSS 대비 2.6× 여유라 reclaim
+#  안 발동 → NO_CAP baseline 과 bit-identical perf 유지, 30GB 점유 OOM 은 여전히 차단. L20 참조.
+#  초기 12G cap 은 MemoryHigh=10G reclaim stress 로 smash +917 → +21 로 44× perf 저하 관찰 후 bump.)
 # htz(root) 는 system scope, ubu1/ubu2(유저) 는 --user scope + XDG_RUNTIME_DIR 필수
 # (ssh non-interactive 세션에서 DBUS 소켓 경로 누락 시 systemd-run --user 가 silent fail).
 # systemd-run 미설치 또는 XDG_RUNTIME_DIR dir 부재 시 bare exec.
 # Override: HEXA_REMOTE_NO_CAP=1 (debug 전용).
 if [ "$HOST" = "hetzner" ] || [ "$HOST" = "htz" ]; then
     _SD_CHECK='command -v systemd-run >/dev/null 2>&1'
-    _SD_WRAP='systemd-run --scope --quiet -p MemoryMax=12G -p MemoryHigh=10G -p TasksMax=512 --'
+    _SD_WRAP='systemd-run --scope --quiet -p MemoryMax=20G -p MemoryHigh=16G -p TasksMax=512 --'
 else
     _SD_CHECK='command -v systemd-run >/dev/null 2>&1 && [ -d "/run/user/$(id -u)" ]'
-    _SD_WRAP='export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemd-run --user --scope --quiet -p MemoryMax=12G -p MemoryHigh=10G -p TasksMax=512 --'
+    _SD_WRAP='export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemd-run --user --scope --quiet -p MemoryMax=20G -p MemoryHigh=16G -p TasksMax=512 --'
 fi
 _ARG_QUOTED="$(quote_args "$@")"
 if [ "${HEXA_REMOTE_NO_CAP:-0}" = "1" ]; then

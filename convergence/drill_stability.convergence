@@ -392,3 +392,11 @@
 @rationale host alias 일관성. airgenome offload 가 ubu1 alias 이미 수용해서 런타임 안전. ssh config `Host ubu ubu1` permissive 라 legacy 호출자도 무중단.
 @files ["multi-file — see agent rename report"]
 @test_status ran (drill L15 smoke 통과로 end-to-end consistency 검증)
+
+@ts 2026-04-22T20:10:00Z
+@id L20_MEMORY_CAP_BUMP_20G_BASED_ON_PERF_DATA
+@state ossified
+@value scripts/bin/hexa_remote — MemoryMax=12G/MemoryHigh=10G → MemoryMax=20G/MemoryHigh=16G. 실측 결과: 12G 에선 smash +21 (baseline 2.3%) 로 reclaim stress 로 인한 44× 성능 저하, 20G 에선 smash +917 (NO_CAP baseline 동일, verdict=PASS). stage0 실제 peak RSS 7.6GB (L7 관찰) 대비 20G 는 2.6× 여유 — reclaim 발동 안 함. 30GB 호스트 기준 여전히 OS+runaway 10GB 여유 + L7 같은 30GB 단독 점유 OOM 은 확실 차단.
+@rationale L14 cap 설계는 안전 우선으로 8G→12G 였으나, 실운영 데이터 (L15 smoke 3-way 비교) 가 12G 의 MemoryHigh=10G reclaim cost 를 44× perf loss 로 드러냄. 20G/16G 는 "OOM 방지 + 정상 성능" 교차점. HEXA_REMOTE_NO_CAP=1 override 는 여전히 debug 경로로 유지.
+@files ["scripts/bin/hexa_remote"]
+@test_status ran (20G cap drill → smash +917 total 1834 verdict=PASS, NO_CAP baseline 과 bit-identical)
