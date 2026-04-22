@@ -1,0 +1,827 @@
+// ═══════════════════════════════════════════════════════════
+// atlas_predict_cache.hexa — Markov predictive bucket prefetch (opt-in)
+//
+// 배경:
+//   AL agent (hot-shard) 는 reactive — access 관찰 후 promote.
+//   본 AV (predictive) 는 proactive — 최근 access pattern 으로 next bucket 예측,
+//   background prefetch 로 다음 query wall-latency 를 단축.
+//
+// 설계:
+//   · access sequence: 최근 N=50 bucket_id trail → /tmp/atlas_predict_access.log
+//   · 1차 Markov: transitions[A][B] = count(A→B). 확률 = count / sum_over_B(count).
+//   · prefetch: top-K=3 전이 확률 bucket 을 background (&) 로 warm 파일 적재.
+//   · warm store: /tmp/atlas_predict_warm/<prefix>.lines (scan_by_prefix 결과 캐시)
+//   · hit = 다음 lookup 이 warm 히트, miss = 예측 안했거나 다른 bucket 접근.
+//   · 적중률 < 20% 지속 (최소 20 sample) → self-disable (/tmp/atlas_predict_disabled).
+//   · atlas.n6 은 read-only. state 는 모두 /tmp.
+//
+// 사용:
+//   hexa shared/n6/atlas_predict_cache.hexa lookup <prefix>     — observe + hit/miss + prefetch
+//   hexa shared/n6/atlas_predict_cache.hexa observe <prefix>    — trail 에만 기록 (no prefetch)
+//   hexa shared/n6/atlas_predict_cache.hexa predict <prefix>    — top-K 예측 출력
+//   hexa shared/n6/atlas_predict_cache.hexa prefetch <prefix>   — warm (blocking)
+//   hexa shared/n6/atlas_predict_cache.hexa drill <csv>         — ex. "math,physics,math" 시퀀스 drill
+//   hexa shared/n6/atlas_predict_cache.hexa stats               — hit_rate / disabled / markov snapshot
+//   hexa shared/n6/atlas_predict_cache.hexa reset               — 모든 state 초기화
+//
+// 편집 금지: atlas.n6 본체, atlas_scan_opt.hexa (본 파일은 sibling util)
+// 규칙: hexa `>=` / `<=` 금지 — 본 파일에서는 < / > 만 사용
+// ═══════════════════════════════════════════════════════════
+
+let _ATLAS_PATH       = "shared/n6/atlas.n6"
+let _BUCKET_IDX_PATH  = "/tmp/atlas_bucket_idx.json"
+let _TRAIL_PATH       = "/tmp/atlas_predict_access.log"
+let _MARKOV_PATH      = "/tmp/atlas_predict_markov.json"
+let _STATS_PATH       = "/tmp/atlas_predict_stats.json"
+let _DISABLE_FLAG     = "/tmp/atlas_predict_disabled"
+let _WARM_DIR         = "/tmp/atlas_predict_warm"
+
+let _TRAIL_WINDOW: i64 = 50       // 최근 N lookup
+let _TOPK: i64         = 3         // prefetch 상위 K 전이
+let _MIN_SAMPLES: i64  = 20        // self-disable 평가 최소 샘플
+let _MIN_HIT_PCT: i64  = 20        // self-disable 임계 (%)
+
+// ─── ms clock ───
+fn _ns_now() -> i64 {
+    let mut r: i64 = 0
+    try {
+        let raw = to_string(exec("date +%s%N")).trim()  // @allow-bare-exec
+        r = to_int(raw)
+    } catch e {}  // @allow-silent-catch
+    return r
+}
+
+// ─── JSON int getter (flat scope) ───
+fn _json_int_flat(raw: string, key: string) -> i64 {
+    let mut v: i64 = 0
+    let marker = "\"" + key + "\":"
+    let idx = raw.index_of(marker)
+    if idx > -1 {
+        let after = raw.substring(idx + len(marker), len(raw))
+        let mut end = after.index_of(",")
+        let end2 = after.index_of("}")
+        if end < 0 { end = end2 }
+        else if end2 > -1 && end2 < end { end = end2 }
+        if end > 0 {
+            try { v = to_int(after.substring(0, end).trim()) } catch e {}  // @allow-silent-catch
+        }
+    }
+    return v
+}
+
+// ─── trail append (bounded N) ───
+fn _trail_append(prefix: string) {
+    try {
+        append_file(_TRAIL_PATH, prefix + "\n")
+    } catch e {}  // @allow-silent-catch
+    // bound: keep last _TRAIL_WINDOW lines only
+    try {
+        let raw = read_file(_TRAIL_PATH)
+        let lines = raw.split("\n")
+        let n = len(lines)
+        // drop trailing empty from split
+        let mut real_n = n
+        if n > 0 {
+            if lines[n - 1] == "" { real_n = n - 1 }
+        }
+        if real_n > _TRAIL_WINDOW {
+            let start = real_n - _TRAIL_WINDOW
+            let mut parts: [string] = []
+            let mut i: i64 = start
+            while i < real_n {
+                parts.push(lines[i])
+                i = i + 1
+            }
+            parts.push("")
+            try { write_file(_TRAIL_PATH, parts.join("\n")) } catch e {}  // @allow-silent-catch
+        }
+    } catch e {}  // @allow-silent-catch
+}
+
+// ─── trail read → [string] (most recent last) ───
+fn _trail_read() -> [string] {
+    let mut out: [string] = []
+    if !file_exists(_TRAIL_PATH) { return out }
+    let mut raw = ""
+    try { raw = read_file(_TRAIL_PATH) } catch e { return out }  // @allow-silent-catch
+    let lines = raw.split("\n")
+    let n = len(lines)
+    let mut i: i64 = 0
+    while i < n {
+        let t = lines[i].trim()
+        if t != "" { out.push(t) }
+        i = i + 1
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Markov table (1차)
+//
+//  Storage (parallel arrays, JSON):
+//    { "froms": [A, A, B], "tos": [B, C, A], "counts": [3, 1, 2], "updated": <ns> }
+//  1차 전이만 저장. 2차 확장은 future (froms → "A|B" 형식).
+// ═══════════════════════════════════════════════════════════
+fn _markov_load() -> [string] {
+    // returns parallel arrays flattened as [from0, to0, count0_str, from1, ...]
+    let mut out: [string] = []
+    if !file_exists(_MARKOV_PATH) { return out }
+    let mut raw = ""
+    try { raw = read_file(_MARKOV_PATH) } catch e { return out }  // @allow-silent-catch
+    raw = raw.trim()
+    if raw == "" { return out }
+    // Parse 3 parallel CSV arrays: "froms":[...], "tos":[...], "counts":[...]
+    let mut froms_csv = ""
+    let mut tos_csv   = ""
+    let mut cnts_csv  = ""
+    let fm = "\"froms\":["
+    let tm = "\"tos\":["
+    let cm = "\"counts\":["
+    let fi = raw.index_of(fm)
+    let ti = raw.index_of(tm)
+    let ci = raw.index_of(cm)
+    if fi > -1 {
+        let after = raw.substring(fi + len(fm), len(raw))
+        let e = after.index_of("]")
+        if e > -1 { froms_csv = after.substring(0, e) }
+    }
+    if ti > -1 {
+        let after = raw.substring(ti + len(tm), len(raw))
+        let e = after.index_of("]")
+        if e > -1 { tos_csv = after.substring(0, e) }
+    }
+    if ci > -1 {
+        let after = raw.substring(ci + len(cm), len(raw))
+        let e = after.index_of("]")
+        if e > -1 { cnts_csv = after.substring(0, e) }
+    }
+    // parse quoted CSV for froms/tos, numeric CSV for counts
+    let fparts = froms_csv.split(",")
+    let tparts = tos_csv.split(",")
+    let cparts = cnts_csv.split(",")
+    let n = len(fparts)
+    let mut i: i64 = 0
+    while i < n {
+        let fraw = fparts[i].trim()
+        let mut traw = ""
+        if i < len(tparts) { traw = tparts[i].trim() }
+        let mut craw = "0"
+        if i < len(cparts) { craw = cparts[i].trim() }
+        if fraw != "" && traw != "" {
+            // strip surrounding quotes if present
+            let mut fv = fraw
+            let mut tv = traw
+            if len(fv) > 1 {
+                if fv.substring(0, 1) == "\"" { fv = fv.substring(1, len(fv) - 1) }
+            }
+            if len(tv) > 1 {
+                if tv.substring(0, 1) == "\"" { tv = tv.substring(1, len(tv) - 1) }
+            }
+            out.push(fv)
+            out.push(tv)
+            out.push(craw)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn _markov_save(flat: [string]) {
+    // flat = [from, to, cnt, from, to, cnt, ...]
+    let n = len(flat)
+    let mut parts: [string] = []
+    parts.push("{\"froms\":[")
+    let mut fi: i64 = 0
+    let mut first = true
+    while fi < n {
+        if first { first = false } else { parts.push(",") }
+        parts.push("\"")
+        parts.push(flat[fi])
+        parts.push("\"")
+        fi = fi + 3
+    }
+    parts.push("],\"tos\":[")
+    let mut ti: i64 = 1
+    first = true
+    while ti < n {
+        if first { first = false } else { parts.push(",") }
+        parts.push("\"")
+        parts.push(flat[ti])
+        parts.push("\"")
+        ti = ti + 3
+    }
+    parts.push("],\"counts\":[")
+    let mut ci: i64 = 2
+    first = true
+    while ci < n {
+        if first { first = false } else { parts.push(",") }
+        parts.push(flat[ci])
+        ci = ci + 3
+    }
+    parts.push("],\"updated\":")
+    parts.push(to_string(_ns_now()))
+    parts.push(",\"schema\":1}\n")
+    try { write_file(_MARKOV_PATH, parts.join("")) } catch e {}  // @allow-silent-catch
+}
+
+// ─── transition bump: count(from → to) += 1 ───
+fn _markov_bump(from_b: string, to_b: string) {
+    if from_b == "" { return }
+    if to_b == "" { return }
+    let mut flat = _markov_load()
+    let n = len(flat)
+    let mut i: i64 = 0
+    let mut found = false
+    while i < n {
+        if flat[i] == from_b && flat[i + 1] == to_b {
+            let mut c: i64 = 0
+            try { c = to_int(flat[i + 2]) } catch e {}  // @allow-silent-catch
+            flat[i + 2] = to_string(c + 1)
+            found = true
+            i = n
+        } else {
+            i = i + 3
+        }
+    }
+    if !found {
+        flat.push(from_b)
+        flat.push(to_b)
+        flat.push("1")
+    }
+    _markov_save(flat)
+}
+
+// ─── rebuild Markov from current trail (fresh view) ───
+fn _markov_rebuild_from_trail() {
+    let trail = _trail_read()
+    let n = len(trail)
+    if n < 2 {
+        // wipe
+        _markov_save([])
+        return
+    }
+    // parallel arrays within this call
+    let mut flat: [string] = []
+    let mut i: i64 = 0
+    while i < n - 1 {
+        let a = trail[i]
+        let b = trail[i + 1]
+        if a != "" && b != "" {
+            let m = len(flat)
+            let mut j: i64 = 0
+            let mut found = false
+            while j < m {
+                if flat[j] == a && flat[j + 1] == b {
+                    let mut c: i64 = 0
+                    try { c = to_int(flat[j + 2]) } catch e {}  // @allow-silent-catch
+                    flat[j + 2] = to_string(c + 1)
+                    found = true
+                    j = m
+                } else {
+                    j = j + 3
+                }
+            }
+            if !found {
+                flat.push(a)
+                flat.push(b)
+                flat.push("1")
+            }
+        }
+        i = i + 1
+    }
+    _markov_save(flat)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  predict(prefix) → top-K next buckets (descending P)
+//
+//  선택: 전이 확률 p = count / sum_count(from=prefix). 0 이면 pass.
+// ═══════════════════════════════════════════════════════════
+fn _predict_topk(from_b: string) -> [string] {
+    let mut out: [string] = []
+    if from_b == "" { return out }
+    let flat = _markov_load()
+    let n = len(flat)
+    // collect (to, cnt) where from == from_b
+    let mut tos: [string] = []
+    let mut cnts: [i64] = []
+    let mut total: i64 = 0
+    let mut i: i64 = 0
+    while i < n {
+        if flat[i] == from_b {
+            tos.push(flat[i + 1])
+            let mut c: i64 = 0
+            try { c = to_int(flat[i + 2]) } catch e {}  // @allow-silent-catch
+            cnts.push(c)
+            total = total + c
+        }
+        i = i + 3
+    }
+    if total < 1 { return out }
+    // sort desc by cnt (selection sort, small N)
+    let nn = len(tos)
+    let mut ii: i64 = 0
+    while ii < nn {
+        let mut best = ii
+        let mut jj: i64 = ii + 1
+        while jj < nn {
+            if cnts[jj] > cnts[best] { best = jj }
+            jj = jj + 1
+        }
+        if best != ii {
+            let ts = tos[ii]; tos[ii] = tos[best]; tos[best] = ts
+            let tc = cnts[ii]; cnts[ii] = cnts[best]; cnts[best] = tc
+        }
+        ii = ii + 1
+    }
+    let take = if nn < _TOPK { nn } else { _TOPK }
+    let mut k: i64 = 0
+    while k < take {
+        // emit "<bucket>|<prob_permille>" (정수 permille, hexa float 회피)
+        let p_permille = (cnts[k] * 1000) / total
+        out.push(tos[k] + "|" + to_string(p_permille))
+        k = k + 1
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+//  stats: hit / miss counters + disable flag
+// ═══════════════════════════════════════════════════════════
+fn _stats_load() -> [i64] {
+    // [hits, misses]
+    let mut out: [i64] = [0, 0]
+    if !file_exists(_STATS_PATH) { return out }
+    let mut raw = ""
+    try { raw = read_file(_STATS_PATH) } catch e { return out }  // @allow-silent-catch
+    raw = raw.trim()
+    if raw == "" { return out }
+    out[0] = _json_int_flat(raw, "hits")
+    out[1] = _json_int_flat(raw, "misses")
+    return out
+}
+
+fn _stats_save(hits: i64, misses: i64) {
+    let mut parts: [string] = []
+    parts.push("{\"hits\":")
+    parts.push(to_string(hits))
+    parts.push(",\"misses\":")
+    parts.push(to_string(misses))
+    parts.push(",\"updated\":")
+    parts.push(to_string(_ns_now()))
+    parts.push(",\"schema\":1}\n")
+    try { write_file(_STATS_PATH, parts.join("")) } catch e {}  // @allow-silent-catch
+}
+
+fn _maybe_self_disable(hits: i64, misses: i64) -> bool {
+    let total = hits + misses
+    if total < _MIN_SAMPLES { return false }
+    let hit_pct = (hits * 100) / total
+    if hit_pct < _MIN_HIT_PCT {
+        try { write_file(_DISABLE_FLAG, "auto-disabled hit_pct=" + to_string(hit_pct) + " samples=" + to_string(total) + "\n") } catch e {}  // @allow-silent-catch
+        return true
+    }
+    return false
+}
+
+fn _is_disabled() -> bool {
+    return file_exists(_DISABLE_FLAG)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  warm store — prefetched bucket content cache
+//
+//  경로: /tmp/atlas_predict_warm/<prefix>.lines
+//  내용: scan_by_prefix(atlas, prefix) 결과를 line-join 한 것.
+//  mtime: 파일 존재 = warm. atlas.n6 mtime 보다 오래되면 stale (재빌드).
+// ═══════════════════════════════════════════════════════════
+fn _ensure_warm_dir() {
+    try {
+        let _x = to_string(exec("mkdir -p '" + _WARM_DIR + "'"))
+    } catch e {}  // @allow-silent-catch
+}
+
+fn _warm_path(prefix: string) -> string {
+    return _WARM_DIR + "/" + prefix + ".lines"
+}
+
+fn _warm_is_fresh(prefix: string) -> bool {
+    let wp = _warm_path(prefix)
+    if !file_exists(wp) { return false }
+    // compare mtime: warm >= atlas ? using stat -c %Y only (Linux primary; macOS fallback done elsewhere).
+    let mut a_m: i64 = 0
+    let mut w_m: i64 = 0
+    try {
+        let ra = to_string(exec("stat -c %Y '" + _ATLAS_PATH + "' 2>/dev/null || stat -f %m '" + _ATLAS_PATH + "' 2>/dev/null")).trim()
+        // take last non-empty numeric token
+        let tk = ra.split("\n")
+        let mut i: i64 = len(tk) - 1
+        while i > -1 {
+            let t = tk[i].trim()
+            if t != "" {
+                try { a_m = to_int(t) } catch e {}  // @allow-silent-catch
+                if a_m > 0 { i = -1 } else { i = i - 1 }
+            } else { i = i - 1 }
+        }
+    } catch e {}  // @allow-silent-catch
+    try {
+        let rw = to_string(exec("stat -c %Y '" + wp + "' 2>/dev/null || stat -f %m '" + wp + "' 2>/dev/null")).trim()
+        let tk = rw.split("\n")
+        let mut i: i64 = len(tk) - 1
+        while i > -1 {
+            let t = tk[i].trim()
+            if t != "" {
+                try { w_m = to_int(t) } catch e {}  // @allow-silent-catch
+                if w_m > 0 { i = -1 } else { i = i - 1 }
+            } else { i = i - 1 }
+        }
+    } catch e {}  // @allow-silent-catch
+    if a_m == 0 { return false }
+    if w_m == 0 { return false }
+    // warm fresh iff warm.mtime > atlas.mtime - 1 (allow equal)
+    if w_m > a_m - 1 { return true }
+    return false
+}
+
+// ─── warm build: scan_by_prefix via bucket index JSON ───
+// 재구현 (atlas_scan_opt scan_by_prefix 의존 회피 — 독립 모듈).
+// bucket index (/tmp/atlas_bucket_idx.json) 활용, 없으면 fallback grep.
+fn _warm_build_blocking(prefix: string) -> i64 {
+    _ensure_warm_dir()
+    let wp = _warm_path(prefix)
+    let mut lines_written: i64 = 0
+    // fast path: bucket index JSON 에서 line indices 읽고 atlas.n6 full read 후 pick.
+    if file_exists(_BUCKET_IDX_PATH) {
+        let mut idx_raw = ""
+        try { idx_raw = read_file(_BUCKET_IDX_PATH) } catch e {}  // @allow-silent-catch
+        let marker = "\"" + prefix + "\":["
+        let bs = idx_raw.index_of(marker)
+        if bs > -1 {
+            let after = idx_raw.substring(bs + len(marker), len(idx_raw))
+            let close = after.index_of("]")
+            if close > -1 {
+                let csv = after.substring(0, close).trim()
+                if csv != "" {
+                    let pp = csv.split(",")
+                    let mut want: [i64] = []
+                    for p in pp {
+                        let pt = p.trim()
+                        if pt != "" {
+                            try { want.push(to_int(pt)) } catch e {}  // @allow-silent-catch
+                        }
+                    }
+                    if len(want) > 0 {
+                        let content = read_file(_ATLAS_PATH)
+                        let lines = content.split("\n")
+                        let nl = len(lines)
+                        let mut parts: [string] = []
+                        let nw = len(want)
+                        let mut i: i64 = 0
+                        while i < nw {
+                            let li = want[i]
+                            if li > -1 && li < nl {
+                                parts.push(lines[li])
+                                lines_written = lines_written + 1
+                            }
+                            i = i + 1
+                        }
+                        parts.push("")
+                        try { write_file(wp, parts.join("\n")) } catch e {}  // @allow-silent-catch
+                        return lines_written
+                    }
+                }
+            }
+        }
+    }
+    // fallback: awk on atlas for matching prefix
+    let awk_src = "BEGIN{FS=\"\"} "
+        + "{ line=$0; s=line; sub(/^[ \\t]+/,\"\",s); "
+        + "  if (s==\"\" || substr(s,1,1)==\"#\" || substr(s,1,2)==\"//\") next; "
+        + "  if (substr(s,1,1) != \"@\") next; "
+        + "  ci = index(s, \"::\"); if (ci == 0) next; "
+        + "  rest = substr(s, ci+2); sub(/^[ \\t]+/,\"\",rest); "
+        + "  if (rest==\"\") next; "
+        + "  sp = index(rest, \" \"); tb = index(rest, \"\\t\"); dom = rest; "
+        + "  if (sp>0 && (tb==0 || sp<tb)) dom = substr(rest, 1, sp-1); "
+        + "  else if (tb>0) dom = substr(rest, 1, tb-1); "
+        + "  us = index(dom, \"_\"); if (us>0) pfx = substr(dom, 1, us-1); else pfx = dom; "
+        + "  if (pfx==\"" + prefix + "\") print line "
+        + "}"
+    let mut raw = ""
+    try {
+        raw = to_string(exec("awk '" + awk_src + "' '" + _ATLAS_PATH + "' 2>/dev/null > '" + wp + "'; wc -l < '" + wp + "'")).trim()
+    } catch e {}  // @allow-silent-catch
+    try { lines_written = to_int(raw) } catch e {}  // @allow-silent-catch
+    return lines_written
+}
+
+// ─── background prefetch: spawn detached awk → warm file ───
+// 비차단. shell 로 awk > warm_path &. output 무시.
+fn _warm_prefetch_bg(prefix: string) {
+    if prefix == "" { return }
+    if _warm_is_fresh(prefix) { return }   // already warm
+    _ensure_warm_dir()
+    let wp = _warm_path(prefix)
+    let awk_src = "BEGIN{FS=\"\"} "
+        + "{ line=$0; s=line; sub(/^[ \\t]+/,\"\",s); "
+        + "  if (s==\"\" || substr(s,1,1)==\"#\" || substr(s,1,2)==\"//\") next; "
+        + "  if (substr(s,1,1) != \"@\") next; "
+        + "  ci = index(s, \"::\"); if (ci == 0) next; "
+        + "  rest = substr(s, ci+2); sub(/^[ \\t]+/,\"\",rest); "
+        + "  if (rest==\"\") next; "
+        + "  sp = index(rest, \" \"); tb = index(rest, \"\\t\"); dom = rest; "
+        + "  if (sp>0 && (tb==0 || sp<tb)) dom = substr(rest, 1, sp-1); "
+        + "  else if (tb>0) dom = substr(rest, 1, tb-1); "
+        + "  us = index(dom, \"_\"); if (us>0) pfx = substr(dom, 1, us-1); else pfx = dom; "
+        + "  if (pfx==\"" + prefix + "\") print line "
+        + "}"
+    // detach: `( awk ... > warm.part && mv warm.part warm ) &`
+    try {
+        let cmd = "( awk '" + awk_src + "' '" + _ATLAS_PATH + "' > '" + wp + ".part' 2>/dev/null && mv '" + wp + ".part' '" + wp + "' ) &"
+        let _x = to_string(exec(cmd + " disown 2>/dev/null; exit 0"))
+    } catch e {}  // @allow-silent-catch
+}
+
+// ═══════════════════════════════════════════════════════════
+//  lookup(prefix) — end-to-end API
+//
+//   1. warm hit 여부 기록 (이전 예측 적중/실패 판정)
+//   2. trail append + markov bump (prev → prefix)
+//   3. predict top-K from prefix
+//   4. prefetch bg (top-K 각 1개씩)
+//   5. 결과: entry line list 출력 + NEXUS_PREDICT_HIT/MISS stderr.
+//
+//  wall time 측정 (warm hit 시 awk 생략 → 단축).
+// ═══════════════════════════════════════════════════════════
+fn lookup(prefix: string) -> i64 {
+    let t0 = _ns_now()
+    let disabled = _is_disabled()
+
+    // (1) 이전 tick 에서 본 prefix 가 예측 adveantage 였는지 판정
+    //     trail[-1] == prev bucket. predict_topk(prev) 에 prefix 가 포함되어 있으면 hit.
+    let trail = _trail_read()
+    let ntr = len(trail)
+    let mut prev = ""
+    if ntr > 0 { prev = trail[ntr - 1] }
+    let mut hit = false
+    let mut miss = false
+    if !disabled && prev != "" {
+        let preds = _predict_topk(prev)
+        let np = len(preds)
+        let mut i: i64 = 0
+        while i < np {
+            let p = preds[i]
+            let bar = p.index_of("|")
+            let mut name = p
+            if bar > -1 { name = p.substring(0, bar) }
+            if name == prefix { hit = true; i = np }
+            else { i = i + 1 }
+        }
+        if !hit { miss = true }
+    }
+
+    // (2) warm file 실제 사용 (hit 판정 무관; fresh 면 그대로 사용)
+    let warm_was_fresh = _warm_is_fresh(prefix)
+    let mut nlines: i64 = 0
+    let wp = _warm_path(prefix)
+    if warm_was_fresh {
+        // just read warm file
+        let mut raw = ""
+        try { raw = read_file(wp) } catch e {}  // @allow-silent-catch
+        let rows = raw.split("\n")
+        let nrows = len(rows)
+        let mut i: i64 = 0
+        while i < nrows {
+            if rows[i] != "" { nlines = nlines + 1 }
+            i = i + 1
+        }
+    } else {
+        // blocking warm build — 현재 tick 적중 실패, 다음 기회 대비
+        nlines = _warm_build_blocking(prefix)
+    }
+    let t1 = _ns_now()
+    let dur_ms = (t1 - t0) / 1000000
+
+    // (3) trail append + markov bump
+    _trail_append(prefix)
+    if prev != "" { _markov_bump(prev, prefix) }
+
+    // (4) predict next + prefetch background (disabled 면 skip)
+    let mut pred_emit = "[]"
+    if !disabled {
+        let next_preds = _predict_topk(prefix)
+        let np = len(next_preds)
+        // emit prefetch & build emit string
+        let mut em: [string] = []
+        em.push("[")
+        let mut i: i64 = 0
+        let mut first = true
+        while i < np {
+            let p = next_preds[i]
+            let bar = p.index_of("|")
+            let mut name = p
+            let mut prob = ""
+            if bar > -1 {
+                name = p.substring(0, bar)
+                prob = p.substring(bar + 1, len(p))
+            }
+            if name != "" {
+                _warm_prefetch_bg(name)
+                if first { first = false } else { em.push(",") }
+                em.push("{\"to\":\"")
+                em.push(name)
+                em.push("\",\"p_permille\":")
+                em.push(if prob == "" { "0" } else { prob })
+                em.push("}")
+            }
+            i = i + 1
+        }
+        em.push("]")
+        pred_emit = em.join("")
+    }
+
+    // (5) stats update + self-disable check
+    let st = _stats_load()
+    let mut hits = st[0]
+    let mut misses = st[1]
+    if hit { hits = hits + 1 }
+    if miss { misses = misses + 1 }
+    _stats_save(hits, misses)
+    let was_now_disabled = _maybe_self_disable(hits, misses)
+
+    // (6) log
+    let hm = if hit { "HIT" } else { if miss { "MISS" } else { "N/A" } }
+    let mut log: [string] = []
+    log.push("NEXUS_PREDICT_")
+    log.push(hm)
+    log.push(" {\"prefix\":\"")
+    log.push(prefix)
+    log.push("\",\"prev\":\"")
+    log.push(prev)
+    log.push("\",\"warm_fresh\":")
+    log.push(if warm_was_fresh { "true" } else { "false" })
+    log.push(",\"nlines\":")
+    log.push(to_string(nlines))
+    log.push(",\"duration_ms\":")
+    log.push(to_string(dur_ms))
+    log.push(",\"hits\":")
+    log.push(to_string(hits))
+    log.push(",\"misses\":")
+    log.push(to_string(misses))
+    log.push(",\"predict\":")
+    log.push(pred_emit)
+    log.push(",\"disabled\":")
+    log.push(if disabled || was_now_disabled { "true" } else { "false" })
+    log.push("}")
+    eprintln(log.join(""))
+    return nlines
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CLI dispatch
+// ═══════════════════════════════════════════════════════════
+let a = args()
+let mut cmd = "stats"
+if len(a) > 2 { cmd = a[2] }
+
+if cmd == "observe" {
+    if len(a) < 4 {
+        println("usage: hexa atlas_predict_cache.hexa observe <prefix>")
+        exit(1)  // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let trail = _trail_read()
+    let ntr = len(trail)
+    let mut prev = ""
+    if ntr > 0 { prev = trail[ntr - 1] }
+    _trail_append(prefix)
+    if prev != "" { _markov_bump(prev, prefix) }
+    println("atlas_predict_cache: observed prev='" + prev + "' → curr='" + prefix + "'")
+    exit(0)
+} else if cmd == "predict" {
+    if len(a) < 4 {
+        println("usage: hexa atlas_predict_cache.hexa predict <prefix>")
+        exit(1)  // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let topk = _predict_topk(prefix)
+    let nk = len(topk)
+    println("atlas_predict_cache: predict from='" + prefix + "' topK=" + to_string(nk))
+    let mut i: i64 = 0
+    while i < nk {
+        println("  " + topk[i])
+        i = i + 1
+    }
+    exit(0)
+} else if cmd == "prefetch" {
+    if len(a) < 4 {
+        println("usage: hexa atlas_predict_cache.hexa prefetch <prefix>")
+        exit(1)  // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let n = _warm_build_blocking(prefix)
+    println("atlas_predict_cache: warm built prefix='" + prefix + "' lines=" + to_string(n) + " file=" + _warm_path(prefix))
+    exit(0)
+} else if cmd == "lookup" {
+    if len(a) < 4 {
+        println("usage: hexa atlas_predict_cache.hexa lookup <prefix>")
+        exit(1)  // @allow-silent-exit
+    }
+    let prefix = a[3]
+    let n = lookup(prefix)
+    println("atlas_predict_cache: lookup prefix='" + prefix + "' lines=" + to_string(n))
+    exit(0)
+} else if cmd == "drill" {
+    // csv of prefixes. iterate lookup and print aggregated summary.
+    if len(a) < 4 {
+        println("usage: hexa atlas_predict_cache.hexa drill <csv_prefixes>  e.g. math,physics,math,logic,math,physics")
+        exit(1)  // @allow-silent-exit
+    }
+    let csv = a[3]
+    let seq = csv.split(",")
+    let nseq = len(seq)
+    let t0 = _ns_now()
+    let mut i: i64 = 0
+    while i < nseq {
+        let p = seq[i].trim()
+        if p != "" { let _n = lookup(p) }
+        i = i + 1
+    }
+    let t1 = _ns_now()
+    let wall_ms = (t1 - t0) / 1000000
+    let st = _stats_load()
+    let hits = st[0]; let misses = st[1]
+    let total = hits + misses
+    let mut hit_pct: i64 = 0
+    if total > 0 { hit_pct = (hits * 100) / total }
+    println("atlas_predict_cache: drill n=" + to_string(nseq) + " wall_ms=" + to_string(wall_ms) + " hits=" + to_string(hits) + " misses=" + to_string(misses) + " hit_pct=" + to_string(hit_pct))
+    exit(0)
+} else if cmd == "stats" {
+    let st = _stats_load()
+    let hits = st[0]
+    let misses = st[1]
+    let total = hits + misses
+    let mut hit_pct: i64 = 0
+    if total > 0 { hit_pct = (hits * 100) / total }
+    let trail = _trail_read()
+    let ntr = len(trail)
+    println("atlas_predict_cache: stats")
+    println("  trail length : " + to_string(ntr) + " (window=" + to_string(_TRAIL_WINDOW) + ")")
+    println("  hits         : " + to_string(hits))
+    println("  misses       : " + to_string(misses))
+    println("  total        : " + to_string(total))
+    println("  hit_pct      : " + to_string(hit_pct) + "%")
+    println("  disabled     : " + (if _is_disabled() { "true" } else { "false" }))
+    println("  topk         : " + to_string(_TOPK))
+    // markov snapshot: top edges (count desc) max 10
+    let flat = _markov_load()
+    let nf = len(flat)
+    let mut tos: [string] = []
+    let mut froms: [string] = []
+    let mut cnts: [i64] = []
+    let mut i: i64 = 0
+    while i < nf {
+        froms.push(flat[i])
+        tos.push(flat[i + 1])
+        let mut c: i64 = 0
+        try { c = to_int(flat[i + 2]) } catch e {}  // @allow-silent-catch
+        cnts.push(c)
+        i = i + 3
+    }
+    let ne = len(cnts)
+    // sort desc (selection sort, small N)
+    let mut ii: i64 = 0
+    while ii < ne {
+        let mut best = ii
+        let mut jj: i64 = ii + 1
+        while jj < ne {
+            if cnts[jj] > cnts[best] { best = jj }
+            jj = jj + 1
+        }
+        if best != ii {
+            let tf = froms[ii]; froms[ii] = froms[best]; froms[best] = tf
+            let tt = tos[ii]; tos[ii] = tos[best]; tos[best] = tt
+            let tc = cnts[ii]; cnts[ii] = cnts[best]; cnts[best] = tc
+        }
+        ii = ii + 1
+    }
+    println("  markov edges : " + to_string(ne))
+    let show = if ne < 10 { ne } else { 10 }
+    let mut k: i64 = 0
+    while k < show {
+        println("    " + froms[k] + " -> " + tos[k] + " : " + to_string(cnts[k]))
+        k = k + 1
+    }
+    exit(0)
+} else if cmd == "reset" {
+    try { let _x = to_string(exec("rm -f '" + _TRAIL_PATH + "' '" + _MARKOV_PATH + "' '" + _STATS_PATH + "' '" + _DISABLE_FLAG + "'; rm -rf '" + _WARM_DIR + "'")) } catch e {}  // @allow-silent-catch
+    println("atlas_predict_cache: reset — trail/markov/stats/warm cleared")
+    exit(0)
+} else if cmd == "rebuild-markov" {
+    _markov_rebuild_from_trail()
+    println("atlas_predict_cache: markov rebuilt from trail")
+    exit(0)
+} else {
+    println("usage: hexa atlas_predict_cache.hexa {lookup|observe|predict|prefetch|drill|stats|reset|rebuild-markov}")
+    exit(1)  // @allow-silent-exit
+}
