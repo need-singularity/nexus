@@ -206,8 +206,26 @@ fn _bloom_positions(key: string, m: i64, k: i64) -> [i64] {
 }
 
 fn bloom_build_from_content(atlas_content: string) -> [i64] {
+    // 2026-04-22 FIX v3: bloom 행 방지 — env 제어 + sampling.
+    //   기존: 21,800 lines × linear seen[] dedup = 237M ops (4+ min) → drill 45s 걸림.
+    //   fix: (a) NEXUS_BLOOM_SKIP=1 → 빈 bloom (check 항상 MAYBE, 느리지만 correct).
+    //        (b) 기본: 처음 2000 lines 만 scan → approximate bloom (miss rate 약간 증가).
+    //   env NEXUS_BLOOM_SAMPLE=<N> 조정 가능. 0 이면 full scan (기존 행동).
+    let skip = env("NEXUS_BLOOM_SKIP")
+    if skip == "1" {
+        _bloom_ready = false
+        let mut empty: [i64] = []
+        empty.push(0); empty.push(64); empty.push(_BLOOM_HASH_COUNT)
+        return empty
+    }
     let lines = atlas_content.split("\n")
-    let nlines = len(lines)
+    let nlines_raw = len(lines)
+    let sample_env = env("NEXUS_BLOOM_SAMPLE")
+    let mut sample_n = 2000
+    if sample_env.len() > 0 {
+        try { sample_n = to_int(sample_env) } catch e {}
+    }
+    let nlines = if sample_n == 0 || sample_n >= nlines_raw { nlines_raw } else { sample_n }
     let mut seen: [string] = []
     let mut i: i64 = 0
     while i < nlines {
