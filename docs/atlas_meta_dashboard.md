@@ -95,7 +95,8 @@ Schema stubs (13): discovery_applied_ledger · blowup_closed_loop_log · meta_de
 | **E2 diff-scan** | A1–A5 rescan **skipped** | `atlas.n6` sha256 `a0e27b25…f33f2c6c` baseline 과 동일 → typed/grades/hub 재계산 불필요 (cost saved) |
 | **K2 rollback target** | snapshot 갱신 `533b77d2 → d5de613c` | 직전 baseline 이후 70+ inbox ack + daemon sync commit 축적; 세션 checkpoint 로 `post_meta_session_20260423_snapshot` 이벤트 기록 |
 | A1–A5 | no-op (E2 판정) | atlas unchanged |
-| B1 blowup | pending (별개 source `n6/signals/blowup_energy_stability.jsonl` 재맵 필요) | 경로 drift — 원 brainstorm 은 `n6/blowup_events.jsonl` 가정 |
+| B1 blowup | **source remap 완료** → `n6/atlas.blowup.jsonl` (89167 events, baseline 과 동일 source 확정) | `blowup_energy_stability.jsonl` 은 0 byte, `atlas.blowup.events.jsonl` 은 44-row typed summary — 본체는 `atlas.blowup.jsonl` |
+| B1 dormancy | **wake threshold crossed**: 0d → 4d (last_event 2026-04-19, >72h 규칙 hit) | wake action 은 daemon 의존 (tool/ write 차단 하) — surface only, maintainer 세션에서 local blowup trigger |
 | F1 selftest 6.7% | unchanged | `tool/` write 차단 (AG10) → maintainer 세션 dependency |
 
 **관찰**: atlas/blowup 소스 전체가 15.5h 동안 안정 (atlas hash 동일 + HEAD 만 이동 = commit 들이 docs/state/config 변경). 즉 **지도·창발 본체 dormant, meta-layer 만 active** — 의도된 상태. E2 는 이 상황에서 A-축 cost 를 0 으로 억제.
