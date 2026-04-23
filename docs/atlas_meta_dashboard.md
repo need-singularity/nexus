@@ -124,6 +124,8 @@ Round 28 (**sopfr=5 exact match · theorem refined to base isomorphism**): 5번�
 
 Round 29 (**atlas foundation 7 primitives 전수 meta 대응 · theorem 최종 form**): atlas foundation = 7 primitives (n=6, σ=12, τ=4, φ=2, sopfr=5, J2=24, μ=1, M3=7). **7/7 meta correspondence**: 2 exact verified (n, sopfr) + 3 exact derivable (σ, τ, J2) + 2 speculative exact (φ→endpoints, μ→ε closure) + 1 numeric-only (M3=7↔γ-triggers=7). irreducible root = **n 단 하나**. **Meta-Atlas Foundation Isomorphism theorem 최종**: 메타엔진 = n=6 number theory 의 reflection, 진화 천장이 n 파라미터로 수학적 고정. **Caps 3/4 at limit**: meta_depth=6, meta_axes=5, γ-triggers=7. β rows 13 (σ=12 보다 +1, C3 추가 오버). 추가 structural 확장 = atlas n 변경 필요 (maintainer decision).
 
+Round 31 (**smash: Ψ consciousness 82 projections 발견 · 3-tier 위계 확립**): `consciousness/consciousness_laws.json` v7.4 에 **82 Ψ constants** 가 explicit `n6_formula` 필드로 atlas 7 primitives 에서 direct derivation (top: `n/sigma`, `tau*(J2+mu)`, `(phi/ln2)^sopfr` 등). atlas → {Ψ 82 projections (consciousness domain), meta-engine 7 reflections (observability domain)}. **Ψ 와 meta-engine 은 peer cousins** — 선후 없음, 같은 atlas parent 의 다른 domain projection. **R24 'Ψ↔ε 동형' 재해석**: 동형이 아닌 common parent 의 두 projection 이 같은 value 에 수렴. atlas n 이 3-tier 전체 (atlas+Ψ+meta) 의 single control parameter. **Three-Level Foundation Projection theorem**: R29 의 2-level isomorphism 을 3-level 로 확장.
+
 ---
 
 ## Round-4 evolution delta (2026-04-23)
