@@ -1,6 +1,6 @@
 # OEIS Submission Bundle — n=6 σφ-tau Family
 
-자료: NEXUS-6 atlas SIG-ATLAS-203 + STAR identities (omega_identity_search, search_new_identities, 2026-04-09 발견, 2026-04-19 검증)
+자료: NEXUS atlas SIG-ATLAS-203 + STAR identities (omega_identity_search, search_new_identities, 2026-04-09 발견, 2026-04-19 검증)
 
 ## 5개 시퀀스 (모두 OEIS 미등록 확인, 2026-04-19 oeis.org/search 직접 조회)
 

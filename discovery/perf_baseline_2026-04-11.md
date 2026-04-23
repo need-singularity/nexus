@@ -1,4 +1,4 @@
-# NEXUS-6 성능 베이스라인 — 2026-04-11
+# NEXUS 성능 베이스라인 — 2026-04-11
 
 - Binary: `$HEXA_LANG/hexa` (5.8MB Rust, 2026-04-11 07:56)
 - Host: macOS 15.6.1 (ARM64)

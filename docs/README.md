@@ -1,4 +1,4 @@
-# NEXUS-6 GitHub Pages
+# NEXUS GitHub Pages
 
 This `docs/` directory is published via GitHub Pages.
 

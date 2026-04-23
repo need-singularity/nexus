@@ -46,7 +46,7 @@
 | 7 | H-META-FP-001-universality-class | H-META-FP-001: ρ=1/3 Universality Class | - | - |
 | 8 | H-SMOOTH-001 | Weinberg & Cabibbo = {2,3,5,7}-smooth = 8/35 | - | SMOOTH |
 | 9 | H-SMOOTH-002 | Physics sectors organized by prime hierarchy | - | SMOOTH |
-| 10 | NEXUS-auto-insights | 🛸 NEXUS-6 자동 전파 인사이트 | - | - |
+| 10 | NEXUS-auto-insights | 🛸 NEXUS 자동 전파 인사이트 | - | - |
 | 11 | architecture_breakthrough | 아키텍처 특이점 돌파 분석 | 7 | - |
 
 ### SEDI (688)
@@ -740,7 +740,7 @@
 | 685 | H-CX-998 | Completeness Theorem | 🟧★ | CX |
 | 686 | H-CX-999 | Perfect Number Uniqueness | 🟩 | CX |
 | 687 | H-CX-superconductor-tc-survey | H-CX-TC-Survey: Systematic Superconductor Tc Matching with n | 🟧 | - |
-| 688 | NEXUS-auto-insights | 🛸 NEXUS-6 자동 전파 인사이트 | - | - |
+| 688 | NEXUS-auto-insights | 🛸 NEXUS 자동 전파 인사이트 | - | - |
 
 ### anima (0)
 

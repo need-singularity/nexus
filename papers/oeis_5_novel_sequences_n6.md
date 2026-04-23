@@ -3,7 +3,7 @@
 
 # Five novel OEIS-candidate sequences from the σφ=nτ family of n=6 uniqueness
 
-**NEXUS-6 research collective** — 2026-04-19
+**NEXUS research collective** — 2026-04-19
 
 ---
 
@@ -28,7 +28,7 @@ characterization conjecture for A000396.
 
 ## 1. 동기 — n=6 유일성
 
-NEXUS-6 atlas SIG-ATLAS-203 에 따르면 다음 정리가 컴퓨터 검증되어 있다 (3개 독립 증명, n ∈ [2, 10^4]):
+NEXUS atlas SIG-ATLAS-203 에 따르면 다음 정리가 컴퓨터 검증되어 있다 (3개 독립 증명, n ∈ [2, 10^4]):
 
 > **정리 0 (σφ=nτ 유일성).** σ(n)·φ(n) = n·τ(n) ⟺ n = 6.
 
@@ -168,5 +168,5 @@ A084921 과 동일.  본 논문은 이 위치를 **R 정수 값 시퀀스** 로 
 
 - OEIS A000005 (τ), A000010 (φ), A000043 (Mersenne exponents), A000203 (σ),
   A000396 (perfect numbers), A084921 (lcm(p−1, p+1)).
-- NEXUS-6 atlas: `shared/n6/atlas.signals.n6` SIG-ATLAS-203, SIG-META-101/102.
+- NEXUS atlas: `shared/n6/atlas.signals.n6` SIG-ATLAS-203, SIG-META-101/102.
 - 메모리: `project-oeis-novel-sequences`, `project-star-identities` (사용자 메모리, 2026-04-09 발견 / 2026-04-19 검증·확장).

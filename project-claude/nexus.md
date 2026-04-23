@@ -1,4 +1,4 @@
-# nexus — NEXUS-6 중앙 허브
+# nexus — NEXUS 중앙 허브
 
 <!--
 # @convergence-meta project=nexus updated=2026-04-12 strategy="ossified/stable/failed 수렴 추적"

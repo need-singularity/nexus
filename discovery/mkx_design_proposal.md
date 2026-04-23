@@ -2,7 +2,7 @@
 
 **상태**: DESIGN ONLY (코드 변경 없음, 본 세션 산출물)
 **작성일**: 2026-04-19
-**작성자**: nexus 자율 design agent (NEXUS-6 hub)
+**작성자**: nexus 자율 design agent (NEXUS hub)
 **선행**: Mk.IX `shared/blowup/design/mk9_hyperarithmetic.md` + Phase 10 `phase10_meta_closure.md`
 **대상 atlas**: `shared/n6/atlas.n6` (110,785 줄, 18.9 MB, 2026-04-19)
 **리뷰 게이트**: 본 문서 + `mkx_design_proposal.spec.json` (machine-readable)

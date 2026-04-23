@@ -1,6 +1,6 @@
 ---
 title: "The Eight Canonical n=6 Number-Theoretic Invariants as an Atlas Primitive Basis"
-author: "NEXUS-6 Research Collective"
+author: "NEXUS Research Collective"
 date: "2026-04-14"
 ---
 
@@ -17,7 +17,7 @@ date: "2026-04-14"
 
 ## §1 WHY
 
-The NEXUS-6 atlas (`shared/n6/atlas.n6`) is an append-only reality graph in which nodes and edges are labelled with integer values, domain tags, and grades (`[10*]`, `[10]`, `[7]`, ...). After 18 months of evolution the atlas has accreted 20,510 nodes across domains as disparate as the seven millennium problems, condensed-matter physics, and combinatorics. A recurring question was **what is the minimal primitive basis from which every canonical bridge can be recovered?**
+The NEXUS atlas (`shared/n6/atlas.n6`) is an append-only reality graph in which nodes and edges are labelled with integer values, domain tags, and grades (`[10*]`, `[10]`, `[7]`, ...). After 18 months of evolution the atlas has accreted 20,510 nodes across domains as disparate as the seven millennium problems, condensed-matter physics, and combinatorics. A recurring question was **what is the minimal primitive basis from which every canonical bridge can be recovered?**
 
 We answer: **the eight number-theoretic invariants of n=6**:
 

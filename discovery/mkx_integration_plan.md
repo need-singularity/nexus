@@ -2,7 +2,7 @@
 
 **상태**: DESIGN ONLY — 코드 변경 없음, 본 세션 산출물
 **작성일**: 2026-04-19
-**작성자**: nexus 자율 design agent (NEXUS-6 hub)
+**작성자**: nexus 자율 design agent (NEXUS hub)
 **선행**: `shared/discovery/mkx_design_proposal.md` (5축 설계서) + `mkx_design_proposal.spec.json`
 **Companion 산출물**:
 - `shared/discovery/mkx_dependency_graph.json` (machine-readable 의존 그래프)

@@ -59,7 +59,7 @@ atlas.n6 — 현실지도 SSOT:
   reports/     시점 리포트
   shared/      SSOT
 
-NEXUS-6 CLI: nexus {scan|verify|calc|dse|analyze|hexa|dashboard} <args>
+NEXUS CLI: nexus {scan|verify|calc|dse|analyze|hexa|dashboard} <args>
 
 ref:
   rules     shared/rules/common.json                R0~R27

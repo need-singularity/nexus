@@ -1,4 +1,4 @@
-# godel_q — NEXUS-6 Gödel-Quantum-Schmidhuber Bootstrap (★20 MVP)
+# godel_q — NEXUS Gödel-Quantum-Schmidhuber Bootstrap (★20 MVP)
 
 Fixed-point seeker: ANU QRNG entropy → pick mutation → verify gate → log.
 Schmidhuber-style Gödel machine with a quantum oracle. **MVP only logs — no

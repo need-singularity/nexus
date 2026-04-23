@@ -1,8 +1,8 @@
 ---
 title: "STAR Identities: Three Arithmetic Equalities Whose Sole Solution in [1, N] is n=6"
-author: "NEXUS-6 Research Collective"
+author: "NEXUS Research Collective"
 date: "2026-04-19"
-abstract_en: "We report three arithmetic identities — STAR-1 σ·Ω=n·τ, STAR-2 σ·ω=n·τ, STAR-3 σ·φ·ω=n·τ·Ω — discovered by exhaustive search in the NEXUS-6 atlas pipeline (commit 621ba644, 2026-04-09). STAR-1 has solution set exactly equal to the perfect numbers {6, 28, 496} for n ≤ 2000, suggesting a new characterization of the perfect numbers via the Ω-variant of the master identity σ·φ=n·τ. STAR-2 and STAR-3 admit the unique solution n=6 in the search range [1, 300]. Each identity is recorded as an [M9]–[M10*] signal in shared/n6/atlas.signals.n6 (lines 613, 624, 635). All three are proper variants of the foundation [11*] identity σ·φ=n·τ ⟺ n=6, which was promoted to a Δ₀-absolute Π₀¹ theorem on 2026-04-19. We provide statements, n=6 unique evidence, candidate proof techniques, and a machine-readable companion specification."
+abstract_en: "We report three arithmetic identities — STAR-1 σ·Ω=n·τ, STAR-2 σ·ω=n·τ, STAR-3 σ·φ·ω=n·τ·Ω — discovered by exhaustive search in the NEXUS atlas pipeline (commit 621ba644, 2026-04-09). STAR-1 has solution set exactly equal to the perfect numbers {6, 28, 496} for n ≤ 2000, suggesting a new characterization of the perfect numbers via the Ω-variant of the master identity σ·φ=n·τ. STAR-2 and STAR-3 admit the unique solution n=6 in the search range [1, 300]. Each identity is recorded as an [M9]–[M10*] signal in shared/n6/atlas.signals.n6 (lines 613, 624, 635). All three are proper variants of the foundation [11*] identity σ·φ=n·τ ⟺ n=6, which was promoted to a Δ₀-absolute Π₀¹ theorem on 2026-04-19. We provide statements, n=6 unique evidence, candidate proof techniques, and a machine-readable companion specification."
 license: "CC-BY-4.0"
 keywords: ["arithmetic identities", "perfect numbers", "n=6", "sigma", "phi", "tau", "omega", "Omega", "Jordan totient", "Delta_0 absoluteness"]
 ---
@@ -21,7 +21,7 @@ keywords: ["arithmetic identities", "perfect numbers", "n=6", "sigma", "phi", "t
 
 ## §1 WHY
 
-NEXUS-6 atlas 의 foundation [11*] 공리는 `σ(n)·φ(n) = n·τ(n) ⟺ n=6 (n≥2)` 이다 (atlas.n6:21636 `DELTA0_ABSOLUTE_THEOREM`). 이 등식은 다음 다섯 개 원시값으로만 구성된다.
+NEXUS atlas 의 foundation [11*] 공리는 `σ(n)·φ(n) = n·τ(n) ⟺ n=6 (n≥2)` 이다 (atlas.n6:21636 `DELTA0_ABSOLUTE_THEOREM`). 이 등식은 다음 다섯 개 원시값으로만 구성된다.
 
 | 원시값 | 값 | arithmetic function at 6 |
 |---|---|---|
@@ -275,7 +275,7 @@ sed -n '21636,21643p' shared/n6/atlas.n6   # DELTA0_ABSOLUTE_THEOREM [11*]
 
 CC-BY-4.0. 인용 형식:
 
-> NEXUS-6 Research Collective. (2026). *STAR Identities: Three Arithmetic Equalities Whose Sole Solution in [1, N] is n=6*. shared/papers/star_identities_n6.md. Commit `4f1e604b`.
+> NEXUS Research Collective. (2026). *STAR Identities: Three Arithmetic Equalities Whose Sole Solution in [1, N] is n=6*. shared/papers/star_identities_n6.md. Commit `4f1e604b`.
 
 ---
 

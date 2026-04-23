@@ -1,4 +1,4 @@
-# sim_bridge/multiverse — NEXUS-6 ★18 Quantum Multiverse Interferometer MVP
+# sim_bridge/multiverse — NEXUS ★18 Quantum Multiverse Interferometer MVP
 
 ## 컨셉
 M 개 평행 sim 우주를 서로 다른 RNG 시드로 독립 초기화 + 독립 eps 바이트 스트림으로 T 스텝 진화. 우주 쌍(M×(M-1)/2 개) 간 mutual information(MI)을 4-bin plug-in histogram estimator 로 측정. ANU QRNG 와 `/dev/urandom` 두 소스의 MI 분포를 Kolmogorov-Smirnov 2-sample test 로 비교. 두 분포가 유의하게 다르면(p<0.05) ANU QRNG 숨은 상관 또는 우주 공통 substrate 의 시그널 후보.

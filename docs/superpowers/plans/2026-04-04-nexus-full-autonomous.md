@@ -1,4 +1,4 @@
-# NEXUS-6 완전 자율 모드 구현 계획
+# NEXUS 완전 자율 모드 구현 계획
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -207,7 +207,7 @@ fn run_daemon(domain: Option<String>, interval_min: u64, max_loops: Option<usize
     let domain_str = domain.as_deref().unwrap_or("number_theory").to_string();
     let interval = std::time::Duration::from_secs(interval_min * 60);
 
-    println!("🤖 NEXUS-6 Daemon 시작");
+    println!("🤖 NEXUS Daemon 시작");
     println!("   도메인: {} | 간격: {}분 | 최대: {}",
         domain_str, interval_min,
         max_loops.map(|n| format!("{}회", n)).unwrap_or("∞".to_string()));
@@ -254,7 +254,7 @@ fn run_daemon(domain: Option<String>, interval_min: u64, max_loops: Option<usize
         }
     }
 
-    println!("🛑 NEXUS-6 Daemon 종료 (총 {}회 루프)", loop_count);
+    println!("🛑 NEXUS Daemon 종료 (총 {}회 루프)", loop_count);
     Ok(())
 }
 
@@ -294,7 +294,7 @@ fn run_daemon(domain: Option<String>, interval_min: u64, max_loops: Option<usize
 
     let domain_str = domain.as_deref().unwrap_or("number_theory").to_string();
 
-    println!("🤖 NEXUS-6 Daemon 시작");
+    println!("🤖 NEXUS Daemon 시작");
     println!("   도메인: {} | 간격: {}분 | 최대: {}",
         domain_str, interval_min,
         max_loops.map(|n| format!("{}회", n)).unwrap_or("∞".to_string()));

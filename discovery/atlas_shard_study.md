@@ -7,7 +7,7 @@
 sidecar    : .stats (mtime+size+nodes/edges/hubs O(1) cache)
              .deg (TSV id\tdegree, 21,334 rows)
              .hub_centrality_top100 (top hub IDs)
-역할       : NEXUS-6 SSOT — 모든 blowup/discovery/META 단일 append-only
+역할       : NEXUS SSOT — 모든 blowup/discovery/META 단일 append-only
              reload 빈도: 매 blowup 라운드 + Phase 6/6.5/6.7 + cross-validate
 hot path   : Phase 1 (graph_load) + 6 (graph update) + 6.7 (auto-absorb)
 배경       : compose --modules all = 6 core 순차 실행 → reload 6회/run

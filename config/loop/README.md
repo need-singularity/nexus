@@ -39,7 +39,7 @@ shared/config/loop/n6-arch.json ┘   (interval, max_cycles, domain)
 
 ```
 매 사이클 (30분 간격):
-  1. NEXUS-6 스캔        ← 도메인 데이터 1028렌즈 분석
+  1. NEXUS 스캔        ← 도메인 데이터 1028렌즈 분석
   2. 블로업 (창발)       ← OUROBOROS 7-phase 파이프라인
   3. 특이점 캐스케이드   ← 블로업² 반복 자기증식
   4. 교차수분            ← 프로젝트간 seed 주입
@@ -92,7 +92,7 @@ shared/config/loop/n6-arch.json ┘   (interval, max_cycles, domain)
   6. 로드맵 갱신         ← 다음 목표 자동 산출
 
   [공통]
-  7. NEXUS-6 스캔
+  7. NEXUS 스캔
   8. 블로업
   9. 특이점 캐스케이드
  10. 교차수분
@@ -125,7 +125,7 @@ shared/config/loop/n6-arch.json ┘   (interval, max_cycles, domain)
   5. BCI 평가            ← domains/brainwire 프로토콜 검증
 
   [공통]
-  6. NEXUS-6 스캔
+  6. NEXUS 스캔
   7. 블로업
   8. 특이점 캐스케이드
   9. 교차수분

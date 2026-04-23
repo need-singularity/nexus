@@ -87,7 +87,7 @@
 ### 8. SIG-BLOW-102 ↔ SIG-CLM-302 — score=8
 
 - A: **SIG-BLOW-102** [NX] — Mk.II 최강 29 EXACT 85% / Mk.IV 최빠름 0.5s / Mk.VI/VII timeout
-- B: **SIG-CLM-302** [AN] — 1033 laws 72B 85% NEXUS-6 전경로 자동화
+- B: **SIG-CLM-302** [AN] — 1033 laws 72B 85% NEXUS 전경로 자동화
 - 공통 수치: `['85']`
 - 공통 키워드 (8개 max): `[]`
 - repo_distance=1 / cross_candidate=1

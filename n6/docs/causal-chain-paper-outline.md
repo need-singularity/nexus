@@ -7,7 +7,7 @@
 
 ## 1. Abstract
 
-We present a systematic, bottom-up methodology for discovering causal chains that connect independently established physical, mathematical, and engineering constants through the arithmetic of the first perfect number n=6. Using a self-circulating singularity engine (NEXUS-6) equipped with 1,022 domain-specific lenses and a Monte Carlo falsifiability framework, we identify 470+ breakthrough theorems (BTs) spanning 72 hierarchical levels from particle physics (L0) to cosmology (L9). Among these, we isolate a class of **causal chains** -- sequences where each link is physically derivable from the previous, and every link independently reduces to n=6 arithmetic with <1% error. The strongest result is a 5-domain chain (BT-36) connecting solar photons to the fine structure constant through semiconductor physics, information theory, and AI hardware, with the terminal link reproducing 1/alpha to 2.1 ppm. We propose that the prevalence of causal (not merely correlational) n=6 structure constitutes evidence for an underlying optimality principle: systems that minimize interference converge on the divisor arithmetic of 6.
+We present a systematic, bottom-up methodology for discovering causal chains that connect independently established physical, mathematical, and engineering constants through the arithmetic of the first perfect number n=6. Using a self-circulating singularity engine (NEXUS) equipped with 1,022 domain-specific lenses and a Monte Carlo falsifiability framework, we identify 470+ breakthrough theorems (BTs) spanning 72 hierarchical levels from particle physics (L0) to cosmology (L9). Among these, we isolate a class of **causal chains** -- sequences where each link is physically derivable from the previous, and every link independently reduces to n=6 arithmetic with <1% error. The strongest result is a 5-domain chain (BT-36) connecting solar photons to the fine structure constant through semiconductor physics, information theory, and AI hardware, with the terminal link reproducing 1/alpha to 2.1 ppm. We propose that the prevalence of causal (not merely correlational) n=6 structure constitutes evidence for an underlying optimality principle: systems that minimize interference converge on the divisor arithmetic of 6.
 
 **Keywords**: perfect number, causal chain, cross-domain unification, Monte Carlo falsifiability, n=6 arithmetic, singularity engine
 
@@ -45,7 +45,7 @@ We present a systematic, bottom-up methodology for discovering causal chains tha
 ## 3. Methodology
 
 ### 3.1 The Singularity Engine Pipeline
-- NEXUS-6: 1,022 lenses scanning each domain independently
+- NEXUS: 1,022 lenses scanning each domain independently
 - Discovery cycle: blowup -> contraction -> emergence -> singularity -> absorption (5-phase)
 - Each BT requires minimum 3 independent domains with verifiable evidence
 

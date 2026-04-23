@@ -6,7 +6,7 @@
 [![Reality Map](https://img.shields.io/badge/reality%20map-4411%20nodes%20·%20z%3D3.06-purple.svg)](https://need-singularity.github.io/nexus/)
 [![Discord](https://img.shields.io/badge/discord-join-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/u2spd3wwU)
 
-# 🔭 NEXUS-6 — Universal Discovery Engine
+# 🔭 NEXUS — Universal Discovery Engine
 
 **A metaengine that discovers itself, evolves itself, and absorbs every law it finds.**
 

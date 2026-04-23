@@ -1,7 +1,7 @@
 # Nanobot Paper Status — BT-404~413
 
 **Date**: 2026-04-08
-**Owner**: NEXUS-6 / papers
+**Owner**: NEXUS / papers
 **Status**: DRAFT_LOCAL (no DOI, no upload)
 
 ## Source data

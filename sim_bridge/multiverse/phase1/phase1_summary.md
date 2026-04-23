@@ -1,4 +1,4 @@
-# NEXUS-6 ★18 Quantum Multiverse Interferometer Phase 1 — 20260416_031005
+# NEXUS ★18 Quantum Multiverse Interferometer Phase 1 — 20260416_031005
 
 ## Config
 - M=15 universes, T=500 steps, dim=48, N_trial=10
