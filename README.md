@@ -1,3 +1,4 @@
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.19404815-blue?logo=zenodo&logoColor=white)](https://doi.org/10.5281/zenodo.19404815)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Lenses](https://img.shields.io/badge/lenses-216-blue.svg)](#)
 [![Laws](https://img.shields.io/badge/laws-711-green.svg)](#)
