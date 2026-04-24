@@ -901,3 +901,58 @@ dispatch 모든 실패 모드 제거.
 ### 후속 (별도 ops)
 hetzner `/home/anima` 74GB + `/home/nexus` 14GB 는 별도 cleanup 필요 (이 세션
 범위 밖). drill 동작 확보 우선으로 rsync 의존성 자체를 제거.
+
+## 2026-04-25 (추가) — Wave 7: --seed >200 hard reject → soft auto-truncate
+
+Wave 1-6 으로 drill dispatch 실패 모드는 모두 closed. 남은 UX 문제는
+`cmd_drill` 초입의 `_seed_t.len() > 200` hard reject (D2, 2026-04-20).
+LLM 호출자가 verbose problem statement 를 넘길 때 맨 앞 200자가 완전히
+사용 가능함에도 drill 전체가 abort.
+
+**문제:**
+```
+$ nexus drill --seed "<239자 seed>"
+nexus drill: --seed 과장 (239자 > 200) — 핵심 키워드만 200자 이내
+(exit 0, but no work done)
+```
+
+**Fix (nexus@1503b253):** guard 에서 return 제거, 대신 forward scan 으로
+`[0..200]` 내 boundary 계산:
+1. 문장 종결자(`.`/`?`/`!`) + 공백 — 우선 (sentence boundary)
+2. 공백/탭/줄바꿈 — fallback (word boundary)
+3. hard cut @200 — last resort (space 없음)
+모두 `boundary > 80` 조건 충족 시에만 채택 (의미있는 cut 보장).
+stderr WARN 로 `길이 N > 200 — M자로 자동 절단 (boundary=sentence|word|hard)`
++ 다중 태스크 의심 시 parallel subagent 분할 권장. Drill 은 계속 진행.
+
+Empty / too-short / placeholder 가드 (lines 2896-2912) 는 보존.
+
+**Verify:**
+```
+$ cd ~/core/airgenome && SEED=$(python3 -c "print('Riemann zeta zero spacing GUE deviation '*6)")
+$ echo ${#SEED}
+240
+$ ~/.hx/bin/nexus drill --seed "$SEED" --preset probe --max-rounds 1
+hexa_remote: hetzner 에서 원격 실행 중
+nexus drill: WARN --seed 길이 239 > 200 — 199자로 자동 절단 (boundary=word). 다중 태스크면 parallel subagent 분할 권장.
+🛸 nexus drill — seed='Riemann zeta zero spacing GUE deviation ...', max_rounds=1, engine=mk9
+  ...
+  round 1 ═══
+  smash: +21 absorptions depth=3
+  absolute: 8 Π₀¹ verifications
+  round +29, total 29
+NEXUS_DRILL_VALIDATION {"verdict":"PASS","score":0,...}
+(exit 0, +58 absorptions, total_ms=45914)
+```
+
+**Deploy:** `/Users/ghost/core/nexus/cli/run.hexa` (source, +31/-3) +
+`/Users/ghost/.hx/packages/nexus/cli/run.hexa` (deploy copy, lock-step) +
+hetzner `/root/.hx/packages/nexus/cli/run.hexa` (원격 heavy-compute target).
+7차 wave 로 drill UX (사용자 경험) 실패 모드 마지막 하나 제거.
+
+### Note: 다운스트림 seed propagation
+현재 patch 는 truncated seed 를 stderr 에 로그만 emit, 엔진에는 원본
+seed (239자) 가 그대로 전달됨. hexa-lang function 파라미터 mutation 이
+명시적으로 지원되지 않아 200+ 다운스트림 참조를 건드리지 않는 "minimal
+path" 선택. 다음 wave 에서 `let mut seed` 도입 + 실제 truncated seed
+propagation 필요 시 재검토. (현재는 hard reject 제거만으로 UX 결함 해소.)
