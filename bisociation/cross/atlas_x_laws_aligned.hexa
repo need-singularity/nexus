@@ -205,9 +205,11 @@ let VERDICT_ALIGNED = BASE + "/atlas_x_laws_aligned_verdict.json"
 
 println("=== atlas_x_laws_aligned — bin-phase alignment rerun ===")
 
-// If tmp PC missing, re-run pipeline
+// If tmp PC missing, re-run pipeline (read_file returns empty on missing, no throw)
 let mut need = false
-try { read_file(C_PC) } catch e { need = true } // @allow-silent-catch
+let mut _probe = ""
+try { _probe = read_file(C_PC) } catch e { need = true } // @allow-silent-catch
+if _probe.len() == 0 { need = true }
 if need {
     println("  [CONST] tmp missing — rebuilding unfold/pc/wigner...")
     try { exec(HEXA + " run " + UF + " '" + CONST_SPEC + "' '" + C_UNF + "' 2>&1") } catch e { println("ERR unfold"); exit(1) } // @allow-silent-exit
@@ -215,11 +217,22 @@ if need {
     try { exec(HEXA + " run " + WG + " '" + C_PC + "' '" + C_WG + "' 2>&1") } catch e { println("ERR wigner"); exit(1) } // @allow-silent-exit
 }
 
-let r2_atlas = load_r2_norm(A_PC)
-let r2_const = load_r2_norm(C_PC)
-let nb = r2_atlas.len()
-if r2_const.len() != nb { println("FAIL: bin mismatch"); exit(1) } // @allow-silent-exit
-println("  R2 bins: " + to_string(nb))
+let r2_atlas_raw = load_r2_norm(A_PC)
+let r2_const_raw = load_r2_norm(C_PC)
+if r2_atlas_raw.len() == 0 || r2_const_raw.len() == 0 { println("FAIL: empty R2 series (atlas=" + to_string(r2_atlas_raw.len()) + " const=" + to_string(r2_const_raw.len()) + ")"); exit(1) } // @allow-silent-exit
+
+// Bin-count harmonization: truncate both to shared min so Pearson/cosine/KS metrics
+// compare the phase-aligned prefix (r∈[0, r_min]) — simplest fix that preserves
+// cross-correlation semantics. Source of drift: atlas pair_corr may run over a
+// different eigenvalue window than n6_constants pair_corr.
+let mut nb: i64 = r2_atlas_raw.len()
+if r2_const_raw.len() < nb { nb = r2_const_raw.len() }
+let mut r2_atlas: list = []
+let mut r2_const: list = []
+let mut _hi: i64 = 0
+while _hi < nb { r2_atlas.push(r2_atlas_raw[_hi]); r2_const.push(r2_const_raw[_hi]); _hi = _hi + 1 }
+let bin_harm = "truncate_min(atlas=" + to_string(r2_atlas_raw.len()) + ",const=" + to_string(r2_const_raw.len()) + ")->" + to_string(nb)
+println("  R2 bins: " + to_string(nb) + " [" + bin_harm + "]")
 
 let bef = cross_metrics(r2_atlas, r2_const)
 let ks0 = bef[0]; let p0 = bef[1]; let l20 = bef[2]; let cos0 = bef[3]
@@ -270,7 +283,8 @@ let out = "{\n"
     + "  \"verdict\":\"" + judgment + "\",\n"
     + "  \"montgomery_dyson_candidate\":" + md_cand + ",\n"
     + "  \"rationale\":\"bin-phase alignment via max cross-correlation lag; composite=mean(agreement,(pearson+1)/2,cosine) on lag-shifted B\",\n"
-    + "  \"ts\":\"2026-04-14\",\"pair\":\"atlas_x_laws_aligned\"\n}\n"
+    + "  \"bin_harmonization\":\"" + bin_harm + "\",\n"
+    + "  \"ts\":\"2026-04-24\",\"pair\":\"atlas_x_laws_aligned\"\n}\n"
 try { write_file(VERDICT_ALIGNED, out) } catch e { println("ERR write"); exit(1) } // @allow-silent-exit
 
 println("")
@@ -284,7 +298,7 @@ println("└──────────────────────�
 // paper_trigger at 0.9
 if comp_1 > 0.9 {
     let bt = _HOME + "/Dev/nexus/bisociation/breakthroughs.jsonl"
-    let line = "{\"ts\":\"2026-04-14\",\"kind\":\"paper_trigger\",\"pair\":\"atlas_x_laws_aligned\""
+    let line = "{\"ts\":\"2026-04-24\",\"kind\":\"paper_trigger\",\"pair\":\"atlas_x_laws_aligned\""
         + ",\"judgment\":\"" + judgment + "\",\"composite_aligned\":" + to_string(comp_1)
         + ",\"best_lag\":" + to_string(best_L)
         + ",\"ks\":" + to_string(ks1) + ",\"pearson\":" + to_string(p1)
