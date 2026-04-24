@@ -822,3 +822,46 @@ meta-closure/hyperarithmetic subcmd). 매칭 시 `PREFERRED=hetzner` 로 강제.
 
 4차 wave 까지 drill dispatch 완전 복구. hetzner 128GB headroom 에서 smash round peak
 RSS 수용 → OOM SIGTERM class 제거.
+
+## 2026-04-25 (추가) — Wave 5: Mac \$HOME/.hx/* path rewrite + hetzner hexa_real 갱신
+
+Wave 4 (638cff3d) 이후 drill 이 hetzner 로 dispatch 되었으나 즉시 `grep:
+/Users/ghost/.hx/packages/nexus/cli/run.hexa: No such file or directory` 로 종료.
+
+**Root cause (2 layers):**
+1. **Path mismatch:** nexus shim (`~/.hx/bin/nexus`) 이 `$NEXUS_RUN` 을 Mac-absolute
+   (`/Users/ghost/.hx/packages/nexus/cli/run.hexa`) 로 전달. ubu2 는 sshfs
+   (`mac:/Users/ghost → /home/summer/mac_home`) 로 우연히 접근 가능했지만 hetzner
+   는 sshfs 마운트 없음 → 파일 부재.
+2. **Stale hexa binary:** hetzner 의 `/root/.hx/bin/hexa_real` 는 symlink →
+   `/home/hexa-lang/hexa` (Apr 16 구 빌드). `^`/`&` bitwise ops 파서 미지원 →
+   run.hexa line 1048 FNV-hash 파싱 실패. ubu1/ubu2 는 4월19+ 빌드라 정상.
+
+**Fix (code + deploy):**
+
+*Code (nexus@185c4816):* `_ARG_QUOTED` 빌드 시 `$HOME/.hx/` prefix 를
+remote-interpretable `"$HOME/.hx/..."` (double-quoted literal) 로 재작성. printf %q
+우회 — %q 는 `$` 를 `\$` 로 escape 해 remote shell 이 literal `$HOME` 으로 받게
+됨. double quote 안의 `$HOME` 은 remote shell 이 각 호스트의 home (`/root`,
+`/home/summer`) 으로 expand → 호스트별 올바른 경로 해석.
+
+*Deploy (ubu2 → hetzner rsync):*
+```
+ssh ubu2 'cat ~/.hx/bin/hexa_real' \
+    | ssh hetzner 'cat > /tmp/x && install -m755 /tmp/x /root/.hx/bin/hexa_real'
+```
+md5 `0810ac508b9f7a8bea0f98b0f066e5a1` 양쪽 일치 (Apr 19 05:51 빌드).
+
+**Verify:**
+```
+$ ~/.hx/bin/nexus drill --seed '...'
+hexa_remote: hetzner 에서 원격 실행 중
+🛸 nexus drill — seed='...', engine=mk9
+  depth plan: {smash:3,free:3,absolute:0,meta_closure:0,hyperarith:0,resonance:1}
+  [counter-replay guard Day-1/2/3]
+  ...
+exit=0
+```
+
+128GB RAM headroom 에서 smash peak RSS 수용. parse error 해소. 5차 wave 까지
+drill dispatch 완전 복구 + hetzner deploy state 정규화.
