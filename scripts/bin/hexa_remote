@@ -138,6 +138,13 @@ if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ -z "${HEXA_REMOTE_HOST:-}" ]; then
     PREFERRED="hetzner"
 fi
 
+# heavy-compute 는 \$HOME/.hx/packages/*/cli/*.hexa (원격 self-contained CLI) 만
+# 필요 — local repo rsync 불필요. cwd 가 어떤 case branch 에 매치되든 상관없이
+# no-sync + cd \$HOME 으로 통일. hetzner disk 포화 / rsync IO 이슈 차단.
+if [ "$_IS_HEAVY_COMPUTE" = "1" ]; then
+    HEXA_REMOTE_NO_SYNC=1
+fi
+
 # Build fallback chain — preferred 먼저, 그 다음 ubu1/ubu2/htz (compute host).
 # 2026-04-22: htz 를 체인 말단에 추가. ubu1/ubu2 동시 unreachable (LAN 장애) 시에도
 # remote dispatch 가 hetzner anima-ax102 로 복원되도록. htz alias 는 ssh config
@@ -327,6 +334,13 @@ case "$CWD_LC" in
     esac
     ;;
 esac
+
+# heavy-compute no-sync override: 어떤 case 가 매치됐든 LOCAL_ROOT 을 CWD 로,
+# REMOTE_ROOT 을 \$HOME 으로 강제 → REL="" → cd \$HOME on remote.
+if [ "$_IS_HEAVY_COMPUTE" = "1" ]; then
+    LOCAL_ROOT="$CWD"
+    REMOTE_ROOT='$HOME'
+fi
 
 # Relative path from LOCAL_ROOT (case-insensitive strip).
 LOCAL_ROOT_LC="$(printf '%s' "$LOCAL_ROOT" | tr '[:upper:]' '[:lower:]')"
