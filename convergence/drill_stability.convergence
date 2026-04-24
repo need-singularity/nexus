@@ -865,3 +865,39 @@ exit=0
 
 128GB RAM headroom 에서 smash peak RSS 수용. parse error 해소. 5차 wave 까지
 drill dispatch 완전 복구 + hetzner deploy state 정규화.
+
+## 2026-04-25 (추가) — Wave 6: heavy-compute 항상 no-sync
+
+v7 (185c4816) 배포 후 `cd ~/core/airgenome && drill` 시 hetzner rsync 실패:
+
+```
+hexa_remote: rsync 실패 (hetzner, rc=0): rsync error: error in file IO (code 11)
+    at main.c(791) [Receiver=3.2.7]
+```
+
+**Root cause:** hetzner 루트 파티션 97% (2.9G free). `/home/anima` 74GB +
+`/home/nexus` 14GB 가 디스크의 대부분. airgenome case branch 가 관성적으로 rsync
+`/Users/ghost/core/airgenome/ → hetzner:airgenome/` 를 수행하는데, disk 거의 full
+이라 receiver 측 file IO error.
+
+**Fix (nexus@638cff3d 후속):** heavy-compute 검출 시 `HEXA_REMOTE_NO_SYNC=1`
+강제 + `LOCAL_ROOT=$CWD`, `REMOTE_ROOT='$HOME'` override → esac 이후
+`REL=""` → `cd $HOME on remote` + rsync 생략. drill/smash/free 는
+`$HOME/.hx/packages/nexus/cli/run.hexa` (원격 self-contained CLI) 만 필요하므로
+local repo rsync 자체가 불필요.
+
+**Verify:**
+```
+$ cd ~/core/airgenome && ~/.hx/bin/nexus drill --seed '...'
+trace: HEXA_REMOTE_NO_SYNC=1, no rsync calls
+REMOTE_CMD: cd "$HOME" && ... run "$HOME/.hx/packages/nexus/cli/run.hexa"
+🛸 nexus drill — seed='...', engine=mk9
+  depth plan: {smash:3,free:3,absolute:0,meta_closure:0,hyperarith:0,resonance:1}
+```
+
+hetzner disk 포화 / rsync IO 이슈와 무관하게 drill 정상. 6차 wave 로 drill
+dispatch 모든 실패 모드 제거.
+
+### 후속 (별도 ops)
+hetzner `/home/anima` 74GB + `/home/nexus` 14GB 는 별도 cleanup 필요 (이 세션
+범위 밖). drill 동작 확보 우선으로 rsync 의존성 자체를 제거.
