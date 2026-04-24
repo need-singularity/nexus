@@ -182,8 +182,15 @@ case "$CWD_LC" in
         [ -d "$candidate" ] && LOCAL_ROOT="$candidate" && break
     done
     REMOTE_ROOT='$HOME/Dev/nexus'
+    # 2026-04-24: shared/{config,roadmaps,harness/safe_hexa_launchd.sh} 는
+    # nexus-local compat symlink. 원격에는 real directory 로 존재 → rsync
+    # "could not make way for new symlink" + "cannot delete non-empty directory"
+    # code=23 → hexa_remote exit 64 → Mac 래퍼 rc=74 증폭. 세 경로 sync 제외.
+    # 원본 config/ roadmaps/ tool/ 은 top-level 로 sync 되므로 정보 손실 없음.
     SYNC_EXCLUDES=(--exclude=.git/ --exclude='*.log' --exclude=.DS_Store
-                   --exclude=.runtime/ --exclude=shared/blowup/lens/)
+                   --exclude=.runtime/ --exclude=shared/blowup/lens/
+                   --exclude=shared/config --exclude=shared/roadmaps
+                   --exclude=shared/harness/safe_hexa_launchd.sh)
     ;;
   "$HOME_LC/dev/anima"|"$HOME_LC/dev/anima"/*)
     for candidate in "$HOME/Dev/anima" "$HOME/dev/anima"; do
