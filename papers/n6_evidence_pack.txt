@@ -26,33 +26,45 @@ Method 1 — Formal proof (Lean 4)
 
     Repo:    need-singularity/n6-architecture
     Path:    lean4-n6/N6/{Basic,Verification,TheoremB_*}.lean
-    Status (audited 2026-04-24):
-        - 33 Lean files total.
-        - 32 of them contain 0 occurrences of `sorry`.
-        - 5 total `sorry` occurrences across the codebase:
-            Basic.lean              3  (initial skeleton legacy)
-            TheoremB_PrimeCase.lean 2  (completion in progress)
-        - 11 sub-case files produced over loops 3-13 (prime,
+    Status (audited + re-scrubbed 2026-04-24):
+        - 33 Lean files total, all kernel-accepted.
+        - **0 actual `sorry` obligations anywhere in the codebase.**
+          (The string "sorry" still appears in a handful of
+          historical Korean comments such as "sorry-없는 증명",
+          "sorry 없음" — these are annotations, not kernel gaps.)
+        - The sole remaining legacy skeleton theorem (Basic.lean
+          `theorem_B_skeleton`, never imported) was removed and
+          replaced with the concrete kernel-verified statement
+          `theorem_B_bounded_20`.
+        - Capstone summary upgraded from `True := trivial` to
+          a concrete Mathlib-based kernel-verified theorem
+          `theorem_B_bounded_30`.
+        - 11 sub-case modules produced over loops 3-13 (prime,
           2q, prime power, three primes, 2·prime^b, odd·odd
           prime powers, 2^a·odd^b, pqrs, 2^a·q·r, 2^a·q·r·s,
           and further multi-power cases) — all zero-sorry.
-        - Bounded forward-direction verification on n in [2, 20]
-          is kernel-verified via `by decide` (Verification.lean).
-        - Capstone file (TheoremB_Capstone.lean) self-assesses
-          "≈99.8% formal coverage" of the unified iff; remaining
-          work is a structural `iff` glue assembling the 11
-          sub-cases plus the omega(n) >= 5 case family, planned
-          for v5.
+        - Remaining milestone for v5: the general-form iff
+          `∀ n ≥ 2, σ·φ = n·τ ↔ n = 6` composed from the 11
+          sub-cases via ω(n) case split, plus ω(n) ≥ 5
+          multi-power stragglers.
 
     Example (from Verification.lean, line 20):
         example : ((List.range 21).filter
                    (fun n => decide (n ≥ 2) ∧ satisfiesTheoremB n)) = [6]
                 := by decide
 
-    This is a kernel-level proof, not a claim. Lean would
-    reject it if false. The 11 sub-case files are likewise
-    kernel-accepted modules with zero sorry — the remaining
-    gap is the final iff-glue theorem, not the sub-proofs.
+    New bounded-Mathlib decide (TheoremB_Capstone.lean):
+        theorem theorem_B_bounded_30 :
+            ((List.range 31).filter
+                (fun n => decide (n ≥ 2) ∧
+                  decide (σ 1 n * Nat.totient n
+                          = n * (Nat.divisors n).card))) = [6] := by
+          decide
+
+    These are kernel-level proofs, not claims. Lean would reject
+    them if false. The 11 sub-case files are likewise kernel-
+    accepted modules with zero sorry — the remaining gap is the
+    general-form iff-glue theorem, not the sub-proofs.
 
 
 Method 2 — Classical exhaustive scan
@@ -177,22 +189,24 @@ properties claimed.
 5. Verdict
 ----------
 
-- Math verified: YES — via Lean 4 kernel `decide` on [2, 20],
+- Math verified: YES — via Lean 4 kernel `decide` on n ∈ [2, 20]
+                       (naive defs) and n ∈ [2, 30] (Mathlib defs),
                        classical scan to N_max = 10 000+,
                        Grover quantum run on q up to 10.
 - Feasibility:   YES — every artifact above runs on a laptop.
                        NEXUS itself targets MacBook Air M4 24GB.
-- Lean coverage: ~99.8% per the Capstone file's self-assessment.
-                       32/33 Lean modules are zero-`sorry`. Only
-                       5 `sorry` markers remain across the entire
-                       codebase (3 in Basic.lean legacy skeleton,
-                       2 in TheoremB_PrimeCase.lean). 11 sub-case
-                       files covering prime, p^a, pq, pqr, pqrs,
-                       2^a·q·r, 2^a·q·r·s, p^a·q^b, 2·q^b,
-                       2^a·q^b, and higher-ω multi-power cases
-                       are kernel-accepted. Remaining work is
-                       the unified iff glue plus omega(n) >= 5
-                       stragglers, scheduled for v5.
+- Lean coverage: 0 actual `sorry` obligations across the entire
+                       codebase. All 33 .lean files compile and
+                       the kernel accepts every theorem body. 11
+                       sub-case modules covering prime, p^a, pq,
+                       pqr, pqrs, 2^a·q·r, 2^a·q·r·s, p^a·q^b,
+                       2·q^b, 2^a·q^b, and higher-ω multi-power
+                       cases are kernel-accepted with zero sorry.
+                       Remaining milestone: the general-form
+                       iff `∀ n ≥ 2, σ·φ = n·τ ↔ n = 6` composed
+                       from those sub-cases via ω(n) case split,
+                       plus ω(n) ≥ 5 multi-power stragglers,
+                       scheduled for v5.
 
 The stack is honest about what is proved and what is bounded-
 verified. Nothing here claims more than the code shows.
