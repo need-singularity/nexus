@@ -982,3 +982,61 @@ Smoke script exit: 0 all-pass, 1 any regression + stderr summary listing cwd+hos
 Waves documented in-depth: sections above (1-7). This checklist is the
 *mechanical* surface — if the smoke test goes red, the wave whose signal
 matches identifies the fault class.
+
+## Wave 8 — Mac-local ssh SIGKILL (jetsam) 재분류 + next-host 1회 재시도 (2026-04-25)
+
+### 증상
+Drill 이 hetzner 에 도달해 round 1 smash/absolute/meta-closure/hyperarith 완료
+(smash +21 absorptions 45.7s, hyperarith 16 Π₀² bounded/proven in 184ms). 그러나
+resonance stage 에서:
+```
+hexa_remote: line 413: 50802 Killed: 9
+  ssh -T ... hetzner "$REMOTE_CMD"
+hexa_remote: 원격 실행 실패 (hetzner, rc=137)
+```
+상위 `hexa` wrapper 는 rc=64 → heavy-compute + Darwin + all-hosts → exit 74 abort.
+
+### Root cause (2026-04-25 observation)
+rc=137 은 **두 케이스를 merge** — (A) 원격 OOM vs (B) Mac-local ssh SIGKILL.
+Mac 측 증거 (24GB RAM, 10 ghost tty, `w` load 12.98/10.25/8.64,
+`vm_stat` lifetime swapouts=102M, `/usr/bin/log show` 2026-04-24 23:58
+`memory pressure event: 4, system vm pressure critical: 1` → launchd
+"teardown of process-scoped services after host exited" → jetsam)
+→ macOS jetsam 이 ssh client 프로세스를 kill.
+
+RSS watchdog last-kill 2026-04-19 (무관), predictive_throttle "kill 금지"
+명시 (무관), `pkill.*ssh` oauth-bridge tunnel 전용 (무관). **launchd 서비스가
+직접 kill 한 흔적 없음** — ssh 는 bash fg child 라 launchd 가시성 없음.
+bash 의 "Killed: 9" 는 kernel-originated jetsam signal.
+
+### Fix — `scripts/bin/hexa_remote` (~+55 LOC, +44/-3 effective)
+- `_run_ssh_once(host)` helper wraps ssh invocation.
+- `_next_host_in_chain(cur)` picks next host in `FALLBACK_CHAIN`.
+- 137/143 수신 시 heuristic:
+  - `uname -s == Darwin` AND `sysctl -n vm.loadavg` 1-min ≥ 8
+  - → Mac-local SIGKILL 의심 분류 + next host 1회 retry (probe → run_ssh_once)
+  - 재시도 결과가 또 137/143 이면 기존 exit 64 경로 (메시지에 "retry exhausted" 표기)
+- Darwin+load-threshold heuristic 미충족 시 즉시 기존 exit 64 (원격 OOM 로 확정).
+- Linux host 호출 (ubu2 → ubu1 relay 등) 은 Darwin 조건 false 라 영향 없음.
+
+### 왜 flock 등 concurrency gate 는 skip
+사용자 보고 "6 parallel drills 모두 74" — concurrency 로 load 압박 유발이 명백.
+그러나 gate 도입은 user-visible 지연 + 새로운 lock primitive 의존. Wave 8 은
+**recovery path** 에 한정 — 4-host fallback + 1회 retry 로 총 8 시도 경로 확보.
+지속 137 이 단일 invocation 에서 2 host 연속 발생하면 Wave 9 에서 flock 검토.
+
+### Verification
+- `bash -n scripts/bin/hexa_remote` → OK
+- `bash -x scripts/bin/hexa_remote --help | head -30` → pick_preferred + FALLBACK +
+  preflight 코드 경로 pre-fix 와 동일, 신규 헬퍼 parse OK
+- End-to-end rc=137 유도는 Mac jetsam 강제 필요 — code review 로 대체
+
+### Files
+- nexus: `scripts/bin/hexa_remote` (main), `convergence/drill_stability.convergence` (이 섹션)
+- airgenome: `state/mac_ssh_sigkill_20260425.md` (investigation), `state/atlas_convergence_witness.jsonl` (witness)
+
+### Remaining open
+- Mac-side jetsam band 정확한 승계 경로 (Terminal → bash → ssh) 미확정 — 조사 시간 필요
+- `-o ControlMaster=auto` deduplication 으로 ssh 프로세스 수 축소 가능성 (side effects
+  탐색 skip — 본 wave 는 minimal change)
+- Mac compute-queue (flock) 는 재발 시 wave 9 에서

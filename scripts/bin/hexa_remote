@@ -422,16 +422,59 @@ fi
 
 # -T = no pty, ServerAlive = 장시간 compute (drill) 중 네트워크 끊기면 30s 내 감지 후 종료.
 # P3: stderr 직통 (2>/dev/null 제거 — 원격 진단정보 surface).
+#
+# 2026-04-25 (fix8): rc=137 은 두 가지 케이스를 모두 가리킨다 —
+#   (A) 원격 호스트 OOM/SIGTERM (hetzner/ubu 쪽 hexa_stage0 cgroup cap 초과)
+#   (B) Mac 로컬 ssh 클라이언트가 jetsam/SIGKILL 로 죽음 (24GB Mac memory
+#       critical pressure + 10 Claude 세션 + load 12+ 2026-04-25 관찰).
+# 기존 코드는 (A)/(B) 구분 없이 exit 64 → 상위 hexa wrapper 가 heavy-compute +
+# Darwin + all-hosts-fail → exit 74 abort. 실제 원격은 완료됐거나 다른 호스트로
+# 옮기면 성공 가능. 휴리스틱: Darwin + loadavg≥8 이면 (B) 로 의심 → next host 1회 retry.
+_run_ssh_once() {
+    local _host="$1"
+    ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
+        -o ControlPath=/tmp/ssh-nexus-%r@%h:%p "$_host" "$REMOTE_CMD"
+}
+_next_host_in_chain() {
+    local _cur="$1"
+    local _seen=0 _h
+    for _h in $FALLBACK_CHAIN; do
+        if [ "$_seen" = "1" ]; then
+            [ "$_h" != "$_cur" ] && { printf '%s' "$_h"; return; }
+        fi
+        [ "$_h" = "$_cur" ] && _seen=1
+    done
+    printf ''
+}
+
 echo "hexa_remote: $HOST 에서 원격 실행 중" >&2
-ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
-    -o ControlPath=/tmp/ssh-nexus-%r@%h:%p "$HOST" "$REMOTE_CMD"
+_run_ssh_once "$HOST"
 ssh_rc=$?
+if [ $ssh_rc -eq 137 ] || [ $ssh_rc -eq 143 ]; then
+    _uname="$(uname -s 2>/dev/null)"
+    _loadavg="$(sysctl -n vm.loadavg 2>/dev/null | awk '{print int($2+0)}')"
+    _probably_mac_local_kill=0
+    if [ "$_uname" = "Darwin" ] && [ "${_loadavg:-0}" -ge 8 ] 2>/dev/null; then
+        _probably_mac_local_kill=1
+    fi
+    _retry_host="$(_next_host_in_chain "$HOST")"
+    if [ "$_probably_mac_local_kill" = "1" ] && [ -n "$_retry_host" ]; then
+        echo "hexa_remote: ⚠ rc=$ssh_rc + Mac loadavg=$_loadavg (≥8) → local ssh SIGKILL 의심 (jetsam). $_retry_host 로 1회 재시도." >&2
+        if _probe_host "$_retry_host"; then
+            HOST="$_retry_host"
+            echo "hexa_remote: retry host=$HOST" >&2
+            _run_ssh_once "$HOST"
+            ssh_rc=$?
+        else
+            echo "hexa_remote: retry 후보 $_retry_host unreachable — 재시도 skip" >&2
+        fi
+    fi
+fi
 if [ $ssh_rc -ne 0 ]; then
     echo "hexa_remote: 원격 실행 실패 ($HOST, rc=$ssh_rc)" >&2
-    # 원격 OOM(137) / SIGTERM(143) → resolver local fallback 강제 (병렬 burst 시 caller 회복)
     case "$ssh_rc" in
         137|143)
-            echo "hexa_remote: ⚠ $HOST 원격 OOM/SIGTERM (rc=$ssh_rc) — fallback 신호(64) 전달 (병렬 dispatch 줄이거나 GATE_LOCAL=1 권장)" >&2
+            echo "hexa_remote: ⚠ $HOST rc=$ssh_rc (retry exhausted) — fallback 신호(64) 전달 (병렬 dispatch 줄이거나 GATE_LOCAL=1 권장)" >&2
             exit 64 ;;
     esac
 fi
