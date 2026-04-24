@@ -1,0 +1,748 @@
+// ═══════════════════════════════════════════════════════════
+// _rmap_expand_helper.hexa — DISC-P8-1 (hexa port)
+//
+// Pure-hexa port of the deleted _rmap_expand_helper.py
+// (python3 removed 2026-04-18 under R37/AN13/L3-PY policy).
+// Called by reality_map_expander.hexa and reality_map_10k.hexa.
+//
+// CLI (1:1 contract with the retired python helper):
+//   hexa run discovery/_rmap_expand_helper.hexa status
+//   hexa run discovery/_rmap_expand_helper.hexa scan
+//   hexa run discovery/_rmap_expand_helper.hexa expand
+//   hexa run discovery/_rmap_expand_helper.hexa expand --merge
+//
+// Output: one JSON object per line on stdout (phase/source/summary/merge).
+//         `expand` writes discovery/reality_map_expansion.jsonl (staging).
+//         `expand --merge` appends new IDs to patches.merged.jsonl.
+//
+// Ported: ALL python ops (stdlib-only; json, re used only for the atlas
+//         `@X id = expr :: domain [grade]` line — reimplemented as a
+//         plain string scan below). No numpy / sklearn / ML dependency
+//         in the original helper, so no DEFERRED paths.
+//
+// @no-lock-needed @allow-bare-exec @allow-devpath
+// ═══════════════════════════════════════════════════════════
+
+let HOME = env("HOME")
+let NEXUS = HOME + "/core/nexus"  // @allow-devpath
+let DISC  = NEXUS + "/discovery"
+let N6    = NEXUS + "/n6"
+let BT    = NEXUS + "/bt"
+
+let MERGED   = DISC + "/reality_map.patches.merged.jsonl"
+let V9       = DISC + "/reality_map_v9.json"
+let EXT_T8   = DISC + "/reality_map_extension_t8.jsonl"
+let EXT_T12  = DISC + "/reality_map_t12_expansion.jsonl"
+let STAGING  = DISC + "/reality_map_expansion.jsonl"
+
+let VCONSTANTS = DISC + "/verified_constants.jsonl"
+let ATLAS      = N6   + "/atlas.n6"
+let N6K        = N6   + "/n6_knowledge.jsonl"
+let N6P        = N6   + "/n6_physics.jsonl"
+let N6C        = N6   + "/n6_constants.jsonl"
+let N6L        = N6   + "/n6_lenses.jsonl"
+let DSEEDS     = DISC + "/domain_seeds.jsonl"
+let THEORY     = DISC + "/theory_registry.jsonl"
+let BT_DOM     = BT   + "/bt_domains.jsonl"
+
+let TARGET = 7500
+
+// ── helpers: jsonl line iter ──────────────────────────────
+fn read_jsonl(path: str) -> any {
+    let mut out = []
+    if !file_exists(path) { return out }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let ln = lines[i].trim()
+        if len(ln) > 0 {
+            try {
+                let obj = json_parse(ln)
+                out.push(obj)
+            } catch e {}
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn count_jsonl(path: str) -> i64 {
+    if !file_exists(path) { return 0 }
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut n: i64 = 0
+    let mut i = 0
+    while i < len(lines) {
+        if len(lines[i].trim()) > 0 { n = n + 1 }
+        i = i + 1
+    }
+    return n
+}
+
+// Map-get with default ("" for string, 0 for int)
+fn get_s(o: any, k: str, dflt: str) -> str {
+    if has_key(o, k) {
+        let v = o[k]
+        if type_of(v) == "null" { return dflt }
+        return to_string(v)
+    }
+    return dflt
+}
+
+fn get_b(o: any, k: str, dflt: bool) -> bool {
+    if has_key(o, k) {
+        let v = o[k]
+        if type_of(v) == "bool" { return v }
+    }
+    return dflt
+}
+
+fn get_i(o: any, k: str, dflt: i64) -> i64 {
+    if has_key(o, k) {
+        let v = o[k]
+        if type_of(v) == "null" { return dflt }
+        try { return to_int(v) } catch e { return dflt }
+    }
+    return dflt
+}
+
+// JSON-stringify one entry as a single line (field order matches python port)
+fn entry_line(e: any) -> str {
+    return json_stringify(e)
+}
+
+// Build an entry map with the canonical field layout
+fn mk_entry(eid: str, level: str, claim: str, measured: str, unit: str,
+            detail: str, source: str, n6_expr: str, grade: str,
+            causal: str, thread: str, origin: str) -> any {
+    let mut m = #{}
+    m["id"] = eid
+    m["level"] = level
+    m["claim"] = claim
+    m["measured"] = measured
+    m["unit"] = unit
+    m["detail"] = detail
+    m["source"] = source
+    m["source_url"] = ""
+    m["n6_expr"] = n6_expr
+    m["grade"] = grade
+    m["causal"] = causal
+    m["thread"] = thread
+    m["origin"] = origin
+    m["bt_refs"] = []
+    m["_patch_source"] = "reality_map_expander.hexa"
+    return m
+}
+
+// ── load_existing_ids ─────────────────────────────────────
+fn load_existing_ids() -> any {
+    let mut ids = #{}  // set-as-map: key -> true
+
+    // 1. patches.merged.jsonl
+    let merged = read_jsonl(MERGED)
+    let mut i = 0
+    while i < len(merged) {
+        let id = get_s(merged[i], "id", "")
+        if len(id) > 0 { ids[id] = true }
+        i = i + 1
+    }
+
+    // 2. v9 nodes
+    if file_exists(V9) {
+        try {
+            let raw = read_file(V9)
+            let v9 = json_parse(raw)
+            if has_key(v9, "nodes") {
+                let nodes = v9.nodes
+                let mut j = 0
+                while j < len(nodes) {
+                    let n = nodes[j]
+                    if type_of(n) == "map" {
+                        let id = get_s(n, "id", "")
+                        if len(id) > 0 { ids[id] = true }
+                    }
+                    j = j + 1
+                }
+            }
+        } catch e {}
+    }
+
+    // 3. extension files
+    let ext_paths = [EXT_T8, EXT_T12]
+    let mut p = 0
+    while p < len(ext_paths) {
+        let arr = read_jsonl(ext_paths[p])
+        let mut k = 0
+        while k < len(arr) {
+            let id = get_s(arr[k], "id", "")
+            if len(id) > 0 { ids[id] = true }
+            k = k + 1
+        }
+        p = p + 1
+    }
+
+    // 4. existing staging
+    let st = read_jsonl(STAGING)
+    let mut q = 0
+    while q < len(st) {
+        let id = get_s(st[q], "id", "")
+        if len(id) > 0 { ids[id] = true }
+        q = q + 1
+    }
+
+    return ids
+}
+
+// ── Source 1: verified_constants ──────────────────────────
+fn scan_verified_constants(existing: any) -> any {
+    let mut out = []
+    let mut seen = #{}
+
+    let rows = read_jsonl(VCONSTANTS)
+    let mut i = 0
+    while i < len(rows) {
+        let obj = rows[i]
+        let st = get_s(obj, "status", "")
+        let ok = st == "PASS" || st == "EXACT"
+        if !ok { i = i + 1; continue }
+        let name = get_s(obj, "name", "").trim()
+        if !name.contains("=") { i = i + 1; continue }
+        let src = get_s(obj, "source", "")
+        let proj = get_s(obj, "project", "")
+
+        let parts = name.split(" ")
+        // filter empties (python split() with no arg splits on any whitespace
+        // and discards empties). We emulate that:
+        let mut parts_clean = []
+        let mut pk = 0
+        while pk < len(parts) {
+            let tok = parts[pk]
+            if len(tok) > 0 { parts_clean.push(tok) }
+            pk = pk + 1
+        }
+        if len(parts_clean) < 2 { i = i + 1; continue }
+        let tag = parts_clean[0]
+
+        let eqparts = name.split("=")
+        if len(eqparts) < 2 { i = i + 1; continue }
+        let measured = eqparts[len(eqparts) - 1].trim()
+        let mut expr = ""
+        if len(eqparts) > 2 {
+            // "=".join(eqparts[1:-1])
+            let mut eb = ""
+            let mut ei = 1
+            while ei < len(eqparts) - 1 {
+                if ei > 1 { eb = eb + "=" }
+                eb = eb + eqparts[ei]
+                ei = ei + 1
+            }
+            expr = eb.trim()
+        } else {
+            expr = eqparts[0].trim()
+        }
+        // claim = " ".join(parts[1:]).split("=")[0].strip()
+        let mut rest = ""
+        let mut ri = 1
+        while ri < len(parts_clean) {
+            if ri > 1 { rest = rest + " " }
+            rest = rest + parts_clean[ri]
+            ri = ri + 1
+        }
+        let claim = rest.split("=")[0].trim()
+
+        let sl = src.to_lower()
+        let tl = tag.to_lower()
+        let mut level = "L5_material"
+        let is_chip = sl.contains("chip") || sl.contains("gpu")
+            || tl.contains("sm-") || tl.contains("ma-") || tl.contains("is-")
+        let proj_l = proj.to_lower()
+        if is_chip {
+            level = "L5_architecture"
+        } else if sl.contains("material") || sl.contains("polymer") {
+            level = "L5_material"
+        } else if sl.contains("environ") || sl.contains("climate") {
+            level = "L6_climate"
+        } else if sl.contains("bio") || sl.contains("gene") || sl.contains("protein") {
+            level = "L4_genetic"
+        } else if sl.contains("chem") || sl.contains("bond") || sl.contains("molecule") {
+            level = "L3_molecule"
+        } else if sl.contains("atom") || sl.contains("element") {
+            level = "L1_atom"
+        } else if sl.contains("particle") || sl.contains("quark") {
+            level = "L0_particle"
+        } else if sl.contains("astro") || sl.contains("cosmo") {
+            level = "L6_astronomy"
+        } else if sl.contains("econ") || sl.contains("financ") {
+            level = "L6_economics"
+        } else if sl.contains("music") {
+            level = "L6_music"
+        } else if sl.contains("geo") || sl.contains("earth") {
+            level = "L6_geology"
+        } else if sl.contains("ocean") {
+            level = "L6_oceanography"
+        } else if proj_l.contains("hyp") || tl.contains("mega") {
+            level = "L2_law"
+        }
+
+        let eid = "VC-" + tag
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+
+        let mut grade = "VERIFIED"
+        if st == "EXACT" { grade = "EXACT" }
+        let detail = "[n6-verified] " + name
+        let source_s = proj + "/" + src
+        let entry = mk_entry(eid, level, claim, measured, "n6",
+            detail, source_s, expr, grade, "DERIVED", "n6", "engineering")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+// ── Source 2: atlas.n6 @-nodes ────────────────────────────
+// Hand-parse:  @X id = expr :: domain [grade_raw]
+fn parse_atlas_line(line: str) -> any {
+    // returns null-on-mismatch, else #{atype, aid, expr, domain, grade_raw}
+    if !line.starts_with("@") { return null }
+    if len(line) < 4 { return null }
+    let atype = line.substring(1, 2)  // 1 char after '@'
+    // After '@X' must be whitespace
+    let sp1 = line.substring(2, 3)
+    if sp1 != " " && sp1 != "\t" { return null }
+    let rest = line.substring(3, len(line)).trim()  // "id = expr :: domain [grade]"
+    // Split on '=' first (first occurrence)
+    let eq = rest.index_of("=")
+    if eq < 0 { return null }
+    let aid = rest.substring(0, eq).trim()
+    if len(aid) == 0 { return null }
+    let after_eq = rest.substring(eq + 1, len(rest))
+    // Find " :: "
+    let dd = after_eq.index_of("::")
+    if dd < 0 { return null }
+    let expr = after_eq.substring(0, dd).trim()
+    let after_dd = after_eq.substring(dd + 2, len(after_eq)).trim()
+    // domain is first whitespace-delimited token
+    let lb = after_dd.index_of("[")
+    if lb < 0 { return null }
+    let domain = after_dd.substring(0, lb).trim()
+    let rb = after_dd.index_of("]")
+    if rb < 0 || rb <= lb { return null }
+    let grade_raw = after_dd.substring(lb + 1, rb)
+    let mut m = #{}
+    m["atype"] = atype
+    m["aid"] = aid
+    m["expr"] = expr
+    m["domain"] = domain
+    m["grade_raw"] = grade_raw
+    return m
+}
+
+fn scan_atlas(existing: any) -> any {
+    let mut out = []
+    let mut seen = #{}
+    if !file_exists(ATLAS) { return out }
+    let raw = read_file(ATLAS)
+    let lines = raw.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let line = lines[i].trim()
+        let m = parse_atlas_line(line)
+        if type_of(m) == "null" { i = i + 1; continue }
+        let atype = to_string(m.atype)
+        let aid = to_string(m.aid)
+        let expr = to_string(m.expr)
+        let domain = to_string(m.domain)
+        let grade_raw = to_string(m.grade_raw)
+
+        let eid = "ATL-" + aid
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+
+        // level_map P→L0_particle, others → L2_law
+        let mut level = "L2_law"
+        if atype == "P" { level = "L0_particle" }
+
+        let mut grade = "HYPOTHESIS"
+        if grade_raw.contains("*") { grade = "VERIFIED" }
+        if grade_raw.contains("!") { grade = "EXACT" }
+
+        let claim = aid + " = " + expr
+        let detail = "[atlas.n6] @" + atype + " " + aid + " :: " + domain
+        let entry = mk_entry(eid, level, claim, expr, "n6",
+            detail, "n6/atlas.n6", expr,
+            grade, "DERIVED", domain, "mathematical")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+// ── Source 3: n6 data files (4 sources) ───────────────────
+fn scan_n6_source(existing: any, seen: any, path: str, tag: str, level: str) -> any {
+    let mut out = []
+    let rows = read_jsonl(path)
+    // file basename = last segment of path
+    let parts = path.split("/")
+    let base = parts[len(parts) - 1]
+    let mut i = 0
+    while i < len(rows) {
+        let obj = rows[i]
+        if has_key(obj, "_schema") { i = i + 1; continue }
+        let mut oid = get_s(obj, "id", "")
+        if len(oid) == 0 { oid = get_s(obj, "name", "") }
+        if len(oid) == 0 { i = i + 1; continue }
+        let eid = tag + "-" + oid.replace(" ", "_")
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+
+        let val = get_s(obj, "value", "")
+        let mut desc = get_s(obj, "desc", "")
+        if len(desc) == 0 { desc = get_s(obj, "description", "") }
+        if len(desc) == 0 { desc = get_s(obj, "statement", "") }
+        if len(desc) == 0 { desc = oid }
+        let domain = get_s(obj, "domain", "n6")
+        let mut grade = "HYPOTHESIS"
+        if get_b(obj, "verified", false) { grade = "VERIFIED" }
+        let mut n6_expr = get_s(obj, "expr", "")
+        if len(n6_expr) == 0 { n6_expr = get_s(obj, "latex", "") }
+        if len(n6_expr) == 0 { n6_expr = val }
+
+        let detail = "[" + tag + "] " + desc
+        let entry = mk_entry(eid, level, desc, val, "n6",
+            detail, "n6/" + base, n6_expr,
+            grade, "DERIVED", domain, "mathematical")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+fn scan_n6_data(existing: any) -> any {
+    let mut all = []
+    let mut seen = #{}
+    let a = scan_n6_source(existing, seen, N6K, "N6K", "L2_law")
+    let mut i = 0
+    while i < len(a) { all.push(a[i]); i = i + 1 }
+    let b = scan_n6_source(existing, seen, N6P, "N6P", "L0_particle")
+    i = 0
+    while i < len(b) { all.push(b[i]); i = i + 1 }
+    let c = scan_n6_source(existing, seen, N6C, "N6C", "L2_law")
+    i = 0
+    while i < len(c) { all.push(c[i]); i = i + 1 }
+    let d = scan_n6_source(existing, seen, N6L, "N6L", "L2_law")
+    i = 0
+    while i < len(d) { all.push(d[i]); i = i + 1 }
+    return all
+}
+
+// ── Source 4: domain_seeds ────────────────────────────────
+fn scan_domain_seeds(existing: any) -> any {
+    let mut out = []
+    let mut seen = #{}
+    let rows = read_jsonl(DSEEDS)
+    let mut i = 0
+    while i < len(rows) {
+        let obj = rows[i]
+        let domain = get_s(obj, "domain", "")
+        let name = get_s(obj, "name", "")
+        if len(domain) == 0 || len(name) == 0 { i = i + 1; continue }
+        let eid = "DSEED-" + domain + "-" + name
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+        let val = get_s(obj, "value", "")
+        let ref_s = get_s(obj, "ref", "")
+        let mut claim = name
+        if len(ref_s) > 0 { claim = ref_s }
+        let detail = "[domain_seed] " + domain + ": " + name + "=" + val
+        let entry = mk_entry(eid, "L6_" + domain, claim, val, "",
+            detail, "discovery/domain_seeds.jsonl", "seed",
+            "CONVENTION", "EMPIRICAL", domain, "natural")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+// ── Source 5: theory_registry ─────────────────────────────
+fn scan_theory_registry(existing: any) -> any {
+    let mut out = []
+    let mut seen = #{}
+    let rows = read_jsonl(THEORY)
+    let mut i = 0
+    while i < len(rows) {
+        let obj = rows[i]
+        let name = get_s(obj, "name", "")
+        let domain = get_s(obj, "domain", "")
+        if len(name) == 0 { i = i + 1; continue }
+        let eid = "THR-" + name
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+        let mut desc = get_s(obj, "desc", "")
+        if len(desc) == 0 { desc = name }
+        let loc = get_i(obj, "loc", 0)
+        let fp = get_s(obj, "fp", "")
+        let mut grade = "HYPOTHESIS"
+        if loc > 50 { grade = "VERIFIED" }
+        let measured = to_string(loc) + " LOC"
+        let detail = "[theory_registry] " + name + " (" + domain + ") fp=" + fp
+        let mut expr = "none"
+        if len(fp) > 0 { expr = fp }
+        let entry = mk_entry(eid, "L2_law", desc, measured, "LOC",
+            detail, "discovery/theory_registry.jsonl", expr,
+            grade, "DERIVED", domain, "mathematical")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+// ── Source 6: bt_domains ──────────────────────────────────
+fn scan_bt_domains(existing: any) -> any {
+    let mut out = []
+    let mut seen = #{}
+    let rows = read_jsonl(BT_DOM)
+    let mut i = 0
+    while i < len(rows) {
+        let obj = rows[i]
+        let domain = get_s(obj, "domain", "")
+        if len(domain) == 0 { i = i + 1; continue }
+        let mut kws = []
+        if has_key(obj, "keywords") {
+            let k = obj.keywords
+            if type_of(k) == "array" { kws = k }
+        }
+        let eid = "BTD-" + domain
+        if has_key(seen, eid) || has_key(existing, eid) { i = i + 1; continue }
+        seen[eid] = true
+        // top-5 join(", ")
+        let mut kwstr = ""
+        let mut ki = 0
+        let lim = if len(kws) < 5 { len(kws) } else { 5 }
+        while ki < lim {
+            if ki > 0 { kwstr = kwstr + ", " }
+            kwstr = kwstr + to_string(kws[ki])
+            ki = ki + 1
+        }
+        let detail = "[bt_domains] " + domain + ": " + kwstr
+        let entry = mk_entry(eid, "L2_law", "BT domain: " + domain,
+            to_string(len(kws)), "keywords",
+            detail, "bt/bt_domains.jsonl", "bt_domain",
+            "CONVENTION", "DERIVED", domain, "engineering")
+        out.push(entry)
+        i = i + 1
+    }
+    return out
+}
+
+// ── merge_staging: append staging into merged, dedup by id ─
+fn merge_staging() {
+    if !file_exists(STAGING) {
+        println(json_stringify(#{"action": "merge", "status": "skip",
+                                  "reason": "staging empty"}))
+        return
+    }
+    let staging_rows = read_jsonl(STAGING)
+    if len(staging_rows) == 0 {
+        println(json_stringify(#{"action": "merge", "status": "skip",
+                                  "reason": "staging empty"}))
+        return
+    }
+    let mut existing = #{}
+    let merged_rows = read_jsonl(MERGED)
+    let mut i = 0
+    while i < len(merged_rows) {
+        let id = get_s(merged_rows[i], "id", "")
+        if len(id) > 0 { existing[id] = true }
+        i = i + 1
+    }
+    let before = count_jsonl(MERGED)
+    let mut added: i64 = 0
+    let mut buf = ""
+    i = 0
+    while i < len(staging_rows) {
+        let obj = staging_rows[i]
+        let id = get_s(obj, "id", "")
+        if len(id) == 0 || has_key(existing, id) { i = i + 1; continue }
+        existing[id] = true
+        buf = buf + json_stringify(obj) + "\n"
+        added = added + 1
+        i = i + 1
+    }
+    if added > 0 { append_file(MERGED, buf) }
+    let after = before + added
+    let mut rpt = #{}
+    rpt["action"] = "merge"
+    rpt["status"] = "done"
+    rpt["before"] = before
+    rpt["after"] = after
+    rpt["added"] = added
+    println(json_stringify(rpt))
+}
+
+// ── main dispatch ─────────────────────────────────────────
+let argv = args()
+// args() returns [hexa, run, file, ...user...] when invoked via `hexa run`
+// Find first user arg (subcommand) — index 3 normally, but also tolerate
+// direct invocation `hexa _rmap_expand_helper.hexa <cmd>` → index 2.
+let mut subcmd = ""
+let mut merge_flag = false
+let mut ai = 0
+while ai < len(argv) {
+    let tok = argv[ai]
+    if tok == "scan" || tok == "expand" || tok == "status" {
+        subcmd = tok
+    } else if tok == "--merge" {
+        merge_flag = true
+    }
+    ai = ai + 1
+}
+
+if len(subcmd) == 0 {
+    println(json_stringify(#{"error": "missing subcommand"}))
+    exit(1)
+}
+
+if subcmd == "status" {
+    let existing = load_existing_ids()
+    let merged_ct = count_jsonl(MERGED)
+    let mut v9_ct: i64 = 0
+    if file_exists(V9) {
+        try {
+            let raw = read_file(V9)
+            let v9 = json_parse(raw)
+            if has_key(v9, "nodes") { v9_ct = len(v9.nodes) }
+        } catch e {}
+    }
+    let t8_ct = count_jsonl(EXT_T8)
+    let t12_ct = count_jsonl(EXT_T12)
+    let staging_ct = count_jsonl(STAGING)
+    let total = len(keys(existing))
+    let mut rpt = #{}
+    rpt["status"] = "ok"
+    rpt["merged"] = merged_ct
+    rpt["v9_nodes"] = v9_ct
+    rpt["ext_t8"] = t8_ct
+    rpt["ext_t12"] = t12_ct
+    rpt["staging"] = staging_ct
+    rpt["unique_ids"] = total
+    rpt["target"] = TARGET
+    rpt["gap"] = TARGET - total
+    println(json_stringify(rpt))
+    exit(0)
+}
+
+if subcmd == "scan" || subcmd == "expand" {
+    let do_write = subcmd == "expand"
+    if do_write { write_file(STAGING, "") }
+
+    let mut existing = load_existing_ids()
+    let mut phase = #{}
+    phase["phase"] = "loaded_existing"
+    phase["unique_ids"] = len(keys(existing))
+    println(json_stringify(phase))
+
+    let mut total_new: i64 = 0
+    let mut all_new = []
+
+    // Source 1
+    let s1 = scan_verified_constants(existing)
+    let mut si = 0
+    while si < len(s1) {
+        existing[s1[si].id] = true
+        all_new.push(s1[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s1)
+    let mut p1 = #{}; p1["source"] = "verified_constants"; p1["new"] = len(s1)
+    println(json_stringify(p1))
+
+    // Source 2
+    let s2 = scan_atlas(existing)
+    si = 0
+    while si < len(s2) {
+        existing[s2[si].id] = true
+        all_new.push(s2[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s2)
+    let mut p2 = #{}; p2["source"] = "atlas.n6"; p2["new"] = len(s2)
+    println(json_stringify(p2))
+
+    // Source 3
+    let s3 = scan_n6_data(existing)
+    si = 0
+    while si < len(s3) {
+        existing[s3[si].id] = true
+        all_new.push(s3[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s3)
+    let mut p3 = #{}; p3["source"] = "n6_data"; p3["new"] = len(s3)
+    println(json_stringify(p3))
+
+    // Source 4
+    let s4 = scan_domain_seeds(existing)
+    si = 0
+    while si < len(s4) {
+        existing[s4[si].id] = true
+        all_new.push(s4[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s4)
+    let mut p4 = #{}; p4["source"] = "domain_seeds"; p4["new"] = len(s4)
+    println(json_stringify(p4))
+
+    // Source 5
+    let s5 = scan_theory_registry(existing)
+    si = 0
+    while si < len(s5) {
+        existing[s5[si].id] = true
+        all_new.push(s5[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s5)
+    let mut p5 = #{}; p5["source"] = "theory_registry"; p5["new"] = len(s5)
+    println(json_stringify(p5))
+
+    // Source 6
+    let s6 = scan_bt_domains(existing)
+    si = 0
+    while si < len(s6) {
+        existing[s6[si].id] = true
+        all_new.push(s6[si])
+        si = si + 1
+    }
+    total_new = total_new + len(s6)
+    let mut p6 = #{}; p6["source"] = "bt_domains"; p6["new"] = len(s6)
+    println(json_stringify(p6))
+
+    if do_write && len(all_new) > 0 {
+        let mut buf = ""
+        let mut wi = 0
+        while wi < len(all_new) {
+            buf = buf + json_stringify(all_new[wi]) + "\n"
+            wi = wi + 1
+        }
+        write_file(STAGING, buf)
+    }
+
+    let projected = len(keys(existing))
+    let mut summ_inner = #{}
+    summ_inner["existing"] = projected - total_new
+    summ_inner["total_new"] = total_new
+    summ_inner["projected"] = projected
+    summ_inner["target"] = TARGET
+    summ_inner["gap_remaining"] = TARGET - projected
+    summ_inner["mode"] = subcmd
+    let mut summ = #{}
+    summ["summary"] = summ_inner
+    println(json_stringify(summ))
+
+    if do_write && merge_flag { merge_staging() }
+    exit(0)
+}
+
+println(json_stringify(#{"error": "unknown subcommand: " + subcmd}))
+exit(1)

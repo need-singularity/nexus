@@ -16,9 +16,11 @@
 // ═══════════════════════════════════════════════════════════
 
 let HOME = env("HOME")
-let NEXUS = HOME + "/Dev/nexus"  // @allow-devpath
-// PY constant removed 2026-04-18 (R37/AN13/L3-PY) — python3 invocation blocked
-let HELPER = NEXUS + "/discovery/_rmap_expand_helper.py"
+let NEXUS = HOME + "/core/nexus"  // @allow-devpath
+// 2026-04-24: python helper replaced by pure-hexa port (nxs session).
+// HELPER is now delegated via `hexa run <path>` — no python3 dependency.
+let HELPER = NEXUS + "/discovery/_rmap_expand_helper.hexa"
+let HEXA_BIN = env("HEXA_LANG") + "/hexa"
 
 fn to_str(v) -> str { return to_string(v) }
 
@@ -60,13 +62,11 @@ if argc >= 4 {
     if arg3 == "--merge" { merge_flag = true }
 }
 
-// R37/AN13/L3-PY violation — python3 wrapper-fallback removed 2026-04-18
-// Original: exec("/usr/bin/python3 _rmap_expand_helper.py <subcmd> [--merge]") — reality_map expansion
-panic("R37/AN13/L3-PY: python3 invocation blocked at reality_map_expander.hexa:67 (_rmap_expand_helper.py delegation). Research module — escalate to user.")
-let mut cmd = ""
-if merge_flag { cmd = cmd + "" }
-
-let out = ""
+// 2026-04-24: delegate to pure-hexa port of _rmap_expand_helper.py (748 LOC).
+// No python3 invocation — satisfies R37/AN13/L3-PY policy.
+let mut cmd = shq(HEXA_BIN) + " run " + shq(HELPER) + " " + shq(subcmd)
+if merge_flag { cmd = cmd + " --merge" }
+let out = sh(cmd)
 println(out)
 
 // Propagate exit via sentinel
