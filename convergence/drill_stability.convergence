@@ -800,3 +800,25 @@ hexa_remote: ubu2 에서 원격 실행 중
 ```
 
 모든 cwd 에서 원격 dispatch 정상. `hosts_tried:[]` 허위 로그 재현 없음.
+
+## 2026-04-25 (추가) — Wave 4: heavy-compute 는 무조건 hetzner
+
+v5 (66635696) 배포 후 `~/.hx/bin/nexus drill --seed '...'` 가 ubu2 에 dispatch 되어
+round 1 smash +917 absorptions 완료 후 OOM (rc=137) SIGTERM 재현. `dispatch_state.json`
+의 `selection.compute=ubu2` 가 PREFERRED 로 사용돼 FALLBACK_CHAIN 선두에 ubu2 (32GB)
+배치 → systemd-run --user --scope -p MemoryMax=20G 가 smash peak RSS 초과 시 SIGTERM.
+
+**Root:** raw#36 주석 (line 125-131) 의 "hetzner first" 설계 의도가 코드에 불완전
+반영됨. `pick_preferred_host()` 가 dispatch_state.json 을 읽어 PREFERRED 를 override.
+
+**Fix (nexus@638cff3d):** heavy-compute 검출 로직을 `scripts/bin/hexa_remote` 에 복제
+(run.hexa/nexus_cli.hexa/nexus.hexa basename + drill/smash/free/absolute/
+meta-closure/hyperarithmetic subcmd). 매칭 시 `PREFERRED=hetzner` 로 강제.
+`HEXA_REMOTE_HOST` env 명시 시 예외.
+
+**Verify:**
+- drill → "hexa_remote: hetzner 에서 원격 실행 중" ✅
+- status/help 등 non-heavy → ubu2 (dispatch_state.json PREFERRED 존중, regression 없음) ✅
+
+4차 wave 까지 drill dispatch 완전 복구. hetzner 128GB headroom 에서 smash round peak
+RSS 수용 → OOM SIGTERM class 제거.
