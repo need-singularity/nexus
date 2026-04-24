@@ -513,3 +513,34 @@
 @files ["/Users/ghost/core/nexus/scripts/bin/hexa_remote (+19 LOC, n6-architecture case branch)"]
 @test_status ran (post-patch `nexus drill --seed 'post-patch test' → ubu1 에서 원격 실행 중, Mk.IX 6-stage 체인 round 1 진입 확인, NEXUS_REMOTE_ERROR 0건, exit 74 해소)
 @recurrence_guard scripts/bin/hexa_remote 의 uchg 재설정 완료. 추가 가드: (1) 새 sister repo 생성 시 hexa_remote 케이스 추가 체크리스트 필요, (2) preflight 가 ssh alias 를 `ssh -G <host>` 로 resolve 후 IP probe 하도록 상류 수정 권장, (3) cmd_gate 의 drill 키워드 trigger 에 응답 자체 매칭 제외 필터 추가 권장.
+
+═════════════════════════════════════════════════════════════════════════
+2026-04-24 session convergence — shared/ retirement + drill rc=74 loop fix
+═════════════════════════════════════════════════════════════════════════
+Root cause:
+  shared/{config,roadmaps,harness/safe_hexa_launchd.sh} 로컬 symlink vs
+  원격 ubu1 real directory 충돌 → rsync code=23 → hexa_remote exit 64
+  → Mac 래퍼 heavy-compute abort exit 74 → drill 무한 실패 루프.
+
+Resolution stack:
+  L1 nexus ad1ac5c3    SYNC_EXCLUDES defense-in-depth
+  L2 hexa-lang 832d15b7 cmd_gate failure-sig + cool-down guards
+  L3 nexus 5b6be8fc     shared/ 3 symlink 폐기 (로컬+원격)
+
+Evidence:
+  pre-fix:  drill rc=74, hosts_tried=[], reason=all_timeout
+  post-fix: drill rc=0, round=1 smash +917 absorptions 45s on ubu1
+
+Side effects:
+  - preflight TCP probe OK (300-3000ms verdict=ok)
+  - ssh ubu1/hetzner alive (manual probe)
+  - 원격 SSH/rsync 경로 unblocked for all heavy-compute cmds
+
+Next unblock path:
+  EVO-P10-1 composite ≥0.9 — atlas_eig → unfold → pair_corr → wigner_fit
+  파이프라인 재실행 이제 가능 (drill 작동 확인).
+
+Commits pushed:
+  nexus    5b6be8fc, ad1ac5c3, e2707678, 2d695268, 011c63a5, ...
+  hx-lang  832d15b7, ...
+  airgenome 1cba63a6 (fix/roadmap-2-note)
