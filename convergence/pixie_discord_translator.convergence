@@ -1,0 +1,28 @@
+@track PIXIE_DISCORD_TRANSLATOR
+@state live
+@date 2026-04-25
+@scope pixie/discord-translator — Cloudflare Worker KR↔EN Discord translator (Gateway DO + slash/context menu interactions)
+
+@repo pixie/discord-translator
+@worker discord-translator.dancinlife.workers.dev
+@entry src/index.ts (HTTP /interactions + scheduled cron)
+@gateway_do src/gateway.ts (outbound WS to gateway.discord.gg)
+@rest src/discord.ts
+@translator src/translator.ts (Anthropic SDK, model=claude-haiku-4-5-20251001)
+
+@architecture DO singleton name="singleton"; alarm-driven heartbeat (heartbeat_interval from HELLO, ~41s); outbound WS via fetch Upgrade: websocket + ws.accept() (NOT hibernation API); cron */1 * * * * pings DO to keep warm; intents = GUILDS|GUILD_MESSAGES|GUILD_MESSAGE_REACTIONS|MESSAGE_CONTENT (bit15 privileged — must stay enabled in Dev Portal)
+@auto_translate MESSAGE_CREATE path detects lang, translates via Claude, posts as thread reply under original (createThread → fallback to inline reply on thread-in-thread)
+@reaction_translate 🇰🇷/🇺🇸/🇬🇧 reaction triggers on-demand translation toward that target
+@context_menu "translate" message-command → ephemeral deferred, followup edits @original
+
+@fixed_20260425 forwarded-message translation bug — Discord forwarded msgs have `content=""` and real text in `message_snapshots[0].message.content`; all three read paths (gateway MESSAGE_CREATE, gateway reaction getMessage, interactions resolved.messages) now fall back to snapshot (commits 831a4ea, 8ec7d5a)
+
+@pitfall_stale_ws observed 2026-04-25: WS can remain readyState=1 with heartbeat ACKs (op 11) flowing but zero MESSAGE_CREATE dispatches arriving — a "zombie but healthy-looking" session. Symptom: auto-translate silently stops. Workaround: redeploy forces new DO instance → fresh IDENTIFY → READY → GUILD_CREATE chain restores dispatch flow. Root cause not yet pinned (possible: resumed session accepted but subscription dropped, or DO isolate evicted between alarms losing WS handlers). Not reproducible on demand.
+@mitigation_idea add dispatch-watchdog: if no non-heartbeat events for N minutes while readyState=1, force close+reconnect. Not implemented.
+@mitigation_idea_2 migrate to Hibernation API (state.acceptWebSocket) for inbound WS; outbound client WS has no equivalent so this requires inverting the connection (Discord can't push to us, so not applicable) — keep outbound + watchdog path.
+
+@secrets DISCORD_BOT_TOKEN / DISCORD_PUBLIC_KEY / DISCORD_APP_ID / ANTHROPIC_API_KEY via wrangler secrets; local dev vars synced through scripts/sync-dev-vars.sh from ~/core/secret
+
+@ops_deploy cd discord-translator && npm run deploy
+@ops_tail cd discord-translator && npx wrangler tail --format pretty
+@ops_register npm run register (re-publish slash/context-menu commands via Discord API)
