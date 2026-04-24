@@ -56,6 +56,25 @@ _probe_host() {
     local retry="${HEXA_REMOTE_PROBE_RETRY:-1}"
     local total=$((retry + 1))
     local reason="unknown"
+    # Wave 11 (2026-04-25): blacklist-on-unreachable. 호스트가 probe 실패하면
+    # /tmp/hexa_remote.blacklist.<host> 파일 mtime 기록. 다음 invocation 은
+    # mtime <300s 면 probe 생략 (fast skip). 300s 초과 시 stale → 재시도.
+    # ubu2 banner timeout 반복 drill 쌓임 방지. HEXA_REMOTE_HOST 직접 지정
+    # 경로는 영향 없음 (이 함수는 fallback chain probe 전용).
+    # Override: HEXA_REMOTE_BLACKLIST_TTL=N (default 300), HEXA_REMOTE_NO_BLACKLIST=1
+    local bl_file="/tmp/hexa_remote.blacklist.$cand"
+    local bl_ttl="${HEXA_REMOTE_BLACKLIST_TTL:-300}"
+    if [ "${HEXA_REMOTE_NO_BLACKLIST:-0}" != "1" ] && [ -f "$bl_file" ]; then
+        local bl_age
+        # stat -f %m for macOS, -c %Y for Linux. Either returns 0 if stat fails.
+        bl_age="$(( $(date +%s) - $(stat -f %m "$bl_file" 2>/dev/null || stat -c %Y "$bl_file" 2>/dev/null || echo 0) ))"
+        if [ "$bl_age" -lt "$bl_ttl" ] 2>/dev/null; then
+            echo "hexa_remote: host=$cand blacklisted ${bl_age}s ago (<${bl_ttl}s TTL) — skipping probe" >&2
+            return 1
+        fi
+        # stale — remove and re-probe.
+        rm -f "$bl_file" 2>/dev/null || true
+    fi
     # raw#36 problem-solving-triad — fixpoint(stable host) + bracket(RAM headroom).
     # Per-host minimum available RAM (MB) before accepting as compute target.
     # heavy-compute drills have been observed at ~20GB RSS → 24GB min keeps a 4GB
@@ -110,6 +129,13 @@ _probe_host() {
             [ -n "$err" ] && reason="$(printf '%s' "$err" | tail -n 1)" ;;
     esac
     echo "hexa_remote: host=$cand 실패: $reason" >&2
+    # Wave 11 (2026-04-25): record blacklist on probe failure (SSH/RAM both).
+    # touch creates file with current mtime; subsequent invocations short-circuit
+    # until bl_ttl (default 300s) expires. RAM-insufficient paths also flow here
+    # because `break` jumps out of the retry loop without returning 0.
+    if [ "${HEXA_REMOTE_NO_BLACKLIST:-0}" != "1" ]; then
+        : > "$bl_file" 2>/dev/null || true
+    fi
     return $rc
 }
 
@@ -210,8 +236,11 @@ FALLBACK_CHAIN="$PREFERRED"
 # (observed SIGTERM rc=137 on round 2 resonance 2026-04-24). By probing
 # hetzner first, the RAM bracket (raw#36 ②) converges on a host with
 # ≥100GB headroom, eliminating the OOM class entirely.
+# Wave 11 (2026-04-25): chain re-order `ubu1 before ubu2` — hetzner busy 시
+# 다음 fallback 은 ubu1 (no sshfs overhead, cleaner). 관측 imbalance: ubu2 가
+# 모든 overflow 흡수 → SSH banner timeout (OOM-killed sshd) 발생.
 # Override: HEXA_REMOTE_HOST / HEXA_REMOTE_CHAIN env vars.
-for cand in hetzner ubu2 ubu1 htz; do
+for cand in hetzner ubu1 ubu2 htz; do
     case " $FALLBACK_CHAIN " in
         *" $cand "*) ;;
         *) FALLBACK_CHAIN="$FALLBACK_CHAIN $cand" ;;

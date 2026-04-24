@@ -1095,6 +1095,64 @@ primitive 대체. 비-heavy 경로 (probe/helpers/rsync) 는 gate 우회.
 - macOS `flock(1)` 설치 가능 환경 (homebrew `util-linux`) 에서 native flock
   로 마이그레이션 시 retry 루프 단순화 가능. 현재는 호환성 우선.
 
+## 2026-04-25 — Wave 11: ubu2 banner-timeout load-imbalance 대응 (chain reorder + blacklist)
+
+### Trigger
+사용자 보고: "ubu2 혼자 터질라그래 로드밸런싱 제대로 안되구요". 관측:
+- hetzner 1min loadavg 1.06 / 15min 8.22 (방금 무거웠음, 가라앉는 중)
+- ubu1 loadavg 0.11, idle
+- ubu2 **SSH banner timeout** — unreachable (sshd OOM-kill 가능성)
+
+Wave 4 가 PREFERRED=hetzner 를 고정했지만 chain 순서가 `hetzner ubu2 ubu1 htz`
+였음. hetzner 바쁠 때 fallback 이 ubu2 로 연속 집중되어 ubu2 리소스 고갈 →
+banner timeout. Wave 9 concurrency gate 는 Mac jetsam 에만 반응, 원격 OOM
+전조는 커버 못함.
+
+### Fix (A + B 2건)
+A. **Chain reorder** (~1 LOC): `for cand in hetzner ubu2 ubu1 htz`
+   → `for cand in hetzner ubu1 ubu2 htz`. ubu1 은 sshfs 오버헤드 없고 현재
+   idle → hetzner busy 시 1차 fallback 으로 적합. ubu2 는 마지막 unix
+   candidate 로 강등.
+
+B. **Blacklist-on-unreachable** (~25 LOC): `_probe_host` 에 삽입.
+   - probe 실패 (SSH/DNS/RAM) 시 `/tmp/hexa_remote.blacklist.<host>` touch
+     (mtime = 실패 시각).
+   - 다음 invocation `_probe_host` 진입 시 blacklist mtime 검사 — ttl (default
+     300s) 이내면 즉시 rc=1 (SSH round-trip 생략, 빠른 skip + stderr notice).
+   - ttl 초과 시 파일 삭제 + 정상 probe (self-heal: 호스트 회복 5분 내 재흡수).
+
+### Mechanics
+- Blacklist file: `/tmp/hexa_remote.blacklist.<host>` (empty, mtime 의미).
+- Age 계산: macOS `stat -f %m` 우선 → Linux `stat -c %Y` fallback → 0 default.
+- HEXA_REMOTE_HOST 직접 지정 경로는 `_probe_host` 호출 안 하므로 영향 없음.
+- RAM-insufficient (raw#36 bracket) 도 blacklist 대상 — "가볍게 실패한" 상태도
+  300s 안에 복구 기대하기 어려워 skip 합리적.
+
+### Override
+- `HEXA_REMOTE_BLACKLIST_TTL=N` → blacklist 유효 시간 (default 300s)
+- `HEXA_REMOTE_NO_BLACKLIST=1` → 기능 완전 bypass (debug/emergency)
+
+### Verification
+- `bash -n scripts/bin/hexa_remote` → OK (31 LOC insert, 1 LOC edit)
+- 3-drill back-to-back (ubu2 unreachable 상태): 모두 hetzner pick (PREFERRED
+  healthy). 첫 ubu2 probe 실패 후 `/tmp/hexa_remote.blacklist.ubu2` 생성 —
+  이후 invocation 은 fallback 진입 시 skip (기대 상황: hetzner 과부하 케이스).
+- blacklist 파일 mtime 300s 초과 시 stale 감지 + 삭제 + 정상 probe 재개 로직
+  확인 (stat -f %m timestamp 비교).
+
+### Files
+- nexus: `scripts/bin/hexa_remote` (_probe_host blacklist + chain reorder),
+  `convergence/drill_stability.convergence` (이 섹션)
+- airgenome: `state/load_balancing_wave11_12_20260425.md`,
+  `state/atlas_convergence_witness.jsonl` (Wave 11/12 witness)
+
+### Remaining open
+- ubu2 는 SSH banner timeout — 물리 복구 (power cycle) 필요. blacklist 가
+  5분마다 재probe 하므로 ubu2 회복 시 자동 재흡수.
+- 다음 Wave 12 에서 "highest-avail host pick" (structural load balancing)
+  도입 예정 — 현재 chain 은 "first healthy" 이므로 hetzner 가 건재하면
+  avail RAM 상관없이 항상 hetzner. Wave 12 는 probe-all + pick by avail_mb.
+
 ## 2026-04-25 — airgenome-side session sweep pointer
 
 Drill 8-wave 외에 동일 세션 내 airgenome 쪽에서 발생한 forge offload (M4/M5 → ubu1),
