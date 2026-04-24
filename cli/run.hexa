@@ -335,13 +335,16 @@ fn _stage_timeout_prefix(stage: str) -> str {
     // Per-stage override via env (초 단위) — NEXUS_DRILL_TIMEOUT_{smash|free|absolute|meta_closure|hyperarith|resonance}
     let ov = env("NEXUS_DRILL_TIMEOUT_" + stage)
     let sec = if ov.len() > 0 { to_int(ov) }
-        else if stage == "smash" { 45 }
-        else if stage == "free" { 60 }
-        else if stage == "absolute" { 30 }
-        else if stage == "meta_closure" { 30 }
-        else if stage == "hyperarith" { 30 }
-        else if stage == "resonance" { 300 }  // Wave 17 (2026-04-25): 60s → 300s, resonance 는 heavy engine, 60s 안 끝나는 drill 빈번 (rc=143 패턴). env override 가능.
-        else { 60 }
+        // Wave 18 (2026-04-25): 전 stage timeout 광범위 상향. 사용자 지적 "좀 넉넉히 좀" —
+        // 원격 호스트 128GB RAM 기준 heavy compute 는 stage 당 수십~수백초 걸림.
+        // 기존 30s/45s/60s 는 rc=143 SIGTERM 반복 유발. env override 동일 유지.
+        else if stage == "smash" { 180 }
+        else if stage == "free" { 180 }
+        else if stage == "absolute" { 180 }
+        else if stage == "meta_closure" { 180 }
+        else if stage == "hyperarith" { 180 }
+        else if stage == "resonance" { 600 }
+        else { 180 }
     // --kill-after=5: SIGTERM at sec, SIGKILL at sec+5 (process-group escape hatch)
     return "timeout --kill-after=5 " + to_string(sec) + " "
 }
