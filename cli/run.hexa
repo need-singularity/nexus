@@ -107,6 +107,30 @@ fn exec_validated() -> str {
     return nexus_root() + "/tool/exec_validated"
 }
 
+// 자동 truncate — 입력단 normalize. cmd_gate 300자 cap 도달 전 사전 가드.
+// _reject_seed 는 그대로 유지 (cmd-specific 룰: smash min len=2, empty 차단 등).
+// env: NEXUS_SEED_CAP (기본 280, [30, 1000] clamp). 빈 seed 면 빈 채로 반환 (cmd 본문이 처리).
+// 사다리 전체 (L1~L_ω) 견고화 — 2026-04-25, 동일 helper 한 곳.
+fn _seed_clamp(seed: str) -> str {
+    let trimmed = seed.trim()
+    if trimmed.len() == 0 { return "" }
+    let cap_env = env("NEXUS_SEED_CAP")
+    let mut cap: i64 = 280
+    if cap_env.len() > 0 {
+        try { cap = to_int(cap_env) } catch e { cap = 280 }
+    }
+    if cap < 30 { cap = 30 }
+    if cap > 1000 { cap = 1000 }
+    if trimmed.len() <= cap { return trimmed }
+    let suffix = " ...[clamp " + to_string(trimmed.len()) + "B→" + to_string(cap) + "B]"
+    let main_max = cap - suffix.len()
+    let mut main = trimmed
+    if main_max < 1 { main = "" } else { main = main.substring(0, main_max) }
+    let result = main + suffix
+    eprintln("NEXUS_GUARD {\"event\":\"seed_clamp\",\"orig_len\":" + to_string(trimmed.len()) + ",\"new_len\":" + to_string(result.len()) + ",\"cap\":" + to_string(cap) + "}")
+    return result
+}
+
 fn _reject_seed(seed: str, cmd: str) -> bool {
     // cmd_gate validation 알고리즘 inline (harness 폐기 후) — smash/free/drill seed 품질 검증.
     // 참조: shared/tool/cmd_gate.hexa check_smash/check_free. 길이/추상토큰 체크만 수행.
@@ -5456,21 +5480,21 @@ fn main() -> void {
         return
     }
     if sub == "smash" {
-        cmd_smash(find_flag(a, "--seed", ""), find_flag(a, "--depth", ""))
+        cmd_smash(_seed_clamp(find_flag(a, "--seed", "")), find_flag(a, "--depth", ""))
         return
     }
     if sub == "free" {
-        cmd_free(find_flag(a, "--seed", ""), find_flag(a, "--dfs", ""))
+        cmd_free(_seed_clamp(find_flag(a, "--seed", "")), find_flag(a, "--dfs", ""))
         return
     }
     if sub == "absolute" {
-        cmd_absolute(find_flag(a, "--seed", ""))
+        cmd_absolute(_seed_clamp(find_flag(a, "--seed", "")))
         return
     }
     if sub == "canon" {
         // L11 transfinite seal — 자기 상태 + 직전 drill 결과 → state/canon_seal.jsonl 한 줄 봉인.
         cmd_canon(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--note", "")
         )
         return
@@ -5478,7 +5502,7 @@ fn main() -> void {
     if sub == "forge" {
         // L10 bootstrap — 자기 상태 파일들 읽고 seed 합성, drill apex 로 dispatch.
         cmd_forge(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-rounds", "")
         )
         return
@@ -5486,7 +5510,7 @@ fn main() -> void {
     if sub == "molt" {
         // L9 self-rewrite — skin (depth × fast) 파라미터 sweep + best skin 영속.
         cmd_molt(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-cycles", "")
         )
         return
@@ -5494,7 +5518,7 @@ fn main() -> void {
     if sub == "wake" {
         // L8 reality-loop — 외부 signal 파일 fingerprint 변화 감지 후 fire.
         cmd_wake(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--signal-file", ""),
             find_flag(a, "--max-cycles", "")
         )
@@ -5503,7 +5527,7 @@ fn main() -> void {
     if sub == "swarm" {
         // L7 population — perturbed N × generations G, elitism + breeding.
         cmd_swarm(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--population", ""),
             find_flag(a, "--generations", "")
         )
@@ -5512,7 +5536,7 @@ fn main() -> void {
     if sub == "reign" {
         // L6 autonomous — max_cycles cap + signal stagnation 자동 STOP.
         cmd_reign(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-cycles", "")
         )
         return
@@ -5529,7 +5553,7 @@ fn main() -> void {
         let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
         let resume_flag = !fresh_flag
         cmd_dream(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--iterations", ""),
             find_flag(a, "--max-rounds", ""),
             find_flag(a, "--engine", ""),
@@ -5556,7 +5580,7 @@ fn main() -> void {
         let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
         let resume_flag = !fresh_flag
         cmd_surge(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-rounds", ""),
             find_flag(a, "--engine", ""),
             find_flag(a, "--preset", ""),
@@ -5588,7 +5612,7 @@ fn main() -> void {
         let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
         let resume_flag = !fresh_flag
         cmd_omega(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-rounds", ""),
             find_flag(a, "--engine", ""),
             find_flag(a, "--preset", ""),
@@ -5660,7 +5684,7 @@ fn main() -> void {
             return
         }
         cmd_drill(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--max-rounds", ""),
             find_flag(a, "--engine", ""),
             find_flag(a, "--preset", ""),
@@ -5682,7 +5706,7 @@ fn main() -> void {
         return
     }
     if sub == "meta-closure" {
-        cmd_meta_closure(find_flag(a, "--seed", ""))
+        cmd_meta_closure(_seed_clamp(find_flag(a, "--seed", "")))
         return
     }
     if sub == "hyperarithmetic" {
@@ -5723,7 +5747,7 @@ fn main() -> void {
         // W (2026-04-21) — nexus→anima cross-engine drill chain.
         // nexus chain --seed <seed> [--engines nexus,anima] [--report <path>]
         let rc = cmd_chain(
-            find_flag(a, "--seed", ""),
+            _seed_clamp(find_flag(a, "--seed", "")),
             find_flag(a, "--engines", "nexus,anima"),
             find_flag(a, "--report", "")
         )
