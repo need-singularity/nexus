@@ -66,10 +66,12 @@ def iter_files():
                 p = Path(dirpath) / fn
                 if p.suffix.lower() not in SCAN_EXTS and not p.name.endswith((".log.gz",)):
                     continue
-                # daily snapshot 도 self-output (ghost_ceiling_summary.daily.YYYY-MM-DD.json)
-                if p.name.startswith("ghost_ceiling_summary.daily.") or \
-                   p.name in {"ghost_ceiling_trace.jsonl", "ghost_ceiling_summary.json"}:
-                    continue
+                # cycle 5 (default): self-output skip 으로 idempotent
+                # cycle 8 (override): NEXUS_BACK_ACTION_ON=1 시 skip 해제 → 의도적 back-action
+                if os.environ.get("NEXUS_BACK_ACTION_ON") != "1":
+                    if p.name.startswith("ghost_ceiling_summary.daily.") or \
+                       p.name in {"ghost_ceiling_trace.jsonl", "ghost_ceiling_summary.json"}:
+                        continue
                 try:
                     if p.stat().st_size > MAX_FILE_BYTES:
                         continue
