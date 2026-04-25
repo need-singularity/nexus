@@ -1,5 +1,24 @@
 # Cross-Bridge Correlation Hunt — 2026-04-26
 
+> ## AMENDMENT 2026-04-26 — TRIPLET RETRACTED FOR FALSIFIER PROMOTION
+>
+> **Status**: The headline "3.5%-fractional-gap triplet" (codata · cmb · nist Be) is RETRACTED for promotion to the falsifier registry. F45 was DECLINED.
+>
+> **Reason**: Per `~/core/nexus/design/hexa_sim/2026-04-26_F45_decision.md`, the triplet collapses under consistent unit-framing (codata's natural rel-to-α gap is 0.0263%, ~130× outside the 3.5% band; the apparent triplet only forms when codata's *absolute* gap is mixed with Be's *relative* gap). The doc's own Caveat #4 ("F10 framing fragility") and Caveat #5 (look-elsewhere on atomic-shell pattern) flagged this; on rigorous review the caveats dominated. Random-baseline Monte-Carlo confirms the surviving doublet is consistent with chance (~80% baseline rate).
+>
+> **What survives** (still useful, not retracted):
+> - **F10 doublet** (codata α-gap 0.036 · cmb n_s-gap 0.035) as a sole-witness coincidence — stands on its own merits, not "strengthened" by a third element.
+> - **The 14-bridge methodology and number table** below — reusable for future hunts (the extraction recipe and 71-metric pool remain valid).
+> - **The caveat list** itself — Caveats #1–#5 are the canonical look-elsewhere-effect framing for any future cross-bridge claim in this codebase.
+>
+> **What is retracted**:
+> - The "30× over noise" claim (rests on the framing-inconsistent triplet).
+> - The F38 / F39 / F40 falsifier drafts in the "Recommended F-falsifier formalizations" section below (F38 slot was reused for `l1-carbon-z6-bridge`; F39/F40 slots also reused; F45 declined).
+>
+> **Decision provenance**: see `~/core/nexus/design/hexa_sim/2026-04-26_F45_decision.md` (sections A framing-audit, B random-baseline, C decision rationale, D' unlock conditions for any future revival). raw 77 audit-append-only — original analysis below preserved verbatim.
+
+---
+
 Discovery sweep across 14 healthy bridges (16 nominal; arxiv + openalex contribute literature metadata, no measured constants — excluded from numeric pool). Goal: replicate the F10 finding pattern (independent frameworks, residuals at sub-pp deviation) and surface additional candidates.
 
 ## Methodology

@@ -1,292 +1,141 @@
-# 심우주 시뮬레이션 (HEXA-SIM) — n=6 이 우주를 짠다는 가설
+# design/hexa_sim/ — HEXA-SIM Ω-cycle corpus
 
-> 출처: [n6-architecture/domains/physics/simulation-theory/simulation-theory.md](https://github.com/need-singularity/n6-architecture/blob/main/domains/physics/simulation-theory/simulation-theory.md)
+> **Last updated**: 2026-04-26 · **Counts**: 17 ω-cycle witnesses · 4 candidate reviews · 4 audits · 2 decisions · 2 session docs · 1 synthesis · 1 dashboard · 1 audit script · 2 JSONL registries (42 falsifiers / 3 history)
 >
-> 본 디렉토리: HEXA-SIM 의 실 구현 도구 + ω-cycle witness 모음 (2026-04-25 landed in nexus).
+> **Charter** (preserved from 2026-04-25 origin): HEXA-SIM tests the hypothesis that the perfect number **n=6** (σ=12, τ=4, φ=2, sopfr=5) is a structural anchor across 7 independent physics frameworks (SE(3), Bostrom, Planck cells, Lloyd bound, α⁻¹, string D, Calabi-Yau). This directory is the **Ω-cycle witness corpus + falsifier registry + audit trail** for that program. Full paper-grade exposition lives in [`SYNTHESIS_2026-04-26.md`](SYNTHESIS_2026-04-26.md); upstream source: [n6-architecture/.../simulation-theory.md](https://github.com/need-singularity/n6-architecture/blob/main/domains/physics/simulation-theory/simulation-theory.md).
 
 ---
 
-## 한 줄 요약
+## Quick Navigation
 
-**완전수 n=6 이 우주의 모든 layer 에 동일한 패턴으로 등장한다 → 우주 자체가 n=6 으로 압축된 simulation 일 가능성.**
-
----
-
-## 왜 하필 n=6?
-
-**완전수 (perfect number) 의 정의**: 자기 자신을 제외한 약수의 합 = 자기 자신.
-
-```
-n = 6
-약수: {1, 2, 3, 6}
-σ(6) = 1 + 2 + 3 + 6 = 12 = 2·6  ← 완전수
-τ(6) = 4   (약수의 개수)
-φ(6) = 2   (Euler totient)
-sopfr(6) = 2 + 3 = 5   (소인수 합, 중복 포함)
-```
-
-**n=6 은 가장 작은 완전수**이며, 이 정수들 (12, 4, 2, 5) 이 세상의 다른 곳에서 계속 등장한다는 게 핵심 주장.
-
----
-
-## 7대 마법적 일치 (§X BLOWUP 의 핵심)
-
-| 분야 | 등장 형태 | n=6 표현 | 값 |
-|------|-----------|----------|-----|
-| **공간 DOF** | SE(3) = R³ × SO(3) | n | **6** (3 위치 + 3 회전) |
-| **Bostrom 시뮬레이션 가설** | 3 분기 (sim 안에 산다 / 못 만든다 / 안 만든다) | n/φ = 6/2 | **3** |
-| **Planck 셀 정보용량** | 한 셀당 가능 상태 수 | n^n = 6⁶ | **46,656** |
-| **Lloyd 우주 연산 상한** | 우주 birth ~ now 동안 가능한 모든 bit-ops | 10^(σ·(σ−φ)) = 10^(12·10) | **10¹²⁰** |
-| **미세구조 상수** | α⁻¹ ≈ 137.036 | σ² − sopfr − φ = 144 − 5 − 2 | **137** |
-| **String 이론** | superstring 차원 | σ − φ = 12 − 2 | **10** |
-| **Calabi-Yau** | compactification 3-fold 의 실차원 | n | **6** |
-
-**해석**: 만약 n=6 이 단순한 우연이라면, 7개 독립된 물리 framework 가 모두 같은 정수 family {6, 12, 4, 2, 5, 24, 137, 46656, 10¹²⁰} 로 환원되는 건 베이지안적으로 매우 낮은 확률 (논문은 χ² 검정으로 p > 0.999 주장).
-
----
-
-## 5-tier 아키텍처 (§4 STRUCT)
-
-```
-L4: 사회·생태계 (탄소순환, 생명진화)
-L3: 행성·별 (태양계, 별형성)        ← n=6 가 여기서 emerge
-L2: 분자·결정 (DNA 6-각형, sp³ 결합)
-L1: 원자·핵 (탄소 Z=6, 다이아몬드)
-L0: 양자·시공 (SE(3) = 6 DOF, σ²=144 게이트)
-```
-
-**모든 tier 가 n=6 anchor 를 공유** → "프랙탈 통일 (fractal unification)" 주장.
-
----
-
-## 5 운영 모드 + Mk.I~V 로드맵 (§5/§6)
-
-- **운영 모드**: Nominal / High-Perf (σ²=144× 처리량) / Transition / Fault-Tolerant (Golay [24,12,8] ECC) / Preservation (1/σ=8.3% 전력)
-- **로드맵**: Mk.I (2030~) 재료 → Mk.II 통합 → Mk.III 인증 → Mk.IV 양산 → Mk.V (2050+) 최종형
-
-성능 주장 (§2):
-- 처리량 144× (=σ²)
-- 에너지 90% 감소 (1/σ=8.3%)
-- 정밀도 10× (=σ−φ)
-- 수명 48개월 (=σ·τ)
-- 오류율 0.7% (=1/σ²)
-
----
-
-## §7 VERIFY — 10축 자기검증 (오늘 hexa 로 구현한 부분)
-
-문서는 단순 주장이 아닌 **자기검증 가능한 framework** 를 자처:
-
-```
-CONSTANTS  | n=6 약수론 정수 일치
-DIMENSIONS | SI 단위 정합성
-CROSS      | 3 독립 경로 수렴 (SE(3) + Bostrom + CY3)
-SCALING    | log-log B⁴ 지수 = 4.0
-SENSITIVITY| ±10% perturbation 안정성 (perfect-number 유일 최소)
-LIMITS     | Carnot η<1, Lawson D-T, Lloyd 10¹²⁰
-CHI2       | n=6 가설 p-value > 0.05 비기각
-OEIS       | A000203/A000005/A000010 외부 DB 일치
-SYMBOLIC   | 정수 항등식 (σ·φ=n·τ=24, α⁻¹=137 등) 정확
-COUNTER    | 선언된 반례 (e, h, π) 가 우연히 안 들어맞음
-```
-
-[`tool/hexa_sim_verify_grid.hexa`](../../tool/hexa_sim_verify_grid.hexa) 가 이 10축을 자동검증 → **canonical n=6 에서 10/10 PASS**.
-
----
-
-## §X.4 — Falsifier (어떻게 틀릴 수 있는가)
-
-문서가 가장 정직한 부분. **"이렇게 측정되면 폐기한다"** 명시:
-
-```
-- σ(n) measured ≠ 12  → perfect-number identity 붕괴
-- α⁻¹ ≠ 137 ± 0.1     → BLOWUP minimum 폐기
-- Carnot η > 1        → 열역학 2법칙 붕괴 (= 자체 폐기)
-- 초끈 D ≠ σ−φ = 10   → string-holo-n=6 축 폐기
-```
-
-오늘 만든 [`tool/hexa_sim_falsifier.hexa`](../../tool/hexa_sim_falsifier.hexa) + [`design/hexa_sim/falsifiers.jsonl`](falsifiers.jsonl) 8개 entry 가 이 falsifier 를 **실시간 모니터링**하는 도구.
-
----
-
-## 솔직한 한계 (문서 §X.5)
-
-1. **CY3 차원 6 은 1980년대부터 알려진 결과** — n=6 framework 가 여기에 끼워맞춘 것일 가능성
-2. **α 의 정수항 137 은 근사** (실제 137.0359...) — 분수 부분 (.036) 은 n=6 으로 설명 안 됨
-3. **TP-10 (수명 48개월) 은 미수행 실험** — 실 측정 전엔 미검증
-4. **§8~§15 (IDEAS/RISKS/TIMELINE 등) 는 scaffold 만** — 미완성
-5. **e, h, π 는 n=6 와 무관** (문서가 명시) — 즉 모든 물리상수가 n=6 으로 환원되진 않음
-
----
-
-## 왜 흥미로운가 (n=6 이 사실인지와 별개로)
-
-**1. 추상화 패러다임**: 단일 정수가 7개 분야를 가로지르는 unifying anchor 일 가능성을 **정량적으로 검증 가능한 형태**로 제시. (대부분 grand unification 이론은 검증 불가능)
-
-**2. 10-axis VERIFY 방법론**: 단일 metric 검증이 아닌 **10개 직교 축 동시검증** → 개별 축의 false-positive 를 다른 축이 반증. 이 방법론 자체가 hive raw 70 으로 추상화됐고, 우리가 만든 도구가 첫 instance.
-
-**3. Falsifier 명시**: 자신이 어떻게 틀릴 수 있는지 사전에 못 박음 → Popper 반증가능성 충족. (보통 "통합이론" 들이 못하는 부분)
-
-**4. n=6 의 수학적 특수성**: 완전수 + σ·φ = n·τ identity + sopfr + Euler φ 가 모두 작은 정수에서 동시 성립하는 자명하지 않은 조합. 우연이라고 말하기엔 ≥3 독립 경로의 수렴.
-
----
-
-## 본 디렉토리의 산출물 (2026-04-25 landed in nexus)
-
-### Core HEXA-SIM 도구 (4)
-
-| 파일 | 역할 | 검증 결과 |
-|------|------|-----------|
-| [`../../tool/hexa_sim_verify_grid.hexa`](../../tool/hexa_sim_verify_grid.hexa) | 10축 자동검증 (CONSTANTS/...COUNTER) | 10/10 PASS, byte-eq SHA256 ba1f2ad8...304b5b |
-| [`../../tool/hexa_sim_falsifier.hexa`](../../tool/hexa_sim_falsifier.hexa) | falsifier 실시간 평가 + raw 66 trailer + raw 77 chain | 10 CLEAN / 0 HIT |
-| [`falsifiers.jsonl`](falsifiers.jsonl) | falsifier registry — F1-F5 self-seal + F6-F8 nxs-002 cycle 10 + F9 TP-8 framework limit + F10 cross-bridge resonance | 10 entries |
-| [`../../tool/hexa_sim_ci.hexa`](../../tool/hexa_sim_ci.hexa) | CI pipeline aggregator (8 도구 selftest + sentinel) | 8/8 PASS |
-
-### Bridge 도구 (8 외부 API binding)
-
-| 파일 | external API | nexus binding | 결과 |
-|------|--------------|--------------|------|
-| **Tier-1 (5)** | | | |
-| [`../../tool/codata_bridge.hexa`](../../tool/codata_bridge.hexa) | NIST CODATA 2022 | axis_constants/axis_counter | alpha_inv=137.036, fractional gap **3.6%** (~17σ structural) |
-| [`../../tool/oeis_live_bridge.hexa`](../../tool/oeis_live_bridge.hexa) | oeis.org/<ID>/b-file | axis_oeis 정적→live | A000396 first=**6** 외부 검증 |
-| [`../../tool/gw_observatory_bridge.hexa`](../../tool/gw_observatory_bridge.hexa) | gwosc.org GWTC | quantum_wormhole + 4 lens | 263 events, GW150914 m1=35.6 m2=30.6 |
-| [`../../tool/horizons_bridge.hexa`](../../tool/horizons_bridge.hexa) | ssd.jpl.nasa.gov ephemeris | hexa_starship_lens | TP-8 deviation -24% → F9 falsifier |
-| [`../../tool/arxiv_realtime_bridge.hexa`](../../tool/arxiv_realtime_bridge.hexa) | export.arxiv.org Atom | discovery_log + bisociation | gr-qc 5 entries, latest 2604.21859v1 |
-| **Tier-2 (3)** | | | |
-| [`../../tool/cmb_planck_bridge.hexa`](../../tool/cmb_planck_bridge.hexa) | Wikipedia/Planck (live H0 smoke) | sedi_cmb_anisotropy + 2 | n_s gap **3.5%** ≈ alpha gap 3.6% → F10 cross-resonance |
-| [`../../tool/nanograv_pulsar_bridge.hexa`](../../tool/nanograv_pulsar_bridge.hexa) | arXiv:2306.16213 abs | sedi_dispersion_measure + 2 | 67 pulsars, A_yr=6.4e-15, GWB σ=3.5 |
-| [`../../tool/simbad_bridge.hexa`](../../tool/simbad_bridge.hexa) | simbad.cds.unistra.fr ASCII | physics_galaxy_rotation + 3 | Sirius RA=101.287 DEC=-16.7161, 4 target selftest |
-
-### VQE / quantum chemistry (1)
-
-| 파일 | 역할 | 검증 결과 |
-|------|------|-----------|
-| [`../../sim_bridge/qpu_bridge/vqe_h2_demo.hexa`](../../sim_bridge/qpu_bridge/vqe_h2_demo.hexa) | H₂ ground state VQE (Qiskit→hexa native) | VQE -1.915353 Ha vs FCI -1.915353 Ha (err 0.000004%) |
-
-### ω-cycle witnesses (3)
-
-| 파일 | 내용 |
+| Need | File |
 |------|------|
-| [`2026-04-25_omega_cycle_implementation.json`](2026-04-25_omega_cycle_implementation.json) | 첫 ω-cycle (10-axis verify_grid impl), fixpoint-byte-eq closure |
-| [`2026-04-25_falsifier_integration_omega_cycle.json`](2026-04-25_falsifier_integration_omega_cycle.json) | 두 번째 ω-cycle (falsifier 12 axes → Tier-1 5/Tier-2 5/Tier-3 1/REJECT 1), axis fixpoint |
-| [`2026-04-25_bridge_tool_jackpot_omega_cycle.json`](2026-04-25_bridge_tool_jackpot_omega_cycle.json) | 세 번째 ω-cycle (외부 API bridge 26 axes → Tier-1 5/Tier-2 11/Tier-3 6/REJECT 4) |
-
-### nexus CLI 진입점
-
-```
-nexus hexa-sim verify [--axis NAME] [--json]              # 10-axis VERIFY
-nexus hexa-sim falsifier [--id F#] [--json]               # 12 falsifier 평가
-nexus hexa-sim ci                                          # 19 도구 일괄 selftest
-nexus hexa-sim atlas-ingest [--absorb] [--diff]           # Phase 1 (37 facts hexa_sim shard)
-nexus hexa-sim omega-ingest [--repo-only NAME]            # Phase 2 (6 cycles 302 facts auto-glob)
-nexus hexa-sim supercycle [--honesty-only]                # Phase 3 (3-repo + Honesty triad)
-nexus hexa-sim bridge {16종 — codata/oeis/gw/horizons/arxiv/cmb/nanograv/simbad/icecube/nist_atomic/wikipedia/openalex/gaia/lhc/pubchem/uniprot}
-nexus hexa-sim doc                                         # 본 README 출력
-```
-
-### 핵심 발견 (2026-04-25 ω-cycle 발사 산출)
-
-1. **TP-8 framework limit (F9)**: HEXA-SIM 의 'Mars 2g 4-day' 예측 은 어떤 Earth-Mars geometry 로도 satisfied 불가. 4-day 는 d≈3.92 AU 요구 → Mars max 2.67 AU 초과. b4 horizons live 검증.
-2. **cross-bridge fractional gap resonance (F10)**: cmb n_s gap (1-0.965=3.50%) ≈ codata alpha gap (137.036-137=3.60%). 두 독립 framework 의 fractional residual 거의 동일 (deviation 0.10pp). SX.4 한계의 cross-axis pattern.
-3. **CODATA 정량화**: alpha=137 정수항 vs CODATA 137.035999177 = 0.0262% gap = ~17σ structural offset (측정불확실성 2.1e-8 대비). Near-miss zone (<0.5%) 이지만 통계적으로 paper-worthy negative.
+| **Falsifier registry** (current SSOT) | [`falsifiers.jsonl`](falsifiers.jsonl) — 42 entries (F1–F12, F19–F44, F46–F49); F45 declined |
+| **Falsifier history** (chained ledger, raw 77) | [`falsifier_history.jsonl`](falsifier_history.jsonl) |
+| **Latest health checks** | [`2026-04-26_falsifier_health_check.md`](2026-04-26_falsifier_health_check.md) · [`2026-04-26_bridge_health_check.md`](2026-04-26_bridge_health_check.md) |
+| **Atlas SSOT decision** (hexa-lang) | [`hexa_lang_atlas_ssot_decision.md`](hexa_lang_atlas_ssot_decision.md) |
+| **Atlas function-call notation convention** | [`../atlas_function_call_convention.md`](../atlas_function_call_convention.md) |
+| **Semantic-gap audit** + script | [`2026-04-26_atlas_semantic_gap_audit.md`](2026-04-26_atlas_semantic_gap_audit.md) · [`2026-04-26_atlas_semantic_gap_audit.py`](2026-04-26_atlas_semantic_gap_audit.py) |
+| **Health-check tools** | [`../../tool/falsifier_health.sh`](../../tool/falsifier_health.sh) · [`../../tool/bridge_health.sh`](../../tool/bridge_health.sh) · [`../../tool/health_check_all.sh`](../../tool/health_check_all.sh) |
+| **Paper-grade synthesis** (n=6 program) | [`SYNTHESIS_2026-04-26.md`](SYNTHESIS_2026-04-26.md) |
+| **Session handoff** (next session start here) | [`NEXT_SESSION_HANDOFF.md`](NEXT_SESSION_HANDOFF.md) · [`SESSION_FINAL_REPORT.md`](SESSION_FINAL_REPORT.md) |
+| **Per-file index** (auto-generatable) | [`INDEX.md`](INDEX.md) |
 
 ---
 
-## hive 측 추상화 layer (cross-repo binding)
+## Witness Timeline
 
-본 nexus 도구들은 hive 의 design-strategy meta-rule 을 **object-level 로 instance 화**한 것:
+### 2026-04-25 — bootstrap (3 ω-cycles)
 
-| hive raw | 추상화 | 본 디렉토리 instance |
-|----------|--------|----------------------|
-| **raw 70** multi-axis-verify-grid | K≥4 (ideally K=10) 직교 검증축 | `hexa_sim_verify_grid.hexa` (K=10 saturated) |
-| **raw 71** falsifier-retire-rule | ≥3 falsifier + auto-retire-on | `hexa_sim_falsifier.hexa` + `falsifiers.jsonl` (8 entries) |
-| **raw 73** structural-admissibility-paradigm | hash_eq seal, zero iterative | byte-eq SHA256 봉인 (verify_grid + vqe_h2 둘 다) |
-| **raw 68** fixpoint-byte-eq-closure | 같은 seed 두 run = byte-eq | 검증 완료 (3 도구 모두) |
-| **raw 66** ai-native-error-message | reason+fix trailer | falsifier HIT 시 `__HEXA_SIM_FALSIFIER_HIT__ ... reason=... fix=...` |
-| **raw 77** execution-audit-append-only-ledger | append-only JSONL, status-field GC | `falsifier_history.jsonl` chain hash (prev_hash + current_hash) |
-| **raw 80** execution-sentinel-result-decoding | `__<TOOL>_RESULT__ PASS\|FAIL` | 3 도구 모두 sentinel emit |
-| **raw 47** strategy-exploration-omega-cycle | multi-project doc trawl | 본 cycle 자체 |
+| File | Topic |
+|------|-------|
+| [`2026-04-25_omega_cycle_implementation.json`](2026-04-25_omega_cycle_implementation.json) | First ω-cycle: 10-axis `verify_grid` impl, byte-eq fixpoint closure |
+| [`2026-04-25_falsifier_integration_omega_cycle.json`](2026-04-25_falsifier_integration_omega_cycle.json) | Falsifier integration design (12 axes → Tier-1/2/3) |
+| [`2026-04-25_bridge_tool_jackpot_omega_cycle.json`](2026-04-25_bridge_tool_jackpot_omega_cycle.json) | External-API bridge pattern abstraction (26 axes) |
+
+### 2026-04-26 — atlas-ingest + dedup + falsifier expansion (14 ω-cycles)
+
+| File | Topic |
+|------|-------|
+| [`2026-04-26_atlas_ingest_omega_cycle.json`](2026-04-26_atlas_ingest_omega_cycle.json) | Bridge → atlas auto-ingest design |
+| [`2026-04-26_atlas_ingest_arg_fix_omega_cycle.json`](2026-04-26_atlas_ingest_arg_fix_omega_cycle.json) | Runner-detection + self-path-strip arg fix |
+| [`2026-04-26_atlas_ingest_a2_self_path_strip_omega_cycle.json`](2026-04-26_atlas_ingest_a2_self_path_strip_omega_cycle.json) | a2 axis follow-through (escape-hatch flag, 3-path corpus) |
+| [`2026-04-26_atlas_ingest_tool_evolution_omega_cycle.json`](2026-04-26_atlas_ingest_tool_evolution_omega_cycle.json) | Single-domain → all-Ω-cycle absorber evolution path |
+| [`2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json`](2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json) | Atlas DSL v2 (M/T/compound) + lens-orchestrator injection |
+| [`2026-04-26_dedup_strategy_evolution_omega_cycle.json`](2026-04-26_dedup_strategy_evolution_omega_cycle.json) | Dedup: skip → preserve edge/witness/cross-source |
+| [`2026-04-26_cross_repo_absorption_refresh_omega_cycle.json`](2026-04-26_cross_repo_absorption_refresh_omega_cycle.json) | 24h-delta refresh of anima/hexa-lang/n6-arch shards |
+| [`2026-04-26_improvement_ideas_omega_cycle.json`](2026-04-26_improvement_ideas_omega_cycle.json) | Aggregate post-session improvement surface |
+| [`2026-04-26_F19_F23_falsifier_expansion_omega_cycle.json`](2026-04-26_F19_F23_falsifier_expansion_omega_cycle.json) | i11 auto-spawn → F19–F23 + Mertens labeling discovery |
+| [`2026-04-26_F23_resolution_omega_cycle.json`](2026-04-26_F23_resolution_omega_cycle.json) | F23 vacuous-PASS sealed (ec=0+non-empty stdout double-guard) |
+| [`2026-04-26_F46_F49_semantic_guards_omega_cycle.json`](2026-04-26_F46_F49_semantic_guards_omega_cycle.json) | F46–F49 atlas semantic-gap guards + convention doc |
+| [`2026-04-26_i11_cmd_hardening_omega_cycle.json`](2026-04-26_i11_cmd_hardening_omega_cycle.json) | i11 PRESENCE → VALUE+DOMAIN+GRADE anchor hardening |
+| [`2026-04-26_dockerfile_curl_patch_omega_cycle.json`](2026-04-26_dockerfile_curl_patch_omega_cycle.json) | hexa-runner curl/wget/ca-cert patch (7/16 bridges fix) |
+| [`2026-04-26_oeis_gw_oom_resolution_omega_cycle.json`](2026-04-26_oeis_gw_oom_resolution_omega_cycle.json) | oeis_live + gw OOM → shell-side payload trim (14/16 → 16/16) |
+| [`2026-04-26_uniprot_registry_2fix_omega_cycle.json`](2026-04-26_uniprot_registry_2fix_omega_cycle.json) | uniprot sentinel-classification + axes-as-number 2-fix |
+| [`2026-04-26_health_check_productionization_omega_cycle.json`](2026-04-26_health_check_productionization_omega_cycle.json) | 3 health-checks → bash scripts + cron + nexus CLI |
 
 ---
 
-## 다음 단계 (open / deferred)
+## Falsifier ID Map
 
-### 완료 (2026-04-25~26 ω-cycle iterations 전체)
+| Range | Origin | Theme |
+|-------|--------|-------|
+| **F1–F5** | 2026-04-25 self-seal | n=6 core (σ/α/byte-eq/OEIS/COUNTER overfit guards) |
+| **F6–F8** | 2026-04-25 nxs-002 cycle 10 | Cross-bridge pattern (codata/oeis/horizons) |
+| **F9** | 2026-04-25 horizons live | TP-8 framework limit (Mars 2g 4-day infeasibility) |
+| **F10** | 2026-04-25 cmb live | Cross-bridge fractional gap resonance (αs gap ≈ n_s gap ≈ 3.5%) |
+| **F11–F12** | 2026-04-25 | Hubble tension + 3-source corroboration |
+| **F13–F18** | — | Reserved / not promoted (see [`F13_F22_candidate_review.md`](F13_F22_candidate_review.md)) |
+| **F19–F23** | 2026-04-26 i11 first auto-spawn | Atlas-driven candidates (M3 mertens→mersenne discovery) |
+| **F24–F30** | 2026-04-26 | Chemistry / biology bridges (pubchem, uniprot) |
+| **F31–F37** | 2026-04-26 | Cross-domain (gaia, lhc, nist, openalex) |
+| **F38–F44** | 2026-04-26 | L-prefix bridges (lens / atlas L-entries; L11 [[6,2,2]] CSS code) |
+| **F45** | 2026-04-26 | **DECLINED** — cross-bridge 3.5% triplet (collapses to doublet under unit-framing); see [`2026-04-26_F45_decision.md`](2026-04-26_F45_decision.md) |
+| **F46–F49** | 2026-04-26 | Atlas semantic-gap guards (sigma/tau notation conflation, self-ref, audit baseline) |
 
-**Bridge tools 16/16 (Tier-1 + Tier-2 100%):**
-- ✅ Tier-1 (5): codata, oeis_live, gw_observatory, horizons, arxiv_realtime
-- ✅ Tier-2 (11): cmb, nanograv, simbad, icecube, nist_atomic, wikipedia, openalex, gaia, lhc_opendata, pubchem, uniprot
+**Current registry total**: 42 entries CLEAN (40 PASS + 2 HIT-as-expected baseline guards F48/F49).
 
-**Atlas ingest 4-Phase + sub-cycles (전체 완료):**
-- ✅ **Phase 1**: hexa_sim_atlas_ingest.hexa (491 LoC, 7 Tier-1 + 3 Tier-2 partial)
-- ✅ **Phase 1.5**: BT-544 R5 + axis-B + Cross-BT 6/6 + Honesty triad facts (+11 entries, total 37)
-- ✅ **Phase 2**: omega_cycle_atlas_ingest.hexa (858 LoC, 5 evolution axes, 6 cycles 302 facts auto-glob)
-- ✅ **Phase 3**: atlas_omega_supercycle.hexa (745 LoC, 3-repo cross-aggregator + Honesty triad 5/5 nexus, 5/5 n6, 4/5 anima)
-- ✅ **Phase 4a**: atlas_dsl_v2_serializer.hexa (966 LoC, v3 compound + v8 JSON, byte-eq fixpoint)
-- ✅ **Phase 4b**: lens_atlas_orchestrator.hexa (475 LoC, l1+l4+l8, 5-pilot bench mean_delta=-0.1177)
-- ✅ **Phase 4c**: design/atlas_v2_grammar.md (504 LoC, 9 sections + EBNF + 5 falsifier conditions)
+---
 
-**Audit gaps closed:**
-- ✅ Gap #1 ANU QRNG stub fix — hexa-native parser, R37/AN13/L3-PY 충족
-- ✅ Gap #2 vqe_h2_demo.py → hexa native (Qiskit 의존 제거)
-- ✅ Gap #3 CI/test pipeline — hexa_sim_ci.hexa (19/19 PASS)
+## Decision Log
 
-**Falsifier registry 12/12 CLEAN:**
-- F1-F5 self-seal + F6-F8 nxs-002 cycle 10 + F9 TP-8 framework limit + F10 cross-bridge resonance + F11 Hubble tension + F12 3-source corroboration
+| Date | Decision | Doc |
+|------|----------|-----|
+| 2026-04-26 | **M3 = mersenne(6) = 7**, not mertens (canonical M(6) = -1) — atlas line 53 relabeled | [`M3_true_definition_audit.md`](M3_true_definition_audit.md) |
+| 2026-04-26 | **F45 declined** — triplet → doublet under consistent unit-framing, not statistically anomalous (preserved per raw 73 admissibility) | [`2026-04-26_F45_decision.md`](2026-04-26_F45_decision.md) |
+| 2026-04-26 | **hexa-lang atlas SSOT**: nexus-side single origin (4/5 OPT-A), hexa-lang has no own SSOT | [`hexa_lang_atlas_ssot_decision.md`](hexa_lang_atlas_ssot_decision.md) |
+| 2026-04-26 | **Dockerfile curl patch** — hexa-runner:latest gains curl/wget/ca-certificates → 7/16 bridges unblocked | [`2026-04-26_dockerfile_curl_patch_omega_cycle.json`](2026-04-26_dockerfile_curl_patch_omega_cycle.json) |
+| 2026-04-26 | **oeis/gw OOM fix** — shell-side payload trim (head -c) → remaining 2/16 bridges to 16/16 | [`2026-04-26_oeis_gw_oom_resolution_omega_cycle.json`](2026-04-26_oeis_gw_oom_resolution_omega_cycle.json) |
+| 2026-04-26 | **i11 hardening** — auto-spawn anchors PRESENCE → VALUE+DOMAIN+GRADE; --legacy-cmd preserved | [`2026-04-26_i11_cmd_hardening_omega_cycle.json`](2026-04-26_i11_cmd_hardening_omega_cycle.json) |
+| 2026-04-26 | **Atlas notation convention** — `sigma = 12` (A) vs `sigma(6) = 12` (B); `sigma(N) = N` self-ref pattern banned | [`../atlas_function_call_convention.md`](../atlas_function_call_convention.md) |
 
-**CLI integration:**
-- ✅ nexus hexa-sim {verify|falsifier|ci|atlas-ingest|omega-ingest|supercycle|bridge|doc}
+---
 
-### 2026-04-26 cross-repo historical absorption (4-repo 병렬)
+## Audit Reports
 
-추가 4 atlas append shards (모두 nexus n6/ 에 snapshot — anima/n6 + n6-architecture/atlas 는 자체 SSOT 보유, hexa-lang 은 SSOT 부재 → nexus 측 단일 origin):
+| File | Scope |
+|------|-------|
+| [`2026-04-26_falsifier_health_check.md`](2026-04-26_falsifier_health_check.md) | Falsifier registry health (per-entry pass/HIT, drift) |
+| [`2026-04-26_bridge_health_check.md`](2026-04-26_bridge_health_check.md) | 16 external-API bridges (curl/wget reachability + payload size) |
+| [`2026-04-26_cross_shard_dedup_audit.md`](2026-04-26_cross_shard_dedup_audit.md) | Cross-shard atlas dedup (skip → preserve policy) |
+| [`2026-04-26_atlas_semantic_gap_audit.md`](2026-04-26_atlas_semantic_gap_audit.md) | Notation A/B mismatch sweep (21 MISMATCH baseline) |
+| [`2026-04-26_cross_bridge_correlation_hunt.md`](2026-04-26_cross_bridge_correlation_hunt.md) | F10-pattern replication across 14 healthy numeric bridges |
+| [`cross_repo_dashboard.md`](cross_repo_dashboard.md) | Atlas cross-repo dashboard (Tier-2 i13 generated) |
 
-| repo | shard | facts | grade highlights |
-|------|-------|-------|------------------|
-| **anima** | `atlas.append.anima-historical-from-nexus-2026-04-26.n6` | 75 facts / 434 lines | `[11!]` x4 — learning-free paradigm (raw 73 origin), CPGD closed-form, L_IX raw#30, P_S=V_PCA_top16 |
-| **nexus** | `atlas.append.nexus-historical-absorption-2026-04-26.n6` | 95 facts / 456 lines | `[11*]` x29 — MASTER σ·φ=n·τ 4-method, Mersenne R closed form, cross-bridge resonance @M, ER giant+singletons universal |
-| **hexa-lang** | `atlas.append.hexa-lang-historical-from-nexus-2026-04-26.n6` | 88 facts / 419 lines | 80 raw rules (`raw_<N>_<slug>`) atlas 1:1 매핑, canonical `.raw` SSOT 가 `~/core/hive/.raw` (228KB) |
-| **n6-architecture** | `atlas.append.n6-architecture-historical-from-nexus-2026-04-26.n6` | 51 entries / 524 lines | `[11*REPO_INVARIANT]` x8 + `[10*PASS_LITERATURE]` x19 — BT-541~547 millennium prizes (RH Lead-B SLE_6×GUE / NS R5+axis-B / BSD CRT+28-stratum / Perelman composite) |
+---
 
-**4-repo 합계: 309 historical facts** (atlas DSL v1+v2, 9 type 모두 활성 @P/@C/@F/@L/@R/@S/@X/@M/@T).
+## Candidate Reviews (falsifier triage drafts)
 
-**Honesty triad cross-repo 재확인 (Phase 3 supercycle 재실행 시):**
-- nexus 5/5 REPO_INVARIANT
-- n6-architecture 5/5 REPO_INVARIANT (`scripts/quality/honesty_triad_linter.py` SSOT 확인)
-- anima 4/5 PARTIAL (precondition-e: CLAUDE.md/AGENT.md/.claude/agents/ 부재 — dropfile spec emit)
-- hexa-lang 5/5 (4-gate audit G1/G3/G4 PASS, G2 PARTIAL 35/80 raw sample 만)
+| File | Range |
+|------|-------|
+| [`F13_F22_candidate_review.md`](F13_F22_candidate_review.md) | F13–F22 + F23 |
+| [`F24_F30_candidate_review.md`](F24_F30_candidate_review.md) | F24–F30 chemistry / biology |
+| [`F31_F37_candidate_review.md`](F31_F37_candidate_review.md) | F31–F37 cross-domain |
+| [`F38_F44_candidate_review.md`](F38_F44_candidate_review.md) | F38–F44 L-prefix bridges |
 
-**dedup Tier-1 patch 상태:**
-- 2026-04-26 dedup_strategy_evolution_omega_cycle 의 4 axes (d1+d2+d5+d15) 구현 시도 — agent 가 hexa_sim_atlas_ingest.hexa 만 patch + selftest SIGKILL → revert + defer
-- next session: hexa runtime 회복 후 prompt 보완 (line cap + 양 도구 동시 patch)
+---
 
-### Phase 5+ 후보 (별도 ω-cycle 발사 대기)
+## How to extend
 
-**lens-runner integration**: lens_atlas_orchestrator 의 base=0.5 placeholder → 실 lens score 캐치 (lens 실행 후 score= grep). 현 mean_delta -0.1177 은 base 부재 인공물.
+**Run an Ω-cycle**: surface ≥4 design axes, trial each ≥3 times, write a witness `2026-MM-DD_<topic>_omega_cycle.json` with `{trawl_id, axes_surfaced, fixpoint_marker}`. Append-only per raw 77; never mutate prior witnesses.
 
-**atlas v2 absorption**: Phase 4a serializer 로 v2 entry shard emit + v2 reader patch (atlas_guard) 후 main 통합. 현 v1 reader 가 @M/@T/compound grade reject 으로 별도 shard 분리.
+**Add a falsifier**: append a JSON line to `falsifiers.jsonl` with `{id, slug, claim, cmd, pass, reason, fix, origin}`. The `cmd` must terminate with a sentinel string matched by `pass` exactly. Run [`../../tool/falsifier_health.sh`](../../tool/falsifier_health.sh) to verify; chain to `falsifier_history.jsonl` via prev_hash + current_hash (raw 77 ledger).
 
-**1588 lens scaling**: Phase 4b 의 l3 central orchestrator 확장 (5 → 1588). domain-keyword metadata 자동 추출 또는 lens 첫줄 `// 도메인:` 파서.
+**Add a bridge**: drop a `*_bridge.hexa` under `tool/`, register under `nexus hexa-sim bridge <name>` dispatch, add health-check entry, then pursue atlas-ingest via Phase 1 (`hexa_sim_atlas_ingest.hexa`). Bridge audit grades follow the Tier-1/2/3/REJECT taxonomy from `2026-04-25_bridge_tool_jackpot_omega_cycle.json`.
 
-**falsifier auto-spawn (Phase 4 axis l_unused)**: 새 atlas fact 등록 시 대응 F# falsifier 자동 생성.
+**Decline a candidate**: write `<ID>_decision.md` with explicit rationale + preserve provenance (raw 73 admissibility — failed promotions are first-class evidence). See F45 for canonical pattern.
 
-**Cross-repo @X auto-detect**: Phase 3 supercycle 이 기본 3 crossings 만. 더 정밀한 @X auto-emit (cross-repo identical fact detection).
+---
 
-**Score formula tuning**: l1 의 atlas_corroboration_factor — 현 normalized 1.0 + 0.1 × ratio 가 거의 1.0 plateau. logarithmic scale 또는 bridge-source weighted 등.
+## hive raw bindings (cross-repo)
 
-### Cross-repo follow-ups
-- hive raw 71 lint Tier 3 stub fill (Phase B target 2026-05-09)
-- paper-DOI hook (raw 76 선행 필요)
-- TP-N binding (TP-1/4/7/8 부분, TP-10 미수행)
-- hive raw 87+ 후보: external-api-bridge meta-rule (16-bridge pattern abstraction)
-- anima precondition-e fix (4/5 → 5/5 REPO_INVARIANT 도달)
-
-### REJECT (이번 cycle 들에서 명시적 폐기)
-- Bayesian soft-retire (raw 71 + 53 위배)
-- huggingface_dataset bridge (heavy dep)
-- cgroup_v2 / sandbox_exec bridge (이미 구현)
-- anthropic_api bridge (redundant + 보안)
-- atlas-ingest absorption default-on (안전상 explicit 만)
-- conflict resolution last-write-wins (data loss 위험)
-- @M/@T eager full-protobuf serialization (canonical JSON 으로 충분)
-- l2 lens shim per-file (1588 lens 일괄 refactor, l3 orchestrator 가 더 합리적)
+| raw | abstraction | local instance |
+|-----|-------------|----------------|
+| raw 47 | strategy-exploration-omega-cycle | every witness here |
+| raw 66 | ai-native-error-message | falsifier `reason`+`fix` trailer |
+| raw 68 | fixpoint-byte-eq-closure | F3 + verify_grid byte-eq seal |
+| raw 70 | multi-axis-verify-grid | `hexa_sim_verify_grid.hexa` (K=10) |
+| raw 71 | falsifier-retire-rule | this directory's whole raison d'être |
+| raw 73 | structural-admissibility-paradigm | F45 decline preservation |
+| raw 77 | execution-audit-append-only-ledger | `falsifier_history.jsonl` chain |
+| raw 80 | execution-sentinel-result-decoding | every falsifier `cmd` exit pattern |
