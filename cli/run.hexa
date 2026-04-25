@@ -5785,6 +5785,18 @@ fn main() -> void {
             let _ah_th = find_flag(a, "--anti-hub-threshold", "")
             if _ah_th.len() > 0 { setenv("NEXUS_DRILL_ANTI_HUB_THRESHOLD", _ah_th) }
             eprintln("NEXUS_DRILL_ANTI_HUB {\"axiom\":\"anti-hub\",\"threshold\":\"" + (if _ah_th.len() > 0 { _ah_th } else { "1000" }) + "\",\"finding\":\"design/abstraction_ceiling.md §7\",\"proposal\":\"nxs-20260425-001\"}")
+            // Ω-saturation cycle 8 (2026-04-25, nxs-20260425-001 진단):
+            //   cycle 7 drill 에서 cmd_drill 의 NEXUS_DRILL_ANTI_HUB_TRACE 가 env_active=""
+            //   로 emit — main 의 setenv 가 child fork 까지 propagate 안 됨 가설.
+            //   sanity check: setenv 직후 env() 재호출로 hexa internal 또는 libc setenv
+            //   여부 분리. 둘 다 동일 process 안에서 일치 = OK, 다르면 hexa setenv buggy.
+            let _verify_ah = env("NEXUS_DRILL_ANTI_HUB")
+            let _verify_th = env("NEXUS_DRILL_ANTI_HUB_THRESHOLD")
+            if _verify_ah != "1" {
+                eprintln("NEXUS_DRILL_SETENV_BUG {\"intended_ANTI_HUB\":\"1\",\"actual_via_env\":\"" + _verify_ah + "\",\"diagnosis\":\"hexa setenv 가 process env 갱신 실패 — internal map 만 update 가능성\"}")
+            } else {
+                eprintln("NEXUS_DRILL_SETENV_OK {\"ANTI_HUB\":\"" + _verify_ah + "\",\"THRESHOLD\":\"" + _verify_th + "\",\"note\":\"process env 정상 — 그러나 child exec 으로 inherit 별개 issue\"}")
+            }
         }
         let _smash_d = _parse_flag_int(a, "--smash-depth")
         let _free_d  = _parse_flag_int(a, "--free-dfs")

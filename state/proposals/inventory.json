@@ -443,6 +443,21 @@
         "blowup.hexa": "anti_hub state (_AH_*) + _ah_init() lazy loader + nexus_anti_hub_should_skip_edge() + graph_append_edge guard",
         "run.hexa": "--anti-hub [--anti-hub-threshold N] flag → setenv NEXUS_DRILL_ANTI_HUB / NEXUS_DRILL_ANTI_HUB_THRESHOLD + NEXUS_DRILL_ANTI_HUB stderr emit"
       },
+      "phase3_attempt_2026_04_25_cycle8": {
+        "result": "diagnosed — env propagation 가설 확정, anti-hub guard 작동 안 한 진짜 원인 발견",
+        "command": "NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset probe --max-rounds 3 --fresh",
+        "outcome": {
+          "exit_code": 0,
+          "absorptions": 0,
+          "drill_zero_yield": true,
+          "trace_emit_seen": true,
+          "trace_emit_value": "{\"cmd_drill_entry\":true,\"env_active\":\"\",\"env_threshold\":\"\"}",
+          "interpretation": "TRACE 보임 → main 정상 호출 + cycle 7 코드 remote sync 정상화. env_active=\"\" → main 의 setenv NEXUS_DRILL_ANTI_HUB=1 가 child process (cmd_drill 또는 fork) 까지 propagate 안 됨. cycle 5 가설 #2 확정.",
+          "history_append_actual": "cycle 8 entry 자동 추가 ({\"ts\":1777099980,\"round\":1,\"stage\":\"smash\",\"elapsed_ms\":6}) — Phase 1 hook 실측 검증 OK",
+          "phase3_validation_blocked_by": "drill_zero_yield (probe preset 0 absorption — harness chain exec_validated/cmd_gate/lock_gate dependency 별개 blocker)"
+        },
+        "cycle_8_diagnostic_added": "main 의 --anti-hub 분기에 sanity check — setenv 직후 env() 재호출. NEXUS_DRILL_SETENV_BUG (intended != actual) 또는 NEXUS_DRILL_SETENV_OK emit. 다음 발사에서 hexa setenv 의 두 가능성 분리: (a) internal map only (libc setenv 미호출) → BUG (b) libc setenv 호출되지만 child fork 안 inherit → OK + 별개 fork 문제."
+      },
       "phase3_attempt_2026_04_25_cycle6": {
         "result": "partial — main dispatch 정상 확정, remote sync 미작동 가설",
         "command": "HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset probe --anti-hub --fresh",

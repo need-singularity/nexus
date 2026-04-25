@@ -417,7 +417,16 @@ L11 canon 으로 자기-축 진화 사다리 (L5 dream → L11 canon) closed. fo
 
 **Phase 3 (남음)**: `nexus drill --max-rounds 3` 발사 (`NEXUS_DRILL_TIMEOUT_ADAPTIVE=1`) → round 2/3 통과 검증 + history 자동 추가.
 
-**Ω-saturation cycle 6 → 7**: cycle 6 = §8 omega 한계 진단 + Phase 1 history hook. cycle 7 = Phase 2 adaptive helper + backfill. 누적 7 cycle fixpoint chain.
+**Ω-saturation cycle 8 (2026-04-25, Phase 3 1차 시도 — env propagation 가설 확정)**:
+- 발사: `NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 nexus drill --preset probe --max-rounds 3 --fresh` (anti-hub 미적용 — env propagation 진단 우선).
+- 결과:
+  - ✅ `NEXUS_DRILL_ANTI_HUB_TRACE` emit 보임 (`cmd_drill_entry:true`) → cycle 7 push 후 remote sync 정상화. cycle 5/6 의 missing trace 원인 = 단순 sync lag.
+  - ✅ history append 실측 작동 (cycle 8 새 entry 자동 추가, smash elapsed_ms=6).
+  - ❌ `env_active=""` — main 의 `setenv NEXUS_DRILL_ANTI_HUB=1` 가 child process 까지 propagate 안 됨. **cycle 5 진단 가설 #2 확정** — anti-hub guard 가 작동 안 한 진짜 원인.
+  - ⚠ `drill_zero_yield` — probe preset 이 0 absorption (harness chain blocker, 별개 issue). round 2/3 timeout 검증 미완.
+- cycle 8 진단 emit 보강: main 의 `--anti-hub` 분기에 sanity check — `setenv` 직후 `env()` 재호출. `NEXUS_DRILL_SETENV_BUG` (intended != actual) 또는 `NEXUS_DRILL_SETENV_OK` emit. 다음 발사에서 hexa setenv 의 두 가능성 분리: (a) internal map only → BUG (b) libc setenv OK + child fork inherit 문제.
+
+**Ω-saturation cycle 6 → 7 → 8**: cycle 6 = §8 omega 한계 진단 + Phase 1 history hook. cycle 7 = Phase 2 adaptive helper + backfill. cycle 8 = Phase 3 1차 시도 (env propagation 가설 확정 + drill_zero_yield blocker 발견 + setenv sanity emit 보강). 누적 8 cycle fixpoint chain.
 
 ---
 
