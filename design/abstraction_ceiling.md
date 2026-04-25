@@ -188,13 +188,20 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
 - ✓ L_ω omega 1차 구현 (commit ee5da9cd) — drill apex preset wrap
 - ✓ commands.json SSOT 등록 (hexa-lang commit b36c3037)
 - ✓ ~/.hx/bin/nexus shim 헤비-컴퓨트 라우팅 추가
-- ✓ **L_ω omega 2차 격상** (이 commit) — L3 다축 자동 dispatch
+- ✓ **L_ω omega 2차 격상** (commit 8b9ff6f0) — L3 다축 자동 dispatch
   - `--engines csv` (≥2) → cmd_chain (cross-engine, L3)
   - `--variants N` (≥2) → adversarial_debate.hexa (L3)
   - `--seeds csv | --seeds-file` → cmd_drill_batch (L3)
   - default → cmd_drill (L2 single-seed apex preset)
   - axes ≥ 3 동시 활성 → `NEXUS_OMEGA ghost_ceiling_approach` JSON emit (L4 surge 영역 신호)
   - 검증: 4 dispatch path (drill / chain / debate / batch) + ceiling hint 모두 동작 확인
+- ✓ **L4 surge 구현** (이 commit) — Cartesian product fan-out
+  - `cmd_surge()` — (engines × variants × seeds) 모든 조합 enumerate
+  - omega 와 차별: omega 는 가장 넓은 axis 만 dispatch, surge 는 모든 조합 실행
+  - CAP 정책: total_runs > NEXUS_SURGE_MAX (기본 12) 시 reject + hint emit
+  - engine != nexus 시 chain (cross-engine), engine = nexus + variants>1 시 speculate=N 흡수
+  - emits: NEXUS_SURGE {plan / run / complete / reject} JSON
+  - 검증: 1×1×1=1 / 3×3×4=36 reject / 2×2×2=8 enumerate 모두 동작 확인
 
 ---
 

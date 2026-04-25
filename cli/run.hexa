@@ -182,6 +182,10 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
+    println("  surge --seed \"...\" [--engines csv] [--variants N] [--seeds csv]")
+    println("        L4 super-orch — Cartesian product (engines × variants × seeds) fan-out.")
+    println("        CAP: total_runs > NEXUS_SURGE_MAX (기본 12) 시 reject.")
+    println("        emits: NEXUS_SURGE JSON (plan/run/complete) — omega 와 차별점 = 모든 조합 실행.")
     println("  omega --seed \"...\"                APEX (L_ω) — drill apex preset + L3 다축 자동 dispatch. 앞으로의 메인.")
     println("        defaults: depth=auto, speculate=3, adaptive=on. 모든 drill 옵션 호환.")
     println("        L3 axes (자동 감지, 가장 넓은 axis 우선):")
@@ -3899,6 +3903,110 @@ fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"drill\"}")
 }
 
+// ─── surge — L4 super-orchestrator (2026-04-25) ───
+// 사다리 위치: L4 (omega 의 sub-axis fan-out 형). omega 는 가장 넓은 axis 만 dispatch 하지만
+// surge 는 (engines × variants × seeds) Cartesian product 로 모든 조합을 실행.
+// 명명: design/abstraction_ceiling.md — multi-axis 동시 폭증 직설 (atlas bloom filter 와 충돌 회피).
+//
+// CAP 정책: 조합 폭주 차단 — total_runs > NEXUS_SURGE_MAX (기본 12) 시 reject + 가이드 emit.
+// Mac 4GB RSS / hetzner 32GB 동시성 제약 고려. NEXUS_SURGE_MAX 로 override 가능.
+//
+// emits:
+//   NEXUS_SURGE {"event":"plan", "engines":N, "variants":N, "seeds":N, "total_runs":N, "cap":N}
+//   NEXUS_SURGE {"event":"run", "idx":i/N, "engine":"...", "variant":i, "seed_idx":i}
+//   NEXUS_SURGE {"event":"complete", "ran":N, "errors":N, "total_abs":sum}
+fn _surge_max_runs() -> int {
+    let v = env("NEXUS_SURGE_MAX")
+    if v.len() == 0 { return 12 }
+    let mut n = 12
+    try { n = to_int(v) } catch e { n = 12 }
+    if n < 1 { return 1 }
+    return n
+}
+
+fn cmd_surge(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str, variants_flag: str, engines_flag: str, seeds_flag: str, seeds_file: str) -> void {
+    let _depth = if master_depth.len() > 0 { master_depth } else { "auto" }
+    let _spec = if speculate_flag.len() > 0 { speculate_flag } else { "3" }
+    // axis 추출 — empty 이면 단일 element 로 정규화
+    let mut engines_arr: [str] = []
+    if engines_flag.len() > 0 {
+        let parts = engines_flag.split(",")
+        let mut i = 0
+        while i < len(parts) {
+            let p = parts[i].trim()
+            if p.len() > 0 { engines_arr = engines_arr + [p] }
+            i = i + 1
+        }
+    }
+    if len(engines_arr) == 0 { engines_arr = ["nexus"] }
+    let mut variants_n: i64 = 1
+    if variants_flag.len() > 0 {
+        try { variants_n = to_int(variants_flag) } catch e { variants_n = 1 }
+        if variants_n < 1 { variants_n = 1 }
+    }
+    let mut seeds_arr: [str] = []
+    if seeds_flag.len() > 0 || seeds_file.len() > 0 {
+        seeds_arr = _seed_batch_load(seeds_flag, seeds_file)
+    }
+    if len(seeds_arr) == 0 {
+        if seed.trim().len() == 0 {
+            eprintln("nexus surge: --seed 또는 --seeds 필수")
+            return
+        }
+        seeds_arr = [seed]
+    }
+    let n_eng = len(engines_arr)
+    let n_var = variants_n
+    let n_seed = len(seeds_arr)
+    let total = n_eng * n_var * n_seed
+    let cap = _surge_max_runs()
+    println("⊕ surge — L4 super-orchestrator  Cartesian (engines×variants×seeds) = " + to_string(n_eng) + "×" + to_string(n_var) + "×" + to_string(n_seed) + " = " + to_string(total) + " runs")
+    eprintln("NEXUS_SURGE {\"event\":\"plan\",\"engines\":" + to_string(n_eng)
+        + ",\"variants\":" + to_string(n_var)
+        + ",\"seeds\":" + to_string(n_seed)
+        + ",\"total_runs\":" + to_string(total)
+        + ",\"cap\":" + to_string(cap) + "}")
+    if total > cap {
+        eprintln("NEXUS_SURGE {\"event\":\"reject\",\"reason\":\"total_runs_exceeds_cap\",\"total\":" + to_string(total) + ",\"cap\":" + to_string(cap) + ",\"hint\":\"NEXUS_SURGE_MAX env 으로 override 또는 axis 축소\"}")
+        println("nexus surge: 조합 " + to_string(total) + " > cap " + to_string(cap) + " — NEXUS_SURGE_MAX env 으로 override 또는 axis 축소")
+        return
+    }
+    let mut ran: i64 = 0
+    let mut errors: i64 = 0
+    let mut total_abs: i64 = 0
+    let mut ei: i64 = 0
+    while ei < n_eng {
+        let _eng = engines_arr[ei]
+        let mut vi: i64 = 0
+        while vi < n_var {
+            let mut si: i64 = 0
+            while si < n_seed {
+                let _sd = seeds_arr[si]
+                ran = ran + 1
+                println("─── surge run " + to_string(ran) + "/" + to_string(total) + " — engine=" + _eng + " variant=" + to_string(vi + 1) + "/" + to_string(n_var) + " seed_idx=" + to_string(si + 1) + "/" + to_string(n_seed) + " ───")
+                eprintln("NEXUS_SURGE {\"event\":\"run\",\"idx\":" + to_string(ran) + ",\"of\":" + to_string(total)
+                    + ",\"engine\":\"" + _eng + "\""
+                    + ",\"variant\":" + to_string(vi + 1)
+                    + ",\"seed_idx\":" + to_string(si + 1) + "}")
+                // engine!=nexus 일 때 chain 1 회로 dispatch (seed + 단일 engine).
+                // engine==nexus 일 때 drill (variant 차원은 speculate 로 흡수 — N-way fork).
+                let var_spec = if n_var > 1 { to_string(n_var) } else { _spec }
+                if _eng != "nexus" {
+                    let _rc = cmd_chain(_sd, "nexus," + _eng, "")
+                    if _rc != 0 { errors = errors + 1 }
+                } else {
+                    cmd_drill(_sd, max_rounds, engine_flag, preset, _depth, per_stage_depths, true, resume_flag, checkpoint_dir, problem, var_spec)
+                }
+                si = si + 1
+            }
+            vi = vi + 1
+        }
+        ei = ei + 1
+    }
+    eprintln("NEXUS_SURGE {\"event\":\"complete\",\"ran\":" + to_string(ran) + ",\"errors\":" + to_string(errors) + ",\"total_abs\":" + to_string(total_abs) + "}")
+    println("⊕ surge complete — ran=" + to_string(ran) + " errors=" + to_string(errors))
+}
+
 // ─── E12 batch drill wrapper (2026-04-21) ───
 // SSOT: shared/config/drill.json .seed_batch
 // Sequential iterate — seed N 개를 순차 cmd_drill 호출. engine_daemon 미구현 시 naive 반복.
@@ -4494,6 +4602,37 @@ fn main() -> void {
     }
     if sub == "absolute" {
         cmd_absolute(find_flag(a, "--seed", ""))
+        return
+    }
+    if sub == "surge" {
+        // L4 super-orchestrator — Cartesian product (engines × variants × seeds) fan-out.
+        // CAP: total_runs > NEXUS_SURGE_MAX (기본 12). drill 옵션 호환.
+        let _smash_d = _parse_flag_int(a, "--smash-depth")
+        let _free_d  = _parse_flag_int(a, "--free-dfs")
+        let _abs_d   = _parse_flag_int(a, "--abs-depth")
+        let _meta_d  = _parse_flag_int(a, "--meta-depth")
+        let _hyper_d = _parse_flag_int(a, "--hyper-depth")
+        let _res_d   = _parse_flag_int(a, "--res-depth")
+        let per_stage = [_smash_d, _free_d, _abs_d, _meta_d, _hyper_d, _res_d]
+        let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
+        let resume_flag = !fresh_flag
+        cmd_surge(
+            find_flag(a, "--seed", ""),
+            find_flag(a, "--max-rounds", ""),
+            find_flag(a, "--engine", ""),
+            find_flag(a, "--preset", ""),
+            find_flag(a, "--depth", ""),
+            per_stage,
+            true,
+            resume_flag,
+            find_flag(a, "--checkpoint-dir", ""),
+            find_flag(a, "--problem", ""),
+            find_flag(a, "--speculate", ""),
+            find_flag(a, "--variants", ""),
+            find_flag(a, "--engines", ""),
+            find_flag(a, "--seeds", ""),
+            find_flag(a, "--seeds-file", "")
+        )
         return
     }
     if sub == "omega" {
