@@ -561,6 +561,94 @@ if [ "$_IS_HEAVY_COMPUTE" = "1" ] \
     fi
     # Success path — class/min/psi 한 줄 진단 (caller observability).
     echo "hexa_remote: L3+L4 class=$_job_class min_avail=${_admit_min_mb}MB psi=${_picked_psi:-NA}% host=$HOST" >&2
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Wave 26 / L5 (2026-04-25): Bayesian predictive admission.
+    # L1-L4 는 reactive (호스트 현재 상태 → 정적 임계). L5 는 predictive —
+    # 같은 (host, class) 의 과거 dispatch 결과 (rc=137/143 SIGTERM 비율) 를
+    # Beta-Bernoulli posterior 로 추정해, false-negative reject 를 줄이면서도
+    # 미래 SIGTERM 확률이 높으면 사전 차단. 목표: cluster RAM 활용 82% → 90%+.
+    #
+    # History TSV (`/tmp/hexa_remote.history.<host>.<class>.tsv`) 형식:
+    #   ts<TAB>avail<TAB>psi<TAB>class<TAB>cmd<TAB>seed_len<TAB>pid<TAB>STATE
+    #   STATE = "START" | "END_<rc>"
+    # 기록 위치: START — L5 가드 통과 직후 / END — exit trap 에서.
+    # 길이/파일 회전: append-only TSV. 무한 누적 방지 = 사용자 책임 (또는 별도 cron).
+    #   `tail -n WINDOW` 으로 최근 N 만 사용하므로 파일이 커도 읽기 비용은 일정.
+    #
+    # Posterior: Beta(1,1) uniform prior + Bernoulli likelihood
+    #   p_post = (kills + 1) / (total + 2)  ← Laplace smoothing
+    # `tail -n WINDOW` END_ 레코드 중 rc∈{137,143} 카운트가 kills.
+    #
+    # Override:
+    #   HEXA_REMOTE_BAYES_WINDOW=N        (default 50) — recent record window
+    #   HEXA_REMOTE_BAYES_REJECT_PCT=N    (default 30) — p_post(%) ≥ N → reject
+    #   HEXA_REMOTE_BAYES_MIN_SAMPLE=N    (default 5)  — total < N 이면 skip (신뢰 부족)
+    #   HEXA_REMOTE_NO_BAYES=1            — gate 비활성
+    _HISTORY_FILE="/tmp/hexa_remote.history.${HOST}.${_job_class}.tsv"
+    # cmd/seed 추출 — _classify_job 과 동일 알고리즘 inline.
+    _l5_cmd=""; _l5_seed=""
+    for ((_li=1; _li<=$#; _li++)); do
+        case "${!_li}" in
+            drill|omega|surge|smash|free|absolute|meta-closure|hyperarithmetic|probe|status|canon)
+                [ -z "$_l5_cmd" ] && _l5_cmd="${!_li}" ;;
+            --seed) _lj=$((_li+1)); _l5_seed="${!_lj:-}" ;;
+        esac
+    done
+    [ -z "$_l5_cmd" ] && _l5_cmd="?"
+
+    if [ "${HEXA_REMOTE_NO_BAYES:-0}" != "1" ] && [ -r "$_HISTORY_FILE" ]; then
+        _bayes_window="${HEXA_REMOTE_BAYES_WINDOW:-50}"
+        _bayes_min_sample="${HEXA_REMOTE_BAYES_MIN_SAMPLE:-5}"
+        _bayes_threshold="${HEXA_REMOTE_BAYES_REJECT_PCT:-30}"
+        _bayes_stats="$(tail -n "$_bayes_window" "$_HISTORY_FILE" 2>/dev/null | awk -F'\t' '
+            $8 ~ /^END_/ {
+                total++
+                rc = substr($8, 5) + 0
+                if (rc == 137 || rc == 143) kills++
+            }
+            END { printf "%d %d", kills+0, total+0 }')"
+        _bayes_kills="$(printf '%s' "$_bayes_stats" | awk '{print $1}')"
+        _bayes_total="$(printf '%s' "$_bayes_stats" | awk '{print $2}')"
+        if [ "${_bayes_total:-0}" -ge "$_bayes_min_sample" ] 2>/dev/null; then
+            # p_post(%) = (kills+1) * 100 / (total+2) — integer truncation.
+            _bayes_p_pct="$(awk -v k="$_bayes_kills" -v t="$_bayes_total" \
+                'BEGIN { printf "%d", (k+1)*100/(t+2) }')"
+            if [ "$_bayes_p_pct" -ge "$_bayes_threshold" ] 2>/dev/null; then
+                echo "hexa_remote: L5 Bayes reject — host=$HOST class=$_job_class p=${_bayes_p_pct}% (kills=$_bayes_kills/total=$_bayes_total window=$_bayes_window) ≥ ${_bayes_threshold}%" >&2
+                # Slot release (L3/L4 reject path 와 동일 cleanup).
+                if [ -n "${_ACQUIRED:-}" ]; then
+                    rm -rf "$_ACQUIRED" 2>/dev/null || true
+                    _ACQUIRED=""
+                fi
+                # blacklist — 다음 invocation 도 같은 호스트 회피 (TTL 300s).
+                if [ "${HEXA_REMOTE_NO_BLACKLIST:-0}" != "1" ]; then
+                    : > "/tmp/hexa_remote.blacklist.$HOST" 2>/dev/null || true
+                fi
+                printf 'NEXUS_REMOTE_ERROR {"host":"%s","p_pct":%s,"kills":%s,"total":%s,"window":%s,"threshold":%s,"job_class":"%s","reason":"l5_bayes_predicted_kill","exit_code":64}\n' \
+                    "$HOST" "$_bayes_p_pct" "$_bayes_kills" "$_bayes_total" "$_bayes_window" "$_bayes_threshold" "$_job_class" >&2
+                exit 64
+            fi
+            echo "hexa_remote: L5 Bayes pass — p=${_bayes_p_pct}% (kills=$_bayes_kills/total=$_bayes_total) < ${_bayes_threshold}%" >&2
+        fi
+        # else: sample 부족 → silent skip (가드 비활성, 학습 단계).
+    fi
+
+    # L5: START record append. 파일 없으면 자동 생성 (>> 가 처리).
+    _l5_t_start="$(date +%s)"
+    _l5_seed_len="${#_l5_seed}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tSTART\n' \
+        "$_l5_t_start" "${_best_avail:-0}" "${_picked_psi:-}" \
+        "$_job_class" "$_l5_cmd" "$_l5_seed_len" "$$" \
+        >> "$_HISTORY_FILE" 2>/dev/null || true
+
+    # L5: END record on exit. 기존 slot-release trap (line ~278) 과 합쳐 단일 trap 으로
+    # 재설정 — bash trap 은 누적되지 않으므로 _ACQUIRED cleanup 도 함께 보존해야 함.
+    # 변수 일부는 상위 scope 의 단일값이라 trap 본문에 인라인으로 박아 expansion 시점
+    # 차이로 인한 손실 방지.
+    _l5_hist_args="${_HISTORY_FILE}"
+    _l5_const_prefix="${_best_avail:-0}\t${_picked_psi:-}\t${_job_class}\t${_l5_cmd}\t${_l5_seed_len}\t$$"
+    trap '_l5_rc=$?; printf "%s\t'"$_l5_const_prefix"'\tEND_%s\n" "$(date +%s)" "$_l5_rc" >> "'"$_l5_hist_args"'" 2>/dev/null || true; rm -rf "${_ACQUIRED:-}" 2>/dev/null || true; exit $_l5_rc' EXIT INT TERM
 fi
 
 # 2026-04-22: 구 default ($HOME/Dev/hexa-lang/hexa) 는 4월14 빌드 — `^` / `&` 비트연산자 파서 미지원.
