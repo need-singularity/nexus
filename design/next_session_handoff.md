@@ -179,3 +179,27 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 - **nxs-012**: σ-별 peak RSS 프로파일 수집 (drill 1회) + Wave 21b 1주 평가 후 host OOM=0 → resolved (mitigation level=engine + isolation 양쪽 cap).
 - **Wave 21b**: 1주 평가 기간 메트릭 (5개) 통과 + sha256 일치 확인 → default ON commit 별도.
 - **hxa-010**: hexa-lang inventory 에 정식 entry 등록 + zig cc multi-arch target 매트릭스 추가 → resolved.
+
+---
+
+## Update — 2026-04-25 (post-canon, ack nxs-002)
+
+### 사다리 closure
+- L11 canon 구현 완료 (commit 8c8b7f43). forge(L10) ↔ canon(L11) 양방향 닫힘. L_ω omega placeholder 만 남음 (도달 불가, §5 ghost ceiling).
+- 사다리 전체 (L1~L_ω) 입력단 견고화 (commit d7877d5c) — `_seed_clamp` helper + NEXUS_SEED_CAP env. 14개 명령 dispatch wrap (smash/free/absolute/canon/forge/molt/wake/swarm/reign/dream/surge/omega/drill/chain/meta-closure).
+
+### 인지 SSOT 동기화
+- hexa-lang `gate/prompt_scan.hexa` AG10 banner stale list 수정 (commit a0253681). omega/canon/forge/molt/wake/swarm/reign/dream/surge 모두 노출.
+- hexa-lang `gate/claude_prompt_hook.hexa` printf|jq → native json_parse (commit 67e5243d). user prompt eval-escape surface 제거.
+
+### nxs-002 진단 결과 (this session, ack=in_progress)
+- atlas×laws_aligned composite = **0.83379** (target ≥0.9, gap **0.06621**)
+- breakdown: pearson=0.464, cosine=0.903, l2=0.492, agreement=0.866
+- root cause: bin-mismatch fixed, **fresh atlas eig pipeline rebuild** 필요 (heavy compute — drill 슬롯 + atlas 재계산)
+- 본 세션 보류 — drill slot 경합 중 (by4wsquol /loop). 다음 세션에서 atlas eig 단독 실행.
+
+### 다음 세션 진입점 (우선순위 순)
+1. drill slot free 확인 → atlas eig pipeline rebuild → composite 재측정 → ≥0.9 시 nxs-002 resolved
+2. nxs-012 (drill resonance OOM) σ-별 RSS 프로파일 수집 (1주 평가 진입)
+3. 잔여 견고화: debate / drill_batch / 자기-합성단 (`_dream_next_seed` 200 → NEXUS_SEED_CAP 통일)
+4. canon-aware forge idempotent (forge 가 seal_id fingerprint 매치 시 boot reject) — design 단계
