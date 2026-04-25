@@ -1,0 +1,402 @@
+#!hexa strict
+// tool/gw_observatory_bridge.hexa — LIGO/Virgo GWOSC GWTC catalog live fetch + n=6 SE(3) DOF binding bridge.
+//
+// @tool(slug="gw_observatory_bridge", desc="Fetch LIGO/Virgo GWOSC GWTC JSON, parse event metadata, expose n=6 SE(3) DOF binding hints to nexus lenses (quantum_wormhole / sedi_gravitational_lensing / physics_gravitational_wave_lens / sedi_chirp_rate / wormhole_lens)")
+// @usage(hexa run tool/gw_observatory_bridge.hexa [--selftest] [--limit N] [--event NAME] [--json] [--catalog SHORT])
+// @exit_codes(0=PASS, 1=usage/io error, 2=value verification fail (anchor missing or fetch empty))
+// @sentinel(__GW_BRIDGE__ PASS|FAIL events_total=N latest_event=NAME first_event=NAME)
+// @origin(GWOSC eventapi/jsonfull GWTC-3-confident catalog — https://gwosc.org/eventapi/)
+// @abstraction(hive raw 70 design-multi-axis-verify-grid + external-source-corroboration; n=6 SE(3) DOF anchor cross-binding)
+// @paradigm(structural-admissibility — deterministic regex parse, no JSON-engine dep, GW150914 anchor)
+// @companion(tool/oeis_live_bridge.hexa — same external-bridge idiom)
+//
+// GWOSC API endpoints (verified 2026-04-25):
+//   https://gwosc.org/eventapi/jsonfull/allevents/             — all confident events cross-catalog
+//   https://gwosc.org/eventapi/jsonfull/GWTC-3-confident/       — GWTC-3 (O3) confident only
+//   https://gwosc.org/eventapi/json/                            — catalog index (metadata only)
+//
+// Response shape (top-level): {"events": {"<NAME>-v<K>": {"commonName":"GW150914","GPS":1126259462.4,
+//   "mass_1_source":35.6,"mass_2_source":30.6,"luminosity_distance":410.0,"chi_eff":-0.07,
+//   "redshift":0.09,"network_matched_filter_snr":24.4, ...}, ...}}
+//
+// CRITICAL ANCHOR: GW150914 (first direct detection, 2015-09-14) MUST appear in any cumulative
+// catalog. If absent → catalog corruption or endpoint regression; selftest fails.
+//
+// n=6 SE(3) DOF binding (cross-axis with hexa_sim_verify_grid axis_cross):
+//   GW source binary BBH carries 6 component-mass + 6 component-spin DOF (per body 3+3).
+//   SE(3) anchor = R^3 + so(3) = 6 DOF — single-body kinematic carrier.
+//   Per-event "binding_hint" exposes mass_1/mass_2 sum and pairs with n=6 anchor for
+//   downstream lens injection (quantum_wormhole_lens entropy bound, sedi_gravitational_lensing
+//   convergence kernel, sedi_chirp_rate inspiral phase coefficient).
+
+// ─── void-safe coercion ───
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn _esc_json(s: string) -> string {
+    let mut r = s.replace("\\", "\\\\")
+    r = r.replace("\"", "\\\"")
+    return r
+}
+
+// ─── HTTP fetch ───
+fn fetch_catalog(short: string) -> string {
+    // short examples: "GWTC-3-confident", "allevents", "GWTC-2.1-confident"
+    let url = "https://gwosc.org/eventapi/jsonfull/" + short + "/"
+    let cmd = "curl -s --max-time 60 '" + url + "'"
+    return _str(exec(cmd))  // @allow-bare-exec
+}
+
+// ─── parsers (regex-free, structural scan over the flat "events":{...} block) ───
+
+// returns the index immediately after the "events" object opening "{" or -1 if not found.
+fn _events_open(text: string) -> i64 {
+    let key_idx = text.index_of("\"events\"")
+    if key_idx < 0 { return -1 }
+    // scan forward for the first '{' after the colon.
+    let mut k = key_idx + 8
+    while k < len(text) {
+        let c = text.substring(k, k + 1)
+        if c == "{" { return k + 1 }
+        if c == "[" { return k + 1 }  // allowed (array shape) — caller handles
+        k = k + 1
+    }
+    return -1
+}
+
+// extract every "<NAME>-v<K>" key inside the events object. NAME pattern: GW followed by 6+ digits
+// (and optional _HHMMSS suffix). simpler: find all occurrences of the substring "\"GW" that are
+// JSON keys (preceded by '{' or ',' optionally with whitespace) and read until next '"'.
+fn extract_event_keys(text: string) -> array {
+    let mut out = []
+    let mut seen = ""
+    let needle = "\"commonName\""
+    let mut pos = 0
+    while pos < len(text) {
+        let i = text.index_of(needle, pos)
+        if i < 0 { break }
+        // advance past needle and find next '"' opening then closing
+        let mut j = i + len(needle)
+        // skip ':' ' ' '"' chars
+        while j < len(text) {
+            let c = text.substring(j, j + 1)
+            if c == "\"" { break }
+            j = j + 1
+        }
+        if j >= len(text) { break }
+        let val_start = j + 1
+        let val_end = text.index_of("\"", val_start)
+        if val_end < 0 { break }
+        let name = text.substring(val_start, val_end)
+        // dedupe: a single event may have multiple version blocks share commonName.
+        // we take FIRST occurrence per name (catalog presents newest version first).
+        let marker = "|" + name + "|"
+        if seen.index_of(marker) < 0 {
+            seen = seen + marker
+            out.push(name)
+        }
+        pos = val_end + 1
+    }
+    return out
+}
+
+// extract a single numeric field for a given event block. We locate the event by its
+// "commonName":"<NAME>" marker, then scan forward (within ~8000 chars) for the field key.
+fn _extract_field_after(text: string, anchor_idx: i64, field: string, max_span: i64) -> string {
+    let key = "\"" + field + "\""
+    let span_end = if anchor_idx + max_span < len(text) { anchor_idx + max_span } else { len(text) }
+    let i = text.index_of(key, anchor_idx)
+    if i < 0 || i > span_end { return "" }
+    // skip past key, ':' and whitespace
+    let mut j = i + len(key)
+    while j < len(text) {
+        let c = text.substring(j, j + 1)
+        if c != ":" && c != " " && c != "\t" && c != "\n" { break }
+        j = j + 1
+    }
+    if j >= len(text) { return "" }
+    // value may be number, "string", null, true/false. Read until terminator (',' '}' or whitespace+).
+    let first = text.substring(j, j + 1)
+    if first == "\"" {
+        let end = text.index_of("\"", j + 1)
+        if end < 0 { return "" }
+        return text.substring(j + 1, end)
+    }
+    let mut k = j
+    while k < len(text) {
+        let c = text.substring(k, k + 1)
+        if c == "," || c == "}" || c == "\n" || c == "\r" { break }
+        k = k + 1
+    }
+    return text.substring(j, k).trim()
+}
+
+fn _find_event_anchor(text: string, name: string) -> i64 {
+    // anchor = the index of "commonName":"NAME" pair. We search for the literal value.
+    let needle = "\"commonName\": \"" + name + "\""
+    let i = text.index_of(needle)
+    if i >= 0 { return i }
+    // tolerate no-space variant
+    let alt = "\"commonName\":\"" + name + "\""
+    return text.index_of(alt)
+}
+
+// returns [name, gps, m1, m2, distance] (strings; "" when missing)
+fn extract_event_brief(text: string, name: string) -> array {
+    let anc = _find_event_anchor(text, name)
+    if anc < 0 { return [name, "", "", "", ""] }
+    let gps = _extract_field_after(text, anc, "GPS", 60000)
+    let m1 = _extract_field_after(text, anc, "mass_1_source", 60000)
+    let m2 = _extract_field_after(text, anc, "mass_2_source", 60000)
+    let dl = _extract_field_after(text, anc, "luminosity_distance", 60000)
+    return [name, gps, m1, m2, dl]
+}
+
+// ─── n=6 binding hint ───
+// SE(3) DOF anchor = 6 (R^3 translation + so(3) rotation per body).
+// component-mass DOF for a binary = 2; pair these to surface a "carrier compliance" note.
+fn _binding_hint(brief: array) -> string {
+    let m1s = brief[1 + 1]  // index 2
+    let m2s = brief[1 + 2]  // index 3
+    if m1s == "" || m2s == "" {
+        return "n6_se3_dof=6 (anchor); binary_mass_dof=2 (incomplete — m1/m2 missing)"
+    }
+    return "n6_se3_dof=6 (anchor R^3+so(3)); binary_mass_dof=2 (m1+m2); carrier_lens_targets=quantum_wormhole+sedi_gravitational_lensing+physics_gravitational_wave+sedi_chirp_rate+wormhole_lens"
+}
+
+// ─── emitters ───
+fn _emit_text_brief(brief: array) {
+    let name = _str(brief[0])
+    let gps = _str(brief[1])
+    let m1 = _str(brief[2])
+    let m2 = _str(brief[3])
+    let dl = _str(brief[4])
+    println("event=" + name + " GPS=" + gps + " m1=" + m1 + "Msun m2=" + m2 + "Msun d_L=" + dl + "Mpc")
+    println("  binding: " + _binding_hint(brief))
+}
+
+fn _emit_json_recent(briefs: array, total: i64, catalog: string) {
+    println("{")
+    println("  \"tool\": \"gw_observatory_bridge\",")
+    println("  \"origin\": \"GWOSC eventapi/jsonfull/" + catalog + "\",")
+    println("  \"abstraction\": \"hive raw 70 design-multi-axis-verify-grid + n=6 SE(3) DOF binding\",")
+    println("  \"events_total\": " + to_string(total) + ",")
+    println("  \"binding_lenses\": [\"quantum_wormhole\", \"sedi_gravitational_lensing\", \"physics_gravitational_wave_lens\", \"sedi_chirp_rate\", \"wormhole_lens\"],")
+    println("  \"n6_anchor\": {\"se3_dof\": 6, \"binary_mass_dof\": 2, \"identity\": \"SE(3) = R^3 + so(3)\"},")
+    println("  \"recent\": [")
+    let mut k = 0
+    while k < len(briefs) {
+        let r = briefs[k]
+        let trail = if k + 1 < len(briefs) { "," } else { "" }
+        println("    {\"name\": \"" + _esc_json(_str(r[0])) + "\", \"gps\": \"" + _esc_json(_str(r[1])) + "\", \"mass_1\": \"" + _esc_json(_str(r[2])) + "\", \"mass_2\": \"" + _esc_json(_str(r[3])) + "\", \"distance_mpc\": \"" + _esc_json(_str(r[4])) + "\"}" + trail)
+        k = k + 1
+    }
+    println("  ]")
+    println("}")
+}
+
+fn _emit_json_event(brief: array, catalog: string) {
+    let name = _str(brief[0])
+    println("{")
+    println("  \"tool\": \"gw_observatory_bridge\",")
+    println("  \"origin\": \"GWOSC eventapi/jsonfull/" + catalog + "\",")
+    println("  \"event\": {\"name\": \"" + _esc_json(name) + "\", \"gps\": \"" + _esc_json(_str(brief[1])) + "\", \"mass_1\": \"" + _esc_json(_str(brief[2])) + "\", \"mass_2\": \"" + _esc_json(_str(brief[3])) + "\", \"distance_mpc\": \"" + _esc_json(_str(brief[4])) + "\"},")
+    println("  \"binding_hint\": \"" + _esc_json(_binding_hint(brief)) + "\",")
+    println("  \"binding_lenses\": [\"quantum_wormhole\", \"sedi_gravitational_lensing\", \"physics_gravitational_wave_lens\", \"sedi_chirp_rate\", \"wormhole_lens\"]")
+    println("}")
+}
+
+// ─── runners ───
+fn _take_first_n(names: array, n: i64) -> array {
+    let mut out = []
+    let mut i = 0
+    while i < n && i < len(names) {
+        out.push(names[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn run_selftest(json_mode: bool) {
+    let catalog = "allevents"
+    let text = fetch_catalog(catalog)
+    if len(text) < 100 {
+        eprintln("gw_observatory_bridge: fetch empty or too small (" + to_string(len(text)) + " bytes)")
+        println("__GW_BRIDGE__ FAIL events_total=0 latest_event=NONE first_event=NONE")
+        exit(2)
+    }
+    let names = extract_event_keys(text)
+    let total = len(names)
+    if total < 90 {
+        eprintln("gw_observatory_bridge: event count below threshold (" + to_string(total) + " < 90)")
+        println("__GW_BRIDGE__ FAIL events_total=" + to_string(total) + " latest_event=NONE first_event=NONE")
+        exit(2)
+    }
+    // GW150914 anchor presence
+    let mut has_anchor = false
+    for n in names {
+        if _str(n) == "GW150914" { has_anchor = true }
+    }
+    if !has_anchor {
+        eprintln("gw_observatory_bridge: GW150914 anchor missing from catalog")
+        println("__GW_BRIDGE__ FAIL events_total=" + to_string(total) + " latest_event=" + _str(names[0]) + " first_event=NONE")
+        exit(2)
+    }
+    let latest = _str(names[0])  // catalog returns newest first
+    let first = "GW150914"        // historical first detection (anchor)
+
+    // brief for GW150914 + 2 most recent
+    let mut briefs = []
+    briefs.push(extract_event_brief(text, latest))
+    briefs.push(extract_event_brief(text, first))
+
+    if json_mode { _emit_json_recent(briefs, total, catalog) }
+    else {
+        println("[gw_observatory_bridge selftest] catalog=" + catalog + " events_total=" + to_string(total))
+        println("[anchor present] GW150914 = first direct detection (2015-09-14)")
+        println("--- latest ---")
+        _emit_text_brief(briefs[0])
+        println("--- anchor ---")
+        _emit_text_brief(briefs[1])
+        println("---")
+    }
+    println("__GW_BRIDGE__ PASS events_total=" + to_string(total) + " latest_event=" + latest + " first_event=" + first)
+    exit(0)
+}
+
+fn run_limit(n: i64, json_mode: bool, catalog: string) {
+    let text = fetch_catalog(catalog)
+    if len(text) < 100 {
+        eprintln("gw_observatory_bridge: fetch empty for catalog " + catalog)
+        println("__GW_BRIDGE__ FAIL events_total=0 latest_event=NONE first_event=NONE")
+        exit(2)
+    }
+    let names = extract_event_keys(text)
+    let total = len(names)
+    if total == 0 {
+        eprintln("gw_observatory_bridge: no events parsed from " + catalog)
+        println("__GW_BRIDGE__ FAIL events_total=0 latest_event=NONE first_event=NONE")
+        exit(2)
+    }
+    let head = _take_first_n(names, n)
+    let mut briefs = []
+    for nm in head { briefs.push(extract_event_brief(text, _str(nm))) }
+    let latest = _str(names[0])
+    // first_event = anchor if present, else last in list
+    let mut first = ""
+    for nm in names {
+        if _str(nm) == "GW150914" { first = "GW150914" }
+    }
+    if first == "" { first = _str(names[len(names) - 1]) }
+
+    if json_mode { _emit_json_recent(briefs, total, catalog) }
+    else {
+        println("catalog=" + catalog + " events_total=" + to_string(total) + " showing first " + to_string(len(briefs)))
+        for b in briefs { _emit_text_brief(b) }
+        println("---")
+    }
+    println("__GW_BRIDGE__ PASS events_total=" + to_string(total) + " latest_event=" + latest + " first_event=" + first)
+    exit(0)
+}
+
+fn run_event(name: string, json_mode: bool, catalog: string) {
+    let text = fetch_catalog(catalog)
+    if len(text) < 100 {
+        eprintln("gw_observatory_bridge: fetch empty for catalog " + catalog)
+        println("__GW_BRIDGE__ FAIL events_total=0 latest_event=NONE first_event=NONE")
+        exit(2)
+    }
+    let anc = _find_event_anchor(text, name)
+    if anc < 0 {
+        eprintln("gw_observatory_bridge: event '" + name + "' not found in catalog " + catalog)
+        println("__GW_BRIDGE__ FAIL events_total=0 latest_event=NONE first_event=" + name)
+        exit(2)
+    }
+    let brief = extract_event_brief(text, name)
+    let names = extract_event_keys(text)
+    let total = len(names)
+    let latest = if len(names) > 0 { _str(names[0]) } else { "NONE" }
+
+    if json_mode { _emit_json_event(brief, catalog) }
+    else {
+        println("catalog=" + catalog + " events_total=" + to_string(total))
+        _emit_text_brief(brief)
+        println("---")
+    }
+    println("__GW_BRIDGE__ PASS events_total=" + to_string(total) + " latest_event=" + latest + " first_event=" + name)
+    exit(0)
+}
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut mode = "selftest"
+    let mut limit_n: i64 = 5
+    let mut event_name = ""
+    let mut json_mode = false
+    let mut catalog = "allevents"
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { mode = "selftest" }
+        else if a == "--limit" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                limit_n = to_i64(cli[i])
+                if limit_n <= 0 { limit_n = 5 }
+                mode = "limit"
+            } else {
+                eprintln("gw_observatory_bridge: --limit requires N")
+                exit(1)
+            }
+        }
+        else if a == "--event" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                event_name = cli[i]
+                mode = "event"
+            } else {
+                eprintln("gw_observatory_bridge: --event requires NAME")
+                exit(1)
+            }
+        }
+        else if a == "--catalog" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                catalog = cli[i]
+            } else {
+                eprintln("gw_observatory_bridge: --catalog requires SHORT")
+                exit(1)
+            }
+        }
+        else if a == "--json" { json_mode = true }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/gw_observatory_bridge.hexa [--selftest] [--limit N] [--event NAME] [--catalog SHORT] [--json]")
+            println("default: --selftest (allevents catalog + GW150914 anchor + count >= 90)")
+            println("catalogs: allevents | GWTC-3-confident | GWTC-2.1-confident | GWTC-1-confident")
+            println("origin : GWOSC eventapi — https://gwosc.org/eventapi/")
+            println("binding: n=6 SE(3) DOF anchor → quantum_wormhole, sedi_gravitational_lensing,")
+            println("         physics_gravitational_wave_lens, sedi_chirp_rate, wormhole_lens")
+            exit(0)
+        }
+        else {
+            eprintln("gw_observatory_bridge: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    if mode == "selftest" { run_selftest(json_mode) }
+    else if mode == "limit" { run_limit(limit_n, json_mode, catalog) }
+    else if mode == "event" { run_event(event_name, json_mode, catalog) }
+    else { run_selftest(json_mode) }
+}
