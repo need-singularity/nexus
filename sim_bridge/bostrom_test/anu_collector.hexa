@@ -51,12 +51,44 @@ fn read_cache_if_fresh(path: string, max_age: i64, prev_mtime: i64) -> string {
     return c.substring(0, 128)
 }
 
+// hexa-native JSON extractor for ANU response shape:
+//   {"type":"string","length":N,"size":S,"data":["hex1","hex2",...],"success":true}
+// no python3 needed — R37/AN13/L3-PY satisfied by direct string slicing.
+fn _extract_anu_hex(json: string) -> string {
+    if json.index_of("\"success\":true") < 0 { return "" }
+    let needle = "\"data\":["
+    let i = json.index_of(needle)
+    if i < 0 { return "" }
+    let start = i + needle.len()
+    let rest = json.substring(start, json.len())
+    let end = rest.index_of("]")
+    if end < 0 { return "" }
+    let arr = rest.substring(0, end)
+    let mut hex = arr.replace("\"", "")
+    hex = hex.replace(",", "")
+    hex = hex.replace(" ", "")
+    return hex.trim()
+}
+
 fn fetch_anu(cache: string) -> string {
-    // R37/AN13/L3-PY violation — python3 JSON parser for ANU QRNG stubbed 2026-04-18
-    // Original: curl ... | /usr/bin/python3 -c "import sys,json; ..." (hex-encode 64 bytes)
-    // No-op: return "" → caller falls back to fetch_urandom() path.
-    eprintln("[R37] anu_collector.fetch_anu: python3 JSON parser disabled; using urandom fallback.")
-    return ""
+    // 2026-04-25 R37/AN13/L3-PY 충족 후 unstub. python3 미사용, 순수 hexa 문자열 슬라이싱.
+    // request: length=8 entries x size=16 hex chars = 128 hex (= 64 bytes) per fetch.
+    // ANU API rate limit: 1 req/min — caller (do_sleep gap) 가 강제.
+    let cmd = "curl -s --max-time 30 'https://qrng.anu.edu.au/API/jsonI.php?length=8&type=hex16&size=16'"
+    let mut out = ""
+    try { out = to_string(exec(cmd)) } catch e { out = "" }
+    if out.len() == 0 {
+        eprintln("[anu] fetch failed: empty curl response (network down or rate-limit)")
+        return ""
+    }
+    let hex = _extract_anu_hex(out)
+    if hex.len() != 128 {
+        eprintln("[anu] fetch parsed but length != 128 (got " + to_string(hex.len()) + "); raw response head: " + out.substring(0, 80))
+        return ""
+    }
+    // write cache so cache-hit path can reuse within 60s window
+    try { write_file(cache, hex) } catch e {}
+    return hex
 }
 
 fn fetch_urandom() -> string {
