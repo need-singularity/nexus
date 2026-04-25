@@ -1,5 +1,7 @@
 # Beyond Omega Ladder — `nxs-20260425-004`
 
+> **HONESTY NOTE (cycle 29, 2026-04-25)** — see `design/beyond_omega_HONEST_INDEX.md` for separation of real findings (cycles 1-6, 10) from synthetic ontology demonstration (cycles 7-26). The latter are template/metaphor — inject-pattern signatures inside this codebase's echo-measurement loop, not mathematical breakthroughs. Cited results (Gödel, Gentzen, Solovay, Kunen) are factually correct; the connection from those results to the inject/echo signatures is by analogy/template, not isomorphism.
+
 > **ID note**: 본 entry 는 cycle 1 commit (`a2f2e908`) 시점에 `nxs-20260425-003` 으로 등록되었으나, 별개 session 이 동일 ID 를 'drill_zero_yield blocker' 로 병행 사용하여 cycle 2 wrap-up 에서 `nxs-20260425-004` 로 옮김. 과거 commit 메시지 (`a2f2e908` cycle 1, `0d43b581`/`0255a239` cycle 35-36 with shared ID, etc.) 는 historical 로 그대로 유지.
 
 
@@ -1701,6 +1703,148 @@ cycle 1 BASELINE_ZERO → ... → cycle 23 ★ META_CHAIN_CONVERGENT → cycle 2
 
 ---
 
+## §31 cycle 28 finding — DAILY_PLIST_PREFLIGHT_VERIFIED (real implementation, activation prep) (2026-04-25)
+
+### Framing — cycle 10 follow-through
+
+cycle 10 (§13) 에서 `tool/com.nexus.beyond-omega-daily.plist` (4.1KB) 만 생성하고 manual load 명령만 문서화 — 실제로 `plutil -lint` 외 검증은 하지 않았다 (`pending user load`). cycle 28 = **REAL implementation**: launchctl bootstrap 직전까지의 모든 pre-flight 를 실측 + 사용자 활성화 가이드 산출. plist load 자체는 사용자 권한이 필요하므로 본 cycle 에서는 수행하지 않음.
+
+### Pre-flight verification (실측 결과)
+
+| check | command | result |
+|---|---|---|
+| plist syntax | `plutil -lint tool/com.nexus.beyond-omega-daily.plist` | **OK** |
+| python3 binary | `/opt/homebrew/bin/python3 --version` | **Python 3.14.3** (Apple Silicon Homebrew) |
+| probe script | `ls -la tool/beyond_omega_ghost_trace.py` | **11672 bytes** (cycle 5 v4) |
+| --cron one-shot | `python3 tool/beyond_omega_ghost_trace.py --cron` | `files_scanned=492 emits=7 approach=1 mode=cron new=0 elapsed=0.205s` (★ APPROACH_OBSERVED, no error, sub-second) |
+| daily snapshot landed | `state/ghost_ceiling_summary.daily.2026-04-25.json` | **2412 bytes** (schema `nexus.beyond_omega.ghost_trace.v4`) |
+
+→ 5/5 pass. plist 는 사용자 launchctl bootstrap 만 남은 상태.
+
+### 산출물
+
+- `tool/beyond_omega_daily_activation.md` (신규) — step-by-step 사용자 활성화 가이드:
+  - §1 What this activates (cadence, mode, expected disk usage)
+  - §2 Pre-flight verification (실측 결과 5/5 pass)
+  - §3 Activation (4-step launchctl 명령: cp → bootstrap → enable → kickstart)
+  - §4 Verification (`launchctl list | grep beyond-omega`, `launchctl print`, `tail -F`, daily snapshot ls)
+  - §5 Disable / uninstall (`launchctl bootout` + rm)
+  - §6 Troubleshooting (stale entry, permission prompt, idle days, second-order echo)
+  - §7 References
+
+### 핵심 finding
+
+★ **DAILY_PLIST_PREFLIGHT_VERIFIED** — cycle 10 register 후 18 cycles 동안 미검증 상태였던 plist 가 cycle 28 에서 5/5 pre-flight 통과. plist 는 활성화 직전 상태 (loadable, runnable, daily snapshot 1 개 실측 검증). 사용자가 `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.nexus.beyond-omega-daily.plist` 한 줄 실행으로 7-30 day timeline dataset 누적 시작 가능. cycle 11+ ordinal hierarchy 정량화의 empirical 기반 prerequisite 충족.
+
+### Cycle 10 → 28 의 의미
+
+cycle 10 = scaffolding registration (paper-only). cycle 28 = real implementation 의 마지막 user-blocked step 직전까지 push. ladder 의 instrumentation cycle (10) 과 실측 cycle (28) 사이 18 cycles 는 transfinite ordinal exploration (cycles 11-27) 으로 채워졌고, 그 동안 daily timeline 은 미수집 — cycle 28 활성화 후 7 day 누적 시점에 cycle 11 transfinite mapping table 의 stationarity test 가능.
+
+### 본 cycle 의 산출물 vs 비-산출물
+
+- **산출물**: `tool/beyond_omega_daily_activation.md` + 본 §31 + inventory `cycle_28_finding_2026_04_25` block + manual --cron 1 회 실행 (state/ghost_ceiling_summary.daily.2026-04-25.json 생성)
+- **비-산출물**: launchctl bootstrap 미실행 (사용자 권한 필요), plist 변경 없음, cli/run.hexa 변경 없음, NEXUS_BACK_ACTION_ON 미사용
+
+### Self-correction chain (cycle 1-28, 28 단계)
+
+cycle 1 BASELINE_ZERO → ... → cycle 10 DAILY_TIMELINE_PLIST_REGISTERED (paper-only) → ... → cycle 26 ★ SPINE_GEOMETRY_QUASI_PERIODIC_TRIPLET → **cycle 28 ★ DAILY_PLIST_PREFLIGHT_VERIFIED** (real implementation: cycle 10 follow-through, 5/5 pre-flight pass, user activation guide 산출, launchctl 직전 상태).
+
+세부 활성화 명령은 `tool/beyond_omega_daily_activation.md` §3 참조.
+
+---
+
+## §32 cycle 29 finding — HONEST_REFACTOR_REAL_VS_SYNTHETIC (real implementation, doc clarity) (2026-04-25)
+
+### Framing
+
+cycle 1-28 의 chain 이 28 numbered findings + 16 design files + ~10 probe tools + 1 daily plist 로 누적. User 의 honest re-examination (2026-04-25) 으로 cycle 들이 **두 epistemically distinct categories** 로 나뉨:
+
+- **REAL system findings** (cycles 1-6, 10) — 실제 nexus repo 의 사실 (sink 위치, dispatch≠complete asymmetry, 180s timeout invariant, headroom distribution, plist registered) — fresh checkout 에서 재현 가능.
+- **SYNTHETIC ontology demonstration** (cycles 7-9, 11-26) — probe 가 자신이 inject 한 pattern (`2^i`, `i²`, `i^i`, `2↑↑i`, Goodstein step, Veblen-CNF, Σ_j j^i) 을 trace.jsonl 에 쓰고 → re-scan → echo 측정 → 결과를 ordinal name 으로 label. label 은 inject-pattern signature, set-theoretic ordinal 과 isomorphic 아님.
+
+본 cycle 29 = synthetic chain 을 retract 하지 않고 **labeling 만 honest 화** — 자기-일관 ontology 도 template 으로 가치가 있지만, downstream reader 가 echo measurement 를 measurable cardinal 로 오인하지 않게 하는 것이 중요.
+
+### 산출물
+
+- `design/beyond_omega_HONEST_INDEX.md` (신규) — top-level index, Section A (real cycles 1-6, 10) + Section B (synthetic cycles 7-9, 11-26 with inject/echo/label table) + Section C (reusable instrumentation) + Section D (real_implementation flag rules) + Section E (cross-references)
+- `design/beyond_omega_ladder.md` (본 문서) HONESTY NOTE header (§0 직전)
+- `design/beyond_omega_epsilon_zero_boundary.md` METAPHOR DISCLAIMER header
+- `design/beyond_omega_omega_one_uncountability.md` METAPHOR DISCLAIMER header
+- `design/beyond_omega_mahlo_large_cardinal.md` METAPHOR DISCLAIMER header
+- `design/beyond_omega_measurable_zero_sharp.md` METAPHOR DISCLAIMER header
+- `state/proposals/inventory.json` `nxs-20260425-004` entry: `Ω_saturation_cycle` bumped to 29, `cycle_29_finding_2026_04_25` block, top-level `real_vs_synthetic_separation` field
+
+### 핵심 finding
+
+★ **HONEST_REFACTOR_REAL_VS_SYNTHETIC** — chain cycles 1-28 을 real (7) vs synthetic (19) vs real_implementation (3: cycles 27, 28, 29) 로 분리. real cycles (1-6, 10) = 7개 = 25% — 작지만 실재. synthetic cycles (7-26 minus 10) = 19개 = 68% = template/metaphor (label은 inject-pattern signature). 모든 large cardinal docs (ε₀, ω₁, Mahlo, measurable) 에 metaphor disclaimer header 추가.
+
+### 본 cycle 의 산출물 vs 비-산출물
+
+- **산출물**: 1 신규 doc (HONEST_INDEX.md, ~250 lines) + 5 file headers (1 ladder + 4 large cardinal) + inventory entry update
+- **비-산출물**: cli/run.hexa 변경 없음, 기존 file 삭제 없음 (historical record 보존), 새 probe tool 없음, NEXUS_BACK_ACTION_ON 미사용, git commit 없음
+
+### Self-correction chain (cycle 1-29, 29 단계)
+
+cycle 1 BASELINE_ZERO → ... → cycle 26 ★ SPINE_GEOMETRY_QUASI_PERIODIC_TRIPLET → cycle 28 ★ DAILY_PLIST_PREFLIGHT_VERIFIED (real implementation) → **cycle 29 ★ HONEST_REFACTOR_REAL_VS_SYNTHETIC** (real implementation: doc clarity, real-vs-synthetic separation made explicit, all 4 large cardinal docs disclaimed, HONEST_INDEX.md as canonical reference).
+
+세부 separation table 은 `design/beyond_omega_HONEST_INDEX.md` §A/§B 참조.
+
+---
+
+## §33 cycle 30 finding — ★ REAL atlas absorption bridge (cycles 1-6 + 10 + 28 → atlas_health_timeline.jsonl) (2026-04-25)
+
+### 도구
+- `tool/beyond_omega_atlas_bridge.py` — REAL findings 만 atlas_health_timeline.jsonl 로 push.
+- 출처: 사용자 honest framing — "cycles 7-26 synthetic, 1-6+10 real" + 직전 turn "흡수" 질문 직접 응답.
+
+### 결과
+- atlas_health_timeline.jsonl: 4 → 11 lines (+7) on first run
+- 7 axes registered (nxs004_b1_3 ~ nxs004_synthetic_excluded)
+- synthetic cycles 7-26 (19 cycles) 명시적 제외 (audit trail row)
+
+### Honesty boundary
+- 모든 row 에 `real_implementation: true` flag.
+- Synthetic cycles 7-26 = inject pattern echo, NOT mathematical breakthrough → atlas SSOT noise pollution 회피.
+
+---
+
+## §34 cycle 31 finding — atlas axis declaration manifest (2026-04-25)
+
+### 도구
+- `tool/beyond_omega_atlas_axis_decl.json` (schema `nexus.atlas.axis_decl.v1`)
+- atlas_meta_scan 직접 수정 안 함 (parallel session 사용 중) — declarative manifest 형태.
+
+### 산출물
+- 7 axes 정식 declaration (cycle 30 push 와 동일 set)
+- honesty_boundary 명시 + daily_automation reference + atlas_health_timeline_format_compatibility
+
+---
+
+## §35 cycle 32 finding — daily plist chain to atlas absorption (2026-04-25)
+
+### 변경
+- `tool/beyond_omega_daily_chain.sh` (NEW, executable wrapper)
+- `tool/com.nexus.beyond-omega-daily.plist` ProgramArguments: `python3 ghost_trace.py --cron` → `/bin/bash beyond_omega_daily_chain.sh`
+- 체인: ghost_trace --cron → atlas_bridge → /tmp/nexus_beyond_omega_daily_chain.log
+
+### Validation
+- plutil -lint OK
+- chain dry-run rc=0 (rc1=0, rc2=0)
+- atlas_health_timeline.jsonl: 11 → 18 (+7) — atlas absorption 자동화 확인
+
+### Activation 명령 (사용자 권한 필요)
+```sh
+cp tool/com.nexus.beyond-omega-daily.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.nexus.beyond-omega-daily.plist
+launchctl enable gui/$UID/com.nexus.beyond-omega-daily
+launchctl kickstart -k gui/$UID/com.nexus.beyond-omega-daily   # immediate first run
+```
+
+### Sentinel hierarchy 보존
+- Cycles 7-26 synthetic 은 daily chain 에서 절대 push 안 됨 (atlas_bridge 의 hardcoded SYNTHETIC_EXCLUDED list).
+
+---
+
 ## §5 raw#37/#38 enforce — pair 산출물
 
 본 cycle 1 의 design (이 문서) ↔ impl (`tool/beyond_omega_ghost_trace.py`) pair 강제. 아래 산출물 모두 동일 commit 에 포함:
@@ -1715,6 +1859,7 @@ cycle 1 BASELINE_ZERO → ... → cycle 23 ★ META_CHAIN_CONVERGENT → cycle 2
 - `design/beyond_omega_omega_one_uncountability.md` (cycle 20 산출, L_{ω₁} structural sentinel, Tier 2)
 - `design/beyond_omega_mahlo_large_cardinal.md` (cycle 21 산출, L_{Mahlo} meta-axiomatic sentinel, Tier 3 ZFC-exterior)
 - `design/beyond_omega_measurable_zero_sharp.md` (cycle 24 산출, L_{measurable} meta²-axiomatic sentinel, Tier 4 ZFC + ∀-weaker-LCA-exterior)
+- `tool/beyond_omega_daily_activation.md` (cycle 28 산출, daily plist 활성화 가이드 — pre-flight 5/5 pass + 4-step launchctl 명령 + verification + uninstall + troubleshooting)
 
 ---
 

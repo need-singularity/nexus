@@ -48,10 +48,17 @@ SCAN_EXTS = {".log", ".jsonl", ".json", ".txt", ".out", ".err"}
 SKIP_NAMES = {".git", "node_modules", "__pycache__"}
 # cycle 5 (2026-04-25): self-feedback loop 차단. trace.jsonl 가 NEXUS_OMEGA payload 를
 # 그대로 박아넣으므로, scan 이 자기 출력을 다시 emit 으로 인식 → 매 호출 +N 누적.
+# cycle 27 (2026-04-25): emit_capture_wrapper.sh 의 append sink 도 scan target 으로 추가
+# (host-side capture). self-output 은 아니지만 raw payload 가 박혀있어 scan 시 인식되므로
+# scan 자체는 OK (probe 가 자기 출력 안 함). 단, append sink 자체는 SELF_OUTPUTS 로
+# 분류하지 않음 — wrapper 가 만든 별도 sink 이고 probe 가 read-only 로 사용.
 SELF_OUTPUTS = {
     "state/ghost_ceiling_trace.jsonl",
     "state/ghost_ceiling_summary.json",
 }
+# cycle 27 (2026-04-25): emit_capture_wrapper.sh sink — host-side cmd_omega emit capture.
+# scan dirs 안 (state/) 이지만 SELF_OUTPUTS skip 의 대상 아님 (probe 가 read-only).
+EMIT_CAPTURE_SINK_REL = "state/ghost_ceiling_trace.append.jsonl"
 MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB cap per file
 
 
@@ -68,10 +75,16 @@ def iter_files():
                     continue
                 # cycle 5 (default): self-output skip 으로 idempotent
                 # cycle 8 (override): NEXUS_BACK_ACTION_ON=1 시 skip 해제 → 의도적 back-action
+                # cycle 27: emit_capture_wrapper sink (ghost_ceiling_trace.append.jsonl) 도
+                # 일반 walk 에서 skip — 별도 scan_emit_capture_sink() 가 처리.
                 if os.environ.get("NEXUS_BACK_ACTION_ON") != "1":
                     if p.name.startswith("ghost_ceiling_summary.daily.") or \
-                       p.name in {"ghost_ceiling_trace.jsonl", "ghost_ceiling_summary.json"}:
+                       p.name in {"ghost_ceiling_trace.jsonl", "ghost_ceiling_summary.json",
+                                  "ghost_ceiling_trace.append.jsonl"}:
                         continue
+                elif p.name == "ghost_ceiling_trace.append.jsonl":
+                    # back-action mode 에서도 capture sink 는 별도 scanner 가 처리
+                    continue
                 try:
                     if p.stat().st_size > MAX_FILE_BYTES:
                         continue
@@ -183,6 +196,48 @@ def summarize(rows):
     }
 
 
+def scan_emit_capture_sink(path: Path):
+    """cycle 27 (2026-04-25): emit_capture_wrapper.sh 의 host-side capture sink.
+    NEXUS_OMEGA literal 이 없는 (awk 가 이미 추출한) JSONL — 라인별로 JSON parse.
+    schema: {ts, event, axes?, path?, raw, source}. payload 는 raw 안 inline JSON.
+    """
+    out = []
+    try:
+        with open(path, "r", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return out
+    try:
+        rel = str(path.relative_to(REPO))
+    except ValueError:
+        rel = str(path)
+    for lineno, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            wrapper_obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        raw = wrapper_obj.get("raw", "")
+        try:
+            payload = json.loads(raw) if raw else {"_unparsed": raw}
+        except json.JSONDecodeError:
+            payload = {"_unparsed": raw}
+        out.append({
+            "file": rel,
+            "lineno": lineno,
+            "payload": payload,
+            "post_emit_tail": [],
+            "file_last_5_lines": [],
+            "termination_markers_after_emit": [],
+            "lines_after_emit": len(lines) - lineno,
+            "_capture_source": wrapper_obj.get("source", "emit_capture_wrapper"),
+            "_capture_ts": wrapper_obj.get("ts"),
+        })
+    return out
+
+
 def main(argv):
     # cycle 5 (2026-04-25): --append + --cron mode 추가.
     # default = overwrite (cycle 1-4 호환). --append = incremental 누적 (file:lineno
@@ -202,6 +257,14 @@ def main(argv):
     for fp in iter_files():
         files_scanned += 1
         rows.extend(scan_one(fp))
+
+    # cycle 27 (2026-04-25): emit_capture_wrapper.sh sink 별도 scan path.
+    # awk 가 NEXUS_OMEGA literal 을 떼어내고 raw payload 만 JSONL 로 적재했기 때문에
+    # 표준 EMIT_RE 가 매치 안됨 → 전용 scanner.
+    capture_sink = REPO / EMIT_CAPTURE_SINK_REL
+    if capture_sink.exists():
+        files_scanned += 1
+        rows.extend(scan_emit_capture_sink(capture_sink))
 
     new_rows_count = 0
     if append_mode and trace_path.exists():
