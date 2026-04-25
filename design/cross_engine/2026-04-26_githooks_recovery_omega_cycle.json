@@ -1,0 +1,76 @@
+{
+  "ts": "2026-04-26T13:30:00+09:00",
+  "ordinal": "ω·recovery·githooks_restore",
+  "engine": "cross_engine",
+  "title": "Recovery ω-cycle: .githooks/pre-commit deletion verify+restore from HEAD",
+  "context": {
+    "trigger": "Earlier parallel ω-cycle batch: a concurrent agent racially deleted .githooks/pre-commit. Commit-grouping agent attempted restore via 'git checkout HEAD --' but orphan-commit agent reported it still showing as deleted in working tree (out of scope for that agent).",
+    "scope": ".githooks/ directory only",
+    "constraints": [
+      "DO NOT modify .githooks/ contents — only restore from HEAD if missing",
+      "DO NOT --no-verify any commit",
+      "Working dir /Users/ghost/core/nexus"
+    ]
+  },
+  "axes": [
+    {
+      "id": "a1",
+      "name": "pre-restoration state verification",
+      "evidence": {
+        "git_status_short": " D .githooks/pre-commit",
+        "ls_dir": "ls: /Users/ghost/core/nexus/.githooks/: No such file or directory",
+        "git_ls_tree_HEAD": "100755 blob b28ca97c04db73d171a4027d9d973675781b022a\t.githooks/pre-commit"
+      },
+      "finding": "Discrepancy CONFIRMED: HEAD contains .githooks/pre-commit (mode 100755 executable, blob b28ca97c), but working tree has the ENTIRE .githooks/ directory missing (not just the file). Earlier 'git checkout HEAD --' restoration claim by commit-grouping agent did NOT take effect — file remains deleted at this cycle's start.",
+      "discrepancy_detected": "yes",
+      "verdict": "RESTORE NEEDED"
+    },
+    {
+      "id": "a2",
+      "name": "restoration action",
+      "evidence": {
+        "command": "git checkout HEAD -- .githooks/",
+        "exit": 0,
+        "stdout_stderr": "(empty)"
+      },
+      "finding": "Single restore command executed cleanly, no stdout/stderr emitted (expected for git checkout success). Restore targeted directory (not just file) to capture any other .githooks/* entries HEAD might track (turns out HEAD only has pre-commit, file count = 1).",
+      "action_taken": "restore",
+      "verdict": "RESTORED"
+    },
+    {
+      "id": "a3",
+      "name": "post-restoration state + integrity verification",
+      "evidence": {
+        "ls_dir": "drwxr-xr-x 3 ghost  staff   96 Apr 26 08:23 .  /  -rwxr-xr-x 1 ghost staff 2944 Apr 26 08:23 pre-commit",
+        "git_status_short": "(clean — no output for .githooks/)",
+        "test_x_executable": "EXECUTABLE",
+        "file_type": "Bourne-Again shell script text executable, Unicode text, UTF-8 text",
+        "file_size_bytes": 2944,
+        "file_count": 1
+      },
+      "finding": "Working tree now matches HEAD: .githooks/ directory present, pre-commit file restored with mode 0755 (executable), size 2944 bytes, type bash script. git status clean for .githooks/ scope. File count in .githooks/ = 1 (matches HEAD ls-tree).",
+      "verdict": "WORKING_TREE_MATCHES_HEAD"
+    },
+    {
+      "id": "a4",
+      "name": "pre-commit hook syntax + functional smoke check",
+      "evidence": {
+        "syntax_check_command": "bash -n /Users/ghost/core/nexus/.githooks/pre-commit",
+        "syntax_check_result": "SYNTAX_OK",
+        "executable_check": "test -x → EXECUTABLE",
+        "no_no_verify_used": true
+      },
+      "finding": "Bash syntax parse PASSES (bash -n exits 0, no syntax errors). File is executable (mode 0755). Hook is ready to run on next commit. No --no-verify bypass used in this cycle — restoration was a pure git checkout, no commit was made by this cycle, so hook bypass was never invoked.",
+      "pre_commit_syntax_check_result": "SYNTAX_OK",
+      "verdict": "HOOK_FUNCTIONAL"
+    }
+  ],
+  "summary": {
+    "discrepancy_detected": "yes",
+    "action_taken": "restore",
+    "pre_commit_syntax_check_result": "SYNTAX_OK",
+    "file_count_githooks": 1,
+    "no_no_verify": true,
+    "scope_respected": ".githooks/ only — no other working-tree files touched"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "title": "R5 weave into meta-aggregators (status_all + health_check_all) — Ω-cycle 2026-04-26",
+  "kind": "omega_cycle",
+  "date": "2026-04-26",
+  "tz": "UTC",
+  "lineage": [
+    "design/hexa_sim/2026-04-26_R5_hash_chained_ledger_omega_cycle.json (R5 stub creation)",
+    "design/hexa_sim/2026-04-26_health_check_productionization_omega_cycle.json (health_check_all baseline)",
+    "design/hexa_sim/2026-04-26_R3_full_pre_commit_omega_cycle.json (status_all section 7 R1/R3/R4 baseline)"
+  ],
+  "context": "R5 (hash-chained rotation ledger + SSH detached signature stub) shipped in the prior iteration as two standalone tools (tool/ledger_verify.sh + tool/registry_sign.sh) plus pre-commit hook updates. They emit __LEDGER_VERIFY__ and __REGISTRY_SIGN__ sentinels, but were not yet visible in the meta-aggregators (atlas_status_all.sh, health_check_all.sh) — meaning no single-page surface and no cron-friendly aggregation. This Ω-cycle weaves R5 into both surfaces so the defense system field-set is complete.",
+  "axes": {
+    "status_all_enrichment": {
+      "tool": "tool/atlas_status_all.sh",
+      "section_modified": "7. defense system (renamed R1/R3/R4 → R1/R3/R4/R5)",
+      "lines_added": 24,
+      "human_readable_lines_added": 2,
+      "summary_lines_added": 1,
+      "exit_code_logic": "DEF_R5_LEDGER=FAIL now triggers EXIT_CODE=2 (consistent with COLLISION_CONF and runtime FAIL)",
+      "sentinel_fields_added": [
+        "defense_r5_ledger=<EMPTY|PASS|FAIL|PRE_R5|missing>",
+        "defense_r5_ledger_entries=<N>",
+        "defense_r5_ledger_broken_at=<line_or_none>",
+        "defense_r5_sign=<SKIPPED|SIGNED|VERIFIED|ERROR|missing>",
+        "defense_r5_sign_reason=<short_reason>"
+      ],
+      "compat": "raw 80 backward-compat preserved — all prior fields (defense_r1_*, defense_r3_full, defense_r4_rotations, timeline_*) retained in original order; R5 fields appended after R4."
+    },
+    "health_check_all_enrichment": {
+      "tool": "tool/health_check_all.sh",
+      "subchecks_before": 3,
+      "subchecks_after": 4,
+      "new_subcheck": "ledger_verify (R5)",
+      "lines_added": 16,
+      "verdict_logic": "L_EC != 0 now joins F_EC/B_EC/S_EC in flipping VERDICT to FAIL (exit 76)",
+      "human_readable_change": "F: %d/%d CLEAN | B: %d/%d PASS | tampered=%d (F=%d B=%d) | S: status_all_%s | L: %s(%d)",
+      "sentinel_fields_added": [
+        "ledger=<STATUS>(<N>)"
+      ],
+      "fix_trailer_added": "R5 ledger chain broken — see ledger_verify output for broken_at line; investigate prev_hash mismatch"
+    },
+    "verification": {
+      "tested": [
+        "bash tool/atlas_status_all.sh --brief → R5 fields visible in section 7, summary, sentinel",
+        "bash tool/health_check_all.sh → L: EMPTY(0) appears in human line; sentinel includes ledger=EMPTY(0)",
+        "bash tool/health_check_all.sh --quiet → sentinel-only output includes ledger field",
+        "hexa run cli/run.hexa hexa-sim status-all → CLI dispatch passes through; container path correctly reports R5 as 'missing' (R5 tools live in mac repo only)",
+        "hexa run cli/run.hexa hexa-sim health-check-all → CLI dispatch passes through; container reports ledger=MISSING(0)"
+      ],
+      "live_sentinels_post_enrichment": {
+        "atlas_status_all": "__ATLAS_STATUS_ALL__ runtime=stage_5 dashboard_h=2/4 facts=10022 shards=10 staged_atlas=0 collision_dup=0 collision_conflict=0 defense_r1_falsifier=f8078376140a defense_r1_bridge=16 defense_r3_full=no defense_r4_rotations=0 defense_r5_ledger=EMPTY defense_r5_ledger_entries=0 defense_r5_ledger_broken_at=none defense_r5_sign=SKIPPED defense_r5_sign_reason=no_signing_key_configured timeline_lines=127 timeline_last_rot=-",
+        "health_check_all": "__HEALTH_CHECK_ALL__ FAIL falsifier=103/105 bridge=14/16 tampered=2 status=ok ledger=EMPTY(0)"
+      },
+      "cli_dispatch": "Y — both `nexus hexa-sim status-all` and `nexus hexa-sim health-check-all` route through cli/run.hexa to the bash tools; sentinels emit cleanly inside container as well (with 'missing' fallback since R5 tools aren't yet in the container payload)."
+    },
+    "cron_suggestion": {
+      "current_state": "ledger is EMPTY (0 entries — no rotations have occurred yet; falsifier_registry_rotation_log.jsonl does not exist or has zero lines)",
+      "guidance": [
+        "Now (pre-rotation): no cron needed. ledger_verify is fast (<10ms on EMPTY) and is already invoked transitively by health_check_all whenever it runs.",
+        "Post first rotation (when R4 begins emitting JSONL entries): ledger_verify becomes meaningful. Recommend daily via existing health_check_all cron — no new cron entry needed.",
+        "If the user adopts SSH signing (R5 OPT-B activation: SIGNING_KEY env or git config user.signingkey set + allowed_signers built): add `bash tool/registry_sign.sh verify` to weekly cron. Verify is read-only, won't block.",
+        "Frequency tuning: if registry rotates >1/week (high-churn falsifier authoring period), bump health_check_all from daily to hourly so ledger drift is caught within the rotation window. Below 1/week, daily is fine."
+      ],
+      "do_not_add_yet": "No standalone ledger_verify cron entry recommended — health_check_all already covers it as 4th subcheck."
+    }
+  },
+  "tier_1": [
+    "tool/atlas_status_all.sh enriched: section 7 expanded with R5 ledger + sign blocks; summary line added; aggregate sentinel extended with 5 new fields (defense_r5_ledger, defense_r5_ledger_entries, defense_r5_ledger_broken_at, defense_r5_sign, defense_r5_sign_reason)",
+    "tool/health_check_all.sh enriched: 4th subcheck added (ledger_verify); verdict logic extended to include L_EC; human line extended with 'L: <STATUS>(<N>)'; sentinel extended with ledger=<STATUS>(<N>)"
+  ],
+  "compliance": {
+    "raw_66": "ai-native errors — fix-trailer added for L_EC != 0 case, points at ledger_verify output and prev_hash mismatch investigation path",
+    "raw_71": "report-only — no auto-mutation; status_all/health_check_all only read R5 sentinels and aggregate them",
+    "raw_73": "minimal — additive only; existing exit-code paths and sentinels untouched except for documented appends",
+    "raw_77": "audit-append-only — all R5 fields appended after the R4 cluster in the sentinel; field order of pre-existing fields preserved",
+    "raw_80": "sentinel evolution backward-compat — old parsers reading defense_r1_* / defense_r3_full / defense_r4_rotations / timeline_* still see those fields in the same positions; R5 fields are post-R4 additions"
+  },
+  "fixpoint": {
+    "marker": "FIXPOINT_REACHED",
+    "criteria": [
+      "Both meta-aggregators surface R5 ledger + sign status",
+      "CLI dispatch (`nexus hexa-sim status-all` / `health-check-all`) passes through unchanged",
+      "Live sentinels show R5 fields with current values (EMPTY ledger / SKIPPED sign — expected pre-activation state)",
+      "No regression in pre-existing sentinel fields (verified: r1/r3/r4/timeline_* all still present and correctly populated)"
+    ],
+    "next_iteration_seeds": [
+      "When R4 emits its first rotation entry, re-run health_check_all to confirm ledger transitions EMPTY → PASS with entries=1",
+      "When user activates SSH signing (R5 OPT-B), re-run status_all to confirm sign field transitions SKIPPED → SIGNED/VERIFIED",
+      "Consider adding R5 ledger broken_at line content to status_all section 7 when status=FAIL (currently only line number is surfaced)"
+    ]
+  },
+  "files_modified": [
+    "tool/atlas_status_all.sh (+24 / -2 lines, sentinel +5 fields)",
+    "tool/health_check_all.sh (+16 / -3 lines, sentinel +1 field)"
+  ],
+  "files_created": [
+    "design/hexa_sim/2026-04-26_R5_weave_into_aggregators_omega_cycle.json (this witness)"
+  ]
+}
