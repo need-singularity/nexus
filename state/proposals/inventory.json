@@ -473,6 +473,26 @@
         "blowup.hexa": "anti_hub state (_AH_*) + _ah_init() lazy loader + nexus_anti_hub_should_skip_edge() + graph_append_edge guard",
         "run.hexa": "--anti-hub [--anti-hub-threshold N] flag → setenv NEXUS_DRILL_ANTI_HUB / NEXUS_DRILL_ANTI_HUB_THRESHOLD + NEXUS_DRILL_ANTI_HUB stderr emit"
       },
+      "phase3_attempt_2026_04_25_cycle12": {
+        "result": "cycle 11 fix 작동 확인 — env propagation 정상 (Mac/docker 양쪽), 새 blocker 발견",
+        "command": "HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset fast --max-rounds 1 --anti-hub --fresh",
+        "outcome": {
+          "execution_path": "docker hard-landing (image=hexa-runner:latest caps=4cpus,4GB) — 모든 host blacklisted (5min TTL)",
+          "emit_NEXUS_DRILL_ANTI_HUB": "{...,'propagation':'global_mut + child_exec_prefix (cycle 10)'}",
+          "emit_NEXUS_DRILL_ANTI_HUB_TRACE": "{cmd_drill_entry:true, env_active:'1', env_threshold:''}",
+          "setenv_runtime_error": "absent — try-catch wrap 정상 작동",
+          "drill_yield": "0 absorptions (smash+free=0 SATURATED early), 0 atlas append",
+          "anti_hub_init_log_seen": "N/A — drill 이 atom 안 만들어서 graph_append_edge 미호출 → _ah_init skip"
+        },
+        "fix_validated": "✅ env propagation 정상 (cycle 11 fix 의 2가지 우회 모두 작동: setenv try-catch + global mut + env prefix)",
+        "new_blocker_discovered": {
+          "kind": "drill_zero_yield in docker/Mac fallback paths",
+          "trigger": "모든 host blacklist TTL 5min 안 → preflight reject → docker hard-landing 또는 Mac local fallback 시 harness chain (exec_validated/cmd_gate/lock_gate dependency) 미작동",
+          "evidence": "cycle 8/9/12 drill 모두 docker/Mac fallback 시 0 absorption (SATURATED early). hetzner remote 시는 917 absorptions 정상 (cycle 6/10).",
+          "next_proposal_candidate": "nxs-20260425-003 — docker/Mac fallback harness chain blocker (별개)"
+        },
+        "anti_hub_guard_full_validation_blocked_by": "drill_zero_yield — guard 자체는 정상 wired (cycle 11 fix), 실제 발동 검증은 hetzner blacklist 풀린 후 정상 dispatch 시 가능"
+      },
       "phase3_attempt_2026_04_25_cycle11": {
         "result": "TRUE root cause 확정 — hetzner hexa.real 빌드 setenv builtin 미정의, env propagation fix 적용",
         "command": "HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset fast --max-rounds 1 --anti-hub --fresh (hetzner remote PSI 56%, avail 122GB)",
