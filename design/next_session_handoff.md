@@ -397,6 +397,30 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 → **drill 의 axiom-driven hub selection 이 결정적**: random top-20 hub pool 으로는 spectral 의 일부 dimensions 만 커버. drill 은 각 새 atom 이 *적절한 specific hub* (axiom 으로 결정) 와 연결되어 spectral 의 *모든 dimensions* 가 진척 → composite 누적 +.
 
 → nxs-002 deep fix 의 실제 mechanism 정밀화: drill 의 「axiom-driven hub-atom matching ratio」 가 결정적 design parameter.
+
+### 2026-04-25 internal cross-link batch test — simulation 한계 도달
+| batches | total_atoms | Δ baseline |
+|---|---|---|
+| 1 | 200 | +0.00095 |
+| 2 | 400 | +0.00095 |
+| 3 | 600 | +0.00095 |
+| 5 | 1000 | −0.00331 |
+| 7 | 1400 | −0.00509 |
+| 10 | 2000 | −0.00910 |
+
+cross-link (drill 의 deduction chain mimic) 도 random hub-only 와 같은 plateau + over-saturation. **모든 simulation 패턴 (random/hub-aligned/cross-link/누적) 이 동일 limit**.
+
+**근본 insight (simulation 한계 발견)**:
+- spectral signal 의 dimension 은 **현재 atlas graph 의 structure 가 대수적으로 결정** — random 변경으로 dimension 추가 X
+- saturation +0.001 까지만 가능 (graph size 단순 증가의 한계)
+- **0.9 도달은 atlas spectral 의 *specific transformation* 필요**: constants_spectrum 과의 dimension-by-dimension alignment 를 강제
+- drill 의 axiom-driven discovery 는 random pool selection 이 아니라 **specific eigenvalue dimension 을 target** 해야 함
+
+**다음 진단 path** (drill slot free 시):
+1. atlas eigenvalue (100개) vs constants_spectrum (46개) dimension-by-dimension diff
+2. 가장 misalign 한 dimension 식별
+3. drill 의 새 atom 이 specific dimension 에 contribution 하도록 axiom 설계
+4. 또는 atlas 의 spectral 의 PCA-style decomposition 후 missing components 직접 분석
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
