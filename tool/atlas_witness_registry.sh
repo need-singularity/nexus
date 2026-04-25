@@ -63,7 +63,9 @@ for w in "${WITNESSES[@]}"; do
     cycle_id=$(jq -r '.trawl_id // .cycle_id // .name // "—"' "$w" 2>/dev/null)
     axes=$(jq -r '
         if (.axes_surfaced | type) == "array" then (.axes_surfaced | length)
+        elif (.axes_surfaced | type) == "number" then .axes_surfaced
         elif (.axes | type) == "array" then (.axes | length)
+        elif (.axes | type) == "number" then .axes
         else 0 end' "$w" 2>/dev/null)
     tier_count=$(jq -r '
         ((.tier_1_immediate_impl // .tier_1_immediate_impl_next_cycle // .tier_1_immediate_impl_this_cycle // []) | length)

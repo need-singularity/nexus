@@ -9,17 +9,17 @@ _Source-of-truth: `/Users/ghost/core/nexus/design/witness_registry.tsv` (regener
 |---|---|
 | total witnesses | 32 |
 | distinct engines | 3 |
-| total axes surfaced | 364 |
+| total axes surfaced | 416 |
 | total Tier-1 promotions | 106 |
 | date span | 2026-04-25 .. 2026-04-26 |
-| orphan witnesses | 6 |
+| orphan witnesses | 0 |
 | duplicate cycle_ids | 0 |
 
 ## Per-engine breakdown
 
 | engine | witnesses | axes | tier-1 | avg axes/witness |
 |---|---:|---:|---:|---:|
-| hexa_sim | 13 | 129 | 34 | 9.9 |
+| hexa_sim | 13 | 181 | 34 | 13.9 |
 | meta_engine | 12 | 142 | 47 | 11.8 |
 | roadmap_engine | 7 | 93 | 25 | 13.3 |
 
@@ -40,19 +40,12 @@ _Source-of-truth: `/Users/ghost/core/nexus/design/witness_registry.tsv` (regener
 | 20 | 5 | hexa_sim | design/hexa_sim/2026-04-26_improvement_ideas_omega_cycle.json |
 | 18 | 4 | hexa_sim | design/hexa_sim/2026-04-26_dedup_strategy_evolution_omega_cycle.json |
 
-## Orphan witnesses (6)
+## Orphan witnesses (0)
 
 _Definition: `axes=0` OR missing `cycle_id`/`trawl_id` OR no `omega_stop`/fixpoint marker._
 _May be stale, incomplete, or use a non-standard schema (e.g. `title`/`axes` instead of `trawl_id`/`axes_surfaced`)._
 
-| axes | tier-1 | fixpoint | path |
-|---:|---:|:---:|---|
-| 0 | 0 | Y | design/hexa_sim/2026-04-25_omega_cycle_implementation.json |
-| 0 | 3 | Y | design/hexa_sim/2026-04-26_atlas_ingest_a2_self_path_strip_omega_cycle.json |
-| 0 | 5 | Y | design/hexa_sim/2026-04-26_atlas_ingest_arg_fix_omega_cycle.json |
-| 9 | 0 | N | design/hexa_sim/2026-04-26_F23_resolution_omega_cycle.json |
-| 5 | 0 | N | design/hexa_sim/2026-04-26_i11_cmd_hardening_omega_cycle.json |
-| 0 | 0 | Y | design/hexa_sim/2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json |
+_(none — all witnesses well-formed)_
 
 ## Duplicate cycle_ids (0)
 
@@ -62,11 +55,11 @@ _(no duplicate cycle_ids — corpus is unique-keyed)_
 
 - **Aging policy**: witnesses older than 30 days with no `tier_1_immediate_impl_this_cycle` follow-up should move to `design/_archive/<engine>/`.
 - **Consolidation**: if any engine has >15 witnesses on the same week, surface a meta-Ω-cycle to dedup overlapping axes.
-- **Orphan cleanup**: 6 orphan(s) — backfill missing fields or move to `_archive/` to keep the registry signal-dense.
+- **Orphan cleanup**: 0 orphan(s) — backfill missing fields or move to `_archive/` to keep the registry signal-dense.
 - **Duplicate keys**: 0 duplicate cycle_id(s) — rename or merge (cycle_id should be a primary key).
 - **Cross-engine audit**: run `tool/atlas_witness_registry.sh --stats` weekly; flag if a single engine produces <2/week (stalled) or >10/week (over-fragmentation).
 - **Schema unification**: tier-1 field has 3 variants (`tier_1_immediate_impl`, `..._next_cycle`, `..._this_cycle`) — pick one canonical form per raw 8 retire-historical-tokens. Likewise for axis arrays (`axes_surfaced` vs `axes`).
 
 ---
 
-_`__ATLAS_WITNESS__ witnesses=32 engines=3 orphans=6 duplicates=0`_
+_`__ATLAS_WITNESS__ witnesses=32 engines=3 orphans=0 duplicates=0`_

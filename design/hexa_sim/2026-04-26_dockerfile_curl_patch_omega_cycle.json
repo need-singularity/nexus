@@ -1,0 +1,80 @@
+{
+  "schema": "omega_cycle.witness.v1",
+  "ts": "2026-04-26",
+  "title": "hexa-runner Dockerfile curl/wget/ca-certificates patch",
+  "trigger": {
+    "kind": "urgent_finding",
+    "source": "design/hexa_sim/2026-04-26_bridge_health_check.md",
+    "summary": "7/16 bridges FAIL — single root cause: hexa-runner:latest lacks /usr/bin/curl"
+  },
+  "axes": {
+    "investigate": {
+      "dockerfile_path": "/Users/ghost/core/hexa-lang/docker/runner/Dockerfile",
+      "base_image": "debian:12-slim",
+      "image_provenance": "hexa-runner@sha256:fe167ea7a3581f5ee3ea548725e56219d58e09aef6723efb1ad504deec1fd612 built 2026-04-25T06:11Z",
+      "missing_binaries": ["curl", "wget"],
+      "verified_via": "docker exec hexa-exec sh -c 'which curl' → empty (rc=1)",
+      "container_launch_ref": "/Users/ghost/.hx/bin/hexa lines 197-205 (--cpus=4 --memory=4g --pids-limit=512 -v $HOME:$HOME -v /tmp/hexa_escalate:/tmp/hexa_escalate --entrypoint /bin/sleep ... infinity)"
+    },
+    "patch": {
+      "files_modified": ["docker/runner/Dockerfile"],
+      "diff_summary": "apt-get install -y line: + curl + wget (joined with existing ca-certificates perl tini); also added comment block citing 2026-04-26 bridge health check root cause",
+      "raw_73_admissibility": "minimum-add only — curl + wget; preserved all existing packages (ca-certificates, perl, tini); no other Dockerfile change",
+      "lines_changed": "+10 -3 (additive comment + apt line extension)"
+    },
+    "rebuild": {
+      "command": "docker buildx use hexa-runner-builder && docker buildx build --platform linux/arm64 -f docker/runner/Dockerfile -t hexa-runner:latest --load .",
+      "duration_s": "~12 (cached layers, only RUN apt + final stages reran)",
+      "result": "DONE — hexa --version + hexa_interp --help both ok inside image",
+      "scope": "host-arch (linux/arm64) only via --load; multi-arch cache build skipped to keep cycle short — re-run tool/build_runner_image.hexa for amd64 cache"
+    },
+    "verify": {
+      "container_relaunch": "docker stop+rm hexa-exec then docker run -d --name hexa-exec --cpus=4 --memory=4g --memory-swap=4g --pids-limit=512 -v $HOME:$HOME -v /tmp/hexa_escalate:/tmp/hexa_escalate -e HOME=$HOME -w $HOME --entrypoint /bin/sleep hexa-runner:latest infinity",
+      "container_id": "a89ce28a3b9c2acf72574ee517f32704d6ce269b895758914f2abccb0aafce37",
+      "curl_check": "/usr/bin/curl — curl 7.88.1",
+      "wget_check": "/usr/bin/wget — GNU Wget 1.21.3",
+      "live_probe": "oeis.org → http=200 23289 bytes; gwosc.org → http=200 696907 bytes (curl works end-to-end from inside container)"
+    }
+  },
+  "before_after": {
+    "scope": "the 7 previously-FAILing bridges from 2026-04-26_bridge_health_check.md",
+    "before_pass": 0,
+    "before_fail": 7,
+    "after_pass": 5,
+    "after_fail": 2,
+    "after_caveat": "2 remaining FAIL are NOT curl-related — they are container OOM (4GB cap)",
+    "per_bridge": {
+      "arxiv_realtime_bridge": {"before": "FAIL fetch_empty", "after": "PASS — 5 entries fetched, latest_id=2604.21859v1"},
+      "simbad_bridge": {"before": "FAIL all 4 empty_response", "after": "PASS — units + sample parse + 4 live targets (Sirius/M31/Sgr A*/Polaris)"},
+      "wikipedia_summary_bridge": {"before": "FAIL refs=4 fetch_empty perfect_extract_len=0", "after": "PASS refs=4 all_ok=true perfect_number_n6_anchor=true perfect_extract_len=362"},
+      "openalex_bridge": {"before": "FAIL 'perfect number' returned 0 entries", "after": "PASS — 14 unit checks + live fetch (3 entries, top_id=W2164731628)"},
+      "uniprot_bridge": {"before": "FAIL sentinel-bug all_ok=false (fallback engaged)", "after": "PASS accession=P68871 source_url=https://rest.uniprot.org/uniprotkb/P42212.json refs=6 all_ok=true — note source_url shows real REST URL, NOT the fallback path; sentinel bug masked because curl now succeeds and ok=true is set the live way"},
+      "oeis_live_bridge": {"before": "FAIL fetch_empty_or_parse_failed", "after": "FAIL Killed (rc=137 SIGKILL OOM) — curl returns 23KB data successfully but interp parse OOMs the 4GB container; cgroup memory.events oom_kill=4 confirmed"},
+      "gw_observatory_bridge": {"before": "FAIL events_total=0", "after": "TIMEOUT/OOM — curl returns 696KB allevents JSON; interp parse exhausts 4GB before producing output"}
+    }
+  },
+  "uniprot_caveat_status": "RESOLVED-by-side-effect — sentinel bug exists per prior report (sets ok=false when fetch attempted-and-empty), but curl fix means fetch is no longer empty, so the live path's ok=true assignment runs first and the bug never fires. Bug remains latent — recommend separate fix to mirror gaia pattern (set ok=true source=fallback when fallback fields populated) so uniprot stays green during real network outages.",
+  "remaining_blockers": {
+    "oom_during_json_parse": {
+      "bridges_affected": ["oeis_live_bridge", "gw_observatory_bridge"],
+      "evidence": "docker exec hexa-exec cat /sys/fs/cgroup/memory.events → oom_kill=4; container cap 4GB; oeis exits rc=137; gw times out at 90s with no stdout",
+      "scope_judgement": "OUT-OF-SCOPE for this curl ω-cycle — separate root cause (interp memory profile), needs distinct ω-cycle (raise cap? streaming JSON parse? bridge-side data-window reduction?)",
+      "recommendation": "follow-up: investigate hexa interp JSON parser memory footprint OR raise hexa-exec --memory cap (re-evaluate against project_mac_hard_landing_policy 50% cap) OR bridges add response-size guards"
+    }
+  },
+  "tier_1": [
+    "Dockerfile patch landed: curl + wget + ca-certificates (already present) baked into hexa-runner:latest, host-arch arm64 --load",
+    "5/7 previously-FAIL bridges resolved (arxiv, simbad, wikipedia, openalex, uniprot now PASS with live network data)",
+    "Bridge health: 9 PASS → 14 PASS out of 16 (9 originally-PASS + 5 resolved); 7 FAIL → 2 FAIL (both OOM, separate failure mode)"
+  ],
+  "tier_2": [
+    "uniprot sentinel-classification bug now masked but still latent — flagged for separate fix",
+    "amd64 multi-arch image cache NOT updated this cycle (host-arch arm64 --load only); next full build via tool/build_runner_image.hexa will refresh both arches",
+    "OOM-kill-during-JSON-parse is the next bottleneck for live-fetch bridges with multi-100KB payloads"
+  ],
+  "raw_admissibility": {
+    "raw_73_minimum_add": "PASS — only added curl + wget to existing apt line; no new RUN, no new ARG, no entrypoint change",
+    "raw_no_break": "PASS — image still runs as Linux container with tini PID1 + hexa entrypoint; --version smoke test inside build succeeded; relaunched container preserves all prior cap/bind-mount/env settings"
+  },
+  "fixpoint_marker": "OK"
+}

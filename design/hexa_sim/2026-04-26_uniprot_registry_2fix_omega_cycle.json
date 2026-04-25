@@ -1,0 +1,96 @@
+{
+  "trawl_id": "2026-04-26_uniprot_registry_2fix_omega_cycle",
+  "cycle_id": "2026-04-26_uniprot_registry_2fix_omega_cycle",
+  "name": "uniprot sentinel-classification + atlas registry axes-as-number — Ω-cycle 2-fix bundle",
+  "date": "2026-04-26",
+  "engine": "hexa_sim",
+  "origin": "hive raw 73 admissibility + raw 66 ai-native-error preservation; follow-up to 2026-04-26_bridge_health_check.md F7 + prior orphan backfill cycle",
+  "scope": "two minimal surgical patches: (1) uniprot_bridge.hexa ok-decision branch when fallback engages; (2) atlas_witness_registry.sh axes_surfaced jq filter to handle scalar number form",
+  "constraints_honored": [
+    "raw 73 admissibility — minimal patch, no scope creep",
+    "raw 66 ai-native-error — preserved error trailers (no error-message contract changes)",
+    "Bash 3.2 portable — registry tool fix uses jq filter only, no bashisms added",
+    "no commit (main thread batches)"
+  ],
+  "axes_surfaced": [
+    {
+      "axis": "fix_1_uniprot_ok_decision",
+      "tool": "tool/uniprot_bridge.hexa",
+      "function": "verify_accession",
+      "lines_changed": "319-330 (block expanded by 5 lines: 4 comment + 1 fails reset)",
+      "diff_summary": "in fallback branch, after `function_brief = _str(row[5])` and before `} else { ... no_fallback ...} `, added `fails = []` with raw-73-justified comment. Mirrors gaia_bridge pattern where fallback success is a legitimate ok=true path.",
+      "before_state": "fails accumulated `fetch_empty_or_short` (or `live_parse_partial`) from the fetch attempt; even after fallback fully populated all 5 required fields, len(fails)>0 → ok=false → sentinel FAIL with `all_ok=false`",
+      "after_state": "fallback success clears prior fetch-attempt fails; field-validation checks at lines 332-335 still run and would push genuine data fails (uniprot_id_empty, etc.) if fallback row was malformed; ok=true only when fallback data is genuinely complete",
+      "edge_cases_preserved": [
+        "live success path — source==live, fallback block skipped, fails empty if all live fields populate",
+        "live partial parse — source stays fallback (line 312), fails gets `live_parse_partial` then cleared, fallback table consulted",
+        "fallback-missing-accession — `no_fallback_for_<acc>` pushed AFTER reset (line 328), still surfaces as ok=false",
+        "fallback-row-malformed — len(row)!=6 → outer-else pushes `no_fallback_for_<acc>` and skips reset entirely"
+      ]
+    },
+    {
+      "axis": "fix_2_registry_axes_scalar",
+      "tool": "tool/atlas_witness_registry.sh",
+      "function": "per-witness jq extract for `axes` column",
+      "lines_changed": "64-67 (block expanded from 4 lines to 6 lines: 2 new elif branches)",
+      "diff_summary": "added `elif (.axes_surfaced | type) == \"number\" then .axes_surfaced` and symmetric `elif (.axes | type) == \"number\" then .axes` between the array branches and the `else 0`",
+      "before_state": "if a witness wrote `axes_surfaced: 9` (number), jq fall-through hit `else 0` → axes counted as 0 → witness silently classified as orphan (axes==0 is one of three orphan triggers per line 88)",
+      "after_state": "scalar number form is recognized and yields the count value directly; both array and scalar forms now first-class per spec",
+      "current_corpus_impact": "two witnesses use scalar form (i11_cmd_hardening=5, F23_resolution=9), but both also carry an `axes` array of matching length, so they were already being counted via the array fallback. The fix is forward-defensive: any future witness that drops the `axes` array body in favor of the lighter `axes_surfaced` scalar count will still be counted correctly instead of silently going orphan."
+    }
+  ],
+  "before_after_verification": {
+    "uniprot_live_mode": {
+      "command": "HEXA_RESOLVER_NO_REROUTE=1 hexa run tool/uniprot_bridge.hexa --selftest",
+      "before": "PASS (already worked when curl available; refs all source=live)",
+      "after": "PASS unchanged — sentinel `__UNIPROT_BRIDGE__ PASS accession=P68871 name=\"Hemoglobin subunit beta\" length=147 organism=\"Homo sapiens\" refs=6 all_ok=true`"
+    },
+    "uniprot_no_fetch_mode": {
+      "command": "HEXA_RESOLVER_NO_REROUTE=1 hexa run tool/uniprot_bridge.hexa --selftest --no-fetch",
+      "before": "PASS (no fetch attempted, no fetch_empty_or_short pushed, fallback fills cleanly)",
+      "after": "PASS unchanged"
+    },
+    "uniprot_fallback_engaged_mode": {
+      "command": "PATH=/tmp/curl_block:$PATH (with curl-stub returning empty) hexa run tool/uniprot_bridge.hexa --selftest",
+      "before": "FAIL — sentinel reported `__UNIPROT_BRIDGE__ FAIL ... all_ok=false` even though fallback data was fully populated; per-ref printout would show source=fallback ok=false fails=fetch_empty_or_short — the bug surfaced in 2026-04-26_bridge_health_check.md F7",
+      "after": "PASS — sentinel `__UNIPROT_BRIDGE__ PASS accession=P68871 ... refs=6 all_ok=true`; per-ref printout shows source=fallback ok=true with no fails; this is the gold-standard gaia pattern reproduced"
+    },
+    "registry_corpus_stats": {
+      "command": "bash tool/atlas_witness_registry.sh --stats",
+      "before": "witnesses=32 engines=3 axes=416 tier-1=106 orphans=0 duplicates=0",
+      "after": "witnesses=32 engines=3 axes=416 tier-1=106 orphans=0 duplicates=0 (no regression — both scalar-form witnesses already had matching `axes` arrays so the array fallback was catching them; fix is forward-defensive)",
+      "scalar_form_witnesses_validated": [
+        "design/hexa_sim/2026-04-26_i11_cmd_hardening_omega_cycle.json: axes_surfaced=5 (number) → registry counts 5",
+        "design/hexa_sim/2026-04-26_F23_resolution_omega_cycle.json: axes_surfaced=9 (number) → registry counts 9"
+      ]
+    }
+  },
+  "tier_1_immediate_impl_this_cycle": [
+    {
+      "id": "uniprot_ok_fallback_clear",
+      "tool": "tool/uniprot_bridge.hexa",
+      "status": "applied + verified across 3 modes (live, no-fetch, fallback-engaged-via-blocked-curl)"
+    },
+    {
+      "id": "atlas_registry_axes_number_branch",
+      "tool": "tool/atlas_witness_registry.sh",
+      "status": "applied + verified (32 witnesses, 0 orphans, 416 axes — no regression)"
+    }
+  ],
+  "omega_stop_witness": {
+    "axes_surfaced_count": 2,
+    "tier1_count": 2,
+    "duplicates_with_prior_cycle": 0,
+    "novel_axes_ratio": "2/2 = 1.0 (both axes are direct surgical follow-ups to existing diagnostic reports — F7 in bridge_health_check + prior orphan backfill cycle — and address concrete actionable bugs)",
+    "decision": "stop — two requested fixes applied + verified; no scope creep; main thread will batch commit"
+  },
+  "raw66_error_trailer_audit": {
+    "uniprot_bridge": "no error trailers modified; line 360 still emits `fails              : <fails_csv>` when non-empty; sentinel FAIL branch (line 448) still emits `fails=<csv>` for genuine field-population failures",
+    "atlas_witness_registry": "no error trailers touched; jq filter is internal data extraction only; orphan-detection messaging at lines 105-110 + dashboard section unchanged"
+  },
+  "downstream_unlocks": [
+    "bridge_health_check report F7 closed (uniprot moves from FAIL to PASS in fallback-engaged mode)",
+    "registry corpus is now scalar-form-tolerant — future Ω-cycle witnesses can elect the lighter `axes_surfaced: <n>` form without orphan risk",
+    "demonstrates raw 73 + raw 66 dual-constraint can be honored in tight surgical fixes (no contract breakage, no over-engineering)"
+  ]
+}
