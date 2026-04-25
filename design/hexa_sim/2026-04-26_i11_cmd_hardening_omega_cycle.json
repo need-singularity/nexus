@@ -1,0 +1,50 @@
+{
+  "title": "i11 cmd hardening — atlas_falsifier_auto_spawn PRESENCE → VALUE+DOMAIN+GRADE anchor",
+  "date": "2026-04-26",
+  "origin": "design/hexa_sim/F13_F22_candidate_review.md (10/10 candidates flagged REWRITE)",
+  "predecessor": "design/hexa_sim/2026-04-26_improvement_ideas_omega_cycle.json axis_i11 (PRESENCE-only baseline)",
+  "evolution": "i11 → i11-hardened",
+  "raws": ["raw 71 (suggest mode preserved, no auto-merge)", "raw 73 (admissibility — anchored claim)", "raw 66 (error trailers preserved)"],
+  "axes": [
+    {
+      "id": "1_investigation",
+      "claim": "PRESENCE-only template is vacuous against the silent-drift threat model",
+      "evidence": "F13_F22_candidate_review.md verdict: all 10 auto-spawn cmds use `^@<TYPE> <id> =` only; grep PASSes even after value drift (e.g. atlas changes `@P n = 6` to `@P n = 7` — falsifier still PASS, no HIT). Witness: F19 `mu` had to be hand-tightened to `^@P mu = mobius\\(6\\) = 1 :: foundation \\[10\\*\\]` before merge.",
+      "witness": "design/hexa_sim/F13_F22_candidate_review.md lines 13-53"
+    },
+    {
+      "id": "2_pattern_derivation",
+      "claim": "Hardened template = `^@<TYPE> <id> = <expr_esc> :: <domain> \\[<grade_esc>\\]` with sentinel `<ID_UPPER>_ANCHOR_INTACT`",
+      "evidence": "Source line is already parsed for expr (sed `s/^@[PCFLRSXMTE] [^ ]+ = (.+) :: .*$/\\1/p`) and domain (sed `.* :: ([^ ]+) \\[.*$/\\1/p`); grade extraction already in place. Adding a regex-escape pass on expr+grade gives full literal anchor with zero new state. Sentinel rename `PRESENT_<ID>_<TYPE>` → `<ID_UPPER>_ANCHOR_INTACT` matches the 4 hand-merged F19-F22 entries already in registry.",
+      "witness": "tool/atlas_falsifier_auto_spawn.sh lines 141-157 + design/hexa_sim/falsifiers.jsonl lines 13-16 (F19-F22 reference shape)"
+    },
+    {
+      "id": "3_escape_handling",
+      "claim": "sed bracket expression `[][(){}.*+?^$|\\\\]` covers all BRE/ERE metacharacters seen in atlas exprs/grades; bash-3.2 / macOS sed compatible",
+      "evidence": "Test cases: `mobius(6) = 1` → `mobius\\(6\\) = 1`; `10*` → `10\\*`; `sigma^2 = 144` → `sigma\\^2 = 144` (verified live). JSON-emission second-pass replaces `\\` → `\\\\` so decoded grep pattern stays valid. 5/5 emitted hardened cmds round-trip through `bash -c` to expected sentinel.",
+      "witness": "live shell verification — all 5 candidates emit ANCHOR_INTACT sentinel"
+    },
+    {
+      "id": "4_backward_compat_flag",
+      "claim": "--legacy-cmd flag preserves pre-hardened PRESENCE-only template for diagnostic / replay against pre-2026-04-26 candidate baselines",
+      "evidence": "Default branch (no flag) → hardened cmd + ANCHOR_INTACT sentinel. `--legacy-cmd` branch → original `^@<TYPE> <id> =` cmd + `PRESENT_<ID>_<TYPE>` sentinel. Sentinel-line includes `mode=hardened|legacy` tag for log-grep visibility. raw 71 unchanged: both modes write to state/falsifier_candidates.jsonl, neither auto-merges into design/hexa_sim/falsifiers.jsonl.",
+      "witness": "tool/atlas_falsifier_auto_spawn.sh lines 32-69 (CLI parse + help) + 142-155 (mode branch) + 174-179 (sentinel mode tag)"
+    },
+    {
+      "id": "5_verification",
+      "claim": "Hardened cmds pass round-trip — JSON-decode → bash -c → expected sentinel, for all 5 default candidates",
+      "evidence": "Run 1: `> state/falsifier_candidates.jsonl && bash tool/atlas_falsifier_auto_spawn.sh --emit-jsonl --limit 5` → 5 candidates. python3 json.loads + subprocess.run for each: F18→N_ANCHOR_INTACT, F19→SIGMA_ANCHOR_INTACT, F20→PHI_ANCHOR_INTACT, F21→TAU_ANCHOR_INTACT, F22→SOPFR_ANCHOR_INTACT. All [OK]. Run 2: --legacy-cmd → 5 candidates with PRESENT_<ID>_<TYPE> sentinels (manual inspection confirms PRESENCE-only template).",
+      "witness": "state/falsifier_candidates.jsonl (post-run, hardened mode) + scripted bash -c round-trip 5/5 OK"
+    }
+  ],
+  "scope_note": "raw 71 SUGGEST mode preserved — script does NOT mutate design/hexa_sim/falsifiers.jsonl. Manual merge path unchanged: `cat state/falsifier_candidates.jsonl >> design/hexa_sim/falsifiers.jsonl` after human review.",
+  "non_goals": [
+    "auto-promote candidates into falsifiers.jsonl (raw 71 forbids)",
+    "hexa runtime dependency (self-host avoid — bash + grep + sed only)",
+    "rewrite of already-merged F19-F22 (those were hand-tightened with the same template; no regression)"
+  ],
+  "follow_ups": [
+    "F13/F14/F15/F16/F17 still in retired/duplicate state per F13_F22 review — no action; F18 (n) now naturally re-spawned with hardened cmd, supersedes legacy F13 (auto-rejected as F12 covers it stronger via triple-source)",
+    "consider --replay-legacy mode to diff hardened vs legacy candidate output across atlas snapshots (cross-snapshot drift detector)"
+  ]
+}
