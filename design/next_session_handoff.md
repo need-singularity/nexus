@@ -301,6 +301,18 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 3. 5 [10*] promotion (n6-sigma/n/phi/j2/tau) 가 atlas.n6 의 n6-canonical mirror — 그러나 atlas.blowup.jsonl graph 에는 영향 X (drill 만 graph 갱신)
 
 **0.9 도달 path 최정밀**: drill 이 만들어야 할 entries = **n6-canonical ↔ {math/physics/geometry} 새 bridges**. 단, 새 entries 가 random 이면 (이전 sensitivity probe) 손상. drill 의 axiom-driven exploration 이 n6-canonical hub 와 정확히 align 되어야 함.
+
+### 2026-04-25 unmapped endpoint 분석
+- declared nodes (atlas.n6 등록): 19,250
+- unmapped (edge endpoint only): 2,070 (25.3% edges 가 ≥1 unmapped)
+- unmapped degree top: **n6-sigma 449 / n6-n 445 / n6-phi 264** ← 5 promoted entries 자체가 unmapped 중 highest-degree hub
+- unmapped prefix: n6 (785) / L6 (503) / L7-L10 (200+) / disc (151) / GEO/ALPHA/ECON 등
+
+**확정 분리 재확인**:
+- 5 [10*] promotion (n6@98a23750) 이 graph hub → atlas.n6 등록 변경 = graph 영향 0
+- 이유: atlas_eig 의 awk1 이 edge endpoint 도 node 로 등록 → unmapped 라도 spectral 에 들어감
+- unmapped 2,070 = drill discovery 의 transient state (atlas.n6 정식 등록 전)
+- atlas.n6 declared 비율은 atlas integrity 척도, spectral 영향 X
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
