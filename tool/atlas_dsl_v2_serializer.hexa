@@ -1,0 +1,966 @@
+#!hexa strict
+// tool/atlas_dsl_v2_serializer.hexa — atlas DSL v2 grade-compound + JSON serialization (Phase 4a)
+//
+// @tool(slug="atlas_dsl_v2_serializer", desc="atlas DSL v1→v2 evolution: v3 compound grade tokens ([10*A+B]) parser/emitter + v8 canonical JSON ↔ n6 bidirectional serialization. backward-compat (단일 token 그대로 valid). Phase 4a Tier-1 axes (v3+v8) of 2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json.")
+// @usage(hexa run tool/atlas_dsl_v2_serializer.hexa [--selftest] [--read-n6 PATH] [--write-n6 PATH] [--validate-grade GRADE] [--json-summary])
+// @exit_codes(0=PASS, 1=usage/io, 2=schema-guard violation)
+// @sentinel(__ATLAS_DSL_V2_SERIALIZER__ PASS|FAIL primitives=N constants=M formulas=K laws=L relations=R symmetries=S crossings=X total=T)
+// @origin(design/hexa_sim/2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json sub-path A v3+v8 Tier-1)
+// @abstraction(raw 23 schema-guard + raw 68 byte-eq idempotence + raw 73 structural-admissibility + raw 70 multi-axis-verify)
+// @paradigm(structural — pure DSL transformation, deterministic emit, byte-eq on identical input)
+// @allow-bare-exec
+//
+// atlas DSL v2 (extends v1):
+//   v1 grammar: @<TYPE> <id> = <expr> :: <domain> [<grade>] + edges (<- -> => == ~> |> !!)
+//   v3 (this tool): grade tokens compound — [PREFIX*TOKEN_A+TOKEN_B+...] alphabetical canonical
+//                   token allowlist: PASS_LITERATURE / PROBE_RUN / BARRIER_CONFIRMED / NEGATIVE_VERDICT /
+//                                    REPO_INVARIANT / CROSS_REPO / VERIFIED / BREAKTHROUGH / HYPOTHESIS / CODATA22
+//                   backward-compat: [10*] single still valid; [10*PASS_LITERATURE] from Phase 2 still valid
+//   v8 (this tool): atlas.n6 ↔ canonical JSON. JSON schema:
+//                   {"version":"atlas_v1_via_v2_serializer","primitives":[{...}],"constants":[...],
+//                    "formulas":[...],"laws":[...],"relations":[...],"symmetries":[...],"crossings":[...]}
+//                   each entry: {"id","expr","domain","grade","applies","edges":[["op","tgt"],...]}
+
+// ─── tiny utilities (reused) ──────────────────────────────────────
+
+fn _now_iso() -> string {
+    return to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()
+}
+
+fn _is_digit(c: string) -> bool {
+    if c >= "0" && c <= "9" { return true }
+    return false
+}
+
+fn _is_upper(c: string) -> bool {
+    if c >= "A" && c <= "Z" { return true }
+    return false
+}
+
+fn _ltrim(s: string) -> string {
+    let n = len(s)
+    let mut i = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == " " || c == "\t" { i = i + 1; continue }
+        break
+    }
+    return s.substring(i, n)
+}
+
+// ─── v3: grade compound token parse/emit ─────────────────────────
+
+// Token allowlist — keep alphabetical (matches canonical emit order)
+fn _grade_token_allowlist() -> array {
+    return [
+        "BARRIER_CONFIRMED",
+        "BREAKTHROUGH",
+        "CODATA22",
+        "CROSS_REPO",
+        "HYPOTHESIS",
+        "NEGATIVE_VERDICT",
+        "PASS_LITERATURE",
+        "PROBE_RUN",
+        "REPO_INVARIANT",
+        "VERIFIED"
+    ]
+}
+
+fn _is_token_allowed(t: string) -> bool {
+    for a in _grade_token_allowlist() {
+        if a == t { return true }
+    }
+    return false
+}
+
+// parse_compound_grade("10*PASS_LITERATURE+REPO_INVARIANT")
+//   → ["OK", "10*", "PASS_LITERATURE,REPO_INVARIANT"]   (tokens alphabetical sorted)
+// parse_compound_grade("10*")
+//   → ["OK", "10*", ""]                                  (no compound)
+// parse_compound_grade("10*lower") → ["FAIL", "lowercase token", ""]
+fn parse_compound_grade(g: string) -> array {
+    if len(g) == 0 { return ["FAIL", "empty grade", ""] }
+    // 1. extract numeric prefix (digits + optional . + digits + optional * ! ?)
+    let n = len(g)
+    let mut i = 0
+    let mut digit_seen = false
+    while i < n {
+        let c = g.substring(i, i + 1)
+        if _is_digit(c) { digit_seen = true; i = i + 1; continue }
+        if c == "." { i = i + 1; continue }
+        break
+    }
+    if !digit_seen { return ["FAIL", "no digits in prefix", ""] }
+    // optional verified marker
+    let mut prefix_end = i
+    if prefix_end < n {
+        let c = g.substring(prefix_end, prefix_end + 1)
+        if c == "*" || c == "!" || c == "?" { prefix_end = prefix_end + 1 }
+    }
+    let prefix = g.substring(0, prefix_end)
+    if prefix_end == n { return ["OK", prefix, ""] }
+    // 2. remainder = uppercase tokens + '+' separators
+    let remainder = g.substring(prefix_end, n)
+    let parts = remainder.split("+")
+    let mut tokens = []
+    for p in parts {
+        if len(p) == 0 { return ["FAIL", "empty token in compound `" + g + "`", ""] }
+        // validate uppercase / underscore / digits only
+        let pn = len(p)
+        let mut k = 0
+        while k < pn {
+            let c = p.substring(k, k + 1)
+            if !_is_upper(c) && c != "_" && !_is_digit(c) {
+                return ["FAIL", "invalid char in token `" + p + "`", ""]
+            }
+            k = k + 1
+        }
+        if !_is_token_allowed(p) {
+            return ["FAIL", "token `" + p + "` not in allowlist", ""]
+        }
+        // dedup
+        let mut dup = false
+        for t in tokens { if t == p { dup = true } }
+        if !dup { tokens.push(p) }
+    }
+    // 3. sort alphabetically (canonical order)
+    let n_tokens = len(tokens)
+    let mut a = 0
+    while a < n_tokens {
+        let mut b = a + 1
+        while b < n_tokens {
+            if tokens[a] > tokens[b] {
+                let tmp = tokens[a]
+                tokens[a] = tokens[b]
+                tokens[b] = tmp
+            }
+            b = b + 1
+        }
+        a = a + 1
+    }
+    let csv = tokens.join(",")
+    return ["OK", prefix, csv]
+}
+
+// emit canonical: prefix + (tokens? "" : "TOK_A+TOK_B")
+fn emit_compound_grade(prefix: string, tokens_csv: string) -> string {
+    if len(tokens_csv) == 0 { return prefix }
+    let parts = tokens_csv.split(",")
+    return prefix + parts.join("+")
+}
+
+fn _valid_grade_v2(g: string) -> bool {
+    let r = parse_compound_grade(g)
+    if r[0] == "OK" { return true }
+    return false
+}
+
+// ─── v8: n6 → JSON parser ───────────────────────────────────────
+
+fn _type_to_category(t: string) -> string {
+    if t == "P" { return "primitives" }
+    if t == "C" { return "constants" }
+    if t == "F" { return "formulas" }
+    if t == "L" { return "laws" }
+    if t == "R" { return "relations" }
+    if t == "S" { return "symmetries" }
+    if t == "X" { return "crossings" }
+    return ""
+}
+
+fn _category_to_type(cat: string) -> string {
+    if cat == "primitives" { return "P" }
+    if cat == "constants" { return "C" }
+    if cat == "formulas" { return "F" }
+    if cat == "laws" { return "L" }
+    if cat == "relations" { return "R" }
+    if cat == "symmetries" { return "S" }
+    if cat == "crossings" { return "X" }
+    return ""
+}
+
+fn _categories_in_order() -> array {
+    return ["primitives", "constants", "formulas", "laws", "relations", "symmetries", "crossings"]
+}
+
+// Parse a header line like "@C alpha_inv_codata = 137.035 :: physics_atomic [10*]"
+// Returns ["OK", type, id, expr, domain, grade] or ["FAIL", reason, ...]
+fn _parse_header_line(line: string) -> array {
+    let s = line.trim()
+    if len(s) < 4 { return ["FAIL", "too short", "", "", "", ""] }
+    if s.substring(0, 1) != "@" { return ["FAIL", "no @ prefix", "", "", "", ""] }
+    let t = s.substring(1, 2)
+    if t != "P" && t != "C" && t != "F" && t != "L" && t != "R" && t != "S" && t != "X" {
+        return ["FAIL", "unknown type `" + t + "`", "", "", "", ""]
+    }
+    // require space after type
+    if len(s) < 3 || s.substring(2, 3) != " " { return ["FAIL", "no space after type", "", "", "", ""] }
+    let rest = s.substring(3, len(s))
+    // find " = " separator
+    let eq_idx = rest.index_of(" = ")
+    if eq_idx < 0 { return ["FAIL", "no ` = ` separator", "", "", "", ""] }
+    let id = rest.substring(0, eq_idx).trim()
+    let after_eq = rest.substring(eq_idx + 3, len(rest))
+    // find " :: " separator
+    let dd_idx = after_eq.index_of(" :: ")
+    if dd_idx < 0 { return ["FAIL", "no ` :: ` separator", "", "", "", ""] }
+    let expr = after_eq.substring(0, dd_idx).trim()
+    let after_dd = after_eq.substring(dd_idx + 4, len(after_eq))
+    // find " [" then trailing "]"
+    let lb_idx = after_dd.index_of(" [")
+    if lb_idx < 0 { return ["FAIL", "no ` [grade]` suffix", "", "", "", ""] }
+    let domain = after_dd.substring(0, lb_idx).trim()
+    let after_lb = after_dd.substring(lb_idx + 2, len(after_dd))
+    // strip trailing ]
+    let nl = len(after_lb)
+    if nl == 0 || after_lb.substring(nl - 1, nl) != "]" {
+        return ["FAIL", "no trailing ]", "", "", "", ""]
+    }
+    let grade = after_lb.substring(0, nl - 1).trim()
+    return ["OK", t, id, expr, domain, grade]
+}
+
+// Edge prefix detection — return [op_token, target] or ["", ""]
+fn _parse_edge_line(line: string) -> array {
+    let s = _ltrim(line)
+    // Order matters: longest prefixes first
+    let edges = [
+        ["<-", "depends_on"],
+        ["->", "derives"],
+        ["==", "equivalent"],
+        ["~>", "converges_to"],
+        ["=>", "application"],
+        ["|>", "verified_by"],
+        ["!!", "breakthrough"]
+    ]
+    for e in edges {
+        let prefix = e[0]
+        let np = len(prefix)
+        if len(s) >= np && s.substring(0, np) == prefix {
+            // require a space after
+            if len(s) > np && s.substring(np, np + 1) == " " {
+                let tgt = s.substring(np + 1, len(s)).trim()
+                return [e[1], tgt]
+            }
+        }
+    }
+    return ["", ""]
+}
+
+// JSON string escape — minimal (\, ", control chars)
+fn _json_esc(s: string) -> string {
+    let mut out = ""
+    let n = len(s)
+    let mut i = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "\\" { out = out + "\\\\" }
+        else if c == "\"" { out = out + "\\\"" }
+        else if c == "\n" { out = out + "\\n" }
+        else if c == "\r" { out = out + "\\r" }
+        else if c == "\t" { out = out + "\\t" }
+        else { out = out + c }
+        i = i + 1
+    }
+    return out
+}
+
+// JSON string unescape — inverse of _json_esc
+fn _json_unesc(s: string) -> string {
+    let mut out = ""
+    let n = len(s)
+    let mut i = 0
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if c == "\\" && i + 1 < n {
+            let nx = s.substring(i + 1, i + 2)
+            if nx == "\\" { out = out + "\\"; i = i + 2; continue }
+            if nx == "\"" { out = out + "\""; i = i + 2; continue }
+            if nx == "n" { out = out + "\n"; i = i + 2; continue }
+            if nx == "r" { out = out + "\r"; i = i + 2; continue }
+            if nx == "t" { out = out + "\t"; i = i + 2; continue }
+        }
+        out = out + c
+        i = i + 1
+    }
+    return out
+}
+
+// Parse n6 content → array of entries; each entry:
+//   [type, id, expr, domain, grade, applies_csv, edges_csv]
+//   applies_csv = each "=> ..." applies joined by "" sentinel
+//   edges_csv = each [op, tgt] joined by "" between, "" inside pair
+// We avoid those control chars in DSL content.
+fn _read_n6_to_entries(path: string) -> array {
+    if !file_exists(path) { return [] }
+    let content = to_string(read_file(path))
+    let lines = content.split("\n")
+    let mut entries = []
+    let mut cur = []  // empty when no current
+    let n = len(lines)
+    let mut i = 0
+    while i < n {
+        let raw = lines[i]
+        // skip pure comment / blank lines (// or # or empty)
+        let t = raw.trim()
+        if len(t) == 0 || t.substring(0, 2) == "//" || t.substring(0, 1) == "#" {
+            i = i + 1
+            continue
+        }
+        // header line begins with @
+        if t.substring(0, 1) == "@" {
+            // flush previous
+            if len(cur) > 0 { entries.push(cur); cur = [] }
+            let h = _parse_header_line(raw)
+            if h[0] != "OK" {
+                // schema-guard: surface to caller via FAIL marker entry
+                entries.push(["__FAIL__", h[1], raw, "", "", "", ""])
+                i = i + 1
+                continue
+            }
+            cur = [h[1], h[2], h[3], h[4], h[5], "", ""]
+            i = i + 1
+            continue
+        }
+        // attribute line — only attach if we have a current entry
+        if len(cur) == 0 { i = i + 1; continue }
+        // check if it's an applies (=>) — we keep as separate column for round-trip aesthetics
+        let stripped = _ltrim(raw)
+        if len(stripped) >= 3 && stripped.substring(0, 3) == "=> " {
+            let body = stripped.substring(3, len(stripped)).trim()
+            if len(cur[5]) == 0 { cur[5] = body }
+            else { cur[5] = cur[5] + "" + body }
+            i = i + 1
+            continue
+        }
+        let edge = _parse_edge_line(raw)
+        if len(edge[0]) > 0 {
+            let pair = edge[0] + "" + edge[1]
+            if len(cur[6]) == 0 { cur[6] = pair }
+            else { cur[6] = cur[6] + "" + pair }
+            i = i + 1
+            continue
+        }
+        // unknown attribute — ignore (forward-compat)
+        i = i + 1
+    }
+    if len(cur) > 0 { entries.push(cur) }
+    return entries
+}
+
+// emit canonical JSON from entries (raw 73 structural-admissibility: deterministic order)
+fn _entries_to_json(entries: array) -> string {
+    // bucket by category
+    let cats = _categories_in_order()
+    let mut buckets = []
+    for c in cats { buckets.push([]) }
+    let mut fails = []
+    for e in entries {
+        if e[0] == "__FAIL__" { fails.push(e); continue }
+        let cat = _type_to_category(e[0])
+        let mut bi = 0
+        let mut placed = false
+        for c in cats {
+            if c == cat { buckets[bi].push(e); placed = true; break }
+            bi = bi + 1
+        }
+        if !placed { fails.push(["__FAIL__", "unknown type " + e[0], e[1], "", "", "", ""]) }
+    }
+    let mut s = "{\n"
+    s = s + "  \"version\": \"atlas_v1_via_v2_serializer\",\n"
+    s = s + "  \"generated_by\": \"tool/atlas_dsl_v2_serializer.hexa\",\n"
+    let mut ci = 0
+    let n_cats = len(cats)
+    while ci < n_cats {
+        let cat = cats[ci]
+        let bucket = buckets[ci]
+        s = s + "  \"" + cat + "\": ["
+        let nb = len(bucket)
+        if nb == 0 {
+            s = s + "]"
+        } else {
+            s = s + "\n"
+            let mut bi2 = 0
+            while bi2 < nb {
+                let e = bucket[bi2]
+                s = s + "    {"
+                s = s + "\"id\": \"" + _json_esc(e[1]) + "\""
+                s = s + ", \"expr\": \"" + _json_esc(e[2]) + "\""
+                s = s + ", \"domain\": \"" + _json_esc(e[3]) + "\""
+                s = s + ", \"grade\": \"" + _json_esc(e[4]) + "\""
+                // applies array
+                s = s + ", \"applies\": ["
+                if len(e[5]) > 0 {
+                    let aps = e[5].split("")
+                    let mut ai = 0
+                    let nap = len(aps)
+                    while ai < nap {
+                        if ai > 0 { s = s + ", " }
+                        s = s + "\"" + _json_esc(aps[ai]) + "\""
+                        ai = ai + 1
+                    }
+                }
+                s = s + "]"
+                // edges array of [op, tgt]
+                s = s + ", \"edges\": ["
+                if len(e[6]) > 0 {
+                    let eds = e[6].split("")
+                    let mut ei = 0
+                    let ned = len(eds)
+                    while ei < ned {
+                        if ei > 0 { s = s + ", " }
+                        let pair = eds[ei].split("")
+                        s = s + "[\"" + _json_esc(pair[0]) + "\", \"" + _json_esc(pair[1]) + "\"]"
+                        ei = ei + 1
+                    }
+                }
+                s = s + "]"
+                s = s + "}"
+                if bi2 + 1 < nb { s = s + "," }
+                s = s + "\n"
+                bi2 = bi2 + 1
+            }
+            s = s + "  ]"
+        }
+        s = s + ",\n"
+        ci = ci + 1
+    }
+    // counts (last, no trailing comma)
+    let mut total = 0
+    let mut ci2 = 0
+    while ci2 < n_cats { total = total + len(buckets[ci2]); ci2 = ci2 + 1 }
+    s = s + "  \"counts\": {"
+    let mut ci3 = 0
+    while ci3 < n_cats {
+        if ci3 > 0 { s = s + ", " }
+        s = s + "\"" + cats[ci3] + "\": " + to_string(len(buckets[ci3]))
+        ci3 = ci3 + 1
+    }
+    s = s + ", \"total\": " + to_string(total)
+    if len(fails) > 0 { s = s + ", \"schema_fails\": " + to_string(len(fails)) }
+    s = s + "}\n"
+    s = s + "}\n"
+    return s
+}
+
+fn read_n6_to_json(path: string) -> string {
+    let entries = _read_n6_to_entries(path)
+    return _entries_to_json(entries)
+}
+
+// ─── v8: JSON → n6 (round-trip) ──────────────────────────────────
+// Lightweight JSON object scanner — extracts "field":"value" string pairs and "field":[ ... ] arrays
+// Depends on entries being one-line objects (matches our canonical emit format).
+
+fn _find_string_field(obj: string, key: string) -> string {
+    let needle = "\"" + key + "\":"
+    let idx = obj.index_of(needle)
+    if idx < 0 { return "" }
+    let after = obj.substring(idx + len(needle), len(obj))
+    // skip ws + opening "
+    let mut j = 0
+    let n = len(after)
+    while j < n {
+        let c = after.substring(j, j + 1)
+        if c == " " || c == "\t" { j = j + 1; continue }
+        break
+    }
+    if j >= n || after.substring(j, j + 1) != "\"" { return "" }
+    let body = after.substring(j + 1, n)
+    // find closing unescaped quote
+    let nb = len(body)
+    let mut k = 0
+    while k < nb {
+        let c = body.substring(k, k + 1)
+        if c == "\\" { k = k + 2; continue }
+        if c == "\"" { return _json_unesc(body.substring(0, k)) }
+        k = k + 1
+    }
+    return ""
+}
+
+// extract array body (between matching [ ]) — scanner respecting strings + nesting
+fn _find_array_field(obj: string, key: string) -> string {
+    let needle = "\"" + key + "\":"
+    let idx = obj.index_of(needle)
+    if idx < 0 { return "" }
+    let after = obj.substring(idx + len(needle), len(obj))
+    // skip ws then expect [
+    let mut j = 0
+    let n = len(after)
+    while j < n {
+        let c = after.substring(j, j + 1)
+        if c == " " || c == "\t" { j = j + 1; continue }
+        break
+    }
+    if j >= n || after.substring(j, j + 1) != "[" { return "" }
+    let body = after.substring(j + 1, n)
+    // find matching ]
+    let nb = len(body)
+    let mut depth = 1
+    let mut in_str = false
+    let mut k = 0
+    while k < nb {
+        let c = body.substring(k, k + 1)
+        if in_str {
+            if c == "\\" { k = k + 2; continue }
+            if c == "\"" { in_str = false }
+            k = k + 1
+            continue
+        }
+        if c == "\"" { in_str = true; k = k + 1; continue }
+        if c == "[" { depth = depth + 1; k = k + 1; continue }
+        if c == "]" {
+            depth = depth - 1
+            if depth == 0 { return body.substring(0, k) }
+            k = k + 1
+            continue
+        }
+        k = k + 1
+    }
+    return ""
+}
+
+// split top-level array of string OR pair-arrays into raw element strings
+fn _split_array_elems(body: string) -> array {
+    let mut out = []
+    let n = len(body)
+    let mut depth = 0
+    let mut in_str = false
+    let mut start = 0
+    let mut i = 0
+    while i < n {
+        let c = body.substring(i, i + 1)
+        if in_str {
+            if c == "\\" { i = i + 2; continue }
+            if c == "\"" { in_str = false }
+            i = i + 1
+            continue
+        }
+        if c == "\"" { in_str = true; i = i + 1; continue }
+        if c == "[" { depth = depth + 1; i = i + 1; continue }
+        if c == "]" { depth = depth - 1; i = i + 1; continue }
+        if c == "," && depth == 0 {
+            let elem = body.substring(start, i).trim()
+            if len(elem) > 0 { out.push(elem) }
+            start = i + 1
+            i = i + 1
+            continue
+        }
+        i = i + 1
+    }
+    let tail = body.substring(start, n).trim()
+    if len(tail) > 0 { out.push(tail) }
+    return out
+}
+
+// strip surrounding quotes from a JSON string elem
+fn _strip_quotes(s: string) -> string {
+    let n = len(s)
+    if n >= 2 && s.substring(0, 1) == "\"" && s.substring(n - 1, n) == "\"" {
+        return _json_unesc(s.substring(1, n - 1))
+    }
+    return s
+}
+
+// split a pair-array element "[\"op\", \"tgt\"]" into [op, tgt]
+fn _parse_pair_elem(elem: string) -> array {
+    let n = len(elem)
+    if n < 2 || elem.substring(0, 1) != "[" || elem.substring(n - 1, n) != "]" {
+        return ["", ""]
+    }
+    let inner = elem.substring(1, n - 1)
+    let parts = _split_array_elems(inner)
+    if len(parts) != 2 { return ["", ""] }
+    return [_strip_quotes(parts[0]), _strip_quotes(parts[1])]
+}
+
+// extract one entry object span starting at obj_open_idx in body
+// returns [end_idx_exclusive, raw_object_str] or [-1, ""]
+fn _extract_one_object(body: string, start: i64) -> array {
+    let n = len(body)
+    if start >= n || body.substring(start, start + 1) != "{" {
+        return [to_string(-1), ""]
+    }
+    let mut depth = 1
+    let mut in_str = false
+    let mut k = start + 1
+    while k < n {
+        let c = body.substring(k, k + 1)
+        if in_str {
+            if c == "\\" { k = k + 2; continue }
+            if c == "\"" { in_str = false }
+            k = k + 1
+            continue
+        }
+        if c == "\"" { in_str = true; k = k + 1; continue }
+        if c == "{" { depth = depth + 1; k = k + 1; continue }
+        if c == "}" {
+            depth = depth - 1
+            if depth == 0 {
+                return [to_string(k + 1), body.substring(start, k + 1)]
+            }
+            k = k + 1
+            continue
+        }
+        k = k + 1
+    }
+    return [to_string(-1), ""]
+}
+
+fn _split_object_array(body: string) -> array {
+    let mut out = []
+    let n = len(body)
+    let mut i = 0
+    while i < n {
+        let c = body.substring(i, i + 1)
+        if c == "{" {
+            let r = _extract_one_object(body, i)
+            let nxt = to_int(r[0])
+            if nxt < 0 { break }
+            out.push(r[1])
+            i = nxt
+            continue
+        }
+        i = i + 1
+    }
+    return out
+}
+
+// Given JSON string (full canonical doc), emit n6 text
+fn write_json_to_n6(json_str: string) -> string {
+    let cats = _categories_in_order()
+    let mut s = "// ═══════════════════════════════════════════════════════════════\n"
+    s = s + "// atlas n6 — emitted from canonical JSON via tool/atlas_dsl_v2_serializer.hexa\n"
+    s = s + "// schema: atlas_v1_via_v2_serializer (Phase 4a v3 grade compound + v8 JSON serialization)\n"
+    s = s + "// idempotence: same JSON input → byte-eq n6 output (raw 68)\n"
+    s = s + "// ═══════════════════════════════════════════════════════════════\n\n"
+    for cat in cats {
+        let arr_body = _find_array_field(json_str, cat)
+        if len(arr_body) == 0 { continue }
+        let objs = _split_object_array(arr_body)
+        if len(objs) == 0 { continue }
+        let typ = _category_to_type(cat)
+        s = s + "// ── @" + typ + " " + cat + " (" + to_string(len(objs)) + ") ──\n"
+        for o in objs {
+            let id = _find_string_field(o, "id")
+            let expr = _find_string_field(o, "expr")
+            let domain = _find_string_field(o, "domain")
+            let grade = _find_string_field(o, "grade")
+            s = s + "@" + typ + " " + id + " = " + expr + " :: " + domain + " [" + grade + "]\n"
+            // applies array
+            let ap_body = _find_array_field(o, "applies")
+            if len(ap_body) > 0 {
+                let elems = _split_array_elems(ap_body)
+                for e in elems {
+                    s = s + "  => " + _strip_quotes(e) + "\n"
+                }
+            }
+            // edges
+            let ed_body = _find_array_field(o, "edges")
+            if len(ed_body) > 0 {
+                let elems = _split_array_elems(ed_body)
+                for e in elems {
+                    let pair = _parse_pair_elem(e)
+                    let op = pair[0]
+                    let tgt = pair[1]
+                    let sym = _edge_symbol(op)
+                    if len(sym) > 0 {
+                        s = s + "  " + sym + " " + tgt + "\n"
+                    }
+                }
+            }
+            s = s + "\n"
+        }
+    }
+    return s
+}
+
+fn _edge_symbol(op: string) -> string {
+    if op == "depends_on" { return "<-" }
+    if op == "derives" { return "->" }
+    if op == "application" { return "=>" }
+    if op == "equivalent" { return "==" }
+    if op == "converges_to" { return "~>" }
+    if op == "verified_by" { return "|>" }
+    if op == "breakthrough" { return "!!" }
+    return ""
+}
+
+// ─── selftest ────────────────────────────────────────────────────
+
+fn _selftest() {
+    // ─ v3: grade compound parse/emit cases ─
+    let g_cases = [
+        ["10*", "OK", "10*", ""],
+        ["11*", "OK", "11*", ""],
+        ["10*PASS_LITERATURE", "OK", "10*", "PASS_LITERATURE"],
+        ["10*PASS_LITERATURE+REPO_INVARIANT", "OK", "10*", "PASS_LITERATURE,REPO_INVARIANT"],
+        ["10*REPO_INVARIANT+PASS_LITERATURE", "OK", "10*", "PASS_LITERATURE,REPO_INVARIANT"],
+        ["11*REPO_INVARIANT+CROSS_REPO", "OK", "11*", "CROSS_REPO,REPO_INVARIANT"],
+        ["10*PROBE_RUN+NEGATIVE_VERDICT", "OK", "10*", "NEGATIVE_VERDICT,PROBE_RUN"],
+        ["7", "OK", "7", ""],
+        ["", "FAIL", "", ""],
+        ["10*lower", "FAIL", "", ""],
+        ["10*UNKNOWN_TOK", "FAIL", "", ""],
+        ["10*PASS_LITERATURE+", "FAIL", "", ""]
+    ]
+    let mut g_pass = 0
+    let mut g_fail = 0
+    let mut g_bad = []
+    for tc in g_cases {
+        let r = parse_compound_grade(tc[0])
+        let want_status = tc[1]
+        if r[0] == want_status {
+            if want_status == "OK" {
+                if r[1] == tc[2] && r[2] == tc[3] { g_pass = g_pass + 1 }
+                else {
+                    g_fail = g_fail + 1
+                    g_bad.push("`" + tc[0] + "` → status OK but prefix=`" + r[1] + "` tokens=`" + r[2] + "` want prefix=`" + tc[2] + "` tokens=`" + tc[3] + "`")
+                }
+            } else {
+                g_pass = g_pass + 1
+            }
+        } else {
+            g_fail = g_fail + 1
+            g_bad.push("`" + tc[0] + "` → status " + r[0] + " want " + want_status + " (reason=" + r[1] + ")")
+        }
+    }
+    if g_fail > 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL grade-compound: " + to_string(g_fail) + "/" + to_string(len(g_cases)))
+        for b in g_bad { eprintln("  " + b) }
+        exit(2)
+    }
+    // canonical emit roundtrip — parse then emit must recover canonical form
+    let emit_cases = [
+        ["10*PASS_LITERATURE+REPO_INVARIANT", "10*PASS_LITERATURE+REPO_INVARIANT"],
+        ["10*REPO_INVARIANT+PASS_LITERATURE", "10*PASS_LITERATURE+REPO_INVARIANT"],
+        ["10*", "10*"],
+        ["11*REPO_INVARIANT+CROSS_REPO", "11*CROSS_REPO+REPO_INVARIANT"],
+        ["10*PROBE_RUN+NEGATIVE_VERDICT", "10*NEGATIVE_VERDICT+PROBE_RUN"]
+    ]
+    let mut e_pass = 0
+    let mut e_bad = []
+    for tc in emit_cases {
+        let r = parse_compound_grade(tc[0])
+        let canon = emit_compound_grade(r[1], r[2])
+        if canon == tc[1] { e_pass = e_pass + 1 }
+        else { e_bad.push("`" + tc[0] + "` → emitted `" + canon + "` want `" + tc[1] + "`") }
+    }
+    if len(e_bad) > 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL emit-canonical:")
+        for b in e_bad { eprintln("  " + b) }
+        exit(2)
+    }
+    // backward-compat single token (v1 forms)
+    let bc_cases = ["7", "10", "10*", "11*", "10!"]
+    let mut bc_pass = 0
+    for g in bc_cases {
+        let r = parse_compound_grade(g)
+        if r[0] == "OK" { bc_pass = bc_pass + 1 }
+    }
+    if bc_pass != len(bc_cases) {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL backward-compat single token: only " + to_string(bc_pass) + "/" + to_string(len(bc_cases)) + " passed")
+        exit(2)
+    }
+    // ─ v8: n6 → JSON roundtrip on synthetic mini DSL ─
+    let synth_n6 = "@C foo = 1.5 :: physics_test [10*]\n  => first test fact\n  |> test_bridge\n\n@F bar = sigma+phi = 14 :: number_theory [10*PASS_LITERATURE]\n  <- foo\n  => derived from foo\n\n@X cross = {foo + bar} dual-witness :: meta_test [11*REPO_INVARIANT+CROSS_REPO]\n  <- foo,bar\n  => synthesis\n"
+    // write synth to tmp
+    let tmp_path = "/tmp/atlas_dsl_v2_selftest_synth.n6"
+    write_file(tmp_path, synth_n6)
+    let json1 = read_n6_to_json(tmp_path)
+    let json2 = read_n6_to_json(tmp_path)
+    if json1 != json2 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL n6→json idempotence (raw 68)")
+        exit(2)
+    }
+    // verify counts present
+    if json1.index_of("\"constants\":") < 0 || json1.index_of("\"formulas\":") < 0 || json1.index_of("\"crossings\":") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL n6→json categories missing")
+        exit(2)
+    }
+    if json1.index_of("\"id\": \"foo\"") < 0 || json1.index_of("\"id\": \"bar\"") < 0 || json1.index_of("\"id\": \"cross\"") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL n6→json entry ids missing")
+        exit(2)
+    }
+    // json → n6 roundtrip
+    let n6_out = write_json_to_n6(json1)
+    if n6_out.index_of("@C foo = 1.5 :: physics_test [10*]") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL json→n6 missing @C foo header")
+        eprintln(n6_out)
+        exit(2)
+    }
+    if n6_out.index_of("@F bar = sigma+phi = 14 :: number_theory [10*PASS_LITERATURE]") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL json→n6 missing @F bar header")
+        exit(2)
+    }
+    if n6_out.index_of("@X cross") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL json→n6 missing @X cross header")
+        exit(2)
+    }
+    if n6_out.index_of("  <- foo") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL json→n6 edge `<- foo` missing")
+        exit(2)
+    }
+    if n6_out.index_of("  => first test fact") < 0 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL json→n6 applies missing")
+        exit(2)
+    }
+    // round-trip: write_json_to_n6(read_n6_to_json(p)) → read again → identical JSON (raw 68)
+    let tmp_path2 = "/tmp/atlas_dsl_v2_selftest_roundtrip.n6"
+    write_file(tmp_path2, n6_out)
+    let json_r = read_n6_to_json(tmp_path2)
+    if json_r != json1 {
+        eprintln("[atlas_dsl_v2_serializer selftest] FAIL roundtrip JSON differs after n6→json→n6→json")
+        // Don't dump full payloads — keep selftest output bounded
+        eprintln("  json1 length=" + to_string(len(json1)) + " json_r length=" + to_string(len(json_r)))
+        exit(2)
+    }
+    println("[atlas_dsl_v2_serializer selftest] OK — grade-compound " + to_string(g_pass) + "/" + to_string(len(g_cases)) + " + emit-canonical " + to_string(e_pass) + "/" + to_string(len(emit_cases)) + " + backward-compat " + to_string(bc_pass) + "/" + to_string(len(bc_cases)) + " + n6→json idempotence + json→n6 roundtrip + n6→json→n6→json fixpoint")
+    exit(0)
+}
+
+// ─── runner ──────────────────────────────────────────────────────
+
+fn _emit_summary_sentinel(entries: array) -> string {
+    let mut p = 0
+    let mut c = 0
+    let mut f = 0
+    let mut l = 0
+    let mut r = 0
+    let mut s = 0
+    let mut x = 0
+    for e in entries {
+        if e[0] == "P" { p = p + 1 }
+        else if e[0] == "C" { c = c + 1 }
+        else if e[0] == "F" { f = f + 1 }
+        else if e[0] == "L" { l = l + 1 }
+        else if e[0] == "R" { r = r + 1 }
+        else if e[0] == "S" { s = s + 1 }
+        else if e[0] == "X" { x = x + 1 }
+    }
+    let total = p + c + f + l + r + s + x
+    return "primitives=" + to_string(p) + " constants=" + to_string(c) + " formulas=" + to_string(f) + " laws=" + to_string(l) + " relations=" + to_string(r) + " symmetries=" + to_string(s) + " crossings=" + to_string(x) + " total=" + to_string(total)
+}
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+    let mut do_selftest = false
+    let mut read_n6_path = ""
+    let mut write_n6_path = ""
+    let mut validate_grade = ""
+    let mut json_summary = false
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { do_selftest = true }
+        else if a == "--read-n6" {
+            if i + 1 >= len(cli) { eprintln("atlas_dsl_v2_serializer: --read-n6 requires PATH"); exit(1) }
+            read_n6_path = cli[i + 1]; i = i + 1
+        }
+        else if a == "--write-n6" {
+            // input is JSON file; output is n6 to stdout (or a sibling .n6)
+            if i + 1 >= len(cli) { eprintln("atlas_dsl_v2_serializer: --write-n6 requires JSON_PATH"); exit(1) }
+            write_n6_path = cli[i + 1]; i = i + 1
+        }
+        else if a == "--validate-grade" {
+            if i + 1 >= len(cli) { eprintln("atlas_dsl_v2_serializer: --validate-grade requires GRADE"); exit(1) }
+            validate_grade = cli[i + 1]; i = i + 1
+        }
+        else if a == "--json-summary" { json_summary = true }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/atlas_dsl_v2_serializer.hexa [--selftest] [--read-n6 PATH] [--write-n6 JSON_PATH] [--validate-grade GRADE] [--json-summary]")
+            println("modes:")
+            println("  --selftest           v3 grade compound + v8 JSON serialization tests")
+            println("  --read-n6 PATH       parse atlas n6 file → emit canonical JSON to stdout")
+            println("  --write-n6 JSON_PATH parse JSON file → emit n6 DSL to stdout")
+            println("  --validate-grade G   parse + canonicalize a single grade token (exit 0 OK, 2 FAIL)")
+            println("  --json-summary       JSON output mode for --read-n6 (always JSON anyway) / for --write-n6 echoes meta")
+            println("axes (Phase 4a Tier-1):")
+            println("  v3 — grade compound token [PREFIX*A+B+...] alphabetical canonical, allowlist 10 tokens")
+            println("  v8 — atlas.n6 ↔ canonical JSON bidirectional, raw 68 byte-eq idempotence")
+            println("origin: design/hexa_sim/2026-04-26_phase4_atlas_dsl_v2_and_lens_injection_omega_cycle.json")
+            exit(0)
+        }
+        else { eprintln("atlas_dsl_v2_serializer: unknown arg `" + a + "`"); exit(1) }
+        i = i + 1
+    }
+
+    if do_selftest { _selftest() }
+
+    if len(validate_grade) > 0 {
+        let r = parse_compound_grade(validate_grade)
+        if r[0] != "OK" {
+            eprintln("__ATLAS_DSL_V2_SERIALIZER__ FAIL grade `" + validate_grade + "`: " + r[1])
+            exit(2)
+        }
+        let canon = emit_compound_grade(r[1], r[2])
+        if json_summary {
+            println("{\"input\": \"" + _json_esc(validate_grade) + "\", \"prefix\": \"" + _json_esc(r[1]) + "\", \"tokens_canonical_csv\": \"" + _json_esc(r[2]) + "\", \"emit_canonical\": \"" + _json_esc(canon) + "\"}")
+        } else {
+            println("input    : " + validate_grade)
+            println("prefix   : " + r[1])
+            println("tokens   : " + r[2])
+            println("canonical: " + canon)
+        }
+        println("__ATLAS_DSL_V2_SERIALIZER__ PASS primitives=0 constants=0 formulas=0 laws=0 relations=0 symmetries=0 crossings=0 total=0")
+        exit(0)
+    }
+
+    if len(read_n6_path) > 0 {
+        let entries = _read_n6_to_entries(read_n6_path)
+        // schema-guard: if any entry is __FAIL__, surface
+        let mut fails = 0
+        for e in entries { if e[0] == "__FAIL__" { fails = fails + 1 } }
+        // also validate every grade via v2 parser
+        let mut bad_grades = []
+        for e in entries {
+            if e[0] == "__FAIL__" { continue }
+            let g = e[4]
+            let r = parse_compound_grade(g)
+            if r[0] != "OK" { bad_grades.push(e[1] + ":" + g + ":" + r[1]) }
+        }
+        if fails > 0 || len(bad_grades) > 0 {
+            eprintln("__ATLAS_DSL_V2_SERIALIZER__ FAIL schema-guard read-n6 fails=" + to_string(fails) + " bad_grades=" + to_string(len(bad_grades)))
+            for bg in bad_grades { eprintln("  bad-grade: " + bg) }
+            exit(2)
+        }
+        let json_text = _entries_to_json(entries)
+        println(json_text)
+        let summary = _emit_summary_sentinel(entries)
+        println("__ATLAS_DSL_V2_SERIALIZER__ PASS " + summary)
+        exit(0)
+    }
+
+    if len(write_n6_path) > 0 {
+        if !file_exists(write_n6_path) {
+            eprintln("atlas_dsl_v2_serializer: --write-n6 path missing: " + write_n6_path)
+            exit(1)
+        }
+        let json_text = to_string(read_file(write_n6_path))
+        let n6_text = write_json_to_n6(json_text)
+        println(n6_text)
+        // count entries via re-parse of JSON for sentinel
+        let cats = _categories_in_order()
+        let mut totals = [0, 0, 0, 0, 0, 0, 0]
+        let mut ci = 0
+        for cat in cats {
+            let body = _find_array_field(json_text, cat)
+            let objs = if len(body) > 0 { _split_object_array(body) } else { [] }
+            totals[ci] = len(objs)
+            ci = ci + 1
+        }
+        let total = totals[0] + totals[1] + totals[2] + totals[3] + totals[4] + totals[5] + totals[6]
+        println("__ATLAS_DSL_V2_SERIALIZER__ PASS primitives=" + to_string(totals[0]) + " constants=" + to_string(totals[1]) + " formulas=" + to_string(totals[2]) + " laws=" + to_string(totals[3]) + " relations=" + to_string(totals[4]) + " symmetries=" + to_string(totals[5]) + " crossings=" + to_string(totals[6]) + " total=" + to_string(total))
+        exit(0)
+    }
+
+    eprintln("atlas_dsl_v2_serializer: no mode selected; use --selftest | --read-n6 PATH | --write-n6 JSON_PATH | --validate-grade GRADE | --help")
+    exit(1)
+}
