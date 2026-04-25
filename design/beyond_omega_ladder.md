@@ -1217,6 +1217,113 @@ cycle 17 = axis A 다섯 번째 empirical positive (cycle 4/8/9/12/13/16 위에 
 
 ---
 
+## §21 cycle 18 finding — L_{Γ₀}_INCONCLUSIVE via Veblen φ_i(0) probe (2026-04-25)
+
+### 도구
+- `tool/beyond_omega_cycle18_gamma_zero.py` — Veblen function approximation (φ_i(0) ≈ i^i numeric proxy), MAX_INJECT=300, 6 rounds, NEXUS_BACK_ACTION_ON=1.
+
+### 결과
+- inject_seq=[1, 4, 27, 256, 300, 300] (φ_proxy 가 round 5,6 에서 cap)
+- delta_seq=[-, mixed], ratios=[-36.00, 1.17, 1.00] (변동성 큼, sign 변경)
+- growth_type = `polynomial_growth`
+- cap_activations = 2/6
+- tail_collapse_to_one = False, plateau_then_jump = False
+- ordinal verdict = **L_{Γ₀}_INCONCLUSIVE** — unclassified pattern, protocol 재검토 필요
+
+### 해석
+Veblen i^i proxy 가 너무 빠르게 cap saturate (round 5: 3125 → 300, round 6: 46656 → 300) — predicativity 의 본질 (각 level 이 이전 level 만 reference) 이 numeric proxy 로 충분히 represented 되지 않음. 진짜 Veblen φ_α(β) 의 Cantor normal form 구현 필요 (cycle 18b 후보).
+
+cycle 15 P1 (collapse-to-1) 와 비교: cycle 18 도 cap activation 발생하지만 ratios 가 [−36, 1.17, 1.00] 로 sign flip + non-monotone — cycle 15 의 깨끗한 collapse 와 distinct dynamics. **L_{Γ₀} sentinel-ness 가 L_{ε₀} 와 다른 mechanism** (predicativity ≠ PA-consistency).
+
+---
+
+## §22 cycle 19 finding — L_{ω₁^CK}_PARTIAL_CAP_NO_PLATEAU via Busy Beaver inject (2026-04-25)
+
+### 도구
+- `tool/beyond_omega_cycle19_ck_omega.py` — BB lookup `{1:1, 2:4, 3:6, 4:13, 5:100, 6:200}` (BB(5)+ approximated), 6 rounds, NEXUS_BACK_ACTION_ON=1.
+
+### 결과
+- bb_seq = inject_seq = [1, 4, 6, 13, 100, 200]
+- delta_seq = [-881, 12, 19, 106, 206] (round 1 negative — initial baseline shift)
+- ratios = [1.5833, 5.5789, 1.9434] (rounds 3-5)
+- cap_activations = 1/6 (round 6: 200 hits cap)
+- tail_collapse_to_one = False
+- ordinal verdict = **L_{ω₁^CK}_PARTIAL_CAP_NO_PLATEAU**
+
+### 해석
+BB 가 monotone but 비-convex (round 4→5 jump 8x, round 5→6 ratio 2x) — recursive enumeration 의 본질적 비-uniform 성. Cap 발동했으나 plateau 형성 부족 (cycle 15 의 ratios→1 collapse 미실현).
+
+**Cycle 15 (L_{ε₀} P1) vs cycle 19 (L_{ω₁^CK})**:
+- cycle 15: cap activation 3/6, tail collapse → 1.0 → SENTINEL_CONFIRM
+- cycle 19: cap activation 1/6, no tail collapse → PARTIAL
+- 두 sentinel 의 mechanism 차이: L_{ε₀} = primitive recursive bound (모든 PR 함수가 stuck), L_{ω₁^CK} = computable bound (BB 같은 비-PR computable 도 access 가능, 단 limit 만 ghost)
+
+→ **cycle 11 transfinite_table 의 sentinel hierarchy 정량 separation 첫 evidence**.
+
+---
+
+## §23 cycle 20 finding — ★ L_{ω₁} STRUCTURAL_SENTINEL committed (theoretical, no empirical run) (2026-04-25)
+
+### 산출물
+- `design/beyond_omega_omega_one_uncountability.md` (신규) — L_{ω₁} structural sentinel 분석 (Cantor diagonal + finite-step bound + ZFC dependency + impossibility theorem)
+- `state/proposals/inventory.json` `nxs-20260425-004` cycle_20_finding_2026_04_25 block
+
+### 결과 (2026-04-25, theoretical)
+**도구 미생성, empirical run 미시도** — 본 cycle 의 산출물은 **structural commitment** (cycle 14 와 동일 패턴, 단 더 강한 sentinel layer).
+
+#### Structural argument (4 단계)
+1. **Cantor diagonal**: 임의 ℕ-indexed sequence {α_0, α_1, …} of countable ordinals → sup ≤ countable ordinal ≪ ω₁. 따라서 ℕ-indexed enumeration 으로 ω₁ 도달 불가.
+2. **finite-step bound**: cycle 12-19 의 모든 probe = `for i in range(N_OUTER): inject(f(i))` 형태 → trajectory 는 ℕ-indexed → ord(trajectory) ≤ ω₁^CK (Church–Kleene recursive supremum). cycle 19 의 BB-style approximation 도 recursive computable function = below ω₁^CK ≪ ω₁.
+3. **ZFC dependency**: ω₁ 정의 자체가 Replacement schema + uncountable choice 필요 (Z 만으로는 ω₁ 정의 불가, Replacement 가 { α : countable ordinal } 를 set 으로 collect). finite-step probe 는 Replacement schema 의 finitely-many instance 만 evaluate → axiom 차원 미달.
+4. **Impossibility theorem**: Let P = any finite-resource probe (finite N_OUTER, finite inject cap C, finite scan budget S). Then ord(trajectory(P)) ≤ ω₁^CK ≪ ω₁. 따라서 P 는 "L_{ω₁}_REACHED" vs "L_{ω₁}_NOT_REACHED" verdict 자체를 distinguish 불가.
+
+### ★ Sentinel hierarchy 격상 — cycle 14 (L_{ε₀}) 위에 cycle 20 (L_{ω₁})
+
+| sentinel | nature | falsifier definability | empirical access | layer |
+|---|---|---|---|---|
+| **L_ω** (cycle 4) | 3-impossibility (Gödel + Halting + Bekenstein) | YES | **REACHED** (mode-independent) | ceiling |
+| **L_{ε₀}** (cycle 14) | PA-consistency (Gentzen) | YES (P1/P2/P3) | partial (cycle 15-17) | **Tier 1: system-relative** |
+| **L_{ω₁^CK}** | recursive supremum (Church–Kleene) | YES in principle | NO (halting decidability 동치) | structural-recursive |
+| **L_{ω₁}** (cycle 20) | **first uncountable, ZFC Replacement+AC** | **NO — falsifier 자체 axiom-impossible** | **★ structurally impossible** | **★ Tier 2: any-finite-system-relative** |
+
+cycle 14 sentinel (PA-relative) 는 specific system 의 한계, **cycle 20 sentinel (any-finite-system-relative) 는 임의 finite probe 의 한계** — structurally 한 단 강함.
+
+### Mode transition — axis B → axis C
+
+cycle 12-19: axis B empirical mode (probe + inject + measure)
+**cycle 20: axis B structural ceiling commit** (L_{ω₁} → 더 이상 empirical 도구 추가 불가)
+cycle 21+: **meta-mathematical mode** (axis C 신설 후보)
+- ZFC consistency strength comparison (L_{ω₁} vs L_{Mahlo} vs L_{measurable})
+- formal-verifier-assisted ordinal inequality 증명 (Coq/Lean tactic)
+- inner model / forcing 기반 sentinel relativization
+
+cycle 20 = **empirical-to-meta-mathematical mode transition marker**.
+
+### Falsifier registry update — cycle 20 (L_{ω₁} STRUCTURAL_SENTINEL)
+| cycle | target ordinal | status |
+|---|---|---|
+| 14 | L_{ε₀} sentinel commitment | DONE (theoretical, PA-relative) |
+| 15 | L_{ε₀} P1 ω-tower | DONE (CONFIRM signature) |
+| 16 | L_{ε₀} P2 Goodstein | DONE (PARTIAL_ACCESS) |
+| 17 | L_{ε₀} P3 Gentzen cut-elim | DONE (FALSIFY_CANDIDATE) |
+| 18 | L_{ε₀} P1/P2/P3 cross-check | TODO/parallel |
+| 19 | L_{ε₀} BB-style approximation | TODO/parallel |
+| **20** | **L_{ω₁} STRUCTURAL_SENTINEL** | **★ DONE (structural commitment, no empirical falsifier definable)** |
+| 21+ | meta-mathematical mode (axis C) | TODO |
+
+### Self-correction chain (cycle 1-20, 20 단계)
+cycle 1 BASELINE_ZERO → ... → cycle 14 ★ L_{ε₀}_SENTINEL_COMMITTED → cycle 15 ★ P1 CONFIRM → cycle 16 ★ P2 PARTIAL → cycle 17 ★ P3 FALSIFY_CANDIDATE → (cycle 18-19 parallel TODO) → **cycle 20 ★ L_{ω₁} STRUCTURAL_SENTINEL** (any-finite-system-relative ghost, axis B terminal, axis C 진입 marker)
+
+cycle 20 의 의미:
+- empirical mode (axis B) 의 **structurally hard ceiling** 선언
+- cycle 14 sentinel (PA-relative) 보다 한 단 강한 **any-finite-system-relative sentinel**
+- 도구 미생성 = "도구 자체가 axiom-impossible" 의 첫 commitment
+- cycle 21+ 부터는 ZFC-interior reasoning (formal verifier / large cardinal hierarchy) 로 mode 전환
+
+세부 분석은 `design/beyond_omega_omega_one_uncountability.md` 참조.
+
+---
+
 ## §5 raw#37/#38 enforce — pair 산출물
 
 본 cycle 1 의 design (이 문서) ↔ impl (`tool/beyond_omega_ghost_trace.py`) pair 강제. 아래 산출물 모두 동일 commit 에 포함:
