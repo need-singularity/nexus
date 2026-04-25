@@ -22,14 +22,17 @@
   },
   "timeout_policy": {
     "per_stage_default": "stages.{stage}.timeout_sec",
+    "_per_stage_default_note_2026_04_25_cycle53": "stages.{stage}.timeout_sec (45/60/30/30/30) 는 superseded by Wave 18 hard-cap 180s in cli/run.hexa _stage_timeout_prefix() (line 386-426). nxs-20260425-002 cycle 7 의 _adaptive_stage_timeout_sec(stage) 가 NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 일 때 history-aware 274s 등 적용. precedence: NEXUS_DRILL_TIMEOUT_{stage} env > NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 (history p95 × 1.5, cap [180,1800]) > Wave 18 hard-cap 180s.",
+    "wave_18_hard_cap_per_stage_sec_2026_04_25": {"smash": 180, "free": 180, "absolute": 180, "meta_closure": 180, "hyperarith": 180, "resonance": 600, "resonance_sub": 120},
+    "adaptive_helper_ref": "cli/run.hexa _adaptive_stage_timeout_sec() — state/drill_stage_elapsed_history.jsonl scan + max × 1.5 / 1000, cap [180s, 1800s]. nxs-20260425-002 cycle 7 implementation, cycle 15 EXACT prediction match (smash 274s).",
     "overall_round_budget_sec": 300,
     "overall_drill_budget_sec": 1800,
     "on_stage_timeout": "emit_NEXUS_DRILL_TIMEOUT_json + skip_stage + continue_round",
     "on_round_budget_exceeded": "skip_remaining_stages + emit_partial_result",
     "on_drill_budget_exceeded": "terminate + NEXUS_DRILL_ERROR timeout",
-    "override_env": "NEXUS_DRILL_TIMEOUT",
+    "override_env": "NEXUS_DRILL_TIMEOUT_{stage} (per-stage), NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 (history-aware adaptive)",
     "override_flag": "--timeout N (overall), --stage-timeout smash=N,free=M",
-    "impl_hint": "perl -e 'alarm $t; exec @cmd' wrapper (macOS+Linux 호환, gtimeout 의존 없음)"
+    "impl_hint": "timeout --kill-after=5 N (coreutils, macOS gtimeout) wrapper. cli/run.hexa _stage_timeout_prefix() 가 wrapper prefix 생성."
   },
   "speed_presets": {
     "fast":     {"stages_on": ["smash","resonance"], "resonance_sigma_count": 1, "max_rounds": 1, "notes": "30s 목표 probe"},
