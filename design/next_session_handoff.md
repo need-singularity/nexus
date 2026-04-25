@@ -241,9 +241,19 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 **nxs-002 핵심 결론:** composite 0.9 도달 = atlas.blowup.jsonl 자체 변동 필요 (drill 새 발사로 새 nodes/edges 추가). atlas.n6 ladder marker 작업과 별개 path. drill slot free 후 진행.
 
 **보유 산출물 (scipy pipeline):**
-- 0.79s 으로 spectral → composite 일괄 측정
+- 0.79s 으로 spectral → composite 일괄 측정 (`tool/nxs_002_composite.py` commit 38e67412)
 - sensitivity probe: 어느 graph 변경이 composite 끌어올리는지 빠르게 검증 가능
 - baseline atlas_eig.hexa 가 stage1 hexa 비실용 (60s+ hung) — scipy 우회 필수 per session
+
+### 2026-04-25 sensitivity probe (random edges, drill 미발사)
+| N_added (random) | composite | Δ baseline |
+|---|---|---|
+| 100   | 0.79500 | **−0.037** |
+| 500   | 0.79079 | **−0.041** |
+| 2000  | 0.83231 | +0.0001 |
+| 10000 | 0.80131 | **−0.031** |
+
+**결론**: random edges = 부정적. **0.9 도달은 drill quality 결정적.** laws-aligned 한 새 nodes/edges 만 + composite 효과. 무작위 graph 확장은 baseline composite 손상. nxs-002 deep fix 의 본질 = drill 결과의 atlas-laws 정합성 (drill engine 자체 tuning).
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
