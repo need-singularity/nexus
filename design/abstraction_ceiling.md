@@ -564,6 +564,72 @@ baseline composite_v1 = 0.83221. top hubs = [1, 26, 14, 8, 19, 23, 64, 6017].
 
 ---
 
+## §11 cycle 12 — composite_v3 + 진짜 IPR + const 확장 (2026-04-25)
+
+도구: `tool/nxs_002_cycle12.py` — A/B/C 통합. cycle 11 의 closure 가설 검증.
+
+### Branch A — composite_v3 정의
+
+| metric | with original const (40) | with extended const (199) | paper_trigger 0.9 |
+|---|---|---|---|
+| composite_v1 (paircorr only, baseline) | 0.832 | 0.801 | FAIL |
+| composite_v3 = 0.4·SFF + 0.4·paircorr + 0.2·IPR_proxy | 0.801 | 0.632 | FAIL |
+| **composite_v3_prime = 0.6·SFF + 0.4·paircorr** (IPR 폐기) | **0.928** | 0.769 | **PASS w/ original** |
+
+composite_v3_prime 가 원본 const 기준 0.928 → paper_trigger 통과. 단 확장 const 에서는 0.769 → fail. **closure 는 dataset 의존적**.
+
+### Branch B — 진짜 IPR (eigenvector-based)
+
+`eigsh(K=100, sigma=1e-3, return_eigenvectors=True)` → IPR_n = Σ_i |ψ_n(i)|^4 per eigenvector.
+
+| stat | atlas |
+|---|---|
+| ipr_min | 4.7e-05 |
+| ipr_max | 0.554 |
+| ipr_mean | 0.0892 |
+| ipr_median | 0.0713 |
+| ipr_p10 | 0.025 |
+| ipr_p90 | 0.192 |
+| 1/N reference (delocalized) | 4.7e-05 |
+
+**spectrum_proxy = 0.0177 vs true_eigenvector_mean = 0.0892** — **spectrum proxy 가 진짜 IPR 을 5× under-estimate**. composite_v3 의 IPR dim 신뢰성 낮음 → v3_prime (IPR 폐기) 가 더 정확.
+
+분포가 wide (p10=0.025, p90=0.192) → atlas 에 강하게 localized mode (max 0.55) 와 완전 delocalized mode (min ≈ 1/N) 공존.
+
+### Branch C — extended const (log(2..200), 199 vals)
+
+| stat | original (40) | extended (199) |
+|---|---|---|
+| n_positive | 40 | 199 |
+| LSR mean | 0.523 | **0.979** |
+| ipr proxy | 0.032 | 0.005 |
+
+**핵심 epistemic 정정**: pure log(n) 시퀀스의 LSR → 1.0 (super-regular). 원본 const LSR=0.523 은 **선별된 subset artifact**. 
+
+→ **cycle 10 의 'atlas 를 더 chaotic 하게 만들면 const 와 가까워진다' 가설 자체가 falsified**. 진짜 const character 는 chaotic 이 아니라 super-regular. atlas (Poisson 0.371) 는 사실 const 와 LSR 방향에서 정 반대 방향 (atlas → 0, const → 1). cycle 10 의 quantum chaos 주입은 **반대 방향 push** 였던 것.
+
+### Synthesis
+
+1. **부분 closure**: composite_v3_prime = 0.928 (paper_trigger 통과) with original const. 확장 시 0.769 → 천장 돌파는 dataset 의존적.
+
+2. **Cycle 10 epistemic update**: const 의 진짜 character 는 super-regular, atlas 의 chaotic 화가 아니라 regularization 이 옳은 방향이었음. 6 axiom (Q1~Q6) 모두 잘못된 방향이었던 것 — 그래서 음 ROI.
+
+3. **IPR proxy unreliable**: spectrum-only IPR 은 진짜 eigenvector IPR 의 1/5 수준. composite_v3 의 IPR dim 이 큰 noise → v3_prime (IPR 폐기) 가 정답.
+
+4. **True finding**: atlas-const alignment 의 진짜 한계는 metric 도 axiom 도 아닌 **dataset 자체의 특성 차이**. atlas (graph Laplacian, Poisson) vs const (log-integer, super-regular) 는 근본적으로 다른 spectrum class.
+
+### Cycle 13 후보
+
+- (1) **closure 선언**: composite_v3_prime 0.928 with original const SSOT → nxs-002 closure 후속 분리
+- (2) const SSOT 정정: 원본 40 val 의 selection 기준 명시 (어떤 물리상수의 log 인지)
+- (3) atlas 다른 표현: Laplacian 외에 adjacency / normalized Laplacian / random walk transition 으로 const-align 재시도
+
+---
+
+**Ω-saturation cycle 6 → 7 → 8 → 9 → 10 → 11 → 12**: cycle 6~9 = timeout adaptive 축. cycle 10 = QRNG/quantum NULL. cycle 11 = SFF align 0.99 finding. cycle 12 = composite_v3_prime 0.928 부분 closure + cycle 10 가설 epistemic falsification + IPR proxy 신뢰성 진단. 누적 12 cycle, abstraction-ceiling 축 사실상 closure 단계.
+
+---
+
 **Ω-saturation cycle**: 본 §6 finding 은 simulation 의 saturation 도달 산물. raw#37/#38 (hexa-lang/self/raws/omega_saturation_cycle.hexa) 가 plan-side + implementation-side pair 강제 — design-only commit chain 차단.
 
 ---

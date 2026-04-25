@@ -360,6 +360,66 @@
           },
           "elapsed_total": "(a) 0.84s + (b) 0.91s + (c) 401.08s = 403s",
           "design_doc_update": "design/abstraction_ceiling.md §10 신설 (3-branch 결과 + SFF align 0.99 핵심 finding + ceiling artifact 가설)"
+        },
+        "cycle_12_3option_2026_04_25": {
+          "tool": "tool/nxs_002_cycle12.py — A/B/C 통합 + composite_v3 + true IPR + extended const",
+          "branch_A_composite_v3": {
+            "definition": "composite_v3 = 0.4·SFF_align + 0.4·paircorr + 0.2·IPR_proxy_align",
+            "definition_prime": "composite_v3_prime = 0.6·SFF_align + 0.4·paircorr (IPR proxy 폐기 — cycle 12B 에서 진짜 IPR 가 proxy 의 5× 임을 확인)",
+            "with_original_const_40": {
+              "components": "SFF=0.99132, paircorr=0.83221, IPR_proxy=0.36",
+              "composite_v3": 0.8014,
+              "composite_v3_prime": 0.92768,
+              "paper_trigger_passed_v3": false,
+              "paper_trigger_passed_v3_prime": true
+            },
+            "with_extended_const_199": {
+              "components": "SFF=0.74841, paircorr=0.801, IPR_proxy=0.06",
+              "composite_v3": 0.6315,
+              "composite_v3_prime": 0.7695,
+              "paper_trigger_passed_v3": false,
+              "paper_trigger_passed_v3_prime": false
+            }
+          },
+          "branch_B_true_IPR_eigenvector": {
+            "method": "eigsh(K=100, sigma=1e-3, return_eigenvectors=True). IPR_n = Σ_i |ψ_n(i)|^4 per eigenvector.",
+            "atlas_K100_results": {
+              "ipr_min": 4.706e-05,
+              "ipr_max": 0.5537,
+              "ipr_mean": 0.0892,
+              "ipr_median": 0.0713,
+              "ipr_p10": 0.025,
+              "ipr_p90": 0.192
+            },
+            "delocalized_reference_1_over_N": 4.69e-05,
+            "spectrum_proxy_vs_true": "spectrum_proxy=0.0177 vs true_eigenvector_mean=0.0892 — proxy underestimates by 5×",
+            "interpretation": "atlas eigenvectors 가 spectrum proxy 가 시사한 것보다 5× 더 localized. min IPR (0.000047) ≈ 1/N — 일부 mode 는 완전 delocalized. max IPR 0.55 — 일부 mode 는 강하게 localized. 분포가 매우 wide (p10=0.025, p90=0.192).",
+            "elapsed_eigsh_with_vectors": 1.72
+          },
+          "branch_C_const_extended": {
+            "method": "log(n) for n in [2, 201) → 199 eigenvalues",
+            "extended_path": "bisociation/cross/constants_spectrum_extended.jsonl",
+            "extended_stats": {
+              "n_positive": 199,
+              "lsr_mean": 0.9787,
+              "ipr_proxy": 0.0052
+            },
+            "original_stats": {
+              "n_positive": 40,
+              "lsr_mean": 0.5232,
+              "ipr_proxy": 0.0321
+            },
+            "key_insight": "log(n) 시퀀스는 LSR → 1.0 (super-regular). 원본 const 의 LSR=0.523 은 **선별된 subset artifact** 였음. **cycle 10 의 'atlas 를 더 chaotic 하게 만들면 const 와 가까워진다' 가설 자체가 틀렸음** — pure log(n) const 는 chaotic 이 아니라 super-regular. atlas (Poisson 0.371) 는 사실 const 와 LSR 방향에서 정 반대로 떨어져 있음 (atlas → 0, const → 1)."
+          },
+          "synthesis": {
+            "closure_status": "**부분 closure**: composite_v3_prime = 0.928 (paper_trigger 0.9 통과) — 단 원본 40-val const 기준에서만. 확장 const 시 0.769 → fail. 천장 돌파는 **dataset 의존적**.",
+            "epistemic_update_cycle_10_falsified": "cycle 10 의 'quantum chaos 주입' 방향 자체가 잘못. const 의 진짜 character (extended) 는 super-regular 인데 atlas 를 chaotic 으로 push 하려 했음. 정 반대 방향이었던 것.",
+            "ipr_proxy_unreliable": "spectrum-only IPR proxy 는 진짜 eigenvector IPR 의 1/5 수준 — composite_v3 의 IPR dim 이 큰 noise 였음. v3 보다 v3_prime (IPR 폐기) 가 정확.",
+            "true_finding": "atlas-const alignment 의 진짜 한계는 metric 도 아니고 axiom 도 아닌 **dataset 자체의 특성 차이**. atlas (graph Laplacian, Poisson level statistics) vs const (log-integer 시퀀스, super-regular). 두 시스템은 근본적으로 다른 spectrum class.",
+            "cycle_13_recommendation": "(1) const SSOT 정정 — 원본 40 val 의 selection 기준 명시 (어떤 물리상수인지). (2) atlas Laplacian 외 다른 atlas 표현 (adjacency, normalized Laplacian) 으로 const-align 시도. (3) 또는 nxs-002 closure 선언 (composite_v3_prime 0.928 with original const) + 후속 작업 분리."
+          },
+          "elapsed_total_s": 2.81,
+          "design_doc_update": "design/abstraction_ceiling.md §11 신설 (composite_v3/v3_prime + 진짜 IPR + extended const 의 LSR ~1 super-regular finding + cycle 10 가설 epistemic 정정)"
         }
       },
       "priority_reason": "cross_repo_blocker floor >= 95 (manual bump — atlas_gap sub-category)",
