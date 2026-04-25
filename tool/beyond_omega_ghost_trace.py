@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-beyond_omega_ghost_trace.py — nxs-20260425-003 cycle 1 first probe
+beyond_omega_ghost_trace.py — nxs-20260425-004 (originally -003) ghost trace probe
 
 L_ω 는 design/abstraction_ceiling.md §4-5 에서 "GHOST CEILING, 도달 불가 sentinel"
 로 확정. "L_ω 너머" 의 첫 empirical 객체 = ghost ceiling 의 internal anatomy.

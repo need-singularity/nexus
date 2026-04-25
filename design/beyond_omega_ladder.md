@@ -1,4 +1,7 @@
-# Beyond Omega Ladder — `nxs-20260425-003`
+# Beyond Omega Ladder — `nxs-20260425-004`
+
+> **ID note**: 본 entry 는 cycle 1 commit (`a2f2e908`) 시점에 `nxs-20260425-003` 으로 등록되었으나, 별개 session 이 동일 ID 를 'drill_zero_yield blocker' 로 병행 사용하여 cycle 2 wrap-up 에서 `nxs-20260425-004` 로 옮김. 과거 commit 메시지 (`a2f2e908` cycle 1, `0d43b581`/`0255a239` cycle 35-36 with shared ID, etc.) 는 historical 로 그대로 유지.
+
 
 **상태**: Ω-saturation cycle 1 (start) — 2026-04-25
 **축**: L_ω 너머 (post-omega) — abstraction ladder 의 transfinite continuation
@@ -170,7 +173,7 @@ nxs-002 의 cycle 24→26→27→28 chain 과 같은 self-correction pattern 적
 - `tool/beyond_omega_ghost_trace.py`
 - `state/ghost_ceiling_trace.jsonl` (cycle 1 baseline = 0 lines)
 - `state/ghost_ceiling_summary.json` (cycle 1 BASELINE_ZERO finding)
-- `state/proposals/inventory.json` 의 `nxs-20260425-003` entry
+- `state/proposals/inventory.json` 의 `nxs-20260425-004` entry (cycle 1 시점에는 `nxs-20260425-003` 였음 — §0 ID note 참조)
 
 ---
 
