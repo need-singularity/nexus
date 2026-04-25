@@ -1,0 +1,457 @@
+// ═══════════════════════════════════════════════════════════
+// nxs_002_omega_metrics.hexa — Ω-saturation cycle 13 hexa native 포팅
+//
+// cycle 11/12 finding: composite_v3_prime = 0.6·SFF + 0.4·paircorr 가
+// 원본 const 기준 0.928 → paper_trigger 0.9 통과 (부분 closure).
+// 본 도구는 Python 의존 (scipy) 제거 — 기존 g_atlas_eig.jsonl 입력 사용.
+//
+// 출력: stdout JSON + bisociation/spectra/g_atlas_composite_v3.json
+//
+// 사용:
+//   hexa run tool/nxs_002_omega_metrics.hexa [--atlas PATH] [--const PATH]
+//   hexa run tool/nxs_002_omega_metrics.hexa --help
+//
+// ═══════════════════════════════════════════════════════════
+
+fn pi_val() -> f64 { return 3.14159265358979323846 }
+
+fn abs_f(x: f64) -> f64 { if x < 0.0 { return 0.0 - x }; return x }
+
+fn sqrt_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    let mut g = x / 2.0
+    if g < 1.0 { g = 1.0 }
+    let mut i: i64 = 0
+    while i < 40 {
+        let nxt = (g + x / g) / 2.0
+        if abs_f(nxt - g) < g * 0.0000000000001 { return nxt }
+        g = nxt
+        i = i + 1
+    }
+    return g
+}
+
+// Taylor exp (|x| < ~30 OK)
+fn exp_f(x: f64) -> f64 {
+    let mut sum: f64 = 1.0
+    let mut term: f64 = 1.0
+    let mut i: i64 = 1
+    while i < 60 {
+        let fi: f64 = to_float(i)
+        term = term * x / fi
+        sum = sum + term
+        i = i + 1
+    }
+    return sum
+}
+
+// cos via Taylor (mod 2π reduction first)
+fn cos_f(x: f64) -> f64 {
+    let two_pi = 2.0 * pi_val()
+    let mut y = x
+    while y > pi_val() { y = y - two_pi }
+    while y < (0.0 - pi_val()) { y = y + two_pi }
+    let mut sum: f64 = 1.0
+    let mut term: f64 = 1.0
+    let yy = y * y
+    let mut k: i64 = 1
+    while k < 30 {
+        let fk: f64 = to_float(2 * k - 1)
+        let fk2: f64 = to_float(2 * k)
+        term = (0.0 - term) * yy / (fk * fk2)
+        sum = sum + term
+        k = k + 1
+    }
+    return sum
+}
+
+fn sin_f(x: f64) -> f64 {
+    let two_pi = 2.0 * pi_val()
+    let mut y = x
+    while y > pi_val() { y = y - two_pi }
+    while y < (0.0 - pi_val()) { y = y + two_pi }
+    let mut sum: f64 = y
+    let mut term: f64 = y
+    let yy = y * y
+    let mut k: i64 = 1
+    while k < 30 {
+        let fk: f64 = to_float(2 * k)
+        let fk2: f64 = to_float(2 * k + 1)
+        term = (0.0 - term) * yy / (fk * fk2)
+        sum = sum + term
+        k = k + 1
+    }
+    return sum
+}
+
+// ─── JSONL parser: extract "lambda":VAL ───
+fn extract_lambda(line: string) -> f64 {
+    let key = "\"lambda\":"
+    let kpos = line.index_of(key)
+    if kpos < 0 { return 0.0 / 0.0 }   // NaN sentinel
+    let start = kpos + len(key)
+    let rest = line.substring(start, len(line))
+    // trim trailing } and ,
+    let mut buf: string = ""
+    let mut i: i64 = 0
+    let L = len(rest)
+    while i < L {
+        let c = rest.substring(i, i + 1)
+        if c == "," || c == "}" || c == " " { break }
+        buf = buf + c
+        i = i + 1
+    }
+    let mut v: f64 = 0.0
+    try { v = to_float(buf) } catch e { v = 0.0 / 0.0 } // @allow-silent-catch
+    return v
+}
+
+fn load_eigenvalues(path: string) -> [f64] {
+    let raw = read_file(path)
+    let lines = raw.split("\n")
+    let mut out: [f64] = []
+    let mut i: i64 = 0
+    let L = len(lines)
+    while i < L {
+        let t = lines[i].trim()
+        if t != "" {
+            let v = extract_lambda(t)
+            // skip NaN (failed parse)
+            if v == v {  // NaN != NaN
+                out = out.push(v)
+            }
+        }
+        i = i + 1
+    }
+    return out
+}
+
+// sort + filter > 1e-10
+fn sort_filter_positive(arr: [f64]) -> [f64] {
+    let n = len(arr)
+    let mut a: [f64] = []
+    let mut i: i64 = 0
+    while i < n {
+        if arr[i] > 0.0000000001 { a = a.push(arr[i]) }
+        i = i + 1
+    }
+    // simple insertion sort (n is small ~150)
+    let m = len(a)
+    let mut sorted: [f64] = a
+    let mut p: i64 = 1
+    while p < m {
+        let key = sorted[p]
+        let mut q: i64 = p - 1
+        let mut tmp: [f64] = []
+        // rebuild via push (hexa list[i]=v limit per atlas_eig.hexa convention)
+        // shift values >key right
+        let mut new_arr: [f64] = []
+        let mut r: i64 = 0
+        let mut inserted: bool = false
+        while r < m {
+            if r == p && !inserted {
+                r = r + 1; continue
+            }
+            if !inserted && r < p && sorted[r] > key {
+                new_arr = new_arr.push(key)
+                inserted = true
+            }
+            new_arr = new_arr.push(sorted[r])
+            r = r + 1
+        }
+        if !inserted { new_arr = new_arr.push(key) }
+        sorted = new_arr
+        p = p + 1
+    }
+    return sorted
+}
+
+// unfolded spacings: s_i = (λ_{i+1} - λ_i) / mean(s)
+fn unfold(sorted: [f64]) -> [f64] {
+    let n = len(sorted)
+    if n < 2 { return [] }
+    let mut spacings: [f64] = []
+    let mut i: i64 = 0
+    while i < n - 1 {
+        spacings = spacings.push(sorted[i + 1] - sorted[i])
+        i = i + 1
+    }
+    let m = len(spacings)
+    let mut sum: f64 = 0.0
+    let mut k: i64 = 0
+    while k < m { sum = sum + spacings[k]; k = k + 1 }
+    if sum <= 0.0 { return [] }
+    let mn = sum / to_float(m)
+    let mut out: [f64] = []
+    let mut j: i64 = 0
+    while j < m { out = out.push(spacings[j] / mn); j = j + 1 }
+    return out
+}
+
+// paircorr R2 — match Python paircorr (DR=0.1, R_MAX=5.0, N_BINS=50)
+fn paircorr(unf: [f64]) -> [f64] {
+    let DR: f64 = 0.1
+    let R_MAX: f64 = 5.0
+    let N_BINS: i64 = 50
+    let n = len(unf)
+    // x = cumsum(unf)
+    let mut x: [f64] = []
+    let mut acc: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { acc = acc + unf[i]; x = x.push(acc); i = i + 1 }
+    // R2 zeros
+    let mut R2: [f64] = []
+    let mut b: i64 = 0
+    while b < N_BINS { R2 = R2.push(0.0); b = b + 1 }
+    let mut p: i64 = 0
+    while p < n {
+        let mut q: i64 = p + 1
+        while q < n {
+            let d = x[q] - x[p]
+            if d > R_MAX { break }
+            let bin: i64 = to_int(d / DR)
+            if bin >= 0 && bin < N_BINS {
+                let mut new_R2: [f64] = []
+                let mut k: i64 = 0
+                while k < N_BINS {
+                    if k == bin { new_R2 = new_R2.push(R2[k] + 1.0) }
+                    else { new_R2 = new_R2.push(R2[k]) }
+                    k = k + 1
+                }
+                R2 = new_R2
+            }
+            q = q + 1
+        }
+        p = p + 1
+    }
+    let denom = to_float(n) * DR
+    let mut out: [f64] = []
+    let mut bb: i64 = 0
+    while bb < N_BINS { out = out.push(R2[bb] / denom); bb = bb + 1 }
+    return out
+}
+
+fn pearson_cosine(A: [f64], B: [f64]) -> [f64] {
+    let n = len(A)
+    if n != len(B) || n < 2 { return [0.0, 0.0] }
+    let mut sa: f64 = 0.0
+    let mut sb: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { sa = sa + A[i]; sb = sb + B[i]; i = i + 1 }
+    let am = sa / to_float(n)
+    let bm = sb / to_float(n)
+    let mut sxx: f64 = 0.0
+    let mut syy: f64 = 0.0
+    let mut sxy: f64 = 0.0
+    let mut sab: f64 = 0.0
+    let mut saa: f64 = 0.0
+    let mut sbb: f64 = 0.0
+    let mut j: i64 = 0
+    while j < n {
+        let da = A[j] - am
+        let db = B[j] - bm
+        sxx = sxx + da * da
+        syy = syy + db * db
+        sxy = sxy + da * db
+        sab = sab + A[j] * B[j]
+        saa = saa + A[j] * A[j]
+        sbb = sbb + B[j] * B[j]
+        j = j + 1
+    }
+    let denom_p = sqrt_f(sxx * syy)
+    let pearson = if denom_p > 0.000000000001 { sxy / denom_p } else { 0.0 }
+    let denom_c = sqrt_f(saa) * sqrt_f(sbb)
+    let cosine = if denom_c > 0.000000000001 { sab / denom_c } else { 0.0 }
+    return [pearson, cosine]
+}
+
+fn composite_v1(R2_a: [f64], R2_b: [f64], atlas_score: f64, const_score: f64) -> f64 {
+    let pc = pearson_cosine(R2_a, R2_b)
+    let pearson = pc[0]
+    let cosine = pc[1]
+    let agreement = 1.0 - abs_f(atlas_score - const_score)
+    return (agreement + (pearson + 1.0) / 2.0 + cosine) / 3.0
+}
+
+// Spectral Form Factor: K(τ) = |Σ exp(-i E_n τ)|² / N
+// = (Σ cos(E_n τ))² + (Σ sin(E_n τ))² ) / N
+fn sff(eigs_pos_sorted: [f64], n_tau: i64, tau_max: f64) -> [f64] {
+    let nz = eigs_pos_sorted
+    let n = len(nz)
+    if n < 5 { return [] }
+    // normalize by mean
+    let mut sum: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { sum = sum + nz[i]; i = i + 1 }
+    let mn = sum / to_float(n)
+    let mut E: [f64] = []
+    let mut j: i64 = 0
+    while j < n { E = E.push(nz[j] / mn); j = j + 1 }
+    let dtau = (tau_max - 0.01) / to_float(n_tau - 1)
+    let mut out: [f64] = []
+    let mut t: i64 = 0
+    while t < n_tau {
+        let tau = 0.01 + to_float(t) * dtau
+        let mut cs: f64 = 0.0
+        let mut ss: f64 = 0.0
+        let mut k: i64 = 0
+        while k < n {
+            let theta = 0.0 - E[k] * tau
+            cs = cs + cos_f(theta)
+            ss = ss + sin_f(theta)
+            k = k + 1
+        }
+        let mag = (cs * cs + ss * ss) / to_float(n)
+        out = out.push(mag)
+        t = t + 1
+    }
+    return out
+}
+
+fn vec_norm2(v: [f64]) -> f64 {
+    let n = len(v)
+    let mut s: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { s = s + v[i] * v[i]; i = i + 1 }
+    return sqrt_f(s)
+}
+
+fn vec_dot(a: [f64], b: [f64]) -> f64 {
+    let n = len(a)
+    let mut s: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { s = s + a[i] * b[i]; i = i + 1 }
+    return s
+}
+
+fn sff_align(sff_a: [f64], sff_b: [f64]) -> f64 {
+    if len(sff_a) != len(sff_b) || len(sff_a) == 0 { return 0.5 }
+    let na = vec_norm2(sff_a)
+    let nb = vec_norm2(sff_b)
+    if na < 0.000000000001 || nb < 0.000000000001 { return 0.5 }
+    return vec_dot(sff_a, sff_b) / (na * nb)
+}
+
+fn ipr_proxy(eigs_pos: [f64]) -> f64 {
+    let n = len(eigs_pos)
+    if n < 2 { return 0.5 }
+    let mut sum_abs: f64 = 0.0
+    let mut i: i64 = 0
+    while i < n { sum_abs = sum_abs + abs_f(eigs_pos[i]); i = i + 1 }
+    if sum_abs < 0.000000000001 { return 0.5 }
+    let mut s: f64 = 0.0
+    let mut j: i64 = 0
+    while j < n {
+        let p = abs_f(eigs_pos[j]) / sum_abs
+        s = s + p * p
+        j = j + 1
+    }
+    return s
+}
+
+fn ipr_align(ipr_a: f64, ipr_b: f64) -> f64 {
+    let mx = if ipr_a > ipr_b { ipr_a } else { ipr_b }
+    if mx < 0.000000000001 { return 0.5 }
+    return 1.0 - abs_f(ipr_a - ipr_b) / mx
+}
+
+// ─── CLI ───
+let _argv = args()
+let _HOME = env("HOME")
+let mut ATLAS_PATH = _HOME + "/core/nexus/bisociation/spectra/g_atlas_eig.jsonl"
+let mut CONST_PATH = _HOME + "/core/nexus/bisociation/cross/constants_spectrum.jsonl"
+let mut OUT_PATH   = _HOME + "/core/nexus/bisociation/spectra/g_atlas_composite_v3.json"
+let mut ATLAS_SCORE: f64 = 0.224128
+let mut CONST_SCORE: f64 = 0.358117
+let mut HELP: bool = false
+
+let mut ai: i64 = 2
+while ai < len(_argv) {
+    let tok = _argv[ai]
+    if tok == "--atlas" && ai + 1 < len(_argv) { ai = ai + 1; ATLAS_PATH = _argv[ai] }
+    else if tok == "--const" && ai + 1 < len(_argv) { ai = ai + 1; CONST_PATH = _argv[ai] }
+    else if tok == "--out" && ai + 1 < len(_argv) { ai = ai + 1; OUT_PATH = _argv[ai] }
+    else if tok == "--atlas-score" && ai + 1 < len(_argv) { ai = ai + 1; ATLAS_SCORE = to_float(_argv[ai]) }
+    else if tok == "--const-score" && ai + 1 < len(_argv) { ai = ai + 1; CONST_SCORE = to_float(_argv[ai]) }
+    else if tok == "--help" { HELP = true }
+    ai = ai + 1
+}
+
+if HELP {
+    println("nxs_002_omega_metrics.hexa — Ω-saturation cycle 13 hexa native")
+    println("usage: hexa run tool/nxs_002_omega_metrics.hexa [opts]")
+    println("  --atlas PATH        atlas eigenvalue jsonl (default: g_atlas_eig.jsonl)")
+    println("  --const PATH        const eigenvalue jsonl (default: constants_spectrum.jsonl)")
+    println("  --out PATH          output composite_v3 json (default: g_atlas_composite_v3.json)")
+    println("  --atlas-score N     verdict score (default: 0.224128 from g_atlas_verdict.json)")
+    println("  --const-score N     verdict score (default: 0.358117)")
+    exit(0) // @allow-silent-exit
+}
+
+if !file_exists(ATLAS_PATH) {
+    println("error: atlas eigenvalues not found: " + ATLAS_PATH)
+    println("  → run bisociation/spectra/atlas_eig.hexa first")
+    exit(1) // @allow-silent-exit
+}
+if !file_exists(CONST_PATH) {
+    println("error: const not found: " + CONST_PATH)
+    exit(1) // @allow-silent-exit
+}
+
+let t_start = to_int(exec("date +%s").trim())
+
+let atlas_raw = load_eigenvalues(ATLAS_PATH)
+let const_raw = load_eigenvalues(CONST_PATH)
+let atlas_pos = sort_filter_positive(atlas_raw)
+let const_pos = sort_filter_positive(const_raw)
+
+let atlas_unf = unfold(atlas_pos)
+let const_unf = unfold(const_pos)
+let R2_atlas = paircorr(atlas_unf)
+let R2_const = paircorr(const_unf)
+
+let v1 = composite_v1(R2_atlas, R2_const, ATLAS_SCORE, CONST_SCORE)
+
+let sff_a = sff(atlas_pos, 50, 10.0)
+let sff_c = sff(const_pos, 50, 10.0)
+let sff_a_align = sff_align(sff_a, sff_c)
+
+let ipr_a = ipr_proxy(atlas_pos)
+let ipr_c = ipr_proxy(const_pos)
+let ipr_a_align = ipr_align(ipr_a, ipr_c)
+
+// composite_v3 = 0.4·SFF + 0.4·paircorr + 0.2·IPR
+let composite_v3_val = 0.4 * sff_a_align + 0.4 * v1 + 0.2 * ipr_a_align
+// composite_v3_prime = 0.6·SFF + 0.4·paircorr (IPR proxy 폐기 — cycle 12B 진짜 IPR 차이)
+let composite_v3_prime_val = 0.6 * sff_a_align + 0.4 * v1
+
+let paper_trigger: f64 = 0.9
+let pass_v3 = composite_v3_val >= paper_trigger
+let pass_v3p = composite_v3_prime_val >= paper_trigger
+
+let t_end = to_int(exec("date +%s").trim())
+let elapsed = t_end - t_start
+
+// JSON output (single line stdout + write to file)
+let json_out = "{"
+    + "\"schema\":\"nxs_002_omega_metrics.hexa.v1\","
+    + "\"ts\":" + to_string(t_end) + ","
+    + "\"atlas_path\":\"" + ATLAS_PATH + "\","
+    + "\"const_path\":\"" + CONST_PATH + "\","
+    + "\"n_atlas_eigenvalues\":" + to_string(len(atlas_pos)) + ","
+    + "\"n_const_eigenvalues\":" + to_string(len(const_pos)) + ","
+    + "\"composite_v1\":" + to_string(v1) + ","
+    + "\"sff_align\":" + to_string(sff_a_align) + ","
+    + "\"ipr_atlas_proxy\":" + to_string(ipr_a) + ","
+    + "\"ipr_const_proxy\":" + to_string(ipr_c) + ","
+    + "\"ipr_align_proxy\":" + to_string(ipr_a_align) + ","
+    + "\"composite_v3\":" + to_string(composite_v3_val) + ","
+    + "\"composite_v3_prime\":" + to_string(composite_v3_prime_val) + ","
+    + "\"paper_trigger_threshold\":" + to_string(paper_trigger) + ","
+    + "\"paper_trigger_passed_v3\":" + (if pass_v3 { "true" } else { "false" }) + ","
+    + "\"paper_trigger_passed_v3_prime\":" + (if pass_v3p { "true" } else { "false" }) + ","
+    + "\"elapsed_s\":" + to_string(elapsed)
+    + "}"
+
+println(json_out)
+try { write_file(OUT_PATH, json_out + "\n") } catch e { println("warn: write failed: " + OUT_PATH) } // @allow-silent-catch

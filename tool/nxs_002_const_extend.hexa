@@ -1,0 +1,71 @@
+// ═══════════════════════════════════════════════════════════
+// nxs_002_const_extend.hexa — extended const generator (cycle 12C → 13)
+//
+// Generate log(n) for n in [n_min, n_max). 기본: n in [2, 201) → 199 vals.
+// 출력: bisociation/cross/constants_spectrum_extended.jsonl
+//
+// cycle 12C finding: pure log(n) sequence LSR → 1.0 (super-regular).
+// 원본 const (40 vals) 의 LSR=0.523 은 선별된 subset artifact.
+//
+// 사용:
+//   hexa run tool/nxs_002_const_extend.hexa [--n-max N] [--n-min N] [--out PATH]
+// ═══════════════════════════════════════════════════════════
+
+// Taylor log via series — log(x) = log(1 + (x-1)/(x+1)·2) reduction
+// faster: log(x) for x > 0 via repeated halving + Taylor at small offset
+fn log_f(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 / 0.0 }
+    // Range reduction: log(x) = log(2)·k + log(y) where y in [1, 2)
+    let LN2: f64 = 0.6931471805599453
+    let mut y = x
+    let mut k: i64 = 0
+    while y >= 2.0 { y = y / 2.0; k = k + 1 }
+    while y < 1.0 { y = y * 2.0; k = k - 1 }
+    // log(y) for y in [1, 2): use atanh series
+    // log(y) = 2·atanh((y-1)/(y+1)) = 2·(z + z³/3 + z⁵/5 + ...)
+    let z = (y - 1.0) / (y + 1.0)
+    let z2 = z * z
+    let mut term = z
+    let mut sum: f64 = z
+    let mut i: i64 = 1
+    while i < 30 {
+        term = term * z2
+        let denom = to_float(2 * i + 1)
+        sum = sum + term / denom
+        i = i + 1
+    }
+    return 2.0 * sum + LN2 * to_float(k)
+}
+
+let _argv = args()
+let _HOME = env("HOME")
+let mut OUT_PATH = _HOME + "/core/nexus/bisociation/cross/constants_spectrum_extended.jsonl"
+let mut N_MIN: i64 = 2
+let mut N_MAX: i64 = 201
+
+let mut ai: i64 = 2
+while ai < len(_argv) {
+    let tok = _argv[ai]
+    if tok == "--out" && ai + 1 < len(_argv) { ai = ai + 1; OUT_PATH = _argv[ai] }
+    else if tok == "--n-min" && ai + 1 < len(_argv) { ai = ai + 1; N_MIN = to_int(_argv[ai]) }
+    else if tok == "--n-max" && ai + 1 < len(_argv) { ai = ai + 1; N_MAX = to_int(_argv[ai]) }
+    ai = ai + 1
+}
+
+if N_MAX <= N_MIN {
+    println("error: --n-max must exceed --n-min")
+    exit(1) // @allow-silent-exit
+}
+
+let mut buf: string = ""
+let mut idx: i64 = 0
+let mut n: i64 = N_MIN
+while n < N_MAX {
+    let val = log_f(to_float(n))
+    buf = buf + "{\"idx\":" + to_string(idx) + ",\"lambda\":" + to_string(val) + "}\n"
+    idx = idx + 1
+    n = n + 1
+}
+
+write_file(OUT_PATH, buf)
+println("wrote " + to_string(idx) + " entries to " + OUT_PATH)
