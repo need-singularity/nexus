@@ -1,0 +1,201 @@
+{
+  "trawl_id": "2026-04-25_hexa_sim_falsifier_integration_omega_cycle",
+  "ts": "2026-04-25T20:30:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw:design-strategy-falsifier-retire-rule (hive raw 71)",
+  "purpose": "hexa_sim_falsifier (예정 도구) 의 실제 연동 아이디어를 ω-cycle 로 surface. 도구 자체는 이번 cycle scope 밖 — integration surface area 와 priority tier 를 결정.",
+  "trigger": "user 2026-04-25 20:25: 'hexa_sim_falsifier 도 실제 연동 아이디어에 대해 오메가 사이클 발사'",
+  "method": "single-thread main-context multi-axis ideation (Anthropic API rate limit hit at 20:25 KST → 3-agent parallel dispatch unavailable until 23:20 KST reset; main thread ideation as ω-cycle 표면화 substitute). 12 candidate axes 표면화 → 4 cluster dedupe → Tier-1/2/3 promotion.",
+  "constraint_note": "3 background agents (ANU stub fix / VQE H2 restore / CI test automation) launched 20:21 KST returned with 'You've hit your limit · resets 11:20pm' before any work performed. Re-spawn after 23:20 KST reset.",
+  "axes_surfaced": [
+    {
+      "id": "axis_1",
+      "name": "standalone_tool_with_sentinel",
+      "summary": "tool/hexa_sim_falsifier.hexa — JSON registry reader + per-falsifier evaluator + sentinel emit (`__HEXA_SIM_FALSIFIER__ PASS|FAIL hits=N retired=M`). exit 0=clean / 2=any hit. raw 80 호환.",
+      "ref_existing": "tool/hexa_sim_verify_grid.hexa (이번 cycle 신규, 동일 sentinel 패턴)"
+    },
+    {
+      "id": "axis_2",
+      "name": "raw_45_omega_blocker_autofire_binding",
+      "summary": "각 falsifier slug → state/blockers/<slug>.hexa entry (interval 1800s). hit 시 blocker autofire → fix-attempt cron. raw 45 가 hive 측에서 이미 active (memory: design_strategy_cluster_lint_drift.hexa cadence 1800s, first fire 2026-04-25T08:19:07Z).",
+      "ref_existing": "hive raw 45 (live, autofire daemon active)"
+    },
+    {
+      "id": "axis_3",
+      "name": "hive_raw_71_lint_tier3_stub_fill",
+      "summary": "hive 의 _check_falsifier_retire_rule() 가 현재 stub (return []). nexus falsifier registry 의 schema 가 reference impl. hive lint 가 raw 70-73 등의 falsifier 필드 검증 시 nexus registry 와 schema-일관되게 작성. cross-repo 양방향 contract.",
+      "ref_existing": "hive tool/design_strategy_lint.hexa _check_* stubs (Phase B target 2026-05-09)"
+    },
+    {
+      "id": "axis_4",
+      "name": "nxs_002_cycle_verdict_binding",
+      "summary": "각 nxs-002 cycle (10/11/12...) 의 verdict (paper-worthy negative / NULL / partial / strong) 를 falsifier slug 와 매핑. cycle 10 (QRNG NULL) 이 첫 entry candidate. falsifier hit 시 design/abstraction_ceiling.md §N 자동 update + inventory.json status flip.",
+      "ref_existing": "design/abstraction_ceiling.md §9 (cycle 10 entry, paper-worthy negative)"
+    },
+    {
+      "id": "axis_5",
+      "name": "paper_doi_lineage_hook_raw_76",
+      "summary": "n6-architecture papers (n6-particle-cosmology-paper.md, n6-hexa-starship-integrated-paper.md 등) 의 각 claim → falsifier slug binding. falsifier hit → paper retraction-notice trailer 자동 추가. Zenodo DOI immutability 충돌 → erratum/retraction-notice 형태로만.",
+      "ref_existing": "hive raw 76 paper-lineage (new status, zenodo immutable + paper-commit-pin)",
+      "blocker": "raw 76 자체가 still new — nexus / n6 어느 쪽도 아직 paper-DOI binding 없음. 선결 필요."
+    },
+    {
+      "id": "axis_6",
+      "name": "lens_score_gate_1588_lenses",
+      "summary": "nexus lens (1588개, lenses/*.hexa) 가 score 계산 시 falsifier hits 를 차감 항으로 포함. lens score = base_score × (1 - falsifier_hit_ratio). 직접 영향 큰 lens: simulation_lens.hexa, n6_void.hexa, omega_state_space_lens.hexa, quantum_big_bang_lens.hexa, physics_cosmic_web.hexa.",
+      "ref_existing": "lenses/simulation_lens.hexa (35 LoC, n=6 universal resonance score)",
+      "blocker": "1588 lens 일괄 refactor 비용 큼. 핵심 lens 5-10 개만 우선 hook."
+    },
+    {
+      "id": "axis_7",
+      "name": "cron_launchd_full_scan",
+      "summary": "매 시간/매일 falsifier registry full-scan + ouroboros_qrng/runs/* 같은 적재 데이터 evaluator. log → design/hexa_sim/falsifier_history.jsonl (append-only, raw 77 audit-append-only-ledger).",
+      "ref_existing": "nexus 의 systemd/launchd cron 인프라 (memory: hexa-runner Mac safety landing 활성)"
+    },
+    {
+      "id": "axis_8",
+      "name": "cross_repo_drift_scan_hook",
+      "summary": "hive 의 cross_project_drift_scan.hexa (5-repo: n6+nexus+anima+hexa-lang+airgenome) 가 falsifier registry 도 scan. 한 repo 의 falsifier hit → 다른 repo 의 dependency 에 cascade alert. 5-way convergence 시 priority-floor=95 (raw 67).",
+      "ref_existing": "hive tool/cross_project_drift_scan.hexa (225 LoC, active)"
+    },
+    {
+      "id": "axis_9",
+      "name": "bayesian_soft_retire_variant",
+      "summary": "raw 71 의 hard auto-retire 대신 soft variant: 각 falsifier 에 weight + prior, multiple weak hits → cumulative confidence > threshold → retire. 실험적.",
+      "ref_existing": "—",
+      "verdict": "REJECT — raw 71 explicit `auto-retire-on satisfaction` (hard) — soft variant 는 raw 71 위배 (raw 53 deterministic-verifier-manifest 도 위배: belief update = LLM-judge family). 폐기."
+    },
+    {
+      "id": "axis_10",
+      "name": "raw_66_ai_native_error_trailer",
+      "summary": "falsifier hit 시 error message 가 raw 66 reason+fix trailer 형식 emit. 예: `__HEXA_SIM_FALSIFIER__ FAIL slug=F2 reason='alpha-inv != 137' fix='check sigma/sopfr/phi in .raw / revisit BLOWUP §X.4'`. raw 66 이미 live (hive raw 66).",
+      "ref_existing": "hive raw 66 ai-native-error-message (live, dual enforce-layer os-level + hive-agent)"
+    },
+    {
+      "id": "axis_11",
+      "name": "signed_witness_chain_audit_append",
+      "summary": "falsifier hits jsonl 가 monotonic chain hash 로 signed (raw 77 audit-append-only-ledger). post-hoc tampering 방지. 각 entry: {ts, slug, evidence, prev_hash, hash}.",
+      "ref_existing": "hive raw 77 (5/5 cross-repo strongest pattern, identical-shape across nexus+anima+n6+airgenome+hexa-lang)"
+    },
+    {
+      "id": "axis_12",
+      "name": "tp_n_testable_predictions_binding",
+      "summary": "HEXA-SIM 문서의 TP-1..TP-10 (DOF=6 / Kissing K_6=12 / B^4 exp / Mars 2g 4-day / 48-month lifespan 등) 각각이 specific falsifier 와 binding. 단순 verify-grid 와 별도 — 'TP 가 깨지면 이 falsifier 발화' 매핑.",
+      "ref_existing": "n6-architecture simulation-theory.md TP-1..TP-10 (Tier 1/2/3 ladder, lifetime test 일부 미수행)"
+    }
+  ],
+  "axes_total_surfaced": 12,
+  "dedupe_method": "(1) reject axis 9 (raw 71 + raw 53 위배 — soft retire 는 deterministic-verifier 위배); (2) cluster by integration-target: A=actor (1+2+7+10+11), B=cross-repo (3+4+8), C=paper-publication (5+12), D=lens (6); (3) Tier promotion by ROI vs blocker: Tier-1 = active ref + low blocker, Tier-2 = active ref + medium blocker, Tier-3 = high blocker or scope-distant.",
+  "axes_clustered_to": 4,
+  "axes_after_reject": 11,
+  "tier_1_immediate_impl": [
+    {
+      "axis_id": "axis_1",
+      "slug": "standalone-tool",
+      "rationale": "foundation — 다른 모든 integration 의 entry. tool/hexa_sim_falsifier.hexa 신설, 5 falsifier (이미 design/hexa_sim/2026-04-25_omega_cycle_implementation.json 에 F1-F5 선언됨) 를 evaluator 로 검증.",
+      "loc_estimate": 200,
+      "deps": []
+    },
+    {
+      "axis_id": "axis_10",
+      "slug": "raw-66-error-trailer",
+      "rationale": "raw 66 already live in hive — sentinel format 만 reason= / fix= trailer 추가. axis_1 과 동시 작업 (단일 파일 변경).",
+      "loc_estimate": 20,
+      "deps": ["axis_1"]
+    },
+    {
+      "axis_id": "axis_11",
+      "slug": "audit-append-only-chain",
+      "rationale": "raw 77 strongest pattern (5/5 cross-repo). hits jsonl + chain hash 만 추가하면 됨. axis_1 의 evaluator 가 emit 시점에 자동 chain.",
+      "loc_estimate": 30,
+      "deps": ["axis_1"]
+    },
+    {
+      "axis_id": "axis_2",
+      "slug": "raw-45-blocker-autofire",
+      "rationale": "raw 45 already live in hive. nexus 측에서 state/blockers/hexa_sim_falsifier.hexa 등록 + interval=1800s. hive autofire 가 cross-repo 발화하는지 검증 필요 (현재 hive→hive 만 active).",
+      "loc_estimate": 50,
+      "deps": ["axis_1"],
+      "open_question": "hive raw 45 autofire 가 cross-repo (nexus) 에 발사 가능한지? 현재 design_strategy_cluster_lint_drift.hexa 는 hive 내부만 — cross-repo dispatch 추가 필요."
+    },
+    {
+      "axis_id": "axis_4",
+      "slug": "nxs-002-cycle-verdict-binding",
+      "rationale": "cycle 10 (QRNG NULL) 가 첫 candidate entry. design/abstraction_ceiling.md §9 의 negative-finding 3종 (Q4_QRNG_ER null / topology hurts / LSR ⊥ composite) → falsifier slug 3개 신규. 자동 retire 시 ceiling.md trailer 추가.",
+      "loc_estimate": 80,
+      "deps": ["axis_1"]
+    }
+  ],
+  "tier_2_backlog": [
+    {
+      "axis_id": "axis_3",
+      "slug": "hive-raw-71-tier3-stub-fill",
+      "rationale": "hive 측 Phase B target 2026-05-09. nexus registry schema 가 안정화된 후 hive lint 가 reference. 양방향 contract 시기 조율 필요.",
+      "loc_estimate": 60,
+      "blocker": "hive Phase B 일정 + schema 안정화"
+    },
+    {
+      "axis_id": "axis_7",
+      "slug": "cron-launchd-full-scan",
+      "rationale": "axis_2 (raw 45 blocker autofire) 와 cadence 차이 — autofire 는 1800s, cron 은 daily/hourly. 중복 가능성 검토 후 분리 또는 통합.",
+      "loc_estimate": 100,
+      "blocker": "axis_2 와 중복 평가 필요"
+    },
+    {
+      "axis_id": "axis_8",
+      "slug": "cross-repo-drift-scan-hook",
+      "rationale": "5-repo drift scan 이 falsifier 도 scan. 한 repo 의 hit 가 cascade alert. 단, hive 의 drift scan 이 nexus 의 falsifier schema 알아야 함 → axis_3 선행.",
+      "loc_estimate": 80,
+      "blocker": "axis_3 선행"
+    },
+    {
+      "axis_id": "axis_5",
+      "slug": "paper-doi-lineage-hook",
+      "rationale": "raw 76 (paper-lineage) new status. n6 / nexus 어느 쪽도 paper-DOI binding 아직 없음. 자체가 큰 작업 — falsifier 와 paper 양방향이라 두 작업 동시 진행 위험.",
+      "loc_estimate": 200,
+      "blocker": "raw 76 자체 status=new — 별도 ω-cycle 필요"
+    },
+    {
+      "axis_id": "axis_12",
+      "slug": "tp-n-binding",
+      "rationale": "TP-1..TP-10 → falsifier mapping. 일부 TP (TP-10 lifespan) 는 미수행 — falsifier 작성해도 테스트 불가. 부분 mapping 만 가능 (TP-1/4/7/8).",
+      "loc_estimate": 60,
+      "blocker": "TP-N 일부 미수행 — 부분 mapping 만"
+    }
+  ],
+  "tier_3_observe_only_or_defer": [
+    {
+      "axis_id": "axis_6",
+      "slug": "lens-score-gate-1588",
+      "rationale": "1588 lens 일괄 refactor 비용 매우 큼. 핵심 5-10 lens (simulation/n6_void/omega_state_space/quantum_big_bang/physics_cosmic_web) 만 시범 적용 후 평가. ROI 불확실.",
+      "blocker": "1588 lens 변환 비용 + 시범 lens 의 falsifier 적합성 미검증",
+      "decision": "DEFER — 시범 ω-cycle 별도 발사 필요"
+    }
+  ],
+  "rejected_axes": [
+    {
+      "axis_id": "axis_9",
+      "slug": "bayesian-soft-retire",
+      "reason": "raw 71 explicit `auto-retire-on satisfaction` (hard, deterministic) + raw 53 deterministic-verifier-manifest (LLM-judge family ban). soft probabilistic retire 는 두 raw rule 위배."
+    }
+  ],
+  "omega_stop": "fixpoint-axis-enumeration-saturated",
+  "omega_stop_witness": {
+    "type": "axis-enumeration-fixpoint",
+    "method": "second-pass enumeration (testing/monitoring/alerting/versioning/security/export 6 categories) → axis 11 (signed-chain) + axis 12 (TP-N binding) 외 신규 표면화 없음. 12 axes 가 fixed point.",
+    "second_pass_new_axes": 2,
+    "second_pass_dedupe_to_existing": 4,
+    "third_pass_new_axes": 0,
+    "result": "FIXPOINT — Tier-1 5개 + Tier-2 5개 + Tier-3 1개 + REJECTED 1개 = 12 total enumeration saturated."
+  },
+  "next_action_recommendation": {
+    "immediate": "Tier-1 axis_1 (tool/hexa_sim_falsifier.hexa, ~200 LoC) + axis_10 (raw 66 trailer) + axis_11 (chain hash) — 단일 commit 으로 묶음. ~250 LoC, 1 PR.",
+    "follow_up_1": "Tier-1 axis_2 (raw 45 blocker autofire) + axis_4 (nxs-002 cycle binding) — separate commit. 130 LoC.",
+    "follow_up_2": "Tier-2 backlog 는 별도 ω-cycle 발사 (hive Phase B 일정, raw 76 별도 cycle 등 선행 조건 정리 후)."
+  },
+  "raw_strategies_self_applied": {
+    "hive_raw_47_strategy_exploration_omega_cycle": "본 trawl 자체 — multi-axis ideation, 12 axes 표면화, fixpoint witness",
+    "hive_raw_70_multi_axis_verify_grid": "Tier 분류 = 4 axis (impl-readiness, dependency-count, blocker-status, ROI) joint",
+    "hive_raw_71_falsifier_retire_rule": "본 trawl 의 대상 — hexa_sim_falsifier 자체가 raw 71 의 instance",
+    "hive_raw_53_deterministic_verifier_manifest": "axis_9 reject 근거"
+  }
+}
