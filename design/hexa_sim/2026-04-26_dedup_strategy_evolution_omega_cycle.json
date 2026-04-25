@@ -1,0 +1,94 @@
+{
+  "trawl_id": "2026-04-26_dedup_strategy_evolution_omega_cycle",
+  "ts": "2026-04-26T03:30:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47)",
+  "purpose": "atlas-ingest 도구 family 의 dedup 정책 진화. 현 단순 skip → 부가정보 (edge/witness/cross-source) 보존. 4-repo 병렬 흡수 진행 중 사용자 발견: '이미 흡수된건데 부가정보가 없는것들은 어떻게 처리가되'.",
+  "trigger": "user 2026-04-26 03:25 — atlas-ingest 의 dedup 이 너무 coarse, 부가정보 손실 위험 지적.",
+  "method": "main-thread multi-axis ideation. 4 dup-detection 케이스 + 4 처리 strategy + audit 보존. 18 axes → 4 cluster → Tier-1 4 / Tier-2 5 / Tier-3 4 / REJECT 5.",
+  "context_evidence": {
+    "current_dedup_logic": "fn _check_dup_in_atlas(id) -> bool: grep '^@[PCFLRSX] <id> =' atlas.n6 → match 시 skip.",
+    "tools_affected": ["tool/hexa_sim_atlas_ingest.hexa", "tool/omega_cycle_atlas_ingest.hexa", "tool/atlas_omega_supercycle.hexa"],
+    "dup_categories": [
+      "(1) 완전 동일 — skip 정상",
+      "(2) 새 edge 추가 — 현 skip → loss",
+      "(3) 새 cross-source 추가 — 현 skip → loss",
+      "(4) 값 갱신 — 현 skip → stale (worst)"
+    ]
+  },
+  "axes_surfaced": [
+    {"id":"d1","name":"trailer_only_append","summary":"기존 entry 보존 + 새 edge (<-/->/=>/|>/!!/~>) 만 separator 와 함께 append. 가장 단순 + 가장 안전."},
+    {"id":"d2","name":"diff_witness_ledger","summary":"dup + diff detected → state/atlas_ingest_dup_diff_history.jsonl 적재 (raw 77 chain). main context review 후 결정."},
+    {"id":"d3","name":"versioned_id_v2","summary":"alpha_inv@v2 형식 (Phase 4 atlas DSL v2 axis v4). v1/v2 entry 둘 다 보존, backward-compat."},
+    {"id":"d4","name":"trailer_sync_only","summary":"id/expr 불변 + 새 |> ~> trailer 만 갱신. 가장 hands-off."},
+    {"id":"d5","name":"dup_detection_granular","summary":"id 만 매치가 아니라 (id, expr, grade, edges_set) 4-tuple 비교. 진정한 'no new info' 만 skip."},
+    {"id":"d6","name":"merge_strategy_per_type","summary":"@C constant: replace if uncertainty 작아짐 / @F formula: skip if 동일 / @L law: append if 새 reference / @X crossing: append if 새 member ..."},
+    {"id":"d7","name":"value_precision_promotion","summary":"137.036 → 137.0360 같은 정밀도 향상은 자동 promote (uncertainty 비교)"},
+    {"id":"d8","name":"witness_lineage_chain","summary":"각 entry 의 |> trailer chain — multiple bridges 가 같은 fact 지지 시 모두 기록 (chain hash 형태)"},
+    {"id":"d9","name":"manual_escalate_conflict","summary":"genuine value 차이 → 항상 manual escalate (raw 71 +safety). REJECT 'auto-replace'."},
+    {"id":"d10","name":"shard_separation_by_strategy","summary":"per-strategy shard: atlas.append.<source>.delta-only.n6 vs atlas.append.<source>.replace.n6"},
+    {"id":"d11","name":"timestamp_aware_skip","summary":"동일 id + 동일 expr + atlas entry 가 < 24h 전 emit → skip (chronological cache)"},
+    {"id":"d12","name":"source_priority_ranking","summary":"같은 fact, 다른 source. NIST CODATA > Wikipedia > heuristic. priority high 이 win, low 는 |> trailer 만"},
+    {"id":"d13","name":"semantic_hash_match","summary":"id 다름 + expr 의미 동일 (예: 'sigma=12' vs 'σ(6)=12') → semantic dup detect. NLP 필요."},
+    {"id":"d14","name":"atlas_v2_M_T_for_meta_dup","summary":"@M meta-dup 추적 + @T trace lineage 통합. atlas v2 활용."},
+    {"id":"d15","name":"dry_run_diff_visualization","summary":"--diff mode 가 'WOULD add edge X', 'WOULD update value Y' 등 명확한 diff emit"},
+    {"id":"d16","name":"rollback_via_git","summary":"shard 모두 git tracked → revert 가능. 별도 도구 X."},
+    {"id":"d17","name":"per_repo_dedup_isolation","summary":"4-repo 각각 독립 dedup. nexus 의 alpha_inv 와 anima 의 alpha_inv 가 다른 entry."},
+    {"id":"d18","name":"eager_full_replace","summary":"새 emit = 항상 ground truth. 기존 entry 무조건 replace. REJECT — data loss."}
+  ],
+  "axes_total_surfaced": 18,
+  "dedupe_method": "(1) REJECT d9 'auto-replace' (raw 71 violation), d18 eager-full-replace (data loss); (2) REJECT d13 semantic-hash (NLP 무거움, scope 외); (3) REJECT d11 timestamp-aware-skip (사용자 의도 와 어긋남 — 24h 가 자의적), d17 per-repo-isolation (Phase 3 supercycle 가 cross-repo @X 에 활용); (4) cluster 4 family: A=preservation (d1/d4/d8), B=detection (d2/d5/d6/d15), C=conflict (d7/d12/d10), D=v2 (d3/d14); (5) Tier 분류 by impl-readiness + 안전성.",
+  "axes_after_reject": 13,
+  "axes_clustered_to": 4,
+  "tier_1_immediate_impl": [
+    {"axis_id":"d2","slug":"diff-witness-ledger","rationale":"가장 안전 + audit trail 보존 + 결정 위임. tool 자체는 unchanged, 단지 skip 시점에 jsonl 한 줄 append.","loc_estimate":40},
+    {"axis_id":"d1","slug":"trailer-only-append","rationale":"부가정보 보존의 핵심. 새 edge 만 separator 와 함께 append. tool 의 emit 함수에 fork.","loc_estimate":80},
+    {"axis_id":"d5","slug":"dup-detection-granular","rationale":"단순 id 매치 → 4-tuple (id,expr,grade,edges) 비교. d1/d2 prerequisite.","loc_estimate":70},
+    {"axis_id":"d15","slug":"diff-mode-visualization","rationale":"--diff mode 확장 (이미 있음). 'WOULD add edge X' 명시. 단순 UX.","loc_estimate":40}
+  ],
+  "tier_2_backlog": [
+    {"axis_id":"d4","slug":"trailer-sync-only","blocker":"d1 trailer-append 안정 후"},
+    {"axis_id":"d8","slug":"witness-lineage-chain","blocker":"d1 + raw 77 chain pattern 활용"},
+    {"axis_id":"d12","slug":"source-priority-ranking","blocker":"per-source 정책 별도 design"},
+    {"axis_id":"d10","slug":"shard-separation-by-strategy","blocker":"file proliferation 평가 후"},
+    {"axis_id":"d6","slug":"merge-strategy-per-type","blocker":"d5 granular detection 안정 후"}
+  ],
+  "tier_3_defer_or_split": [
+    {"axis_id":"d3","slug":"versioned-id-v2","reason":"atlas v2 (Phase 4a) 의 별도 axis v4. 본 cycle 과 별개 진행"},
+    {"axis_id":"d7","slug":"value-precision-promotion","reason":"d6 merge-per-type 의 sub-strategy"},
+    {"axis_id":"d14","slug":"atlas-v2-MT-for-meta-dup","reason":"atlas v2 도입 후 별도"},
+    {"axis_id":"d16","slug":"rollback-via-git","reason":"git 자체로 충분; 별도 도구 X"}
+  ],
+  "rejected_axes": [
+    {"axis_id":"d9","slug":"manual-escalate-conflict-only","reason":"too restrictive — 모든 case manual 비현실적"},
+    {"axis_id":"d11","slug":"timestamp-aware-skip","reason":"24h 자의적 cutoff, 사용자 의도와 어긋남"},
+    {"axis_id":"d13","slug":"semantic-hash-match","reason":"NLP 무거움, scope 외"},
+    {"axis_id":"d17","slug":"per-repo-dedup-isolation","reason":"Phase 3 supercycle 가 cross-repo @X 에 활용 — isolation 은 그 가치 손실"},
+    {"axis_id":"d18","slug":"eager-full-replace","reason":"data loss 위험; raw 71 falsifier-retire-rule 위배"}
+  ],
+  "omega_stop":"fixpoint-axis-enumeration-saturated",
+  "omega_stop_witness":{
+    "type":"axis-enumeration-fixpoint",
+    "method":"18 axes 표면화 (4 cluster). second-pass 신규 0.",
+    "result":"FIXPOINT — Tier-1 4 / Tier-2 5 / Tier-3 4 / REJECT 5 = 13+5 = 18"
+  },
+  "first_impl_target":{
+    "name":"tool/hexa_sim_atlas_ingest.hexa + omega_cycle_atlas_ingest.hexa 둘 다 patch (둘은 dedup 로직 공유)",
+    "scope":"Tier-1 4 axes 동시 (~230 LoC patch across 2 tools)",
+    "axes_combined":["d2 diff-witness-ledger", "d1 trailer-only-append", "d5 dup-detection-granular", "d15 diff-mode-visualization"],
+    "output_changes":{
+      "(1) 새 helper": "_check_entry_full_match(id, expr, grade, edges_csv) -> string in {EXACT_DUP, ID_ONLY_DUP, NEW_EDGES, VALUE_CONFLICT}",
+      "(2) 새 emit branch": "emit_delta_edges(id, new_edges_set) — 기존 entry 보존 + separator + new edges only",
+      "(3) 새 file": "state/atlas_ingest_dup_diff_history.jsonl (raw 77 chain hash)",
+      "(4) --diff mode 확장": "EXACT_DUP / ID_ONLY_DUP / NEW_EDGES / VALUE_CONFLICT 4 카테고리 emit"
+    },
+    "verification":"selftest: 4 케이스 round-trip (각 한 entry pair) + diff history append + idempotence"
+  },
+  "raw_strategies_self_applied":{
+    "raw_47_strategy_exploration":"본 trawl 자체",
+    "raw_70_multi_axis_verify":"axes Tier 분류 = 4 axis (impl-readiness + 안전성 + raw rule + 부가정보 보존도) joint",
+    "raw_71_falsifier":"d9 reject 근거 (auto-replace 가 falsifier-retire 위배), d18 reject 근거 (data loss)",
+    "raw_73_structural_admissibility":"d2 diff-witness 가 byte-eq seal 보존 (skip 결정 deterministic)",
+    "raw_77_audit_append_only":"d2 diff history 적용",
+    "raw_68_byte_eq":"d5 4-tuple match 가 'no new info' 의 정확한 정의 — 같은 4-tuple 두번 emit = byte-eq"
+  }
+}
