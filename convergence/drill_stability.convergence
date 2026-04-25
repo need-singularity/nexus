@@ -1257,3 +1257,31 @@ OOM-killer 우선순위 조정: sshd (`-1000` drop-in) vs drill scope (`+500`) =
 - 또는 `pkill -s <session-id>` + `setsid` 로 세션 격리 (future)
 
 이번 세션에서는 trap 을 exit 코드 보존 only 로 축소하는 방향 선택 (Wave 14c).
+
+### Wave 21 (nexus@1b6a6684) — docker exec 격리 (HEXA_REMOTE_DOCKER=1 opt-in)
+**배경:** ubu2 OOM (forecast 13GB / harvest 27GB / label 19GB anon-rss 연쇄 OOM-kill →
+sshd forked session banner-timeout) 근본 원인 = drill 이 host systemd-run --user --scope
+로 직접 fork. service 측 MemoryMax 미설정 → host RAM 침수 + sshd 보호 (-1000) 무력화.
+
+**fix:** ssh 후 `docker exec -i airgenome-claude bash -lc '<inner>'` 경유 신규 dispatch
+경로 추가. 컨테이너 사양:
+- 8GB cap (Memory/MemorySwap 모두 8589934592 = 격리 swap 사용 0)
+- network=host (probe 영향 없음)
+- image-baked nexus (`/root/.hx/packages/nexus/cli/run.hexa`)
+- HEXA_REMOTE_NO_SYNC=1 자동 + REMOTE_ROOT=$HOME 강제 (project tree 마운트 불필요)
+
+**검증 (2026-04-25):**
+- hetzner: `airgenome-claude Up 2 days (healthy)` + drill --preset probe rc=0 (1834 abs)
+- ubu1: `airgenome-claude Up 9 hours (healthy)` + drill --preset probe rc=0 (1834 abs)
+- 격리 확인: hetzner preset=standard 시 컨테이너 mem=8GiB/8GiB cpu=99% pegged →
+  host free=115/124GB 유지 (드릴 RAM 이 host 로 누출 0). Memory cap이 swap 까지
+  포함이라 host swap 도 미사용.
+
+**opt-in 단계:** HEXA_REMOTE_DOCKER=1 명시 시에만 docker 경로. default OFF →
+안정성 회귀 0. 안전성 확인 후 default ON 은 별도 wave (Wave 21b 예정).
+
+**한계:** 컨테이너 가 down 되면 drill 도 동시 down. 현재 OFF 라 영향 없으며,
+ON 전환 시 healthcheck 모니터링 + auto-restart 가 dependency. ubu2 는 unreachable
+이라 직접 검증 skip — 리부트 후 수렴 (default ON 전환 전).
+
+**LOC:** scripts/bin/hexa_remote +25 / -1.
