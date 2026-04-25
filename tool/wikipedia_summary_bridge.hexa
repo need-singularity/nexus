@@ -1,0 +1,338 @@
+#!hexa strict
+// tool/wikipedia_summary_bridge.hexa — Wikipedia REST `page/summary` live fetch + nexus reference / disambiguation / discovery_log enrichment.
+//
+// @tool(slug="wikipedia_summary_bridge", desc="Wikipedia page-summary REST fetch (title/extract/description) + n=6 anchor binding + discovery_log candidate emission")
+// @usage(hexa run tool/wikipedia_summary_bridge.hexa [--selftest] [--json] [--title <NAME>])
+// @exit_codes(0=PASS, 1=usage/io error, 2=value verification failure)
+// @sentinel(__WIKIPEDIA_BRIDGE__ PASS|FAIL title="<TITLE>" extract_len=N)
+// @origin(hive raw 70 design-multi-axis-verify-grid — external encyclopedic corroboration of n=6 framework anchors)
+// @abstraction(hive raw 73 structural-admissibility — canonical entity reconciliation across reference / disambiguation / discovery axes)
+// @paradigm(structural-admissibility — deterministic JSON field extraction, integer-only, no float arithmetic)
+// @companion(tool/oeis_live_bridge.hexa A000396 first-term=6 anchor; tool/codata_bridge.hexa alpha^-1=137 anchor)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoint: https://en.wikipedia.org/api/rest_v1/page/summary/<TITLE>
+//   e.g.    https://en.wikipedia.org/api/rest_v1/page/summary/Perfect_number
+// Response: JSON { "title": ..., "extract": ..., "description": ..., "thumbnail": {...}, ... }
+//
+// n=6 binding: when --title=Perfect_number, the extract MUST contain the digit "6"
+// (smallest perfect number, OEIS A000396 first term). This is a cross-source corroboration
+// of the n=6 anchor that is also independently verified by oeis_live_bridge.
+//
+// SELFTEST references (4):
+//   Perfect_number              — n=6 anchor (number theory)
+//   Simulation_hypothesis       — simulation-theory disambiguation seed
+//                                 (NB: 'Bostrom_simulation_argument' returns 404; canonical title
+//                                  is 'Simulation_hypothesis' per Wikipedia REST. Disambiguation
+//                                  candidate: alias 'Bostrom_simulation_argument' → 'Simulation_hypothesis'.)
+//   Calabi-Yau_manifold         — Calabi-Yau geometry reference
+//   Pulsar                      — astrophysical companion to nanograv_pulsar_bridge
+
+// ─── void-safe helpers ───
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn _esc_json(s: string) -> string {
+    let mut r = s.replace("\\", "\\\\")
+    r = r.replace("\"", "\\\"")
+    r = r.replace("\n", " ")
+    r = r.replace("\r", " ")
+    r = r.replace("\t", " ")
+    return r
+}
+
+fn _contains(haystack: string, needle: string) -> bool {
+    return haystack.index_of(needle) >= 0
+}
+
+// ─── minimal JSON string-field extractor ───
+// We only need top-level "title", "extract", "description" — all string-typed.
+// Strategy: find '"<key>"' then ':' then opening '"', then walk to the next unescaped '"'.
+// Honors backslash-escapes (\", \\, \n, \uXXXX → leave raw). Returns "" if not found.
+fn _is_ws(c: string) -> bool {
+    return c == " " || c == "\t" || c == "\n" || c == "\r"
+}
+
+// returns first non-whitespace index >= start, or -1 if none in [start, n).
+fn _skip_ws(s: string, start: i64, n: i64) -> i64 {
+    let mut i = start
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if !_is_ws(c) { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn _find_str_field(json_text: string, key: string) -> string {
+    let needle = "\"" + key + "\""
+    let n = len(json_text)
+    let mut search_from = 0
+    while search_from < n {
+        let kp = json_text.substring(search_from, n).index_of(needle)
+        if kp < 0 { return "" }
+        let key_pos = search_from + kp
+        let after_key = key_pos + len(needle)
+        // expect ':' (after optional whitespace)
+        let colon_pos = _skip_ws(json_text, after_key, n)
+        if colon_pos < 0 { return "" }
+        let colon = json_text.substring(colon_pos, colon_pos + 1)
+        if colon != ":" {
+            // nested key (e.g. "titles" containing "title"); resume search past this match
+            search_from = after_key
+            continue
+        }
+        // find opening quote of string value
+        let val_pos = _skip_ws(json_text, colon_pos + 1, n)
+        if val_pos < 0 { return "" }
+        let opener = json_text.substring(val_pos, val_pos + 1)
+        if opener != "\"" {
+            // value is non-string (object/number/null) — keep searching
+            search_from = after_key
+            continue
+        }
+        // walk the string body, honoring backslash escapes
+        let mut j = val_pos + 1
+        let mut out = ""
+        while j < n {
+            let c = json_text.substring(j, j + 1)
+            if c == "\\" {
+                if j + 1 >= n { return out }
+                let nxt = json_text.substring(j + 1, j + 2)
+                if nxt == "\"" { out = out + "\"" }
+                else if nxt == "\\" { out = out + "\\" }
+                else if nxt == "/" { out = out + "/" }
+                else if nxt == "n" { out = out + " " }
+                else if nxt == "t" { out = out + " " }
+                else if nxt == "r" { out = out + " " }
+                else if nxt == "u" {
+                    // skip 4 hex digits — emit a placeholder space (we don't decode UTF-16)
+                    out = out + " "
+                    j = j + 4
+                }
+                else { out = out + nxt }
+                j = j + 2
+                continue
+            }
+            if c == "\"" { return out }
+            out = out + c
+            j = j + 1
+        }
+        return out
+    }
+    return ""
+}
+
+fn _truncate(s: string, n: i64) -> string {
+    if len(s) <= n { return s }
+    return s.substring(0, n) + "..."
+}
+
+// ─── HTTP fetch ───
+
+fn _url_for(title: string) -> string {
+    // titles are already canonical "Snake_Case" — no urlencode needed for ASCII inputs.
+    return "https://en.wikipedia.org/api/rest_v1/page/summary/" + title
+}
+
+fn fetch_summary(title: string) -> string {
+    let url = _url_for(title)
+    let cmd = "curl -s --max-time 15 -H 'accept: application/json' '" + url + "' 2>/dev/null"
+    return _str(exec(cmd))  // @allow-bare-exec
+}
+
+// ─── core: parse one summary into [title, extract, description] ───
+
+fn parse_summary(json_text: string) -> array {
+    let title = _find_str_field(json_text, "title")
+    let extract = _find_str_field(json_text, "extract")
+    let description = _find_str_field(json_text, "description")
+    return [title, extract, description]
+}
+
+// returns [title, extract, description, ok_flag, fails_csv]
+fn verify_title(title_in: string) -> array {
+    let body = fetch_summary(title_in)
+    if len(body) == 0 {
+        return [title_in, "", "", "false", "fetch_empty"]
+    }
+    let parts = parse_summary(body)
+    let title = _str(parts[0])
+    let extract = _str(parts[1])
+    let description = _str(parts[2])
+    let mut fails = []
+    if len(extract) == 0 { fails.push("extract_empty") }
+    if len(title) == 0 { fails.push("title_empty") }
+    // n=6 anchor binding for Perfect_number
+    if title_in == "Perfect_number" {
+        if !_contains(extract, "6") {
+            fails.push("n6_anchor_missing: extract lacks digit '6'")
+        }
+    }
+    let ok = if len(fails) == 0 { "true" } else { "false" }
+    return [title, extract, description, ok, fails.join("; ")]
+}
+
+// ─── emitters ───
+
+fn _emit_text(title_in: string, r: array) {
+    let title = _str(r[0])
+    let extract = _str(r[1])
+    let description = _str(r[2])
+    let ok = _str(r[3])
+    let fails = _str(r[4])
+    println("WIKI_TITLE_INPUT  : " + title_in)
+    println("title_canonical   : " + title)
+    println("description       : " + description)
+    println("extract_len       : " + to_string(len(extract)))
+    println("extract_truncated : " + _truncate(extract, 200))
+    println("ok                : " + ok)
+    if fails != "" { println("fails             : " + fails) }
+    println("source_url        : " + _url_for(title_in))
+    println("---")
+}
+
+fn _emit_json_one(title_in: string, r: array) {
+    let title = _esc_json(_str(r[0]))
+    let extract = _esc_json(_truncate(_str(r[1]), 200))
+    let description = _esc_json(_str(r[2]))
+    let n6 = if title_in == "Perfect_number" && _str(r[3]) == "true" { "true" } else { "false" }
+    let dlc = "wikipedia_summary:" + title_in + ":extract_len=" + to_string(len(_str(r[1])))
+    println("{")
+    println("  \"tool\": \"wikipedia_summary_bridge\",")
+    println("  \"origin\": \"hive raw 70/73 — encyclopedic corroboration of n=6 framework anchors\",")
+    println("  \"title_input\": \"" + _esc_json(title_in) + "\",")
+    println("  \"title\": \"" + title + "\",")
+    println("  \"extract\": \"" + extract + "\",")
+    println("  \"description\": \"" + description + "\",")
+    println("  \"source_url\": \"" + _url_for(title_in) + "\",")
+    println("  \"n6_anchor_match\": " + n6 + ",")
+    println("  \"discovery_log_candidate\": \"" + _esc_json(dlc) + "\"")
+    println("}")
+}
+
+fn _emit_json_multi(inputs: array, results: array, all_ok: bool) {
+    println("{")
+    println("  \"tool\": \"wikipedia_summary_bridge\",")
+    println("  \"origin\": \"hive raw 70/73 — encyclopedic corroboration of n=6 framework anchors\",")
+    println("  \"references\": [")
+    let mut k = 0
+    while k < len(results) {
+        let title_in = _str(inputs[k])
+        let r = results[k]
+        let trail = if k + 1 < len(results) { "," } else { "" }
+        let title = _esc_json(_str(r[0]))
+        let extract = _esc_json(_truncate(_str(r[1]), 200))
+        let description = _esc_json(_str(r[2]))
+        let ok = _str(r[3])
+        let fails = _esc_json(_str(r[4]))
+        let n6 = if title_in == "Perfect_number" && ok == "true" { "true" } else { "false" }
+        println("    {\"title_input\": \"" + _esc_json(title_in) + "\", \"title\": \"" + title + "\", \"description\": \"" + description + "\", \"extract\": \"" + extract + "\", \"extract_len\": " + to_string(len(_str(r[1]))) + ", \"ok\": " + ok + ", \"fails\": \"" + fails + "\", \"n6_anchor_match\": " + n6 + ", \"source_url\": \"" + _url_for(title_in) + "\"}" + trail)
+        k = k + 1
+    }
+    println("  ],")
+    let cons = if all_ok { "true" } else { "false" }
+    println("  \"all_references_ok\": " + cons + ",")
+    println("  \"discovery_log_candidate\": \"wikipedia_summary_bridge:selftest:4_refs:all_ok=" + cons + "\"")
+    println("}")
+}
+
+// ─── runners ───
+
+fn run_selftest(json_mode: bool) {
+    let inputs = ["Perfect_number", "Simulation_hypothesis", "Calabi-Yau_manifold", "Pulsar"]
+    let mut results = []
+    let mut all_ok = true
+    let mut perfect_extract = ""
+    let mut perfect_n6 = false
+    for t in inputs {
+        let r = verify_title(t)
+        results.push(r)
+        if r[3] != "true" { all_ok = false }
+        if t == "Perfect_number" {
+            perfect_extract = _str(r[1])
+            if r[3] == "true" { perfect_n6 = true }
+        }
+    }
+
+    if json_mode { _emit_json_multi(inputs, results, all_ok) }
+    else {
+        let mut k = 0
+        while k < len(results) {
+            _emit_text(_str(inputs[k]), results[k])
+            k = k + 1
+        }
+    }
+
+    let n6_str = if perfect_n6 { "true" } else { "false" }
+    let verdict = if all_ok && perfect_n6 { "PASS" } else { "FAIL" }
+    println("__WIKIPEDIA_BRIDGE__ " + verdict + " refs=4 all_ok=" + (if all_ok { "true" } else { "false" }) + " perfect_number_n6_anchor=" + n6_str + " perfect_extract_len=" + to_string(len(perfect_extract)))
+    if verdict == "PASS" { exit(0) }
+    exit(2)
+}
+
+fn run_single(title: string, json_mode: bool) {
+    let r = verify_title(title)
+    if json_mode { _emit_json_one(title, r) }
+    else { _emit_text(title, r) }
+    let title_can = _str(r[0])
+    let extract = _str(r[1])
+    let ok = _str(r[3])
+    if ok != "true" {
+        println("__WIKIPEDIA_BRIDGE__ FAIL title=\"" + title + "\" extract_len=" + to_string(len(extract)) + " fails=" + _str(r[4]))
+        exit(2)
+    }
+    println("__WIKIPEDIA_BRIDGE__ PASS title=\"" + title_can + "\" extract_len=" + to_string(len(extract)))
+    exit(0)
+}
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut mode = "selftest"
+    let mut title = "Perfect_number"
+    let mut json_mode = false
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { mode = "selftest" }
+        else if a == "--json" { json_mode = true }
+        else if a == "--title" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                title = cli[i]
+                mode = "single"
+            } else {
+                eprintln("wikipedia_summary_bridge: --title requires <NAME>")
+                exit(1)
+            }
+        }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/wikipedia_summary_bridge.hexa [--selftest] [--json] [--title <NAME>]")
+            println("  --selftest      4-reference fetch (Perfect_number / Simulation_hypothesis / Calabi-Yau_manifold / Pulsar) + n=6 anchor")
+            println("  --title <NAME>  fetch single page summary; default 'Perfect_number'")
+            println("  --json          emit JSON object on stdout")
+            println("origin: hive raw 70/73 — encyclopedic corroboration of n=6 framework + reference/disambiguation/discovery_log enrichment candidates")
+            exit(0)
+        }
+        else {
+            eprintln("wikipedia_summary_bridge: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    if mode == "single" { run_single(title, json_mode) }
+    else { run_selftest(json_mode) }
+}
