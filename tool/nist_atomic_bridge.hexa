@@ -1,0 +1,540 @@
+#!hexa strict
+// tool/nist_atomic_bridge.hexa — NIST Atomic Spectra/Constants ↔ HEXA-SIM bridge: Rydberg + Bohr + Hartree fetch + n=6 first-row anchor.
+//
+// @tool(slug="nist_atomic_bridge", desc="NIST atomic constants (Rydberg, Bohr radius, Hartree energy) live fetch + first 6 elements ionization sequence (Z=1..6, C=Z=6 diamond/n6 anchor) + axis_constants precision binding")
+// @usage(hexa run tool/nist_atomic_bridge.hexa [--selftest] [--json] [--no-fetch] [--element <symbol>])
+// @exit_codes(0=PASS, 1=usage/io error, 2=value verification failure)
+// @sentinel(__NIST_ATOMIC_BRIDGE__ PASS|FAIL rydberg=<m^-1> bohr_radius=<m> hartree_eV=<eV>)
+// @origin(hive raw 70 design-multi-axis-verify-grid + raw 73 structural-admissibility — atomic-scale empirical anchor for axis_constants precision lift)
+// @abstraction(hive raw 77 cross-repo audit-ledger — third bridge in atomic axis after codata_bridge / arxiv_realtime_bridge)
+// @paradigm(structural-admissibility — scaled-integer arithmetic, no floats, hardcoded fallback for off-line)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoint (primary):   https://physics.nist.gov/cuu/Constants/Table/allascii.txt   (plain text, ~30KB; CODATA 2022)
+// Endpoint (specific):  https://physics.nist.gov/cgi-bin/cuu/Value?ryd               (Rydberg constant single-value page)
+//                       https://physics.nist.gov/cgi-bin/cuu/Value?bohrrada0         (Bohr radius single-value page)
+//
+// Target lines from allascii.txt (CODATA 2022):
+//   "Rydberg constant                                            10 973 731.568 157       0.000 012                m^-1"
+//   "Bohr radius                                                 5.291 772 105 44 e-11    0.000 000 000 82 e-11    m"
+//   "Hartree energy in eV                                        27.211 386 245 981       0.000 000 000 030        eV"
+//
+// Hardcoded fallback (CODATA 2022):
+//   Rydberg R_inf = 10973731.568157 m^-1     (scaled by 10^6 → 10973731568157)
+//   Bohr radius   = 5.29177210544e-11 m      (mantissa × 10^14 = 529177210544 → unit 10^-25 m)
+//   Hartree eV    = 27.211386245981 eV       (scaled by 10^12 → 27211386245981)
+//   H ionization  = 13.605693122994 eV (= 1/2 Hartree)
+//
+// n=6 framework binding (HEXA-SIM Y9):
+//   First 6 elements first-ionization energies (eV, NIST):
+//     H=13.598, He=24.587, Li=5.392, Be=9.323, B=8.298, C=11.260
+//   Z=6 (Carbon) is the n6 L1 diamond anchor — sp3 tetrahedral ↔ 6 valence interactions
+//
+// Bound axes (nexus axis_constants):
+//   - alpha^-1 (codata_bridge)
+//   - R_inf    (this tool, Rydberg)        ← precision lift for atomic-scale axis
+//   - a_0      (this tool, Bohr radius)    ← length-scale axis
+//   - E_h      (this tool, Hartree)        ← atomic energy unit axis
+//
+// Candidate new axis: 'atomic_spectra' — first-6-Z ionization sequence as discrete signature row
+
+// ─── scaled-integer constants ───
+
+fn SCALE_RYD() -> i64 { return 1000000 }              // Rydberg: 6 frac digits (R_inf in m^-1)
+fn SCALE_BOHR() -> i64 { return 100000000000 }        // Bohr: mantissa × 10^11 (so 529177210544 represents 5.29177210544 × 10^-11)
+fn BOHR_FRAC_DIGITS() -> i64 { return 11 }            // matches NIST published 11-frac-digit mantissa
+fn SCALE_HART() -> i64 { return 1000000000000 }       // Hartree eV: 12 frac digits
+
+// CODATA 2022 hardcoded fallbacks
+fn FALLBACK_RYDBERG() -> i64 { return 10973731568157 }       // 10973731.568157 m^-1 (×10^6)
+fn FALLBACK_RYDBERG_UNCERT() -> i64 { return 12 }            // 0.000012 (×10^6)
+fn FALLBACK_BOHR_MANT() -> i64 { return 529177210544 }       // 5.29177210544 × 10^-11 m (mantissa ×10^11 → 529177210544)
+fn FALLBACK_BOHR_UNCERT() -> i64 { return 8 }                // 0.00000000008 × 10^-11 m (mantissa-uncert ×10^11)
+fn FALLBACK_HARTREE_EV() -> i64 { return 27211386245981 }    // 27.211386245981 eV (×10^12)
+fn FALLBACK_HARTREE_UNCERT() -> i64 { return 30 }            // 0.000000000030 eV (×10^12)
+// H ionization = Hartree / 2 = 13.605693122990 eV (computed) ; NIST quoted 13.598434599702 (Lyman limit, slightly different from Hartree/2 due to reduced-mass correction)
+fn FALLBACK_H_IONIZATION_EV() -> i64 { return 13598434599702 }   // 13.598434599702 eV (×10^12)
+
+// ─── first 6 elements (Z=1..6) first ionization energies in millielectronvolts (×1000 eV → 5 frac digits via different scale) ───
+// We use scale 10^3 (meV) for the n=6 anchor table — matches NIST 3-decimal published precision.
+fn FIRST_6_Z() -> array { return [1, 2, 3, 4, 5, 6] }
+fn FIRST_6_SYMBOLS() -> array { return ["H", "He", "Li", "Be", "B", "C"] }
+// NIST first ionization (eV, ×1000 = meV)
+fn FIRST_6_IONIZATION_MEV() -> array {
+    return [13598, 24587, 5392, 9323, 8298, 11260]
+}
+fn N6_ANCHOR_Z() -> i64 { return 6 }    // Carbon
+fn N6_ANCHOR_SYMBOL() -> string { return "C" }
+
+// ─── string helpers ───
+
+fn _abs_i(x: i64) -> i64 { if x < 0 { return 0 - x } return x }
+
+fn _str_to_i(s: string) -> i64 {
+    if len(s) == 0 { return 0 }
+    let mut neg = false
+    let mut i = 0
+    if s.substring(0, 1) == "-" { neg = true; i = 1 }
+    let mut acc: i64 = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "0" { acc = acc * 10 }
+        else if c == "1" { acc = acc * 10 + 1 }
+        else if c == "2" { acc = acc * 10 + 2 }
+        else if c == "3" { acc = acc * 10 + 3 }
+        else if c == "4" { acc = acc * 10 + 4 }
+        else if c == "5" { acc = acc * 10 + 5 }
+        else if c == "6" { acc = acc * 10 + 6 }
+        else if c == "7" { acc = acc * 10 + 7 }
+        else if c == "8" { acc = acc * 10 + 8 }
+        else if c == "9" { acc = acc * 10 + 9 }
+        i = i + 1
+    }
+    if neg { return 0 - acc }
+    return acc
+}
+
+// Format scaled integer with N fractional digits (decimal positional)
+fn _fmt_at_scale(scaled: i64, scale_pow: i64) -> string {
+    // scale_pow = number of decimal places implied (e.g. 6 for ×10^6)
+    let neg = scaled < 0
+    let v = _abs_i(scaled)
+    let mut div: i64 = 1
+    let mut k = 0
+    while k < scale_pow { div = div * 10; k = k + 1 }
+    let int_part = v / div
+    let frac_part = v % div
+    let mut frac_str = to_string(frac_part)
+    while len(frac_str) < scale_pow { frac_str = "0" + frac_str }
+    let core = to_string(int_part) + "." + frac_str
+    if neg { return "-" + core }
+    return core
+}
+
+fn _fmt_rydberg(s: i64) -> string { return _fmt_at_scale(s, 6) }    // 6 frac digits
+fn _fmt_hartree(s: i64) -> string { return _fmt_at_scale(s, 12) }   // 12 frac digits
+// Bohr: mantissa scale 10^11; we want to render as "5.29177210544e-11"
+fn _fmt_bohr_sci(mant: i64) -> string {
+    // mant is mantissa × 10^11 representing the real-number mantissa M (where actual value = M × 10^-11 m)
+    let v = _abs_i(mant)
+    let mut div: i64 = 1
+    let mut k = 0
+    let frac_n = BOHR_FRAC_DIGITS()
+    while k < frac_n { div = div * 10; k = k + 1 }
+    let int_part = v / div
+    let frac_part = v % div
+    let mut frac_str = to_string(frac_part)
+    while len(frac_str) < frac_n { frac_str = "0" + frac_str }
+    // strip trailing zeros from frac for readability (keep at least one)
+    let mut end = len(frac_str)
+    while end > 1 && frac_str.substring(end - 1, end) == "0" { end = end - 1 }
+    let frac_trim = frac_str.substring(0, end)
+    let core = to_string(int_part) + "." + frac_trim + "e-11"
+    if mant < 0 { return "-" + core }
+    return core
+}
+
+// Format meV → "<int>.<3 frac> eV" (e.g. 13598 → "13.598")
+fn _fmt_mev_to_ev(mev: i64) -> string { return _fmt_at_scale(mev, 3) }
+
+// ─── NIST fetch + parse ───
+
+fn fetch_nist_text() -> string {
+    let url = "https://physics.nist.gov/cuu/Constants/Table/allascii.txt"
+    // grab three lines: Rydberg / Bohr / Hartree energy in eV
+    let cmd = "curl -s --max-time 12 '" + url + "' 2>/dev/null | grep -E '^(Rydberg constant +[0-9]|Bohr radius +[0-9]|Hartree energy in eV +[0-9])'"
+    let raw = exec(cmd)  // @allow-bare-exec
+    return to_string(raw)
+}
+
+// Walk a NIST line: skip the descriptor (first column up to column-gap), return the value column raw token (with embedded spaces) up to the uncertainty column.
+fn _extract_value_token(line: string, prefix: string) -> string {
+    if len(line) < len(prefix) { return "" }
+    // confirm prefix
+    if line.substring(0, len(prefix)) != prefix { return "" }
+    let n = len(line)
+    // find first digit (or "-") after prefix
+    let mut start: i64 = -1
+    let mut i = len(prefix)
+    while i < n {
+        let c = line.substring(i, i + 1)
+        let is_digit = c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+        if is_digit || c == "-" { start = i; i = n }
+        i = i + 1
+    }
+    if start < 0 { return "" }
+    // walk forward; stop on double-space (column boundary to uncertainty)
+    let mut end = start
+    let mut j = start
+    let mut prev_space = false
+    while j < n {
+        let c = line.substring(j, j + 1)
+        if c == " " {
+            if prev_space { j = n }
+            else { prev_space = true; end = j }
+        } else {
+            // accept digit, dot, e, +, -
+            let is_digit = c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+            if is_digit || c == "." || c == "e" || c == "E" || c == "+" || c == "-" {
+                end = j + 1
+                prev_space = false
+            } else {
+                j = n
+            }
+        }
+        j = j + 1
+    }
+    return line.substring(start, end).trim()
+}
+
+// Parse "10 973 731.568 157" → scaled by 10^6 = 10973731568157
+// Strips spaces; takes integer part + up to N fractional digits; pads if short, truncates if long.
+fn _parse_decimal_scaled(s: string, frac_digits: i64) -> i64 {
+    let cleaned = s.replace(" ", "")
+    let dot = cleaned.index_of(".")
+    if dot < 0 {
+        // no fractional part — multiply by 10^frac_digits
+        let mut mul: i64 = 1
+        let mut k = 0
+        while k < frac_digits { mul = mul * 10; k = k + 1 }
+        return _str_to_i(cleaned) * mul
+    }
+    let int_str = cleaned.substring(0, dot)
+    let frac_raw = cleaned.substring(dot + 1, len(cleaned))
+    // strip non-digits at end (e.g. "e-11" suffix)
+    let mut clean_frac = ""
+    let mut i = 0
+    while i < len(frac_raw) {
+        let c = frac_raw.substring(i, i + 1)
+        if c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" {
+            clean_frac = clean_frac + c
+        } else {
+            i = len(frac_raw)
+        }
+        i = i + 1
+    }
+    if len(clean_frac) > frac_digits { clean_frac = clean_frac.substring(0, frac_digits) }
+    while len(clean_frac) < frac_digits { clean_frac = clean_frac + "0" }
+    let mut mul: i64 = 1
+    let mut k = 0
+    while k < frac_digits { mul = mul * 10; k = k + 1 }
+    let int_v = _str_to_i(int_str)
+    let frac_v = _str_to_i(clean_frac)
+    return int_v * mul + frac_v
+}
+
+// Bohr value comes as "5.291 772 105 44 e-11" — parse mantissa with 11 frac digits, ignore exponent (assumed -11).
+fn _parse_bohr_scaled(s: string) -> i64 {
+    let cleaned = s.replace(" ", "")
+    // strip "e-11" or "E-11" suffix
+    let elo = cleaned.index_of("e")
+    let mut mant_str = cleaned
+    if elo >= 0 { mant_str = cleaned.substring(0, elo) }
+    return _parse_decimal_scaled(mant_str, BOHR_FRAC_DIGITS())
+}
+
+// Locate target line by prefix from concatenated text
+fn _line_with_prefix(text: string, prefix: string) -> string {
+    let lines = text.split("\n")
+    let mut i = 0
+    while i < len(lines) {
+        let ln = lines[i]
+        if len(ln) >= len(prefix) {
+            if ln.substring(0, len(prefix)) == prefix { return ln }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+// ─── core: parse all three ───
+
+fn parse_nist_block(text: string) -> array {
+    // returns [rydberg_scaled, bohr_mant_scaled, hartree_eV_scaled, ok_flags]
+    // ok_flags: bit0=rydberg, bit1=bohr, bit2=hartree (1=parsed live, 0=fallback)
+    let mut ryd = FALLBACK_RYDBERG()
+    let mut bohr = FALLBACK_BOHR_MANT()
+    let mut hart = FALLBACK_HARTREE_EV()
+    let mut flags: i64 = 0
+
+    let ln_r = _line_with_prefix(text, "Rydberg constant ")
+    if len(ln_r) > 0 {
+        let tok = _extract_value_token(ln_r, "Rydberg constant ")
+        if len(tok) > 0 {
+            let v = _parse_decimal_scaled(tok, 6)
+            if v > 0 { ryd = v; flags = flags + 1 }
+        }
+    }
+    let ln_b = _line_with_prefix(text, "Bohr radius ")
+    if len(ln_b) > 0 {
+        let tok = _extract_value_token(ln_b, "Bohr radius ")
+        if len(tok) > 0 {
+            let v = _parse_bohr_scaled(tok)
+            if v > 0 { bohr = v; flags = flags + 2 }
+        }
+    }
+    let ln_h = _line_with_prefix(text, "Hartree energy in eV ")
+    if len(ln_h) > 0 {
+        let tok = _extract_value_token(ln_h, "Hartree energy in eV ")
+        if len(tok) > 0 {
+            let v = _parse_decimal_scaled(tok, 12)
+            if v > 0 { hart = v; flags = flags + 4 }
+        }
+    }
+    return [ryd, bohr, hart, flags]
+}
+
+// ─── selftest ───
+
+fn _selftest() {
+    let mut bad = []
+
+    // 1. parse "10 973 731.568 157" with 6 frac → 10973731568157
+    let p1 = _parse_decimal_scaled("10 973 731.568 157", 6)
+    if p1 != 10973731568157 { bad.push("parse_ryd expected 10973731568157 got " + to_string(p1)) }
+
+    // 2. parse Bohr "5.291 772 105 44 e-11" → 529177210544 (mantissa × 10^14)
+    let p2 = _parse_bohr_scaled("5.291 772 105 44 e-11")
+    if p2 != 529177210544 { bad.push("parse_bohr expected 529177210544 got " + to_string(p2)) }
+
+    // 3. parse Hartree "27.211 386 245 981" with 12 frac → 27211386245981
+    let p3 = _parse_decimal_scaled("27.211 386 245 981", 12)
+    if p3 != 27211386245981 { bad.push("parse_hart expected 27211386245981 got " + to_string(p3)) }
+
+    // 4. extract value token from realistic line
+    let line = "Rydberg constant                                            10 973 731.568 157       0.000 012                m^-1"
+    let tok = _extract_value_token(line, "Rydberg constant ")
+    if tok != "10 973 731.568 157" { bad.push("extract_ryd expected '10 973 731.568 157' got '" + tok + "'") }
+
+    // 5. extract+parse roundtrip — Bohr
+    let line_b = "Bohr radius                                                 5.291 772 105 44 e-11    0.000 000 000 82 e-11    m"
+    let tok_b = _extract_value_token(line_b, "Bohr radius ")
+    if tok_b != "5.291 772 105 44 e-11" { bad.push("extract_bohr expected '5.291 772 105 44 e-11' got '" + tok_b + "'") }
+    let v_b = _parse_bohr_scaled(tok_b)
+    if v_b != 529177210544 { bad.push("roundtrip_bohr expected 529177210544 got " + to_string(v_b)) }
+
+    // 6. fallback constants sanity
+    if FALLBACK_RYDBERG() != 10973731568157 { bad.push("FALLBACK_RYDBERG mismatch: " + to_string(FALLBACK_RYDBERG())) }
+    if FALLBACK_BOHR_MANT() != 529177210544 { bad.push("FALLBACK_BOHR_MANT mismatch: " + to_string(FALLBACK_BOHR_MANT())) }
+    if FALLBACK_HARTREE_EV() != 27211386245981 { bad.push("FALLBACK_HARTREE_EV mismatch: " + to_string(FALLBACK_HARTREE_EV())) }
+
+    // 7. n=6 anchor table
+    let zs = FIRST_6_Z()
+    let syms = FIRST_6_SYMBOLS()
+    let ions = FIRST_6_IONIZATION_MEV()
+    if len(zs) != 6 { bad.push("FIRST_6_Z length expected 6 got " + to_string(len(zs))) }
+    if len(syms) != 6 { bad.push("FIRST_6_SYMBOLS length expected 6 got " + to_string(len(syms))) }
+    if len(ions) != 6 { bad.push("FIRST_6_IONIZATION_MEV length expected 6 got " + to_string(len(ions))) }
+    let z_carbon: i64 = zs[5]
+    if z_carbon != 6 { bad.push("Z[5] expected 6 (Carbon) got " + to_string(z_carbon)) }
+    let s_carbon: string = syms[5]
+    if s_carbon != "C" { bad.push("symbol[5] expected 'C' got '" + s_carbon + "'") }
+    let ion_c: i64 = ions[5]
+    if ion_c != 11260 { bad.push("ionization[C] expected 11260 meV got " + to_string(ion_c)) }
+    if N6_ANCHOR_Z() != 6 { bad.push("N6_ANCHOR_Z expected 6 got " + to_string(N6_ANCHOR_Z())) }
+    if N6_ANCHOR_SYMBOL() != "C" { bad.push("N6_ANCHOR_SYMBOL expected 'C' got '" + N6_ANCHOR_SYMBOL() + "'") }
+
+    // 8. format roundtrips
+    let f1 = _fmt_rydberg(10973731568157)
+    if f1 != "10973731.568157" { bad.push("_fmt_rydberg expected '10973731.568157' got '" + f1 + "'") }
+    let f2 = _fmt_bohr_sci(529177210544)
+    if f2 != "5.29177210544e-11" { bad.push("_fmt_bohr_sci expected '5.29177210544e-11' got '" + f2 + "'") }
+    let f3 = _fmt_hartree(27211386245981)
+    if f3 != "27.211386245981" { bad.push("_fmt_hartree expected '27.211386245981' got '" + f3 + "'") }
+    let f4 = _fmt_mev_to_ev(13598)
+    if f4 != "13.598" { bad.push("_fmt_mev_to_ev(13598) expected '13.598' got '" + f4 + "'") }
+
+    // 9. parse_nist_block on synthetic full-text → all three flags set
+    let synthetic = line + "\n" + line_b + "\nHartree energy in eV                                        27.211 386 245 981       0.000 000 000 030        eV\n"
+    let blk = parse_nist_block(synthetic)
+    let bf: i64 = blk[3]
+    if bf != 7 { bad.push("parse_nist_block flags expected 7 (all three) got " + to_string(bf)) }
+    let br_v: i64 = blk[0]
+    if br_v != 10973731568157 { bad.push("block ryd expected 10973731568157 got " + to_string(br_v)) }
+
+    if len(bad) > 0 {
+        eprintln("[nist_atomic_bridge selftest] FAIL: " + bad.join(", "))
+        exit(1)
+    }
+    println("[nist_atomic_bridge selftest] OK — parse + extract + block + n6-anchor + format (9 checks, " + to_string(len(zs)) + " elements verified)")
+    exit(0)
+}
+
+// ─── element lookup ───
+
+fn _find_element(symbol: string) -> i64 {
+    // returns index 0..5 if found, -1 otherwise
+    let syms = FIRST_6_SYMBOLS()
+    let mut i = 0
+    while i < len(syms) {
+        let s: string = syms[i]
+        if s == symbol { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+// ─── emit ───
+
+fn _emit_text(ryd: i64, bohr: i64, hart: i64, source: string, h_ion_ev_scaled: i64) {
+    println("NIST_SOURCE          : " + source)
+    println("rydberg_inv_m        : " + _fmt_rydberg(ryd) + " m^-1")
+    println("bohr_radius_m        : " + _fmt_bohr_sci(bohr) + " m")
+    println("hartree_eV           : " + _fmt_hartree(hart) + " eV")
+    println("h_ionization_eV      : " + _fmt_hartree(h_ion_ev_scaled) + " eV   (NIST Lyman limit)")
+    println("--- n=6 first-row ionization sequence (Z=1..6) ---")
+    let zs = FIRST_6_Z()
+    let syms = FIRST_6_SYMBOLS()
+    let ions = FIRST_6_IONIZATION_MEV()
+    let mut i = 0
+    while i < len(zs) {
+        let z: i64 = zs[i]
+        let s: string = syms[i]
+        let ion: i64 = ions[i]
+        let mark = if z == N6_ANCHOR_Z() { "  ← n6 L1 anchor (diamond sp3)" } else { "" }
+        println("  Z=" + to_string(z) + "  " + s + "  ionization=" + _fmt_mev_to_ev(ion) + " eV" + mark)
+        i = i + 1
+    }
+    println("---")
+}
+
+fn _emit_json(ryd: i64, bohr: i64, hart: i64, source: string, h_ion_ev_scaled: i64) {
+    println("{")
+    println("  \"tool\": \"nist_atomic_bridge\",")
+    println("  \"origin\": \"hive raw 70 design-multi-axis-verify-grid + raw 73 structural-admissibility\",")
+    println("  \"paradigm\": \"structural-admissibility (scaled-int)\",")
+    println("  \"source\": \"" + source + "\",")
+    println("  \"rydberg_inv_m\": " + _fmt_rydberg(ryd) + ",")
+    println("  \"bohr_m\": \"" + _fmt_bohr_sci(bohr) + "\",")
+    println("  \"hartree_eV\": " + _fmt_hartree(hart) + ",")
+    println("  \"h_ionization_eV\": " + _fmt_hartree(h_ion_ev_scaled) + ",")
+    println("  \"first_6_elements\": [")
+    let zs = FIRST_6_Z()
+    let syms = FIRST_6_SYMBOLS()
+    let ions = FIRST_6_IONIZATION_MEV()
+    let mut i = 0
+    while i < len(zs) {
+        let z: i64 = zs[i]
+        let s: string = syms[i]
+        let ion: i64 = ions[i]
+        let comma = if i < len(zs) - 1 { "," } else { "" }
+        println("    {\"symbol\": \"" + s + "\", \"Z\": " + to_string(z) + ", \"ionization_eV\": " + _fmt_mev_to_ev(ion) + "}" + comma)
+        i = i + 1
+    }
+    println("  ],")
+    println("  \"n6_anchor\": {\"Z\": " + to_string(N6_ANCHOR_Z()) + ", \"symbol\": \"" + N6_ANCHOR_SYMBOL() + "\", \"binding\": \"diamond_sp3_tetrahedral_n6_L1\"},")
+    println("  \"axis_bindings\": [\"axis_constants.rydberg\", \"axis_constants.bohr_radius\", \"axis_constants.hartree_eV\", \"axis_atomic_spectra.first_6_Z_ionization\"]")
+    println("}")
+}
+
+fn _emit_element_only(symbol: string) {
+    let idx = _find_element(symbol)
+    if idx < 0 {
+        eprintln("nist_atomic_bridge: element '" + symbol + "' not in first-6 table (H/He/Li/Be/B/C only)")
+        exit(1)
+    }
+    let zs = FIRST_6_Z()
+    let syms = FIRST_6_SYMBOLS()
+    let ions = FIRST_6_IONIZATION_MEV()
+    let z: i64 = zs[idx]
+    let s: string = syms[idx]
+    let ion: i64 = ions[idx]
+    let anchor = if z == N6_ANCHOR_Z() { " (n6 L1 anchor: diamond sp3)" } else { "" }
+    println("element=" + s + " Z=" + to_string(z) + " first_ionization_eV=" + _fmt_mev_to_ev(ion) + anchor)
+    exit(0)
+}
+
+// ─── main ───
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut json_mode = false
+    let mut no_fetch = false
+    let mut element_query = ""
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { _selftest() }
+        else if a == "--json" { json_mode = true }
+        else if a == "--no-fetch" { no_fetch = true }
+        else if a == "--element" {
+            if i + 1 >= len(cli) { eprintln("nist_atomic_bridge: --element requires a symbol"); exit(1) }
+            element_query = cli[i + 1]
+            i = i + 1
+        }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/nist_atomic_bridge.hexa [--selftest] [--json] [--no-fetch] [--element <symbol>]")
+            println("  --selftest          : 9-check internal verification, exit 0/1")
+            println("  --json              : emit JSON object on stdout")
+            println("  --no-fetch          : skip NIST curl, use hardcoded CODATA 2022 fallback")
+            println("  --element <symbol>  : print only that element's first-ionization (H/He/Li/Be/B/C)")
+            println("origin: hive raw 70/73/77 — atomic-axis bridge: Rydberg + Bohr + Hartree + Z=1..6 anchor (C=Z6 diamond)")
+            exit(0)
+        }
+        else {
+            eprintln("nist_atomic_bridge: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    if len(element_query) > 0 { _emit_element_only(element_query) }
+
+    let mut ryd: i64 = FALLBACK_RYDBERG()
+    let mut bohr: i64 = FALLBACK_BOHR_MANT()
+    let mut hart: i64 = FALLBACK_HARTREE_EV()
+    let mut source: string = "fallback:CODATA-2022-hardcoded"
+
+    if !no_fetch {
+        let text = fetch_nist_text()
+        if len(text) == 0 {
+            source = "fallback:fetch-failed (CODATA-2022-hardcoded)"
+        } else {
+            let blk = parse_nist_block(text)
+            let bf: i64 = blk[3]
+            if bf == 7 {
+                ryd = blk[0]
+                bohr = blk[1]
+                hart = blk[2]
+                source = "live:nist.gov/cuu/Constants/Table/allascii.txt"
+            } else if bf > 0 {
+                // partial parse — accept what we got, mark partial
+                if (bf % 2) == 1 { ryd = blk[0] }
+                if ((bf / 2) % 2) == 1 { bohr = blk[1] }
+                if ((bf / 4) % 2) == 1 { hart = blk[2] }
+                source = "live-partial:nist.gov/cuu/Constants/Table/allascii.txt (flags=" + to_string(bf) + ")"
+            } else {
+                source = "fallback:parse-failed (CODATA-2022-hardcoded)"
+            }
+        }
+    }
+
+    // H ionization stays at fallback (NIST Lyman-limit value, not Hartree/2)
+    let h_ion = FALLBACK_H_IONIZATION_EV()
+
+    if json_mode { _emit_json(ryd, bohr, hart, source, h_ion) }
+    else { _emit_text(ryd, bohr, hart, source, h_ion) }
+
+    // sanity sentinel: rydberg in [10973000.0, 10974000.0], bohr mantissa in [528000000000, 530000000000], hartree in [27.0, 27.5]
+    let ryd_lo: i64 = 10973000000000
+    let ryd_hi: i64 = 10974000000000
+    let bohr_lo: i64 = 528000000000     // 5.28 × 10^11 (mantissa scaled by 10^11)
+    let bohr_hi: i64 = 530000000000     // 5.30 × 10^11
+    let hart_lo: i64 = 27000000000000
+    let hart_hi: i64 = 27500000000000
+    let sane = ryd >= ryd_lo && ryd <= ryd_hi && bohr >= bohr_lo && bohr <= bohr_hi && hart >= hart_lo && hart <= hart_hi
+    if !sane {
+        println("__NIST_ATOMIC_BRIDGE__ FAIL rydberg=" + _fmt_rydberg(ryd) + " bohr_radius=" + _fmt_bohr_sci(bohr) + " hartree_eV=" + _fmt_hartree(hart))
+        exit(2)
+    }
+    println("__NIST_ATOMIC_BRIDGE__ PASS rydberg=" + _fmt_rydberg(ryd) + " bohr_radius=" + _fmt_bohr_sci(bohr) + " hartree_eV=" + _fmt_hartree(hart))
+    exit(0)
+}
