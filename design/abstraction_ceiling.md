@@ -289,20 +289,31 @@ L11 canon 으로 자기-축 진화 사다리 (L5 dream → L11 canon) closed. fo
 - subgraph (giant only): −0.03
 - domain induced: −0.17~−0.38
 - chain/tree/cycle/small-world: −0.015~−0.06 (정형 = regular)
-- **Erdős–Rényi (random network)**: **+0.0037** ★ 유일 +
-- ER separate two-block (200×2): **+0.018** sweet spot
-- ER single big block (800): −0.022 (over-chaotic)
+- **Erdős–Rényi (random network)**: **+0.003 ~ +0.0037** ★ 유일 +
 - avg_deg ~4 sparse: 정확한 chaos 양
 
-**진정한 nxs-002 mechanism (현재 session 도달 limit)**:
+**ER block sweep 실측** (2026-04-25 follow-up cycle, scipy pipeline, baseline=0.83221):
+
+| config | composite | Δ |
+|---|---|---|
+| 1×400 p=0.005 (single big) | 0.80243 | −0.030 (over-chaotic) |
+| **2×200 avg_deg=4 (sweet spot)** | **0.83552** | **+0.0033** ✅ |
+| 3×200 avg_deg=4 | 0.80243 | −0.030 |
+| 4×200 avg_deg=4 | 0.79053 | −0.042 |
+| 5×200 avg_deg=4 | 0.79763 | −0.035 |
+| 8×200 avg_deg=4 | 0.81571 | −0.017 |
+| 4×100 p=0.04 | 0.80369 | −0.029 |
+| 4×400 p=0.01 | 0.80677 | −0.025 |
+
+**진정한 nxs-002 mechanism (실측 확인)**:
 - atlas hub-and-spoke = regular spectrum
 - 정형 chain/tree/cycle = 다른 종류 regular
-- **uniform random pairing (sparse ER, avg_deg ~4) only +**
-- drill 의 axiom-driven discovery 가 **multiple isolated ER components** 형태여야 0.9 도달
+- **uniform random pairing (sparse ER, avg_deg ~4) only +** — 단 magnitude 매우 제한적
+- **block scaling 음**: 3-block 이상 추가 시 모두 negative — multi-block 늘려도 ceiling 못 깸. 2×200 단일 sweet spot 만 실효
 
-**simulation ceiling**: 0.85 (현재 0.832 + ER ROI maximum +0.018). 0.9 = 단순 graph 변경으로 도달 불가, drill engine 의 axiom 자체 재설계 필요.
+**simulation ceiling 정정**: **0.835** (baseline 0.83221 + sweet 2×200 +0.0033 = 0.83552). 이전 추정 0.85 (+0.018 가정) 는 6× 과대평가. gap 0.067 중 ER 로 메울 수 있는 건 약 5% (0.003/0.067). 0.9 도달 = drill engine 의 axiom 자체 재설계 필요 — 결론 강화.
 
-**측정 도구**: `tool/nxs_002_composite.py` (174 lines, scipy pipeline, 1.36s) — atlas.blowup.jsonl 변경 후 즉시 ROI 측정.
+**측정 도구**: `tool/nxs_002_composite.py` (~220 lines, scipy pipeline, 1.0~3.5s) — `--predict-er [--er-blocks N --er-block-size N --er-p X]` 로 multi-block ER 시뮬 가능. atlas.blowup.jsonl 변경 후 즉시 ROI 측정.
 
 **Ω-saturation cycle**: 본 §6 finding 은 simulation 의 saturation 도달 산물. raw#37/#38 (hexa-lang/self/raws/omega_saturation_cycle.hexa) 가 plan-side + implementation-side pair 강제 — design-only commit chain 차단.
 

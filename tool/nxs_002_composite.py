@@ -138,29 +138,33 @@ def composite_aligned(A_R2, B_R2, atlas_score=0.224128, const_score=0.358117, la
     }
 
 def predict_er_roi(A_base, n_base, R2_const, K=100, sigma=1e-3,
-                   N_new=400, p=0.005, n_runs=1):
+                   n_blocks=1, block_size=400, p=0.005, n_runs=1, seed_base=2026):
     """
-    Ω-saturation cycle 2026-04-25 finding:
-      sparse ER (avg_deg ~4) multiple isolated components 가 + ROI source.
-      drill 발사 전 baseline atlas 에 가상 ER batch 시뮬해서 추정 ROI 를 미리 측정.
-    Returns: dict with predicted Δ.
+    Ω-saturation cycle 2026-04-25 finding (Δ-cycle 후속 정정):
+      sparse ER multi-block 시뮬. 실측 sweet spot 은 2×200 avg_deg=4 한 곳
+      (Δ ≈ +0.003); 1-block 또는 3+ blocks 모두 negative — multi-block scaling 음.
+      본 함수는 임의 (n_blocks, block_size, p) 측정용.
     """
     from scipy.sparse import csr_matrix
     coo = A_base.tocoo()
     base_rows = list(coo.row); base_cols = list(coo.col)
     deltas = []
     for run in range(n_runs):
-        np.random.seed(2026 + run)
-        new_idx = list(range(n_base, n_base + N_new))
+        rng = np.random.RandomState(seed_base + run)
         rows = list(base_rows); cols = list(base_cols)
-        for i in range(N_new):
-            for j in range(i+1, N_new):
-                if np.random.rand() < p:
-                    a, b = new_idx[i], new_idx[j]
-                    rows.extend([a, b]); cols.extend([b, a])
-        hub = np.random.randint(0, n_base)
-        rows.extend([new_idx[0], int(hub)]); cols.extend([int(hub), new_idx[0]])
-        n_total = n_base + N_new
+        cur = n_base
+        for _b in range(n_blocks):
+            idx = list(range(cur, cur + block_size))
+            for i in range(block_size):
+                for j in range(i+1, block_size):
+                    if rng.rand() < p:
+                        a, b = idx[i], idx[j]
+                        rows.extend([a, b]); cols.extend([b, a])
+            anchor = rng.randint(0, n_base)
+            rows.extend([idx[0], int(anchor)])
+            cols.extend([int(anchor), idx[0]])
+            cur += block_size
+        n_total = cur
         A_new = csr_matrix((np.ones(len(rows)), (np.array(rows), np.array(cols))), shape=(n_total, n_total))
         A_new.sum_duplicates(); A_new.data[:] = 1.0
         vals = laplacian_eigenvalues(A_new, K=K, sigma=sigma)
@@ -169,7 +173,7 @@ def predict_er_roi(A_base, n_base, R2_const, K=100, sigma=1e-3,
     return {
         "predicted_composites": [round(d, 5) for d in deltas],
         "mean_composite_after": round(sum(deltas)/len(deltas), 5),
-        "N_new": N_new, "p": p, "n_runs": n_runs,
+        "n_blocks": n_blocks, "block_size": block_size, "p": p, "n_runs": n_runs,
     }
 
 def main():
@@ -180,7 +184,15 @@ def main():
     ap.add_argument("--sigma", type=float, default=1e-3)
     ap.add_argument("--target", type=float, default=0.9)
     ap.add_argument("--predict-er", action="store_true",
-                    help="가상 ER batch (N=400 p=0.005) 시뮬레이션 추가 — drill 발사 전 ROI 추정")
+                    help="가상 ER batch 시뮬레이션 추가 — drill 발사 전 ROI 추정")
+    ap.add_argument("--er-blocks", type=int, default=1,
+                    help="ER block 수 (sweet spot 2; 3+ block 은 음 ROI)")
+    ap.add_argument("--er-block-size", type=int, default=400,
+                    help="block 당 노드 수 (sweet spot 200)")
+    ap.add_argument("--er-p", type=float, default=0.005,
+                    help="ER edge 확률 (sweet spot 0.020 — block_size=200 시 avg_deg=4)")
+    ap.add_argument("--er-runs", type=int, default=1,
+                    help="ER 시뮬 반복 (random seed 변동, mean 산출)")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -205,7 +217,11 @@ def main():
         "gap_to_target": round(args.target - res["composite_after"], 5),
     })
     if args.predict_er:
-        prediction = predict_er_roi(A, n, R2_const, K=args.K, sigma=args.sigma)
+        prediction = predict_er_roi(
+            A, n, R2_const, K=args.K, sigma=args.sigma,
+            n_blocks=args.er_blocks, block_size=args.er_block_size,
+            p=args.er_p, n_runs=args.er_runs,
+        )
         prediction["delta_predicted"] = round(prediction["mean_composite_after"] - res["composite_after"], 5)
         res["er_prediction"] = prediction
     print(json.dumps(res, ensure_ascii=False))
