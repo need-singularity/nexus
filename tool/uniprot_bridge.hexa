@@ -1,0 +1,502 @@
+#!hexa strict
+// tool/uniprot_bridge.hexa — UniProtKB REST live fetch + nexus connectome / morphogen / biology lens binding.
+//
+// @tool(slug="uniprot_bridge", desc="UniProtKB REST fetch (accession → fullName / sequence_length / organism / FUNCTION) + n=6 SE(3)/τ=4 anchor binding + biology lens corroboration")
+// @usage(hexa run tool/uniprot_bridge.hexa [--selftest] [--json] [--accession <ID>] [--no-fetch])
+// @exit_codes(0=PASS, 1=usage/io error, 2=value verification failure)
+// @sentinel(__UNIPROT_BRIDGE__ PASS|FAIL accession=<A> name=<N> length=<L> organism=<ORG>)
+// @origin(hive raw 70 design-multi-axis-verify-grid — molecular-biology empirical anchor for n=6 framework cross-domain corroboration)
+// @abstraction(hive raw 73 structural-admissibility — canonical {accession,fullName,sequence_length,organism} reconciliation across UniProt + biology lens)
+// @paradigm(structural-admissibility — deterministic JSON field extraction, integer-only, no float arithmetic)
+// @companion(tool/wikipedia_summary_bridge.hexa Perfect_number anchor; lenses/frontier_morphogenesis_turing.hexa, lenses/accel_connectome.hexa, lenses/fish_biology_lens.hexa)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoint: https://rest.uniprot.org/uniprotkb/<ACCESSION>.json
+//   e.g.    https://rest.uniprot.org/uniprotkb/P68871.json   (Hemoglobin subunit beta, HBB_HUMAN, 147 AA)
+// Response: JSON {primaryAccession, uniProtkbId, organism:{scientificName, commonName, taxonId, ...},
+//                 sequence:{length, value, ...},
+//                 proteinDescription:{recommendedName:{fullName:{value}}, ...},
+//                 comments:[{commentType:"FUNCTION", texts:[{value: "..."}]}, ...]}
+//
+// Fallback (n=6 anchor set, used on --no-fetch / network failure):
+//   1. P68871  HBB_HUMAN   "Hemoglobin subunit beta"            len=147   Homo sapiens     (4-tier oxygen carrier; α2β2 = 4 = τ subunit count)
+//   2. P00533  EGFR_HUMAN  "Epidermal growth factor receptor"   len=1210  Homo sapiens     (RTK signal-transduction)
+//   3. P04637  P53_HUMAN   "Cellular tumor antigen p53"         len=393   Homo sapiens     (tumor suppressor; transcription factor)
+//   4. P01308  INS_HUMAN   "Insulin"                            len=110   Homo sapiens     (hormone; A+B chain disulfide)
+//   5. P00395  COX1_HUMAN  "Cytochrome c oxidase subunit 1"     len=513   Homo sapiens     (mitochondrial respiratory complex IV)
+//   6. P42212  GFP_AEQVI   "Green fluorescent protein"          len=238   Aequorea victoria (auto-fluorescent reporter)
+//
+// n=6 anchor (honest-weak): the 20 standard amino-acid residues do NOT bind to n=6 directly.
+// Strongest available bindings:
+//   (a) SE(3)=6 backbone DoF per residue (3 translation + 3 rotation) — every protein in the set carries this anchor.
+//   (b) hemoglobin α2β2 quaternary = 4 = τ subunits (separate τ=4 anchor, not n=6).
+//   (c) n_fallback = 6 reference proteins (the anchor set itself).
+// Verdict reported as `n6_anchor_strength="weak: SE(3)/protein-backbone DoF only; τ=4 quaternary on HBB"`.
+
+// ─── void-safe helpers ───
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn _esc_json(s: string) -> string {
+    let mut r = s.replace("\\", "\\\\")
+    r = r.replace("\"", "\\\"")
+    r = r.replace("\n", " ")
+    r = r.replace("\r", " ")
+    r = r.replace("\t", " ")
+    return r
+}
+
+fn _truncate(s: string, n: i64) -> string {
+    if len(s) <= n { return s }
+    return s.substring(0, n) + "..."
+}
+
+fn _is_ws(c: string) -> bool {
+    return c == " " || c == "\t" || c == "\n" || c == "\r"
+}
+
+fn _is_digit(c: string) -> bool {
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4"
+        || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn _str_to_i(s: string) -> i64 {
+    if len(s) == 0 { return 0 }
+    let mut acc: i64 = 0
+    let mut i = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "0" { acc = acc * 10 }
+        else if c == "1" { acc = acc * 10 + 1 }
+        else if c == "2" { acc = acc * 10 + 2 }
+        else if c == "3" { acc = acc * 10 + 3 }
+        else if c == "4" { acc = acc * 10 + 4 }
+        else if c == "5" { acc = acc * 10 + 5 }
+        else if c == "6" { acc = acc * 10 + 6 }
+        else if c == "7" { acc = acc * 10 + 7 }
+        else if c == "8" { acc = acc * 10 + 8 }
+        else if c == "9" { acc = acc * 10 + 9 }
+        i = i + 1
+    }
+    return acc
+}
+
+fn _skip_ws(s: string, start: i64, n: i64) -> i64 {
+    let mut i = start
+    while i < n {
+        let c = s.substring(i, i + 1)
+        if !_is_ws(c) { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+// ─── minimal JSON extractors ───
+// We only need: top-level "primaryAccession" / "uniProtkbId" (strings),
+//               nested "organism".scientificName (string),
+//               nested "sequence".length (int),
+//               nested "proteinDescription".recommendedName.fullName.value (string, FIRST occurrence is canonical),
+//               nested "comments"[FUNCTION].texts[0].value (string, FIRST FUNCTION block).
+//
+// Strategy: brute-force literal search for distinctive prefix patterns. UniProt JSON is
+// well-formed and the prefixes we look for occur only in the contexts we want.
+
+// Find first string-valued occurrence of "<key>":"VALUE" anywhere in json_text starting at `from`.
+fn _find_str_after(json_text: string, key: string, from: i64) -> string {
+    let needle = "\"" + key + "\""
+    let n = len(json_text)
+    let mut search_from = from
+    while search_from < n {
+        let kp = json_text.substring(search_from, n).index_of(needle)
+        if kp < 0 { return "" }
+        let key_pos = search_from + kp
+        let after_key = key_pos + len(needle)
+        let colon_pos = _skip_ws(json_text, after_key, n)
+        if colon_pos < 0 { return "" }
+        if json_text.substring(colon_pos, colon_pos + 1) != ":" {
+            search_from = after_key
+            continue
+        }
+        let val_pos = _skip_ws(json_text, colon_pos + 1, n)
+        if val_pos < 0 { return "" }
+        if json_text.substring(val_pos, val_pos + 1) != "\"" {
+            search_from = after_key
+            continue
+        }
+        let mut j = val_pos + 1
+        let mut out = ""
+        while j < n {
+            let c = json_text.substring(j, j + 1)
+            if c == "\\" {
+                if j + 1 >= n { return out }
+                let nxt = json_text.substring(j + 1, j + 2)
+                if nxt == "\"" { out = out + "\"" }
+                else if nxt == "\\" { out = out + "\\" }
+                else if nxt == "/" { out = out + "/" }
+                else if nxt == "n" { out = out + " " }
+                else if nxt == "t" { out = out + " " }
+                else if nxt == "r" { out = out + " " }
+                else if nxt == "u" {
+                    out = out + " "
+                    j = j + 4
+                }
+                else { out = out + nxt }
+                j = j + 2
+                continue
+            }
+            if c == "\"" { return out }
+            out = out + c
+            j = j + 1
+        }
+        return out
+    }
+    return ""
+}
+
+fn _find_str_field(json_text: string, key: string) -> string {
+    return _find_str_after(json_text, key, 0)
+}
+
+// Find first integer-valued occurrence of "<key>":NUMBER.
+fn _find_int_field(json_text: string, key: string) -> i64 {
+    let needle = "\"" + key + "\""
+    let n = len(json_text)
+    let mut search_from = 0
+    while search_from < n {
+        let kp = json_text.substring(search_from, n).index_of(needle)
+        if kp < 0 { return -1 }
+        let key_pos = search_from + kp
+        let after_key = key_pos + len(needle)
+        let colon_pos = _skip_ws(json_text, after_key, n)
+        if colon_pos < 0 { return -1 }
+        if json_text.substring(colon_pos, colon_pos + 1) != ":" {
+            search_from = after_key
+            continue
+        }
+        let val_pos = _skip_ws(json_text, colon_pos + 1, n)
+        if val_pos < 0 { return -1 }
+        let opener = json_text.substring(val_pos, val_pos + 1)
+        if !_is_digit(opener) {
+            search_from = after_key
+            continue
+        }
+        let mut j = val_pos
+        let mut digits = ""
+        while j < n {
+            let c = json_text.substring(j, j + 1)
+            if !_is_digit(c) { break }
+            digits = digits + c
+            j = j + 1
+        }
+        return _str_to_i(digits)
+    }
+    return -1
+}
+
+// Extract organism.scientificName: locate the literal '"organism":{' block then read scientificName inside.
+fn _find_organism(json_text: string) -> string {
+    let anchor = "\"organism\":{"
+    let p = json_text.index_of(anchor)
+    if p < 0 { return "" }
+    return _find_str_after(json_text, "scientificName", p)
+}
+
+// Extract canonical fullName (proteinDescription.recommendedName.fullName.value).
+// The FIRST "recommendedName":{"fullName":{"value":"..."} sequence is the canonical name;
+// later occurrences inside contains[]/alternativeNames are subordinate.
+fn _find_full_name(json_text: string) -> string {
+    let anchor = "\"recommendedName\":{\"fullName\":{\"value\":"
+    let p = json_text.index_of(anchor)
+    if p < 0 {
+        // fall back to plain recommendedName lookup
+        let p2 = json_text.index_of("\"recommendedName\"")
+        if p2 < 0 { return "" }
+        return _find_str_after(json_text, "value", p2)
+    }
+    return _find_str_after(json_text, "value", p)
+}
+
+// Extract first FUNCTION comment text (comments[].commentType == "FUNCTION", texts[0].value).
+// UniProt JSON layout: ...{"texts":[{"evidences":[...],"value":"<TEXT>"}],"commentType":"FUNCTION"}...
+// Strategy: locate `"commentType":"FUNCTION"`, then scan backwards from there for the LAST
+// occurrence of `"value":"` (which is inside the same comment object's texts[] array).
+fn _find_function_brief(json_text: string) -> string {
+    let anchor = "\"commentType\":\"FUNCTION\""
+    let p = json_text.index_of(anchor)
+    if p < 0 { return "" }
+    let win_start = if p > 4096 { p - 4096 } else { 0 }
+    let window = json_text.substring(win_start, p)
+    let needle = "\"value\":\""
+    // find the LAST occurrence of needle within window by repeatedly advancing
+    let mut search_from = 0
+    let mut last_rel = -1
+    let wn = len(window)
+    while search_from < wn {
+        let off = window.substring(search_from, wn).index_of(needle)
+        if off < 0 { break }
+        last_rel = search_from + off
+        search_from = last_rel + 1
+    }
+    if last_rel < 0 { return "" }
+    let abs_pos = win_start + last_rel
+    return _find_str_after(json_text, "value", abs_pos)
+}
+
+// ─── HTTP fetch ───
+
+fn _url_for(accession: string) -> string {
+    return "https://rest.uniprot.org/uniprotkb/" + accession + ".json"
+}
+
+fn fetch_entry(accession: string) -> string {
+    let url = _url_for(accession)
+    let cmd = "curl -s --max-time 20 -H 'accept: application/json' '" + url + "' 2>/dev/null"
+    return _str(exec(cmd))  // @allow-bare-exec
+}
+
+// ─── fallback table (n=6 anchor proteins) ───
+// columns: [accession, uniProtkbId, fullName, length, organism, function_brief]
+
+fn _fallback_table() -> array {
+    return [
+        ["P68871", "HBB_HUMAN",  "Hemoglobin subunit beta",          147,  "Homo sapiens",      "Involved in oxygen transport from the lung to the various peripheral tissues"],
+        ["P00533", "EGFR_HUMAN", "Epidermal growth factor receptor", 1210, "Homo sapiens",      "Receptor tyrosine kinase binding ligands of the EGF family and activating signaling cascades"],
+        ["P04637", "P53_HUMAN",  "Cellular tumor antigen p53",       393,  "Homo sapiens",      "Acts as a tumor suppressor; induces growth arrest or apoptosis in response to stress"],
+        ["P01308", "INS_HUMAN",  "Insulin",                          110,  "Homo sapiens",      "Insulin decreases blood glucose; key regulator of carbohydrate and lipid metabolism"],
+        ["P00395", "COX1_HUMAN", "Cytochrome c oxidase subunit 1",   513,  "Homo sapiens",      "Component of cytochrome c oxidase, the last enzyme of the mitochondrial respiratory chain"],
+        ["P42212", "GFP_AEQVI",  "Green fluorescent protein",        238,  "Aequorea victoria", "Energy-transfer acceptor; fluorescence emission upon UV/blue excitation"]
+    ]
+}
+
+fn _fallback_for(accession: string) -> array {
+    let tbl = _fallback_table()
+    let mut i = 0
+    while i < len(tbl) {
+        let row = tbl[i]
+        if _str(row[0]) == accession { return row }
+        i = i + 1
+    }
+    return []
+}
+
+// ─── core: verify one accession ───
+// returns [accession, uniProtkbId, fullName, length_str, organism, function_brief, source, ok, fails_csv]
+
+fn verify_accession(accession: string, allow_fetch: bool) -> array {
+    let mut uniprot_id = ""
+    let mut full_name = ""
+    let mut length: i64 = -1
+    let mut organism = ""
+    let mut function_brief = ""
+    let mut source = "fallback"
+    let mut fails = []
+
+    if allow_fetch {
+        let body = fetch_entry(accession)
+        if len(body) > 200 {
+            uniprot_id = _find_str_field(body, "uniProtkbId")
+            full_name = _find_full_name(body)
+            organism = _find_organism(body)
+            // sequence.length is an int; we look for the first "length" int field
+            // (UniProt entries put it inside "sequence":{...} early in the doc)
+            length = _find_int_field(body, "length")
+            function_brief = _find_function_brief(body)
+            if len(uniprot_id) > 0 && length > 0 && len(full_name) > 0 {
+                source = "live"
+            } else {
+                fails.push("live_parse_partial")
+            }
+        } else {
+            fails.push("fetch_empty_or_short")
+        }
+    }
+
+    if source == "fallback" {
+        let row = _fallback_for(accession)
+        if len(row) == 6 {
+            uniprot_id = _str(row[1])
+            full_name = _str(row[2])
+            length = row[3]
+            organism = _str(row[4])
+            function_brief = _str(row[5])
+        } else {
+            fails.push("no_fallback_for_" + accession)
+        }
+    }
+
+    if len(uniprot_id) == 0 { fails.push("uniprot_id_empty") }
+    if len(full_name) == 0 { fails.push("full_name_empty") }
+    if length <= 0 { fails.push("length_invalid") }
+    if len(organism) == 0 { fails.push("organism_empty") }
+
+    let ok = if len(fails) == 0 { "true" } else { "false" }
+    return [accession, uniprot_id, full_name, to_string(length), organism, function_brief, source, ok, fails.join("; ")]
+}
+
+// ─── n=6 binding hint ───
+fn _n6_hint(accession: string) -> string {
+    if accession == "P68871" {
+        return "weak: protein-backbone SE(3)=6 DoF/residue; HBB α2β2 quaternary=4=τ (separate anchor)"
+    }
+    return "weak: protein-backbone SE(3)=6 DoF/residue (3 translation + 3 rotation per residue)"
+}
+
+// ─── emitters ───
+
+fn _emit_text(r: array) {
+    println("UNIPROT_ACCESSION  : " + _str(r[0]))
+    println("uniprot_id         : " + _str(r[1]))
+    println("full_name          : " + _str(r[2]))
+    println("sequence_length    : " + _str(r[3]))
+    println("organism           : " + _str(r[4]))
+    println("function_brief     : " + _truncate(_str(r[5]), 200))
+    println("source             : " + _str(r[6]))
+    println("ok                 : " + _str(r[7]))
+    if _str(r[8]) != "" { println("fails              : " + _str(r[8])) }
+    println("source_url         : " + _url_for(_str(r[0])))
+    println("n6_binding_hint    : " + _n6_hint(_str(r[0])))
+    println("---")
+}
+
+fn _emit_json_one(r: array) {
+    let acc = _str(r[0])
+    let fn_brief = _esc_json(_truncate(_str(r[5]), 240))
+    println("{")
+    println("  \"tool\": \"uniprot_bridge\",")
+    println("  \"origin\": \"hive raw 70/73 — molecular-biology empirical anchor for n=6 framework cross-domain corroboration\",")
+    println("  \"accession\": \"" + _esc_json(acc) + "\",")
+    println("  \"uniprot_id\": \"" + _esc_json(_str(r[1])) + "\",")
+    println("  \"full_name\": \"" + _esc_json(_str(r[2])) + "\",")
+    println("  \"sequence_length\": " + _str(r[3]) + ",")
+    println("  \"organism_scientific_name\": \"" + _esc_json(_str(r[4])) + "\",")
+    println("  \"function_brief\": \"" + fn_brief + "\",")
+    println("  \"source\": \"" + _esc_json(_str(r[6])) + "\",")
+    println("  \"ok\": " + _str(r[7]) + ",")
+    println("  \"fails\": \"" + _esc_json(_str(r[8])) + "\",")
+    println("  \"source_url\": \"" + _url_for(acc) + "\",")
+    println("  \"n6_binding_hint\": \"" + _esc_json(_n6_hint(acc)) + "\",")
+    println("  \"nexus_lens_binding\": [\"lenses/accel_connectome.hexa\", \"lenses/frontier_morphogenesis_turing.hexa\", \"lenses/fish_biology_lens.hexa\"]")
+    println("}")
+}
+
+fn _emit_json_multi(results: array, all_ok: bool) {
+    println("{")
+    println("  \"tool\": \"uniprot_bridge\",")
+    println("  \"origin\": \"hive raw 70/73 — molecular-biology empirical anchor for n=6 framework cross-domain corroboration\",")
+    println("  \"references\": [")
+    let mut k = 0
+    while k < len(results) {
+        let r = results[k]
+        let trail = if k + 1 < len(results) { "," } else { "" }
+        let acc = _str(r[0])
+        println("    {\"accession\": \"" + _esc_json(acc) + "\", \"uniprot_id\": \"" + _esc_json(_str(r[1])) + "\", \"full_name\": \"" + _esc_json(_str(r[2])) + "\", \"sequence_length\": " + _str(r[3]) + ", \"organism\": \"" + _esc_json(_str(r[4])) + "\", \"function_brief\": \"" + _esc_json(_truncate(_str(r[5]), 200)) + "\", \"source\": \"" + _esc_json(_str(r[6])) + "\", \"ok\": " + _str(r[7]) + ", \"fails\": \"" + _esc_json(_str(r[8])) + "\", \"source_url\": \"" + _url_for(acc) + "\", \"n6_binding_hint\": \"" + _esc_json(_n6_hint(acc)) + "\"}" + trail)
+        k = k + 1
+    }
+    println("  ],")
+    let cons = if all_ok { "true" } else { "false" }
+    println("  \"all_references_ok\": " + cons + ",")
+    println("  \"n_fallback_anchor\": 6,")
+    println("  \"n6_anchor_strength\": \"weak: SE(3)=6 backbone DoF per residue (universal); τ=4 quaternary on HBB (separate anchor); n_fallback=6 reference proteins\",")
+    println("  \"nexus_lens_binding\": [\"lenses/accel_connectome.hexa\", \"lenses/frontier_morphogenesis_turing.hexa\", \"lenses/fish_biology_lens.hexa\", \"lenses/n6_morphogenesis.hexa\"],")
+    println("  \"discovery_log_candidate\": \"uniprot_bridge:selftest:6_refs:all_ok=" + cons + "\"")
+    println("}")
+}
+
+// ─── runners ───
+
+fn run_selftest(json_mode: bool, allow_fetch: bool) {
+    let tbl = _fallback_table()
+    let mut results = []
+    let mut all_ok = true
+    let mut i = 0
+    while i < len(tbl) {
+        let acc = _str(tbl[i][0])
+        let r = verify_accession(acc, allow_fetch)
+        results.push(r)
+        if _str(r[7]) != "true" { all_ok = false }
+        i = i + 1
+    }
+
+    if json_mode { _emit_json_multi(results, all_ok) }
+    else {
+        let mut k = 0
+        while k < len(results) {
+            _emit_text(results[k])
+            k = k + 1
+        }
+    }
+
+    // sentinel uses the first entry (HBB) as primary witness
+    let primary = results[0]
+    let verdict = if all_ok { "PASS" } else { "FAIL" }
+    println("__UNIPROT_BRIDGE__ " + verdict + " accession=" + _str(primary[0]) + " name=\"" + _str(primary[2]) + "\" length=" + _str(primary[3]) + " organism=\"" + _str(primary[4]) + "\" refs=6 all_ok=" + (if all_ok { "true" } else { "false" }))
+    if verdict == "PASS" { exit(0) }
+    exit(2)
+}
+
+fn run_single(accession: string, json_mode: bool, allow_fetch: bool) {
+    let r = verify_accession(accession, allow_fetch)
+    if json_mode { _emit_json_one(r) }
+    else { _emit_text(r) }
+    let ok = _str(r[7])
+    if ok != "true" {
+        println("__UNIPROT_BRIDGE__ FAIL accession=" + accession + " name=\"" + _str(r[2]) + "\" length=" + _str(r[3]) + " organism=\"" + _str(r[4]) + "\" fails=" + _str(r[8]))
+        exit(2)
+    }
+    println("__UNIPROT_BRIDGE__ PASS accession=" + accession + " name=\"" + _str(r[2]) + "\" length=" + _str(r[3]) + " organism=\"" + _str(r[4]) + "\"")
+    exit(0)
+}
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut mode = "selftest"
+    let mut accession = "P68871"
+    let mut json_mode = false
+    let mut allow_fetch = true
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { mode = "selftest" }
+        else if a == "--json" { json_mode = true }
+        else if a == "--no-fetch" { allow_fetch = false }
+        else if a == "--accession" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                accession = cli[i]
+                mode = "single"
+            } else {
+                eprintln("uniprot_bridge: --accession requires <ID>")
+                exit(1)
+            }
+        }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/uniprot_bridge.hexa [--selftest] [--json] [--accession <ID>] [--no-fetch]")
+            println("  --selftest         6-reference fetch (P68871/P00533/P04637/P01308/P00395/P42212) + n=6 anchor")
+            println("  --accession <ID>   fetch single UniProtKB entry; default 'P68871' (Hemoglobin subunit beta)")
+            println("  --json             emit JSON object on stdout")
+            println("  --no-fetch         skip live fetch, use hardcoded fallback only (n=6 anchor proteins)")
+            println("origin: hive raw 70/73 — molecular-biology empirical anchor + connectome/morphogen/biology lens corroboration")
+            exit(0)
+        }
+        else {
+            eprintln("uniprot_bridge: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    if mode == "single" { run_single(accession, json_mode, allow_fetch) }
+    else { run_selftest(json_mode, allow_fetch) }
+}
