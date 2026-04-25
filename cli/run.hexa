@@ -182,6 +182,8 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
+    println("  omega --seed \"...\"                APEX (L_ω) — drill apex preset (depth=auto, speculate=3, adaptive=on). 앞으로의 메인.")
+    println("        모든 drill 옵션 그대로 호환 — drill 의 super-set, 기본값만 apex 로 설정.")
     println("  drill --seed \"...\" [--max-rounds N] [--engine mk9|mk10] [--preset fast|probe|coarse|standard]")
     println("        [--problem riemann|bsd|hodge|navier|pnp|poincare|yangmills]   per-millennium preset (drill.json .problem_presets)")
     println("        category layer: seed → analysis|number|algebra|topology|logic|geometry auto-detect (NEXUS_CATEGORY_OFF=1 비활성)")
@@ -3805,6 +3807,19 @@ fn _batch_shared_cleanup() -> void {
     eprintln("NEXUS_DRILL_BATCH_INIT {\"op\":\"cleanup\"}")
 }
 
+// ─── omega — APEX (L_ω) orchestrator (2026-04-25) ───
+// 사다리 위계: L1 atomic → L2 drill (round loop) → L3 fan-out → L4 super-orch → ... → L_ω omega.
+// 의미: 「도달 가능한 최상위 통합 명령」. drill 위에 apex preset (depth=auto, speculate=3, adaptive=on) 자동 적용.
+// 호환: --seed 외 모든 drill 플래그 그대로 사용 가능 — user 지정값이 apex 기본값 우선.
+// 명명 근거: design/abstraction_ceiling.md — 그리스 Ω + 무한 서수 ω + Chaitin Ω 정보천장 3 축 매핑.
+fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str) -> void {
+    println("⊙ omega — APEX orchestration (L_ω, drill apex preset)")
+    // apex defaults — user 가 명시한 값이 있으면 그대로 유지
+    let _depth = if master_depth.len() > 0 { master_depth } else { "auto" }
+    let _spec = if speculate_flag.len() > 0 { speculate_flag } else { "3" }
+    cmd_drill(seed, max_rounds, engine_flag, preset, _depth, per_stage_depths, true, resume_flag, checkpoint_dir, problem, _spec)
+}
+
 // ─── E12 batch drill wrapper (2026-04-21) ───
 // SSOT: shared/config/drill.json .seed_batch
 // Sequential iterate — seed N 개를 순차 cmd_drill 호출. engine_daemon 미구현 시 naive 반복.
@@ -4400,6 +4415,33 @@ fn main() -> void {
     }
     if sub == "absolute" {
         cmd_absolute(find_flag(a, "--seed", ""))
+        return
+    }
+    if sub == "omega" {
+        // L_ω apex — drill apex preset (depth=auto, speculate=3, adaptive=on).
+        // 모든 drill 플래그 호환 — user 지정값이 apex 기본값 우선.
+        let _smash_d = _parse_flag_int(a, "--smash-depth")
+        let _free_d  = _parse_flag_int(a, "--free-dfs")
+        let _abs_d   = _parse_flag_int(a, "--abs-depth")
+        let _meta_d  = _parse_flag_int(a, "--meta-depth")
+        let _hyper_d = _parse_flag_int(a, "--hyper-depth")
+        let _res_d   = _parse_flag_int(a, "--res-depth")
+        let per_stage = [_smash_d, _free_d, _abs_d, _meta_d, _hyper_d, _res_d]
+        let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
+        let resume_flag = !fresh_flag
+        cmd_omega(
+            find_flag(a, "--seed", ""),
+            find_flag(a, "--max-rounds", ""),
+            find_flag(a, "--engine", ""),
+            find_flag(a, "--preset", ""),
+            find_flag(a, "--depth", ""),
+            per_stage,
+            true,
+            resume_flag,
+            find_flag(a, "--checkpoint-dir", ""),
+            find_flag(a, "--problem", ""),
+            find_flag(a, "--speculate", "")
+        )
         return
     }
     if sub == "drill" {
