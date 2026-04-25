@@ -14,7 +14,8 @@
 #   76 if any subcheck FAIL
 #
 # Sentinel (raw 80):
-#   __HEALTH_CHECK_ALL__ <PASS|FAIL> falsifier=C/T bridge=P/T status=ok|fail
+#   __HEALTH_CHECK_ALL__ <PASS|FAIL> falsifier=C/T bridge=P/T tampered=Ft+Bt status=ok|fail
+#   (Ft = falsifier tampered count, Bt = bridge tampered count — R1 propagation)
 #
 # Compliance: raw 66 + raw 71 + raw 80
 # Origin: design/hexa_sim/2026-04-26_health_check_productionization_omega_cycle.json
@@ -42,11 +43,14 @@ F_OUT=$(bash "$TOOL_DIR/falsifier_health.sh" --quiet 2>&1); F_EC=$?
 F_LINE=$(printf '%s\n' "$F_OUT" | grep '__FALSIFIER_HEALTH__' | tail -1)
 F_TOTAL=$(printf '%s' "$F_LINE" | sed -nE 's/.*total=([0-9]+).*/\1/p'); F_TOTAL=${F_TOTAL:-0}
 F_CLEAN=$(printf '%s' "$F_LINE" | sed -nE 's/.*clean=([0-9]+).*/\1/p'); F_CLEAN=${F_CLEAN:-0}
+F_TAMP=$(printf '%s' "$F_LINE"  | sed -nE 's/.*tampered=([0-9]+).*/\1/p'); F_TAMP=${F_TAMP:-0}
 
 B_OUT=$(bash "$TOOL_DIR/bridge_health.sh" --quiet 2>&1); B_EC=$?
 B_LINE=$(printf '%s\n' "$B_OUT" | grep '__BRIDGE_HEALTH__' | tail -1)
 B_TOTAL=$(printf '%s' "$B_LINE" | sed -nE 's/.*total=([0-9]+).*/\1/p'); B_TOTAL=${B_TOTAL:-0}
 B_PASS=$(printf '%s' "$B_LINE" | sed -nE 's/.*pass=([0-9]+).*/\1/p'); B_PASS=${B_PASS:-0}
+B_TAMP=$(printf '%s' "$B_LINE" | sed -nE 's/.*tampered=([0-9]+).*/\1/p'); B_TAMP=${B_TAMP:-0}
+TAMP_TOTAL=$((F_TAMP + B_TAMP))
 
 S_OUT=$(bash "$TOOL_DIR/atlas_status_all.sh" --brief 2>&1); S_EC=$?
 S_LINE=$(printf '%s\n' "$S_OUT" | grep '__ATLAS_STATUS_ALL__' | tail -1)
@@ -61,13 +65,16 @@ if [ "$F_EC" != "0" ] || [ "$B_EC" != "0" ] || [ "$S_EC" != "0" ]; then
 fi
 
 if [ "$QUIET" = "0" ]; then
-    printf 'F: %d/%d CLEAN | B: %d/%d PASS | S: status_all_%s\n' \
-        "$F_CLEAN" "$F_TOTAL" "$B_PASS" "$B_TOTAL" "$S_STATE"
+    printf 'F: %d/%d CLEAN | B: %d/%d PASS | tampered=%d (F=%d B=%d) | S: status_all_%s\n' \
+        "$F_CLEAN" "$F_TOTAL" "$B_PASS" "$B_TOTAL" "$TAMP_TOTAL" "$F_TAMP" "$B_TAMP" "$S_STATE"
     if [ "$EXIT_CODE" = "76" ]; then
-        echo "  reason: subcheck failure (falsifier_ec=$F_EC bridge_ec=$B_EC status_ec=$S_EC)"
+        echo "  reason: subcheck failure (falsifier_ec=$F_EC bridge_ec=$B_EC status_ec=$S_EC tampered=$TAMP_TOTAL)"
         echo "  fix:    bash $TOOL_DIR/falsifier_health.sh ; bash $TOOL_DIR/bridge_health.sh ; bash $TOOL_DIR/atlas_status_all.sh --full"
+        if [ "$TAMP_TOTAL" -gt 0 ]; then
+            echo "  fix:    R1 tamper detected — audit git log of mutated files; refresh baseline if intended"
+        fi
     fi
 fi
 
-echo "__HEALTH_CHECK_ALL__ $VERDICT falsifier=$F_CLEAN/$F_TOTAL bridge=$B_PASS/$B_TOTAL status=$S_STATE"
+echo "__HEALTH_CHECK_ALL__ $VERDICT falsifier=$F_CLEAN/$F_TOTAL bridge=$B_PASS/$B_TOTAL tampered=$TAMP_TOTAL status=$S_STATE"
 exit $EXIT_CODE

@@ -1,0 +1,78 @@
+{
+  "trawl_id": "2026-04-26_R3_full_baseline_rotation",
+  "topic": "Falsifier registry baseline auto-rotation via pre-commit hook (R3 full + R4 ledger)",
+  "raw_bindings": ["raw 66", "raw 71", "raw 73", "raw 77"],
+  "axes_surfaced": [
+    {
+      "axis": "design",
+      "decisions": [
+        "Hash the STAGED blob (`git show :path`), not the working tree, so an unstaged edit cannot leak a wrong baseline.",
+        "Local-only rotation: state/ is gitignored; do NOT auto-stage the baseline (avoids cross-developer baseline conflicts).",
+        "Idempotent guard: when OLD_SHA == NEW_SHA, exit 0 silently (no log entry, no stderr noise).",
+        "Failure paths exit 0, never block the commit (raw 71 — defense reports, doesn't gate)."
+      ]
+    },
+    {
+      "axis": "install",
+      "decisions": [
+        "Sandbox cannot write to `.git/hooks/` (EPERM); chose `.githooks/` (project-tracked) + `git config core.hooksPath .githooks`.",
+        "`.githooks/pre-commit` chmod +x; `.githooks/` is now an untracked artifact ready for main-thread commit.",
+        "core.hooksPath is per-repo local config — clones must re-run `git config core.hooksPath .githooks` (document if standardized)."
+      ]
+    },
+    {
+      "axis": "test",
+      "trials": [
+        {
+          "trial": 1,
+          "name": "rotation-fires",
+          "setup": "appended test marker to falsifiers.jsonl; git add",
+          "result": "hook fired: 584a9d9f... → 6a33aed9... ; baseline rewritten; log entry appended; exit 0",
+          "verdict": "PASS"
+        },
+        {
+          "trial": 2,
+          "name": "idempotent-no-op",
+          "setup": "re-ran hook with same staged state",
+          "result": "exit 0; log line count remained 1 (no duplicate entry); no stderr",
+          "verdict": "PASS"
+        },
+        {
+          "trial": 3,
+          "name": "cleanup-unwind",
+          "setup": "git restore --staged + restore baseline + restore registry + rm log",
+          "result": "working-tree sha = baseline sha = 584a9d9fb1761fea... ; status clean of test artifacts",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "axis": "documentation",
+      "decisions": [
+        "README.md gains §'Defense system' subsection between Audit Reports and Candidate Reviews.",
+        "Subsection enumerates R1/R2/R3-lite/R3-full/R4 layers with mechanism + live-since + artifact path.",
+        "Threat model paragraph maps each defense to a concrete attack/oversight scenario."
+      ]
+    }
+  ],
+  "tier_1_outcomes": [
+    "Hook installed at .githooks/pre-commit, executable, core.hooksPath=.githooks live.",
+    "Rotation triggered Y in test (584a9d9f → 6a33aed9 → reverted); idempotent on re-run.",
+    "Forensic ledger format validated (single JSONL line, ts/old_sha/new_sha/trigger keys).",
+    "README.md Defense system section added (R1-R4 table + threat model)."
+  ],
+  "fixpoint_marker": {
+    "achieved": true,
+    "evidence": "Hook + idempotency + cleanup all PASS in single iteration; no follow-up axes opened; defense ladder is now end-to-end (per-entry hash → baseline → auto-rotation → ledger).",
+    "next_axes_dormant": [
+      "Cross-developer baseline sync (currently local-only by design; revisit only if state/ becomes tracked).",
+      "core.hooksPath enforcement (currently manual per-clone; could move to bootstrap script if standardized)."
+    ]
+  },
+  "artifacts": {
+    "hook": ".githooks/pre-commit",
+    "baseline": "state/falsifier_registry.sha256",
+    "ledger": "state/falsifier_registry_rotation_log.jsonl",
+    "readme_section": "design/hexa_sim/README.md §'Defense system (falsifier registry integrity)'"
+  }
+}

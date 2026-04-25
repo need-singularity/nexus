@@ -104,6 +104,22 @@
 
 ---
 
+## Defense system (falsifier registry integrity)
+
+Layered defenses against silent registry tampering / drift. Each layer is independently auditable; failure of one does not mask the others (raw 71 — report + rotate, never auto-promote).
+
+| Layer | Mechanism | Live since | Artifact |
+|-------|-----------|------------|----------|
+| **R1** | Per-entry `cmd_sha256` (each falsifier carries its own command hash; mutation flips the hash) | live | `falsifiers.jsonl` (`cmd_sha256` field) |
+| **R2** | Anti-spoof lint (`cmd` must end in sentinel matched by `pass` exactly; rejects literal-only commands) | live | [`../../tool/falsifier_health.sh`](../../tool/falsifier_health.sh) |
+| **R3 lite** | Whole-registry SHA256 baseline checked under `--strict` (any drift → warn) | live | `state/falsifier_registry.sha256` |
+| **R3 full** | **Pre-commit hook auto-rotates baseline** when `falsifiers.jsonl` is staged; idempotent (no-op when sha unchanged); raw 66 trailers on failure paths | this iteration | [`../../.githooks/pre-commit`](../../.githooks/pre-commit) (enable: `git config core.hooksPath .githooks`) |
+| **R4** | Forensic ledger — every rotation appended JSONL `{ts, old_sha, new_sha, trigger}` (gitignored, local-only) | this iteration | `state/falsifier_registry_rotation_log.jsonl` |
+
+**Threat model**: an entry's `cmd` is silently swapped → R1 catches the per-entry hash flip. The whole file is replaced → R3 lite catches the baseline drift. A developer adds a legitimate F102+ entry but forgets `shasum -a 256 falsifiers.jsonl > state/falsifier_registry.sha256` → R3 full rotates the baseline at commit time and R4 records the rotation.
+
+---
+
 ## Candidate Reviews (falsifier triage drafts)
 
 | File | Range |

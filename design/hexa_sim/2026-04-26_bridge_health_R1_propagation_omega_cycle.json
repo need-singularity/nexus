@@ -1,0 +1,210 @@
+{
+  "trawl_id": "2026-04-26_bridge_health_R1_propagation_omega_cycle",
+  "ts": "2026-04-26T03:08:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw:design-strategy-falsifier-retire-rule (hive raw 71, report-only) + raw:design-strategy-honesty-admissibility (hive raw 73) + raw:design-strategy-audit-append-only (hive raw 77) + raw:design-strategy-sentinel-update (hive raw 80) + raw:design-strategy-ai-native-error-message (hive raw 66)",
+  "purpose": "Propagate R1 cmd_sha256 + HIT/ERROR semantic disambiguation defenses from falsifier_health.sh to bridge_health.sh. Bridges face higher attack risk than falsifiers because they are invoked by external API selftest paths (network-reachable subversion surface). Establish per-bridge SHA256 baseline TSV + runtime mismatch → STATUS=TAMPERED defense.",
+  "trigger": "user 2026-04-26 prompt: 'Ω-cycle (오메가 사이클) — propagate R1 cmd_sha256 + HIT/ERROR semantics from falsifier_health.sh to bridge_health.sh'",
+  "inputs": {
+    "donor": "tool/falsifier_health.sh (R1 + R3 lite shipped previous Ω-cycle)",
+    "recipient": "tool/bridge_health.sh (150 lines, no per-entry hash defense, no --strict mode)",
+    "wrapper": "tool/health_check_all.sh (74 lines, aggregator sentinel)",
+    "bridge_inventory": "16 .hexa bridges in tool/ (mirrors cli/run.hexa _hexa_sim_bridge_dispatch)",
+    "asymmetry": "tool/roadmap_dod_bridge.hexa exists but is not in 16-bridge registry → out of scope (matches existing bridge_health.sh BRIDGES list)"
+  },
+  "constraint_compliance": {
+    "raw_66_reason_fix": "TAMPERED line emits reason=bridge_sha256_mismatch + fix=audit_git_log_or_refresh_baseline + declared/live hashes; FAIL line emits reason=selftest_failed + fix=run_verbose_then_check_design",
+    "raw_71_report_only": "no auto-mutation of bridges; STRICT mode warns (not fails) when baseline missing",
+    "raw_73_admissibility": "all classification deltas backed by real bash exec results captured below — no fabrication",
+    "raw_77_audit_append_only": "additive patch — no existing logic deleted, only new STRICT branch + per-bridge SHA check + TAMPERED counter; baseline TSV created additively at state/bridge_sha256.tsv",
+    "raw_80_sentinel": "__BRIDGE_HEALTH__ extended with tampered=K field; __HEALTH_CHECK_ALL__ extended with tampered=Ft+Bt field; backward compatible parsers (older sed scripts ignore extra fields)"
+  },
+  "axes_surfaced": [
+    {
+      "id": "axis_1_design_baseline_storage",
+      "name": "baseline_storage_strategy",
+      "options_considered": [
+        "inline_hardcoded_in_script (rejected: forces script edit per bridge change, conflates state with code)",
+        "inline_metadata_in_each_bridge_hexa_header (rejected: chicken-and-egg self-attest, easy to spoof)",
+        "separate_TSV_state_bridge_sha256_tsv (chosen: mirrors falsifier_registry.sha256 precedent, content-addressed, single source of truth)"
+      ],
+      "decision": "state/bridge_sha256.tsv with format: name<TAB>relative_path<TAB>sha256_16<TAB>last_verified_utc",
+      "rationale": "Same shape as falsifier_registry.sha256 (single-line baseline) but per-entry granularity needed because bridges are 16 independent files vs falsifiers being one JSONL registry"
+    },
+    {
+      "id": "axis_2_phase1_hash_collection",
+      "name": "phase_1_baseline_generation",
+      "method": "python3 hashlib.sha256 over raw bytes of each .hexa, truncated to 16 hex chars (matches falsifier sha256_16 helper)",
+      "outcome_count": 16,
+      "outcome_hashes": {
+        "codata": "3f9992f3d5893c59",
+        "oeis": "7d398574197022ea",
+        "gw": "03ef521be5764571",
+        "horizons": "e404f79a28547749",
+        "arxiv": "6ee5345124e14c9e",
+        "cmb": "5ae9137a9ff8e094",
+        "nanograv": "0a346df1730ff368",
+        "simbad": "c3d6e74f6666b778",
+        "icecube": "40c571507cf7c9e6",
+        "nist_atomic": "f11b775fac88098a",
+        "wikipedia": "9ed44a3edd45cfc5",
+        "openalex": "eaed6249d17b5df1",
+        "gaia": "23665fb979f54e3a",
+        "lhc": "f5914e4107df3740",
+        "pubchem": "60ac4d05886428bf",
+        "uniprot": "03256b5a12ba898f"
+      },
+      "tsv_path": "/Users/ghost/core/nexus/state/bridge_sha256.tsv",
+      "tsv_lines": 20,
+      "tsv_byte_size": 1499,
+      "git_visibility": "ignored by .gitignore line 266 (state/*) — same precedent as state/falsifier_registry.sha256"
+    },
+    {
+      "id": "axis_3_phase2_patch_bridge_health",
+      "name": "phase_2_bridge_health_sh_patch",
+      "additions": [
+        "BRIDGE_SHA_TSV env override + default state/bridge_sha256.tsv",
+        "STRICT=0 + --strict flag parsing (mirrors falsifier_health.sh)",
+        "sha256_file_16() helper (shasum BSD → sha256sum GNU fallback)",
+        "declared_sha_for() awk lookup over baseline TSV",
+        "TAMPERED=0 counter init + per-bridge SHA check before selftest invocation",
+        "STATUS=TAMPERED branch with raw 66 reason+fix trailer + declared/live hash dump",
+        "OFFLINE-FALLBACK ec≠0 branch (degraded but ran) with separate counter increment",
+        "tampered field in JSONL line + summary + sentinel"
+      ],
+      "deletions": "none (raw 77 audit-append-only)",
+      "lines_before": 150,
+      "lines_after": 215,
+      "lines_delta": 65
+    },
+    {
+      "id": "axis_4_phase3_disambiguation",
+      "name": "HIT_vs_ERROR_bridge_disambiguation",
+      "falsifier_donor_pattern": "ec=0+sentinel→CLEAN, ec=0+no_sentinel→HIT, ec=1+grep_style→HIT, else→ERROR",
+      "bridge_recipient_pattern": "ec=0+sentinel→PASS, ec=0+sentinel+fb_str→PASS+OFFLINE++, ec=0+no_sentinel→FAIL, ec≠0+fb_str→OFFLINE+FAIL++, ec≠0+no_fb→FAIL",
+      "key_difference": "Bridges have heterogeneous sentinel formats (__NAME_BRIDGE__ PASS vs [name_bridge selftest] OK) — both accepted. Falsifier had one sentinel type. Bridges also have legitimate offline-fallback path (network unreachable + cached fallback engaged) which is degraded-not-failed; falsifiers don't have that mode.",
+      "non_trivial_heuristic": "Per raw 73, ec≠0 alone does not auto-classify — must check OUT for fallback|offline|no.?fetch substring before reclassifying as OFFLINE-FALLBACK. Pure ec≠0 with no fallback signal stays FAIL."
+    },
+    {
+      "id": "axis_5_phase4_health_check_all_integration",
+      "name": "wrapper_aggregator_tampered_surfacing",
+      "additions": [
+        "F_TAMP parse from __FALSIFIER_HEALTH__ tampered=N field",
+        "B_TAMP parse from __BRIDGE_HEALTH__ tampered=N field",
+        "TAMP_TOTAL=F_TAMP+B_TAMP aggregate",
+        "human-readable line: tampered=N (F=N B=N) breakdown",
+        "raw 66 fix trailer: 'R1 tamper detected — audit git log of mutated files; refresh baseline if intended' (only when TAMP_TOTAL>0)",
+        "sentinel field: tampered=N appended to __HEALTH_CHECK_ALL__"
+      ],
+      "lines_before": 74,
+      "lines_after": 80,
+      "lines_delta": 6
+    },
+    {
+      "id": "axis_6_verification_baseline",
+      "name": "verification_pre_mutation",
+      "cmd": "bash tool/bridge_health.sh --quiet",
+      "sentinel": "__BRIDGE_HEALTH__ PASS total=16 pass=16 fail=0 tampered=0 duration_ms=33000",
+      "outcome": "16/16 PASS, tampered=0",
+      "detected": true
+    },
+    {
+      "id": "axis_7_verification_mutation",
+      "name": "verification_during_codata_tamper",
+      "injection": "echo '// drift-tamper-test 2026-04-26' >> tool/codata_bridge.hexa",
+      "cmd": "bash tool/bridge_health.sh",
+      "per_bridge_line": "  codata        TAMPERED   ec=N/A  reason=bridge_sha256_mismatch  fix=audit_git_log_or_refresh_baseline  declared=3f9992f3d5893c59  live=3a85a2c5c64565d5",
+      "sentinel": "__BRIDGE_HEALTH__ FAIL total=16 pass=15 fail=1 tampered=1 duration_ms=33000",
+      "summary_line": "  total=16  pass=15  fail=1  offline_fallback=3  tampered=1  wall=33000ms",
+      "outcome": "15/16 PASS + 1 TAMPERED (codata) — selftest skipped after SHA mismatch (raw 71 fail-fast on tamper, no risk of running mutated body)",
+      "detected": true
+    },
+    {
+      "id": "axis_8_verification_restore",
+      "name": "verification_post_restore",
+      "restore_cmd": "mv /tmp/codata_bridge.save tool/codata_bridge.hexa",
+      "post_restore_sha": "3f9992f3d5893c59 (matches baseline)",
+      "cmd": "bash tool/bridge_health.sh --quiet",
+      "sentinel": "__BRIDGE_HEALTH__ PASS total=16 pass=16 fail=0 tampered=0 duration_ms=34000",
+      "outcome": "16/16 PASS, tampered=0 — fixpoint reached, no residue from mutation",
+      "detected": true
+    },
+    {
+      "id": "axis_9_wrapper_smoke_test",
+      "name": "health_check_all_wrapper_smoke",
+      "cmd": "bash tool/health_check_all.sh",
+      "sentinel": "__HEALTH_CHECK_ALL__ FAIL falsifier=89/91 bridge=16/16 tampered=0 status=ok",
+      "human_line": "F: 89/91 CLEAN | B: 16/16 PASS | tampered=0 (F=0 B=0) | S: status_all_ok",
+      "note": "FAIL verdict is from pre-existing falsifier HITs (F: 89/91 not 91/91) — orthogonal to this Ω-cycle. Bridge subcheck cleanly reports 16/16 + tampered=0. Aggregator tampered field successfully surfaces both sub-counts."
+    }
+  ],
+  "tier_1_promotion_witnesses": [
+    {
+      "name": "bridge_sha256.tsv_created",
+      "evidence": "/Users/ghost/core/nexus/state/bridge_sha256.tsv — 20 lines (4 header + 16 data), 1499 bytes, all 16 bridge hashes pinned",
+      "tier_promotion_axis": "phase_1_hash_collection"
+    },
+    {
+      "name": "bridge_health.sh_R1_patched",
+      "evidence": "tool/bridge_health.sh: 150→215 lines, +65 lines, TAMPERED counter + --strict flag + sha256_file_16 helper + declared_sha_for awk lookup + per-bridge runtime SHA check before selftest. Mutation test: codata tamper → STATUS=TAMPERED with declared=3f9992f3d5893c59 live=3a85a2c5c64565d5",
+      "tier_promotion_axis": "phase_2_patch_bridge_health"
+    },
+    {
+      "name": "health_check_all.sh_aggregator_tampered_surfacing",
+      "evidence": "tool/health_check_all.sh: 74→80 lines, +6 lines, F_TAMP+B_TAMP parsed and aggregated; sentinel extended with tampered=N field; human line shows tampered=0 (F=0 B=0) breakdown",
+      "tier_promotion_axis": "phase_4_health_check_all_integration"
+    },
+    {
+      "name": "fixpoint_marker",
+      "evidence": "Pre-mutation 16/16 PASS tampered=0 → during-mutation 15/16 PASS + 1 TAMPERED (codata flagged with raw 66 trailer) → post-restore 16/16 PASS tampered=0. codata_bridge.hexa byte-identical to baseline post-restore (sha 3f9992f3d5893c59 matches). git status confirms only tool/bridge_health.sh + tool/health_check_all.sh modified; codata_bridge.hexa untouched.",
+      "tier_promotion_axis": "verification_3way_cycle"
+    }
+  ],
+  "non_witnessed_gaps": [
+    {
+      "id": "gap_1_baseline_rotation_tooling",
+      "description": "No companion tool/bridge_sha256_pin.py created — the TSV regeneration is currently ad-hoc python3 inline. If a bridge gets a legitimate edit, operator must manually rerun the inline snippet from this witness. Recommend follow-up Ω-cycle to ship tool/bridge_sha256_pin.py mirroring how falsifier baselines are refreshed.",
+      "severity": "medium"
+    },
+    {
+      "id": "gap_2_roadmap_dod_bridge_unregistered",
+      "description": "tool/roadmap_dod_bridge.hexa exists in tool/ but is not in the 16-bridge BRIDGES list of bridge_health.sh — it falls outside both selftest invocation and SHA pinning. Either register as 17th bridge or document as out-of-scope helper. Inherited from upstream — not in this cycle's scope.",
+      "severity": "low"
+    },
+    {
+      "id": "gap_3_strict_mode_no_block",
+      "description": "--strict flag accepted but only warns when baseline TSV is missing. Mismatch detection is always on (TAMPERED auto-flips sentinel to FAIL regardless of --strict). The flag is currently a no-op for the runtime path; reserved for future R3-style policy escalation.",
+      "severity": "low"
+    },
+    {
+      "id": "gap_4_no_self_attest_chain",
+      "description": "Baseline TSV itself is unsigned — an attacker who can rewrite a bridge .hexa can also rewrite the TSV. Mitigation requires an out-of-band signature (gpg / sigstore) or git-tracked baseline (currently .gitignore'd by state/* pattern, mirroring falsifier precedent). Defer to post-cycle policy decision.",
+      "severity": "medium"
+    }
+  ],
+  "fixpoint_marker": "REACHED — 16/16 PASS tampered=0 baseline before mutation, 15/16 + 1 tampered during codata mutation (correctly detected with raw 66 trailer), 16/16 PASS tampered=0 after restore. Three-way mutation cycle confirms detector is sound (no false negatives) and reversible (no residue). codata_bridge.hexa byte-identical pre/post (sha 3f9992f3d5893c59).",
+  "files_touched": {
+    "modified": [
+      "tool/bridge_health.sh (+65 lines: --strict flag, sha256_file_16, declared_sha_for, TAMPERED counter, per-bridge SHA check, OFFLINE-FALLBACK ec≠0 branch, sentinel tampered=N field)",
+      "tool/health_check_all.sh (+6 lines: F_TAMP/B_TAMP parse, TAMP_TOTAL aggregate, sentinel tampered=N field, raw 66 fix trailer when tampered>0)"
+    ],
+    "created": [
+      "state/bridge_sha256.tsv (16 bridge hashes, 4 header lines, .gitignore-d per state/* precedent)",
+      "design/hexa_sim/2026-04-26_bridge_health_R1_propagation_omega_cycle.json (this witness)"
+    ],
+    "deleted": [],
+    "test_mutations_undone": [
+      "tool/codata_bridge.hexa: tampered then restored byte-identical (sha 3f9992f3d5893c59 matches baseline; git status clean for this file)"
+    ]
+  },
+  "compliance_artifacts": {
+    "raw_66_trailers_emitted": [
+      "TAMPERED line: reason=bridge_sha256_mismatch + fix=audit_git_log_or_refresh_baseline",
+      "FAIL line: reason=selftest_failed + fix=run_verbose_then_check_design",
+      "Summary line: 'fix: audit git log of mutated bridge(s); if intended, refresh state/bridge_sha256.tsv' (when tampered>0)",
+      "Wrapper: 'fix: R1 tamper detected — audit git log of mutated files; refresh baseline if intended' (when TAMP_TOTAL>0)"
+    ],
+    "raw_77_additive_evidence": "git diff tool/bridge_health.sh shows zero deleted lines from prior logic; all changes are additive blocks or in-place field appends to JSONL/sentinel",
+    "raw_80_sentinel_evolution": "__BRIDGE_HEALTH__ <P|F> total=N pass=P fail=F duration_ms=T → __BRIDGE_HEALTH__ <P|F> total=N pass=P fail=F tampered=K duration_ms=T (backward compatible: legacy sed parsers ignore unknown fields)",
+    "no_commits": "per prompt constraint — main thread batches"
+  }
+}
