@@ -1,0 +1,95 @@
+{
+  "title": "Honesty-triad cross-repo dashboard refresh ω-cycle",
+  "date": "2026-04-26",
+  "origin_context": "After 24h+ of activity (nexus 246 commits / anima 146 / hexa-lang 41 / n6-arch 29) post the absorption-refresh ω-cycle, validate dashboard reading still matches reality.",
+  "raw_admissibility": "raw 73 (cross-repo audit precondition)",
+  "axes": [
+    {
+      "id": "a1_dashboard_rerun",
+      "kind": "rerun",
+      "input": "bash ~/core/nexus/tool/atlas_cross_repo_dashboard.sh",
+      "output": "repos=4 total_atlas_lines=65450 total_facts=28848 honesty_pass=3/4",
+      "delta_vs_prior": "atlas lines/facts unchanged; nexus last_commit advanced 059b8438 → d84a0601 (2026-04-25 22:36 → 2026-04-26 01:09)",
+      "witness": "PASS"
+    },
+    {
+      "id": "a2_direct_verification",
+      "kind": "verify",
+      "method": "Per-repo per-precondition direct file/git checks (a/b/c/d/e)",
+      "matrix": {
+        "nexus":     {"a":"PASS","b":"PASS","c":"PASS","d":"PASS","e":"PASS","total":"5/5"},
+        "n6-arch":   {"a":"PASS","b":"PASS","c":"PASS","d":"PASS","e":"PASS","total":"5/5"},
+        "anima":     {"a":"PASS","b":"PASS","c":"PASS","d":"PASS (via git-tracked symlink)","e":"PASS","total":"5/5"},
+        "hexa-lang": {"a":"PASS","b":"PASS","c":"PASS","d":"FAIL (no atlas SSOT — OPT-A ceiling)","e":"PASS","total":"4/5"}
+      },
+      "witness": "PASS"
+    },
+    {
+      "id": "a3_comparison",
+      "kind": "diff",
+      "result": "Dashboard PASS counts (5/5, 5/5, 5/5, 4/5) MATCH direct verification.",
+      "drift_findings": [
+        {
+          "kind": "cosmetic",
+          "where": "anima 'Last Commit' display",
+          "cause": "anima n6/atlas.n6 is a symlink to ~/core/n6-architecture/atlas/atlas.n6; git log -- n6/atlas.n6 inside anima returns empty",
+          "impact": "display only — aggregate counts unaffected",
+          "suggested_fix": "deref symlink before git log in dashboard tool"
+        },
+        {
+          "kind": "latent",
+          "where": "check_precondition_a",
+          "cause": "checks .git/HEAD existence only, not git-ls-files of SSOT",
+          "impact": "all 4 repos happen to pass direct ls-files this cycle, no false-positive observed",
+          "suggested_fix": "add `git ls-files | grep -q <SSOT>` to precondition (a)"
+        }
+      ],
+      "witness": "PASS"
+    },
+    {
+      "id": "a4_hexa_lang_ceiling_reconfirm",
+      "kind": "ceiling-check",
+      "decision_doc": "design/hexa_sim/hexa_lang_atlas_ssot_decision.md (OPT-A)",
+      "scan": "find ~/core/hexa-lang -maxdepth 3 -name '*.n6' → 0 atlas-shaped files",
+      "commit_activity_24h": 41,
+      "result": "OPT-A ceiling holds. hexa-lang remains 4/5 PARTIAL by architectural decision.",
+      "witness": "PASS"
+    },
+    {
+      "id": "a5_defense_doc_scan",
+      "kind": "scan",
+      "method": "find -iname 'SECURITY*' / 'THREAT*' across 4 repos",
+      "results": {
+        "nexus": "tool/security_scan.hexa (scanner, tool-shaped)",
+        "n6-architecture": "(none found)",
+        "anima": "state/security_roi_audit.json (state-shaped)",
+        "hexa-lang": "doc/security/os-level-enforcement-limits.md (doc-shaped, raw 66)"
+      },
+      "alignment_opportunity": "Each repo expresses defense differently (tool/state/doc). Optional 6th precondition (f) 'defense surface declared' would normalize the signal.",
+      "witness": "PASS"
+    }
+  ],
+  "tier_1": [
+    {
+      "artifact": "design/hexa_sim/cross_repo_dashboard.md",
+      "kind": "dashboard refresh",
+      "lines": 90,
+      "status": "WRITTEN"
+    }
+  ],
+  "fixpoint": {
+    "honesty_pass": "3/4",
+    "delta_vs_prior_3_of_4": "0 (unchanged)",
+    "ceiling": "hexa-lang 4/5 (OPT-A)",
+    "drift_detected": false,
+    "stable": true,
+    "next_action": "no immediate change required; latent (a) tightening + symlink display fix queued as Tier-2"
+  },
+  "constraints_honored": {
+    "read_only_3_source_repos": true,
+    "bash_grep_git_only": true,
+    "raw_73_admissibility": true,
+    "under_200_lines_dashboard_md": true,
+    "no_commit": true
+  }
+}

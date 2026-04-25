@@ -1,0 +1,113 @@
+{
+  "trawl_id": "2026-04-26_B2_remote_cwd_fix_omega_cycle",
+  "axes_surfaced": [
+    {"id": "a1", "name": "core_root_env_override_with_git_fallback", "track": "A"},
+    {"id": "a2", "name": "falsifier_cwd_independence_probe", "track": "A"},
+    {"id": "b1", "name": "remote_runner_architectural_coupling", "track": "B"},
+    {"id": "b2", "name": "env_var_portability_HOME_assumption", "track": "B"},
+    {"id": "b3", "name": "raw_25_cwd_as_hidden_state", "track": "B"}
+  ],
+  "ts": "2026-04-26T07:55:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw 25 (environmental coupling — cwd/HOME divergence local↔remote)",
+  "ordinal_stamp": "ω (terminal patch — bounded scope, +14 LoC, no runner-layer changes)",
+  "purpose": "B2 atlas-ingest remote-runner cwd path mismatch: tool/omega_cycle_atlas_ingest.hexa _repo_paths() hardcoded `env_var(HOME) + /core/<repo>/design`. Remote dispatcher executes with HOME=/root → resolves to `/root/core/nexus/design` which is empty (witnesses live on local Mac at `/Users/ghost/core/nexus/design`). Cycles never discovered → `__OMEGA_CYCLE_ATLAS_INGEST__ FAIL no cycles discovered`.",
+  "trigger": "yesterday's a2 fix attempt (2026-04-26_atlas_ingest_a2_self_path_strip_omega_cycle) ran clean locally but failed under hexa-remote with sentinel `FAIL no cycles discovered (repo_filter=\\`nexus\\`)` because remote-runner cwd/HOME do not match local layout. Independent of a2/arg-fix bugs — this is a path-resolution bug, not an arg-parsing bug.",
+  "method": "diagnose-and-fix ω-cycle, two-track. Track-A = chosen mitigation (env override + git rev-parse fallback) with falsifier probe; Track-B = epistemic limits (architectural coupling, HOME-portability, cwd-as-state).",
+  "root_cause_one_sentence": "_repo_paths() assumes $HOME/core/<repo>/design is the design directory, which couples the tool to the host filesystem layout — true on local Mac (HOME=/Users/ghost) but false on remote runner (HOME=/root, where witnesses are not rsynced).",
+  "context_evidence": {
+    "tool_path": "tool/omega_cycle_atlas_ingest.hexa",
+    "bug_lines_pre_patch": "30-38 (_repo_paths function)",
+    "bug_snippet_pre_patch": "fn _repo_paths() { let h = env_var(\"HOME\"); return [[\"nexus\", h + \"/core/nexus/design\", ...], ...] }",
+    "observed_symptom_remote": "__OMEGA_CYCLE_ATLAS_INGEST__ FAIL no cycles discovered (repo_filter=`nexus`)",
+    "observed_symptom_local": "tool reaches schema-guard (different downstream FAIL on grade `7`) — proves cycles ARE discovered locally",
+    "remote_HOME": "/root",
+    "local_HOME": "/Users/ghost",
+    "remote_design_dir_resolved": "/root/core/nexus/design (empty / nonexistent)",
+    "local_design_dir_resolved": "/Users/ghost/core/nexus/design (61 entries, 17 omega_cycle.json files)",
+    "exit_code_pre_patch_via_resolver": "could-not-test (today: hexa-remote all 4 hosts blacklisted/unreachable AND docker fork failed); diagnosis based on yesterday's observed FAIL"
+  },
+  "options_considered": [
+    {"id": "a", "name": "NEXUS_CORE_ROOT env var with $HOME/core fallback", "loc": "+14", "verdict": "CHOSEN — composable with (b)"},
+    {"id": "b", "name": "git rev-parse --show-toplevel parent-dir derivation", "loc": "+5", "verdict": "MERGED INTO (a) as second fallback — works when run from inside any of the 3 sibling repos"},
+    {"id": "c", "name": "--design-dir <path> CLI flag override", "loc": "+8", "verdict": "REJECTED — would only override one repo, doesn't compose with cross-repo aggregate (a6)"},
+    {"id": "d", "name": "pure remote-runner config — HEXA_REMOTE_HOME or rsync of design/", "loc": "0 (out of scope)", "verdict": "STILL-NEEDED for full remote function (rsync of witness corpus); the chosen tool fix exposes NEXUS_CORE_ROOT as the clean hook for remote-runner config to set"}
+  ],
+  "chosen_mitigation": "a+b hybrid",
+  "track_a_final_form_axes": [
+    {
+      "axis_id": "a1",
+      "name": "core_root_env_override_with_git_fallback",
+      "description": "Introduce _core_root() helper: 1) prefer NEXUS_CORE_ROOT env if set and dir exists; 2) else `git rev-parse --show-toplevel | dirname` if that parent contains nexus/design; 3) else $HOME/core. _repo_paths() now derives all 3 repo design dirs from this single root.",
+      "loc_estimate": 14,
+      "loc_actual": 14,
+      "files_touched": ["tool/omega_cycle_atlas_ingest.hexa"],
+      "applied": true,
+      "verification": [
+        "cd /Users/ghost/core/nexus && hexa_interp ... --dry-run --repo-only nexus → cycles discovered (sentinel reaches schema-guard)",
+        "cd /tmp && NEXUS_CORE_ROOT=/Users/ghost/core hexa_interp ... → cycles discovered (env override path exercised)",
+        "cd /Users/ghost/core/nexus/design && hexa_interp ... → cycles discovered (git rev-parse fallback path exercised)"
+      ]
+    },
+    {
+      "axis_id": "a2",
+      "name": "falsifier_cwd_independence_probe",
+      "description": "A test invocation pattern that runs the tool from a cwd OUTSIDE both the repo and $HOME/core, with NEXUS_CORE_ROOT pointing to the witness location, must succeed in cycle discovery. This serves as a portable falsifier: if a future regression re-couples the tool to cwd or $HOME, this probe fails.",
+      "probe_command": "cd /tmp && NEXUS_CORE_ROOT=/Users/ghost/core /Users/ghost/core/hexa-lang/build/hexa_interp /Users/ghost/core/nexus/tool/omega_cycle_atlas_ingest.hexa --dry-run --repo-only nexus",
+      "expected_signal": "stdout contains @C/@F/@P shard lines (i.e. cycles were globbed and parsed); sentinel does NOT contain `no cycles discovered`",
+      "loc_estimate": 0,
+      "applied": "doc-only (probe documented; not codified as selftest case in this cycle to keep delta ≤ 25 LoC)"
+    }
+  ],
+  "track_b_limits_axes": [
+    {
+      "axis_id": "b1",
+      "name": "remote_runner_architectural_coupling",
+      "description": "The hexa-resolver / hexa-remote layer transports the .hexa script and exec()s it on a remote host but does NOT transport the design/ corpus. This is a fundamental architectural gap: tools that read repo data files cannot run remotely without a corpus-sync step (rsync, git-pull-on-remote, or virtual-fs mount). The B2 fix in _core_root() only resolves the path-derivation half; the data-transport half remains the resolver's responsibility. Out of scope per task constraint (do not modify hexa-resolver).",
+      "mitigation_options_for_resolver_layer": [
+        "rsync design/ + n6/ + state/ to remote $NEXUS_CORE_ROOT before exec",
+        "git clone/pull on remote host as part of runner image bootstrap",
+        "mount local fs read-only into remote container (sshfs, nfs, or 9p)"
+      ]
+    },
+    {
+      "axis_id": "b2",
+      "name": "env_var_portability_HOME_assumption",
+      "description": "Using `env_var(HOME)` as a path anchor is unsafe across host boundaries. HOME varies (/Users/ghost on Mac, /root in remote container, /home/runner in CI, etc.) and there is no contract that any of these locate /core. Pattern critique: any tool in /Users/ghost/core/nexus/tool/ that builds paths from HOME has the same coupling. _has_substr(grep $HOME tool/*.hexa) finds at least 4 other call sites in this same file (lines 32, 330, 335, 482) plus likely many other tools. A future axis would migrate all of them to a shared `repo_root()` helper module."
+    },
+    {
+      "axis_id": "b3",
+      "name": "raw_25_cwd_as_hidden_state",
+      "description": "raw 25 (environmental coupling) — the tool's behavior depends on three unseen environmental inputs simultaneously: $HOME, the cwd (for git rev-parse), and the dispatch path (local interp vs hexa-resolver vs remote runner). The fix narrows this to one explicit input ($NEXUS_CORE_ROOT) plus two implicit fallbacks; full hermeticity would require requiring the explicit input or printing a sentinel `__OMEGA_CYCLE_ATLAS_INGEST__ INFO core_root=<path> source=<env|git|home>` for audit trail. Currently no such trace is emitted — debugging future regressions will still require manual instrumentation."
+    }
+  ],
+  "tier_1_promotion": [
+    {"axis_id": "a1", "rationale": "DONE in this cycle (+14 LoC, ≤ 25 budget)"}
+  ],
+  "tier_1_deferred": [
+    {"axis_id": "a2", "rationale": "documented falsifier probe; codify as selftest case in next cycle (+~10 LoC)"},
+    {"axis_id": "b1", "rationale": "remote-runner data-transport gap — needs hexa-resolver/runner-image change, explicitly out of scope"}
+  ],
+  "delta_loc_total": 14,
+  "delta_loc_budget": 25,
+  "verification_record": {
+    "pre_patch_local_hexa_interp": "FAIL schema-guard invalid grade `7` on bridge_tool_jackpot_axis_b1_summary_0 (passes discovery, fails downstream — separate bug)",
+    "post_patch_local_hexa_interp_default_cwd": "FAIL schema-guard invalid grade `7` ... (same downstream FAIL, discovery still works → no regression on local default path)",
+    "post_patch_tmp_cwd_with_env": "FAIL schema-guard invalid grade `7` ... (cycles discovered via NEXUS_CORE_ROOT env, env override path verified)",
+    "post_patch_design_subdir_cwd": "FAIL schema-guard invalid grade `7` ... (cycles discovered via git rev-parse fallback path verified)",
+    "post_patch_via_hexa_resolver": "blocked: all 4 remote hosts blacklisted, docker `Cannot fork` — not a B2 issue, separate infra symptom; cannot exercise remote dispatch path today",
+    "interpretation": "exit code 0 in all cases (interpreter exit; tool sentinel FAIL is grade-validation downstream of B2 scope). Discovery success is asserted by presence of `@C ... :: omega_cycle_<slug>` shard lines in stdout — observed in all three post-patch runs, absent in pre-fix remote-cwd scenario."
+  },
+  "git_diff_summary": {
+    "file": "tool/omega_cycle_atlas_ingest.hexa",
+    "lines_added": 14,
+    "lines_removed": 2,
+    "net": 12,
+    "function_added": "_core_root()",
+    "function_modified": "_repo_paths() (now sources root from _core_root)"
+  },
+  "axes_total_surfaced": 5,
+  "axes_track_a": 2,
+  "axes_track_b": 3,
+  "tier_1_size": 1,
+  "schema_version": "omega_cycle.v1"
+}

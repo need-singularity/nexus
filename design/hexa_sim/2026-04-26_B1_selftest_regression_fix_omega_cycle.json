@@ -1,0 +1,94 @@
+{
+  "ordinal": "ω",
+  "ts": "2026-04-26T00:00:00Z",
+  "trawl_id": "B1_selftest_grade_validator_regression_fix",
+  "scope": "tool/omega_cycle_atlas_ingest.hexa :: fn _valid_grade",
+  "tier_class": "B1",
+  "axes_total_surfaced": 4,
+  "axes": [
+    {
+      "axis_id": "a1_root_cause",
+      "name": "interpreter continue-in-nested-if escape semantics",
+      "summary": "hexa interpreter mis-handles `continue` inside a nested `if` block: the `continue` exits the inner-if but execution continues with remaining statements of the outer-if before re-entering the loop. In _valid_grade the outer `if !suffix_started { ... return false } else { ... return false }` always hit a `return false` after the inner digit branch's `continue` for any valid grade.",
+      "evidence": "Trace fixture /tmp/test_grade2.hexa: input '7' -> i=0 c='7' digit_seen=false suffix_started=false -> 'no match -> false' (printed from outer-if's tail return, despite inner `if c >= '0' && c <= '9' { ...; continue }` matching). Fresh fixture /tmp/test_grade5.hexa with FLAT structure (no outer if-wrap) returned true correctly.",
+      "verdict": "PASS",
+      "grade": "10*PROBE_RUN"
+    },
+    {
+      "axis_id": "a2_fix_scope",
+      "name": "flatten _valid_grade branches into single-level guards",
+      "summary": "Rewrote _valid_grade to use flat sequential `if ... { ...; continue }` guards keyed off the suffix_started boolean, eliminating all nested-if-with-continue paths. No call sites changed; same regex grammar. Comment also tightened: extended_token ::= [A-Z_][A-Z_0-9]*. Net delta -11 LoC (16-line body vs 27-line body).",
+      "evidence": "git diff: 1 hunk in fn _valid_grade only (lines ~287-317 of patched file). Diff: -21/+10 (excluding 3 added comment lines documenting the fix rationale). All other code paths untouched.",
+      "verdict": "PASS",
+      "grade": "10*PROBE_RUN"
+    },
+    {
+      "axis_id": "a3_falsifier",
+      "name": "12-case selftest corpus including 9 valid + 3 invalid grades",
+      "summary": "Selftest corpus at lines 562-575 covers: numeric (7, 10), suffixed (10*, 11*), extended-token (10*PASS_LITERATURE, 10*PROBE_RUN, 10*BARRIER_CONFIRMED, 10*NEGATIVE_VERDICT, 11*REPO_INVARIANT), and rejection cases (empty, abc, 10*lower). Pre-fix: 9/12 fail. Post-fix: 12/12 pass.",
+      "evidence_pre": "[omega_cycle_atlas_ingest selftest] FAIL grade-validator: grade `7` → got false want true (and 8 more)",
+      "evidence_post": "[omega_cycle_atlas_ingest selftest] OK — type-classification 7 cases / grade-validator 12 cases / glob 46 witnesses / cross-repo nexus path / slug determinism / emit idempotence",
+      "verdict": "PASS",
+      "grade": "10*PASS_LITERATURE"
+    },
+    {
+      "axis_id": "a4_live_run_regression_check",
+      "name": "no downstream regression in --dry-run live mode",
+      "summary": "Beyond selftest, ran `--dry-run --repo-only nexus` end-to-end. Sentinel emitted: __OMEGA_CYCLE_ATLAS_INGEST__ PASS cycles=46 facts=1161 crosslinks=0 repos=3 grade_dist=7:1013,10:0,10*ext:6,11:0,11*ext:142. Grade distribution non-zero across 7/10*ext/11*ext buckets confirms validator now accepts all live-classified grade tokens.",
+      "verdict": "PASS",
+      "grade": "10*PROBE_RUN"
+    }
+  ],
+  "fix_diff": {
+    "file": "tool/omega_cycle_atlas_ingest.hexa",
+    "fn": "_valid_grade",
+    "before": [
+      "while i < n {",
+      "    let c = g.substring(i, i + 1)",
+      "    if !suffix_started {",
+      "        if c >= \"0\" && c <= \"9\" { digit_seen = true; i = i + 1; continue }",
+      "        if c == \".\" { i = i + 1; continue }",
+      "        if c == \"*\" || c == \"!\" || c == \"?\" { i = i + 1; continue }",
+      "        if (c >= \"A\" && c <= \"Z\") || c == \"_\" {",
+      "            suffix_started = true",
+      "            i = i + 1",
+      "            continue",
+      "        }",
+      "        return false",
+      "    } else {",
+      "        if (c >= \"A\" && c <= \"Z\") || c == \"_\" || (c >= \"0\" && c <= \"9\") {",
+      "            i = i + 1",
+      "            continue",
+      "        }",
+      "        return false",
+      "    }",
+      "}"
+    ],
+    "after": [
+      "while i < n {",
+      "    let c = g.substring(i, i + 1)",
+      "    if suffix_started && ((c >= \"A\" && c <= \"Z\") || c == \"_\" || (c >= \"0\" && c <= \"9\")) { i = i + 1; continue }",
+      "    if suffix_started { return false }",
+      "    if c >= \"0\" && c <= \"9\" { digit_seen = true; i = i + 1; continue }",
+      "    if c == \".\" { i = i + 1; continue }",
+      "    if c == \"*\" || c == \"!\" || c == \"?\" { i = i + 1; continue }",
+      "    if (c >= \"A\" && c <= \"Z\") || c == \"_\" { suffix_started = true; i = i + 1; continue }",
+      "    return false",
+      "}"
+    ],
+    "net_lines": "+10 / -21 = net -11 LoC (well under 30 LoC budget)"
+  },
+  "selftest_output_post_fix": [
+    "[omega_cycle_atlas_ingest selftest] OK — type-classification 7 cases / grade-validator 12 cases / glob 46 witnesses / cross-repo nexus path / slug determinism / emit idempotence"
+  ],
+  "selftest_exit_code": 0,
+  "live_dry_run_sentinel": "__OMEGA_CYCLE_ATLAS_INGEST__ PASS cycles=46 facts=1161 crosslinks=0 repos=3 grade_dist=7:1013,10:0,10*ext:6,11:0,11*ext:142",
+  "downstream_invariant": "validator change is grammar-equivalent: same accept/reject set as the v2 author's intent; only the implementation control-flow pattern changed to avoid the interpreter quirk.",
+  "follow_ups": [
+    "Same nested-if-continue pattern may exist elsewhere in nexus hexa tools — sweep candidates: tool/hexa_sim_atlas_ingest.hexa (already flat, OK), tool/atlas_dsl_v2_serializer.hexa::_valid_grade_v2 (TODO probe).",
+    "Consider filing a hexa-lang interpreter issue: `continue` inside nested `if` should re-enter loop test, not execute outer-if remaining statements."
+  ],
+  "method_gap": "Author wrote idiomatic if/else block-structured code that would work in any other lang; interpreter fault, not author logic fault. Method gap = `selftest must run on the actual interpreter, not be code-reviewed mentally`. The bug only surfaced when `--selftest` was actually executed against the deployed hexa_interp.",
+  "ordinal_stamp": "ω",
+  "sentinel": "__OMEGA_CYCLE_B1_SELFTEST_REGRESSION_FIX__ PASS"
+}

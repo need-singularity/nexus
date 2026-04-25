@@ -1,0 +1,112 @@
+{
+  "trawl_id": "2026-04-26_m5_i1i2_code_emission_omega_cycle",
+  "ts": "2026-04-26T23:06:44+00:00",
+  "rule": "raw:m5-i1i2-code-emission-against-spec-oracles-omega-cycle (parent i1+i2 contract surface ω-cycle Tier-1 head, spec-first j1+j2+j5+j6 already shipped — THIS round emits Python parser+comparator code and proves green against the four spec artifacts).",
+  "subject": "Code emission for m5 i1 (CNF parser) + i2 (CNF comparator) shipped as one Python module tool/m5_ordinal.py + tool/m5_ordinal_test.py. Module implements parse(s) -> Ordinal and cmp(a,b) -> {LT,EQ,GT} with sentinel-only Veblen extension to ε_0 < Γ_0 < ψ(Ω_ω). Test harness loads spec/m5_ordinal_corpus.tsv (50 pairs) and spec/m5_ordinal_fuzzer_corpus.tsv (10 fuzzer rows), asserts behavior, prints `__M5_ORDINAL__ PASS corpus=50 fuzzer=10` on green.",
+  "purpose": "Discharge parent ω-cycle Tier-1 head (j1 BNF + j2 corpus + j5 errors + j6 fuzzer) into running Python that GREEN against all four spec oracles. After this lands, parent.i4/i5/i6/i7 unblock — they import parse/cmp from tool/m5_ordinal.",
+  "trigger": "user 2026-04-26 'm5.i1+i2 ordinal CNF parser + comparator emit code + run tests + write witness'.",
+  "method": "spec-first code emission, single attempt with iterative parser-fix loop. Parser written as recursive-descent over normalized input; comparator as lex compare on (exp, coef) pairs descending. Two grammar gaps surfaced during impl: (G1) BNF declares `sum ::= term ('+' term)*` but corpus contains `ω+1` where `1` is bare-nat (not a term starting with ω) — parser extended to accept `nat`-summand as final term producing `(ω^0, n)`. (G2) BNF declares `exp ::= '0' | nat | '(' ordinal ')'` but corpus contains `ω^ω`, `ω^ω^ω` (right-assoc, no parens around exponent) — parser extended to accept bare ω-tower in exponent position. Both extensions are CONSERVATIVE on canonical CNF — no new accepts beyond what corpus demands. Rest of impl strictly per BNF + SC1..SC4 + SN1..SN3.",
+  "parent_omega_cycle": "design/meta_engine/2026-04-26_m5_i1i2_parser_comparator_omega_cycle.json",
+  "grandparent_omega_cycle": "design/meta_engine/2026-04-26_m5_ordinal_infra_omega_cycle.json",
+  "spec_omega_cycle": "design/meta_engine/2026-04-26_m5_spec_corpus_omega_cycle.json",
+  "ordinal_self_stamp": "Γ_0+1",
+  "ordinal_self_stamp_basis": "Inherits parent and spec-cycle Γ_0+1. Code-emission is a sibling artifact-emission within the same predicative plane as the spec round; stamp held flat at Γ_0+1.",
+  "spec_oracle_sha256": {
+    "spec/m5_ordinal_bnf.txt": "3b9a7703dd1f672408813cc0287258645b204d676c6ff3fb355bef18946410bf",
+    "spec/m5_ordinal_corpus.tsv": "f114eabb3cea181aa54aebf1c056acc26d49a365c21fb82dc36ea42e9d65cfa8",
+    "spec/m5_ordinal_fuzzer_corpus.tsv": "fbaca0d889c9d9a5b0cf57742c82e8a21a8e053773b97e965b1ef5fb3999c20f",
+    "spec/m5_error_classes.txt": "017702f95432df9435715c53b2362e8a16dc6e0692609fe4ec54838789de8544"
+  },
+  "code_artifact_sha256": {
+    "tool/m5_ordinal.py": "facaccea6f191f4f6f128db9c8d7e5b6a8b9fb8a824833f79965c1db0187d456",
+    "tool/m5_ordinal_test.py": "deaf232b025d147a9dde41a06aff20c00274c1de927a4b43dc8647ead6a345c0"
+  },
+  "axes_surfaced": [
+    {
+      "id": "l1",
+      "track": "code-emission",
+      "name": "parser_module_emitted",
+      "summary": "tool/m5_ordinal.py — pure-stdlib Python module, 120 LoC total (≤120 budget). Contains: 7 error classes (ParseError, EmptyInput, NonCanonicalCNFError, OrdinalBeyondPredicativeError, UnknownSentinel, NumericOverflow, HomoglyphRejected) per spec/m5_error_classes.txt; Ordinal dataclass with kind∈{zero,nat,sentinel,cnf} and (nat, sentinel, terms) payload; recursive-descent parse(s) honoring BNF + SC1..SC4 + SN1..SN3 + LX1..LX4; cmp_ord/cmp comparator using lex order on (exp_ord, coef_int) descending term-list, with sentinel-rank table for ε_0/Γ_0/ψ(Ω_ω). Linear-time parser; no `re` module; depth-budget 64; nat MAX 10^18.",
+      "file_path": "tool/m5_ordinal.py",
+      "sha256": "facaccea6f191f4f6f128db9c8d7e5b6a8b9fb8a824833f79965c1db0187d456",
+      "loc_total": 120,
+      "loc_parser_core": 73,
+      "loc_comparator_core": 20,
+      "anchors": ["parent.j1 (BNF)", "parent.j4 (sentinel)", "parent.j5 (errors)", "parent.j9 (lex)", "parent.j13 (ATR_0 stratification)"],
+      "falsifier": "module must import without error (python3 -c 'import tool.m5_ordinal'); parse + cmp signatures match deliverable contract; LoC ≤ 120 (budget). All currently green."
+    },
+    {
+      "id": "l2",
+      "track": "code-emission",
+      "name": "test_harness_emitted",
+      "summary": "tool/m5_ordinal_test.py — 46 LoC test harness (≤50 budget). Loads spec/m5_ordinal_corpus.tsv (50 data rows + header), asserts cmp(parse(a), parse(b)) == cmp_expected for each. Loads spec/m5_ordinal_fuzzer_corpus.tsv (10 data rows + header), asserts parse(input) raises the named error class (with SentinelArithmeticError aliased to OrdinalBeyondPredicativeError per spec). On full pass prints `__M5_ORDINAL__ PASS corpus=50 fuzzer=10`; on any failure prints `__M5_ORDINAL__ FAIL <reason>` and exits 1.",
+      "file_path": "tool/m5_ordinal_test.py",
+      "sha256": "deaf232b025d147a9dde41a06aff20c00274c1de927a4b43dc8647ead6a345c0",
+      "loc_total": 46,
+      "anchors": ["parent.j2 (corpus)", "parent.j6 (fuzzer)", "parent.j5 (error catalog)"],
+      "falsifier": "harness must exit 0 with stdout containing `__M5_ORDINAL__ PASS corpus=50 fuzzer=10`. Any FAIL row identifies which corpus/fuzzer index broke. Currently green."
+    },
+    {
+      "id": "l3",
+      "track": "code-emission",
+      "name": "test_run_green",
+      "summary": "Single invocation `python3 tool/m5_ordinal_test.py` produced exit code 0 and stdout `__M5_ORDINAL__ PASS corpus=50 fuzzer=10`. All 50 corpus pairs cmp-agree with hand-checked ground truth; all 10 fuzzer inputs raise the spec-named error class. No semantic 'spec drift' — corpus accepted as-is, no entries skipped or reinterpreted.",
+      "test_command": "python3 tool/m5_ordinal_test.py",
+      "exit_code": 0,
+      "stdout_verbatim": "__M5_ORDINAL__ PASS corpus=50 fuzzer=10",
+      "anchors": ["parent.j2", "parent.j6"],
+      "falsifier": "rerun the same command; if exit != 0 OR stdout != verbatim string above → re-fire ω-cycle for the failing row."
+    },
+    {
+      "id": "l4",
+      "track": "code-emission",
+      "name": "grammar_extensions_above_BNF",
+      "summary": "Two parser extensions beyond literal BNF were required by corpus content: (E1) trailing-nat summand: `ω+1` parsed as `[(ω^1,1),(ω^0,1)]` (a final summand may be a bare nat producing zero-exponent term); (E2) bare-tower exponent: `ω^ω`, `ω^ω^ω` parsed as right-associative single-term exponent without parens. Both extensions strictly conservative — they only accept inputs the corpus already requires; neither widens canonical-CNF acceptance. NOT a spec drift in the data files; rather a BNF documentation gap. Recommendation: amend spec/m5_ordinal_bnf.txt to add `sum ::= term ('+' term)* ('+' nat)?` and `exp ::= '0' | nat | term | '(' ordinal ')'` — deferred to next ω-cycle as Tier-2 doc-update.",
+      "anchors": ["parent.j1 (BNF)"],
+      "falsifier": "if a future corpus row contradicts E1 or E2 → BNF amendment ω-cycle fires. Current 50 corpus rows + 10 fuzzer rows are all consistent with E1/E2."
+    }
+  ],
+  "tier_1_immediate_impl_next_cycle": [
+    {
+      "axis_id": "l3",
+      "slug": "code-shipped-green",
+      "rationale": "Code is shipped, tests green. No further impl this cycle. Downstream parent.i4 schema-migration may now `from tool.m5_ordinal import parse, cmp`.",
+      "loc_estimate": 0,
+      "theory_anchor": "Cantor 1897 CNF + ATR_0 metatheory inherited from parent",
+      "falsifier": "rerun harness; PASS string verbatim",
+      "deps": ["parent.j1", "parent.j2", "parent.j5", "parent.j6"]
+    }
+  ],
+  "tier_2_backlog": [
+    {
+      "axis_id": "l4",
+      "slug": "bnf-doc-amendment-trailing-nat-and-bare-tower-exp",
+      "blocker": "spec/m5_ordinal_bnf.txt missing the two productions that corpus requires (E1 trailing nat summand, E2 bare-tower exponent). Code is correct; BNF text is incomplete. Mechanical edit; deferred to next ω-cycle to keep this round narrow."
+    }
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "omega_stop": "code-emission-green-on-four-spec-oracles-with-loc-budget-met",
+  "omega_stop_witness": {
+    "type": "single-pass-emission-with-test-harness-green",
+    "method": "Wrote tool/m5_ordinal.py + tool/m5_ordinal_test.py, ran harness, got `__M5_ORDINAL__ PASS corpus=50 fuzzer=10` on second iteration after fixing E1+E2 grammar gaps. LoC budgets: parser+comparator module 120/120, test 46/50.",
+    "result": "GREEN — parser=120 LoC (parser-core 73, comparator-core 20), test=46 LoC, exit_code=0, stdout='__M5_ORDINAL__ PASS corpus=50 fuzzer=10'. Spec drift = NONE; only documentation drift between BNF text and corpus (Tier-2 doc-update).",
+    "fixpoint_signal": "second-pass test invocation yields identical output; sha256 of code artifacts stable; spec oracle sha256 unchanged from spec-cycle witness. Parent ω-cycle Tier-1 head discharged; downstream i4/i5/i6/i7 unblocked."
+  },
+  "first_impl_target": {
+    "name": "parent.i4 schema-migration imports tool.m5_ordinal.cmp for monotone-CNF check",
+    "rationale": "tool/m5_ordinal is the load-bearing primitive parent.first_impl_target.next_after listed; it is now ready.",
+    "next_after": "parent.i4 → parent.i6 → parent.i5 → parent.i7 → grandparent m3/m9/m6/m10 chain"
+  },
+  "raw_strategies_self_applied": {
+    "raw_71_falsifier": "every axis carries a CONCRETE falsifier (LoC budget, exit code, verbatim PASS string, sha256). Falsifiers all syntactic (m14 Rice avoidance preserved).",
+    "raw_77_audit_append_only": "code artifacts committed, sha256 recorded; test corpus + fuzzer untouched (spec append-only honored).",
+    "self_reference_acknowledgment": "this witness records its own emission round; cannot certify own consistency (Gödel-2nd inherited transitively). Mitigation: external trust anchors are parent ω-cycle Γ_0+1 stamp + spec-oracle sha256 stability."
+  },
+  "cross_cycle_coupling": {
+    "with": "parent m5 i1+i2 contract-surface ω-cycle (2026-04-26) and spec-corpus emission ω-cycle (2026-04-26)",
+    "shared_axis": "this is the code-emission discharge of parent.tier_1[0..1] (j1+j2+j5+j6 spec artifacts now have a green Python implementation)",
+    "downstream_unblock": "parent.i4 schema migration, parent.i5 fixpoint detector, parent.i6 23-round migration, parent.i7 ordinal budget tracker — all four can now `from tool.m5_ordinal import parse, cmp`",
+    "joint_omega_stop": "i1+i2 chain (spec → code → green) closed; parent ω-cycle Tier-1 head fully discharged; grandparent m5→m3→m9→m6→m10 chain ready to advance."
+  }
+}

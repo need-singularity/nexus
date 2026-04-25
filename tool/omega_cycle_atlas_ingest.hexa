@@ -27,13 +27,26 @@ fn dir_exists(p: string) -> bool {
 
 // ─── repo registry (a6 cross-repo) ──────────────────────────────
 
+fn _core_root() -> string {
+    // B2 remote-cwd fix: prefer NEXUS_CORE_ROOT env, else derive from `git -C nexus rev-parse`,
+    // else $HOME/core. Decouples tool from $HOME assumption (remote runner cwd /root vs local /Users/ghost).
+    let override = env_var("NEXUS_CORE_ROOT")
+    if len(override) > 0 && dir_exists(override) { return override }
+    let top = to_string(exec("git rev-parse --show-toplevel 2>/dev/null")).trim()
+    if len(top) > 0 {
+        let parent = to_string(exec("dirname '" + top + "' 2>/dev/null")).trim()
+        if len(parent) > 0 && dir_exists(parent + "/nexus/design") { return parent }
+    }
+    return env_var("HOME") + "/core"
+}
+
 fn _repo_paths() -> array {
     // [name, abs_path_to_design_dir, honesty_guard_relpath]
-    let h = env_var("HOME")
+    let r = _core_root()
     return [
-        ["nexus", h + "/core/nexus/design", "honesty_invariant"],
-        ["n6-architecture", h + "/core/n6-architecture/design", "honesty_invariant"],
-        ["anima", h + "/core/anima/design", "honesty_invariant"]
+        ["nexus", r + "/nexus/design", "honesty_invariant"],
+        ["n6-architecture", r + "/n6-architecture/design", "honesty_invariant"],
+        ["anima", r + "/anima/design", "honesty_invariant"]
     ]
 }
 
@@ -273,7 +286,10 @@ fn _valid_type(t: string) -> bool {
 
 fn _valid_grade(g: string) -> bool {
     // grade ::= digit+ ("." digit+)? ("*" | "!" | "?")? extended_token?
-    // extended_token ::= [A-Z_]+
+    // extended_token ::= [A-Z_][A-Z_0-9]*
+    // B1 regression fix: flat branches — interpreter mis-handles `continue`
+    // inside nested `if` (escapes inner block but executes remaining outer-if
+    // statements, hitting `return false` for valid input). Unnest into single-level guards.
     if len(g) == 0 { return false }
     let mut i = 0
     let n = len(g)
@@ -281,24 +297,13 @@ fn _valid_grade(g: string) -> bool {
     let mut suffix_started = false
     while i < n {
         let c = g.substring(i, i + 1)
-        if !suffix_started {
-            if c >= "0" && c <= "9" { digit_seen = true; i = i + 1; continue }
-            if c == "." { i = i + 1; continue }
-            if c == "*" || c == "!" || c == "?" { i = i + 1; continue }
-            // first uppercase or underscore → suffix begin
-            if (c >= "A" && c <= "Z") || c == "_" {
-                suffix_started = true
-                i = i + 1
-                continue
-            }
-            return false
-        } else {
-            if (c >= "A" && c <= "Z") || c == "_" || (c >= "0" && c <= "9") {
-                i = i + 1
-                continue
-            }
-            return false
-        }
+        if suffix_started && ((c >= "A" && c <= "Z") || c == "_" || (c >= "0" && c <= "9")) { i = i + 1; continue }
+        if suffix_started { return false }
+        if c >= "0" && c <= "9" { digit_seen = true; i = i + 1; continue }
+        if c == "." { i = i + 1; continue }
+        if c == "*" || c == "!" || c == "?" { i = i + 1; continue }
+        if (c >= "A" && c <= "Z") || c == "_" { suffix_started = true; i = i + 1; continue }
+        return false
     }
     return digit_seen
 }
