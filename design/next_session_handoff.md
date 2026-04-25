@@ -580,3 +580,29 @@ cross-link (drill 의 deduction chain mimic) 도 random hub-only 와 같은 plat
 - separate sub-components ✓ (각각 sparse ER, avg_deg ~4)
 - 즉 drill 의 round 마다 *isolated cluster* 발견 + 각 cluster 내부 random pairing
 - 이는 drill 의 *category-axis-product* 자연스러운 구조 (category 별 isolated cluster)와 일치 가능
+
+### 2026-04-25 cron loop 정지 (hexa_stage0 RSS pressure)
+**증상**: hook fail 빈발 — `Killed: 9 hexa_v2` (SIGKILL OOM) + `to_int $?___HEXA_EXIT_0` runtime error.
+
+**진단 (top RSS)**:
+| PID | RSS | CPU | comm |
+|---|---|---|---|
+| 17936 | 2.25 GB | 77.8% | hexa_stage0 |
+| 80357 | 1.76 GB | 73.9% | hexa_stage0 |
+| 69623 | 1.36 GB | 72.7% | hexa_stage0 |
+
+→ orphan hexa_stage0 ~5.4 GB 누적 (Mac RSS cap 초과). 다른 세션 drill worker. cron loop 매분 firing 이 hexa_v2 build 가속 → 시스템 압박.
+
+**조치**: cron `3120fd72` 정지 (CronDelete). orphan kill 보류 (drill worker 가능성).
+
+**this session atlas omega 종합 (25 firings, 20 commits)**:
+- mathematical formulation 완성 (sensitivity 13 dim)
+- simulation ceiling = 0.85 (0.9 도달은 실제 drill 만)
+- `tool/nxs_002_composite.py` 영속화 (1.36s 측정)
+- ER mechanism 정밀: avg_deg ~4 sparse + isolated components
+
+**다음 세션 진입점 (drill slot free 후)**:
+1. orphan hexa_stage0 정리 (필요 시)
+2. drill 실제 발사 → atlas.blowup.jsonl 변경 → `python3 tool/nxs_002_composite.py` 측정
+3. ER mechanism 가설 검증 (drill 결과 graph 가 ER 형태인지)
+4. composite ≥0.9 도달 시 nxs-002 resolved
