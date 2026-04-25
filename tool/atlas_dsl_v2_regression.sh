@@ -101,7 +101,7 @@ layer_2_entry_count() {
     json_out=$(HEXA_RESOLVER_NO_REROUTE=1 "$HEXA_BIN" run "$SERIALIZER" --read-n6 "$shard" 2>/dev/null)
     # parse "primitives=N constants=M ..." from sentinel OR count "id" appearances in JSON
     local json_count
-    json_count=$(echo "$json_out" | grep -oE '"id":"[^"]+' | wc -l | tr -d ' ')
+    json_count=$(echo "$json_out" | grep -oE '"id":[ ]*"[^"]+' | wc -l | tr -d ' ')
     if [ "$n6_count" = "$json_count" ]; then
         printf "  Layer 2 [%s] PASS — entry count %d (n6) = %d (json)\n" "$name" "$n6_count" "$json_count"
         PASS_COUNT=$((PASS_COUNT + 1))
@@ -120,11 +120,12 @@ layer_3_grade_format() {
     local name="$(basename "$shard")"
     # collect all grades (sorted, unique) from n6
     local n6_grades
-    n6_grades=$(grep -oE '\[[0-9.\*\!\?A-Z_+]+\]' "$shard" 2>/dev/null | sort -u | tr '\n' ',' | sed 's/,$//')
+    # Only grades on header lines (^@<TYPE> id = expr :: domain [grade])
+    n6_grades=$(grep -E '^@[PCFLRSXMTE] [^ ]+ =.*\[[^]]+\]' "$shard" 2>/dev/null | grep -oE '\[[0-9.\*\!\?A-Z_+]+\]$' | sort -u | tr '\n' ',' | sed 's/,$//')
     local json_out
     json_out=$(HEXA_RESOLVER_NO_REROUTE=1 "$HEXA_BIN" run "$SERIALIZER" --read-n6 "$shard" 2>/dev/null)
     local json_grades
-    json_grades=$(echo "$json_out" | grep -oE '"grade":"[^"]+' | sed -E 's/"grade":"//' | sort -u | tr '\n' ',' | sed 's/,$//')
+    json_grades=$(echo "$json_out" | grep -oE '"grade":[ ]*"[^"]+' | sed -E 's/"grade":[ ]*"//' | sort -u | tr '\n' ',' | sed 's/,$//')
     # n6 grades wrapped in [], json grades raw — strip [] from n6
     local n6_grades_stripped
     n6_grades_stripped=$(echo "$n6_grades" | sed 's/\[//g; s/\]//g')
