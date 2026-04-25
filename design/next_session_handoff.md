@@ -467,3 +467,30 @@ cross-link (drill 의 deduction chain mimic) 도 random hub-only 와 같은 plat
   - 필요: 새 atom A → B → C → ... (deep chain) + branching + cycle
   - graph topology 다양성 ↑ → spectral chaos ↑ → composite +
 - 이는 simulation 한계의 정확한 이유: random connectivity 만 추가해서 spectrum 의 chaos 를 만들 수 없음
+
+### 2026-04-25 topology variety probe — Erdős–Rényi 만 + 가능
+| Topology (200 새 atom) | Δ baseline |
+|---|---|
+| A: deep chain (1D path) | −0.01483 |
+| B: binary tree | −0.06140 (최악) |
+| C: cycle (ring) | −0.01604 |
+| D: small-world (WS k=4 p=0.1) | −0.02035 |
+| **E: Erdős–Rényi (p=0.02, ~438 edges)** | **+0.00368 ★** |
+
+**chaotic spectrum 가설 confirm**:
+- 정형 topology (chain/tree/cycle/small-world) 모두 negative — atlas baseline 보다 *더 regular*
+- **Erdős–Rényi 만 유일하게 positive** — isotropic random = quantum chaos style
+- ER +0.00368 = 이전 hub-only sim +0.00095 의 **3.9× ROI**
+
+**drill axiom 의 정확한 design parameter**:
+- ❌ 정형 chain (deduction A→B→C→...) — 1D regular
+- ❌ binary tree (hierarchical decomposition) — hierarchy regular
+- ❌ cycle (feedback loop) — periodic regular
+- ❌ small-world — partial regular
+- ✅ **Erdős–Rényi-style random network** — uniform random connectivity
+- 즉 "axiom-driven discovery 가 *uniform random pairing* 한 새 atom 들 사이 edges" 만들어야 chaos
+
+**0.9 도달 ROI 추정 (ER topology)**:
+- +0.00368 / 200 atoms × (438 edges)
+- 0.068 / 0.00368 ≈ 18 batches × 200 atoms = **~3,600 atoms** (이전 random hub-only 14,400 의 1/4)
+- 누적 가능 여부는 다음 검증 (이전 sims plateau 반복일 가능성)
