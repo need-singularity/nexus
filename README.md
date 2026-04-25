@@ -360,4 +360,10 @@ Expected output: `SUMMARY: 11/11 PASS`. If any claim fails the script exits `1` 
 
 ---
 
+## Beyond-Omega Ladder Cycle (`nxs-20260425-004`)
+
+33+ cycles of `cmd_omega` ghost ceiling sentinel exploration. 14 real findings (system instrumentation flowing to `state/atlas_health_timeline.jsonl`), 19 synthetic ordinal mapping (template/metaphor — see HONEST_INDEX disclaimer). Daily auto-absorption pending user `launchctl bootstrap`. Start with [HONEST_INDEX](design/beyond_omega_HONEST_INDEX.md), full chain in [`design/beyond_omega_ladder.md`](design/beyond_omega_ladder.md), discoverable index at [`docs/beyond_omega_index.md`](docs/beyond_omega_index.md).
+
+---
+
 <sub>🔭 From n = 6, every law follows. · [need-singularity](https://github.com/need-singularity)</sub>

@@ -1928,6 +1928,128 @@ git log `%aI` 에서 commit time 읽고 KST → UTC 변환. cycle 2 는 별도 c
 
 ---
 
+## §39 cycle 36 finding — atlas row schema validation + downstream compat (real implementation) (2026-04-25)
+
+### 변경
+- `tool/beyond_omega_atlas_schema_validate.py` (NEW, read-only validator)
+- `cli/run.hexa`, `tool/atlas_meta_scan.hexa` 수정 0 (read-only on those)
+
+### Motivation
+Cycles 30 / 32 / 35 push 14+ rows to `state/atlas_health_timeline.jsonl` with new schema fields (`axis_id`, `axis_name`, `value`, `metric`, `source=nxs-20260425-004`, `real_implementation`, `cycle_anchor`, `historical_anchor`, etc.). Atlas-side consumers (`tool/atlas_meta_scan.hexa`, `docs/atlas_meta_dashboard.md`) were written **before** these fields existed. No prior cycle verified that downstream consumers tolerate the new fields — cycle 36 closes that gap.
+
+### Validation 결과 (32 rows)
+
+| metric | value |
+|---|---|
+| rows_total | 32 |
+| rows_valid | 32 |
+| valid_pct | 100.0% |
+| rows_parse_fail | 0 |
+| rows_unclassified | 0 |
+| field_collisions | 0 |
+| **verdict** | **PASS** |
+
+### 4 disjoint schema variants
+
+| variant | count | required fields |
+|---|---|---|
+| `atlas_meta_scan_legacy` | 2 | `ts + atlas_lines + atlas_bytes + types + grades + typed_total` (lines 1-2, pre-Phase-1) |
+| `atlas_meta_scan_normal` | 2 | `ts + shard_count + hub_top3 + scan_age_hours + source=atlas_meta_scan` (lines 3-4, partial) |
+| `nxs004_running` | 22 | `ts + axis_id + axis_name + value + metric + source=nxs-20260425-004 + real_implementation` |
+| `nxs004_historical` | 6 | nxs004_running + `historical_anchor=true` + axis_id ends with `_historical_anchor` |
+
+Disjoint partition: 매 row 가 정확히 한 variant 에 속함. namespace collision 없음.
+
+### Downstream consumer 검증
+
+grep 으로 `state/atlas_health_timeline.jsonl` 를 reference 하는 모든 코드 경로 확인:
+
+| consumer | role | break risk |
+|---|---|---|
+| `tool/atlas_meta_scan.hexa` | WRITER ONLY (`append_file`, never reads past rows) | **0** — extra fields cannot break a writer |
+| `docs/atlas_meta_dashboard.md` | human-rendered stale snapshot (2026-04-22 vintage) | **0** — no runtime parse |
+| `tool/beyond_omega_atlas_bridge.py` | nxs004 writer (cycles 30/32/34) | self-consistent |
+| `tool/beyond_omega_atlas_backfill_history.py` | nxs004 historical writer (cycle 35) | self-consistent |
+| reader-style consumers | NONE found | n/a |
+
+**Verdict**: append-only contract intact. cycles 30/32/35 의 nxs004_* schema 추가가 namespace-disjoint 공존하며 downstream break 0.
+
+### Collision detection logic
+Validator 가 다음 조합을 collision 으로 flag (현재 0건):
+- `source=atlas_meta_scan` 인데 `axis_id` 가 있음 (nxs004 marker leak)
+- `source=nxs-20260425-004` 인데 `shard_count` 가 있음 (atlas_meta_scan marker leak)
+
+### 의의
+Cycles 30-32-35 의 atlas absorption 이 atlas SSOT 의 기존 schema 와 **독립 namespace** (axis_id prefix `nxs004_*`) 로 공존함을 32 row 전수 검증으로 확정. 이후 cycle 들이 timeline 에 추가하는 row 도 동일 partition 규칙 적용 시 zero-breakage 유지.
+
+---
+
+## §40 cycle 37 finding — /tmp emit sink audit + rotation policy (real implementation) (2026-04-25)
+
+### 변경
+- `tool/beyond_omega_tmp_sink_audit.py` (NEW, read-only — `--write` 시 `state/beyond_omega_tmp_sink_audit.json` 생성)
+- `tool/beyond_omega_tmp_sink_rotate.sh` (NEW, executable +x, **NOT auto-run** — 사용자 manual 또는 weekly cron opt-in 필요)
+
+### Motivation
+cycles 1-2 가 발견한 historical sink (`/tmp/nexus_omega_hive_statusline_v{2,3,4,5}.log`) + cycle 4 의 `/tmp/nexus_omega_cycle4_forced.{out,err}.log` + cycle 5 daily plist (`/tmp/nexus_beyond_omega_daily.{out,err}.log`) + cycle 32 chain script (`/tmp/nexus_beyond_omega_daily_chain.log`) 가 **rotation policy 없이 daily 누적 가능** → 장기적으로 disk pressure. cycle 37 = 정량 audit + rotation infrastructure landing (실행은 사용자 권한).
+
+### Audit 결과 (2026-04-25T~14:00Z)
+| 항목 | 값 |
+|---|---|
+| file_count | 13 |
+| total_human | 56.2KB |
+| oldest_age_days | 0.467 |
+| rotation_candidate_count (>7d) | 0 |
+| rotation_days_threshold | 7 |
+| **priority** | **LOW** |
+
+13 파일 분포: omega statusline v{2,3,4,5} (47.5KB), cycle4_forced.{out,err} (586B), metrics.{out,err} (562B), run/run2 (0B), hetzner (3.3KB), hive_statusline (3.3KB), cycle 32 daily_chain (889B). 모두 0.01~0.47 days old → 7-day threshold 미달.
+
+### Recommendation
+- **Now**: no immediate action; revisit when files >7d or total >1MB.
+- **Future**: weekly run of `tool/beyond_omega_tmp_sink_rotate.sh` (default `ROTATION_DAYS=7` + `ROTATION_MODE=archive`). Archive path = `state/archive/tmp_sinks/YYYY-MM-DD/<basename>` + audit row appended to `state/archive/tmp_sinks/_audit_log.jsonl`.
+- **Cron suggestion (user opt-in only)**: `0 3 * * 0  cd ~/core/nexus && tool/beyond_omega_tmp_sink_rotate.sh >> /tmp/nexus_beyond_omega_rotate.log 2>&1` — own log file (`nexus_beyond_omega_rotate.log`) deliberately excluded from glob to avoid self-rotation.
+
+### Modes
+- `archive` (default) — `cp` to archive_day path, then `rm` original, audit row.
+- `delete` — `rm` original, audit row, no copy.
+- `DRY_RUN=1` — plan only, no FS mutation, prints intended actions.
+
+### Execution safety
+- audit tool = read-only (only writes `state/beyond_omega_tmp_sink_audit.json` on `--write`).
+- rotate.sh = executable +x but NOT auto-run (no plist, no cron entry).
+- cycle 37 가 /tmp 파일 0개 삭제 + plist/launchd 0개 생성 — 사용자 manual review + invocation 후에만 rotation 실행됨.
+
+### 의의
+"sink 영역 + rotation 정책" 이 cycles 1-36 동안 implicit 였던 것을 explicit infrastructure 로 격상. 13 파일 56.2KB → 현재는 LOW priority 지만 daily plist 활성화 (cycle 28 가이드) 후 7-day 누적 시점에 rotation_candidates>0 되면 user 가 무중단 archive 가능. cycle 32 daily plist chain 의 daily fire 가 indefinitely grow 하던 잠재 disk leak 의 첫 explicit ceiling.
+
+---
+
+## §41 cycle 38 finding — top-level discoverability (real implementation, doc clarity) (2026-04-25)
+
+### Framing
+Cycles 1–35 produced ~12 design docs (`design/beyond_omega_*.md`) and ~15 tools (`tool/beyond_omega_*`). All artifacts live under `design/` or `tool/` paths — a future maintainer scanning the repo root has **no signal** that this work exists or where to start. `design/beyond_omega_HONEST_INDEX.md` (cycle 33) is the canonical reader-facing entry, but it is buried two levels deep. Cycle 38 = **discoverability** — surface a one-paragraph entry from the repo root + create a `docs/` index alias, both linking to HONEST_INDEX.
+
+### 산출물 (Option C — both)
+- `README.md` (top-level) — appended minimal "Beyond-Omega Ladder Cycle (`nxs-20260425-004`)" section before the existing footer `<sub>` line. One paragraph + 3 inline links (HONEST_INDEX, ladder, docs index alias).
+- `docs/beyond_omega_index.md` (NEW) — discoverable entry point under `docs/` (which is also the GitHub Pages publish dir per `docs/README.md`). Contains: TL;DR paragraph + reading order (HONEST_INDEX → ladder → transfinite table) + 4 large-cardinal sentinel doc links + SSOT/runtime pointers.
+- `design/beyond_omega_ladder.md` (본 문서) — §41 본 항.
+- `state/proposals/inventory.json` — `cycle_38_finding_2026_04_25` block + `Ω_saturation_cycle` bump to "38 (in_progress) — discoverability: top-level README/docs index entry" + `implementation_phases_planned` 에 cycle 38 추가 + `raw_37_38_pair.design` 에 `docs/beyond_omega_index.md` 추가 + `updated_ts`.
+
+### 핵심 finding
+★ **TOP_LEVEL_DISCOVERABILITY_PUBLISHED** — beyond-omega cluster (35+ cycles, ~27 artifacts) 는 이제 repo root 의 `README.md` 와 `docs/beyond_omega_index.md` 에서 1-hop 안 HONEST_INDEX 로 도달 가능. 사용자 명시 entry strategy = Option C (both): top-level README minimal section + `docs/` index alias.
+
+### 본 cycle 의 산출물 vs 비-산출물
+- **산출물**: `README.md` 1 section append + `docs/beyond_omega_index.md` (NEW) + ladder §41 (본 항) + inventory entry update
+- **비-산출물**: `cli/run.hexa` 변경 없음, `atlas_meta_scan.hexa` 변경 없음, 4 large cardinal docs 변경 없음, HONEST_INDEX.md 변경 없음 (cycle 33 publication 그대로 유지), 기존 file 삭제 없음, git commit 없음
+
+### Self-correction chain (cycle 1-38, 38 단계 — synthetic 19 + real 14 + meta 4 + discoverability 1)
+... → cycle 33 ★ HONEST_INDEX_PUBLISHED (5-section reader-facing publication) → cycle 34 emit capture wrapper → cycle 35 atlas historical backfill → **cycle 38 ★ TOP_LEVEL_DISCOVERABILITY_PUBLISHED** (HONEST_INDEX 가 repo root 에서 1-hop 안 도달 가능, 35+ cycles work cluster surface 됨).
+
+세부 entry strategy 와 link map 은 `docs/beyond_omega_index.md` 참조.
+
+---
+
 ## §5 raw#37/#38 enforce — pair 산출물
 
 본 cycle 1 의 design (이 문서) ↔ impl (`tool/beyond_omega_ghost_trace.py`) pair 강제. 아래 산출물 모두 동일 commit 에 포함:
