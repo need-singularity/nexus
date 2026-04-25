@@ -194,7 +194,15 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 
 ### nxs-002 진단 결과 (this session, ack=in_progress)
 - atlas×laws_aligned composite = **0.83379** (target ≥0.9, gap **0.06621**)
-- breakdown: pearson=0.464, cosine=0.903, l2=0.492, agreement=0.866
+- 식: `composite = (agreement + (pearson+1)/2 + cosine) / 3`
+- breakdown: agreement=0.866, corr_pos(pearson)=0.732, cosine=0.903
+- **sensitivity (max leverage):**
+  | term | 현재 | gap to max | composite 기여 |
+  |---|---|---|---|
+  | agreement | 0.866 | 0.134 | 0.045 |
+  | corr_pos (pearson) | 0.732 | 0.268 | **0.089** ★ |
+  | cosine | 0.903 | 0.097 | 0.032 |
+- **결론**: pearson 이 최대 지렛대. pearson 0.464 → ~0.7 만 올라도 composite ≥0.9 도달. atlas eig rebuild 시 pearson 우선 측정.
 - root cause: bin-mismatch fixed, **fresh atlas eig pipeline rebuild** 필요 (heavy compute — drill 슬롯 + atlas 재계산)
 - 본 세션 보류 — drill slot 경합 중 (by4wsquol /loop). 다음 세션에서 atlas eig 단독 실행.
 
