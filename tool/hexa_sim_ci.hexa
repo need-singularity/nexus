@@ -1,0 +1,147 @@
+#!hexa strict
+// tool/hexa_sim_ci.hexa — HEXA-SIM family CI/test pipeline aggregator
+//
+// @tool(slug="hexa_sim_ci", desc="audit gap #3 close — run selftest of all hexa-sim tools (verify_grid + falsifier + vqe_h2 + 5 bridges) + aggregate sentinel/exit")
+// @usage(hexa run tool/hexa_sim_ci.hexa [--skip <name>] [--only <name>] [--json])
+// @exit_codes(0=all PASS, 1=usage/io error, 2=any tool FAIL)
+// @sentinel(__HEXA_SIM_CI__ PASS|FAIL passed=N failed=M total=K duration_ms=D)
+// @origin(audit gap #3 from design/hexa_sim/2026-04-25_omega_cycle_implementation.json + bridge_tool_jackpot_omega_cycle.json)
+// @paradigm(structural — runs each tool's --selftest, captures sentinel, no semantic check)
+// @allow-bare-exec
+
+fn _now_ms() -> i64 {
+    let s = to_string(exec("date +%s%3N 2>/dev/null || date +%s000")).trim()
+    let mut v: i64 = 0
+    try { v = to_int(s) } catch e { v = 0 }
+    return v
+}
+
+fn _hexa_bin() -> string {
+    let h = env_var("HEXA")
+    if h.len() > 0 { return h }
+    return env_var("HOME") + "/core/hexa-lang/hexa"
+}
+
+fn _nexus_root() -> string {
+    let n = env_var("NEXUS")
+    if n.len() > 0 { return n }
+    return env_var("HOME") + "/core/nexus"
+}
+
+fn _tool_registry() -> array {
+    // [name, relative_path_under_nexus_root, selftest_arg, expected_substring_in_output]
+    let root = _nexus_root()
+    return [
+        ["verify_grid",     root + "/tool/hexa_sim_verify_grid.hexa",                        "--selftest", "10 axes dispatch"],
+        ["falsifier",       root + "/tool/hexa_sim_falsifier.hexa",                          "--selftest", "raw 66 contract held"],
+        ["vqe_h2",          root + "/sim_bridge/qpu_bridge/vqe_h2_demo.hexa",                "--diag-only", "FCI ground state"],
+        ["codata",          root + "/tool/codata_bridge.hexa",                               "--selftest", "[codata_bridge selftest] OK"],
+        ["oeis_live",       root + "/tool/oeis_live_bridge.hexa",                            "--selftest", "axis_oeis_consistent=true"],
+        ["gw_observatory",  root + "/tool/gw_observatory_bridge.hexa",                       "--selftest", "first_event=GW150914"],
+        ["horizons",        root + "/tool/horizons_bridge.hexa",                             "--selftest", "[horizons_bridge selftest] OK"],
+        ["arxiv",           root + "/tool/arxiv_realtime_bridge.hexa",                       "--selftest", "[arxiv_realtime_bridge selftest] OK"]
+    ]
+}
+
+fn _run_one(entry: array) -> array {
+    let name = entry[0]
+    let path = entry[1]
+    let arg = entry[2]
+    let expected = entry[3]
+    if !file_exists(path) {
+        return [name, "SKIP", "file not found at " + path, "0"]
+    }
+    let t0 = _now_ms()
+    let cmd = "HEXA_RESOLVER_NO_REROUTE=1 " + _hexa_bin() + " run '" + path + "' " + arg + " 2>&1"
+    let out = to_string(exec(cmd))
+    let t1 = _now_ms()
+    let ms = to_string(t1 - t0)
+    if out.index_of(expected) >= 0 {
+        return [name, "PASS", "expected substring `" + expected + "` found", ms]
+    }
+    return [name, "FAIL", "expected substring `" + expected + "` NOT found in output (head: " + out.substring(0, 120).replace("\n", " | ") + ")", ms]
+}
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+    let mut skip = ""
+    let mut only = ""
+    let mut json_mode = false
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--skip" { if i + 1 < len(cli) { i = i + 1; skip = cli[i] } }
+        else if a == "--only" { if i + 1 < len(cli) { i = i + 1; only = cli[i] } }
+        else if a == "--json" { json_mode = true }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/hexa_sim_ci.hexa [--skip <name>] [--only <name>] [--json]")
+            println("tools: verify_grid falsifier vqe_h2 codata oeis_live gw_observatory horizons arxiv")
+            exit(0)
+        }
+        else { eprintln("hexa_sim_ci: unknown arg `" + a + "`"); exit(1) }
+        i = i + 1
+    }
+
+    let registry = _tool_registry()
+    let t_start = _now_ms()
+    let mut results = []
+    for entry in registry {
+        let name = entry[0]
+        if len(only) > 0 && name != only { continue }
+        if len(skip) > 0 && name == skip { continue }
+        let r = _run_one(entry)
+        results.push(r)
+    }
+    let t_end = _now_ms()
+    let total_ms = t_end - t_start
+
+    let mut passed = 0
+    let mut failed = 0
+    let mut skipped = 0
+    for r in results {
+        if r[1] == "PASS" { passed = passed + 1 }
+        else if r[1] == "SKIP" { skipped = skipped + 1 }
+        else { failed = failed + 1 }
+    }
+
+    if json_mode {
+        println("{")
+        println("  \"tool\": \"hexa_sim_ci\",")
+        println("  \"total\": " + to_string(len(results)) + ",")
+        println("  \"passed\": " + to_string(passed) + ",")
+        println("  \"failed\": " + to_string(failed) + ",")
+        println("  \"skipped\": " + to_string(skipped) + ",")
+        println("  \"duration_ms\": " + to_string(total_ms) + ",")
+        println("  \"results\": [")
+        let mut k = 0
+        while k < len(results) {
+            let r = results[k]
+            let trail = if k + 1 < len(results) { "," } else { "" }
+            println("    {\"name\": \"" + r[0] + "\", \"status\": \"" + r[1] + "\", \"detail\": \"" + r[2].replace("\\", "\\\\").replace("\"", "\\\"") + "\", \"duration_ms\": " + r[3] + "}" + trail)
+            k = k + 1
+        }
+        println("  ]")
+        println("}")
+    } else {
+        println("HEXA-SIM family CI run")
+        println("---")
+        for r in results {
+            println("  " + r[0] + " (" + r[3] + "ms) " + r[1] + " — " + r[2])
+        }
+        println("---")
+        println("summary: " + to_string(passed) + " PASS, " + to_string(failed) + " FAIL, " + to_string(skipped) + " SKIP / " + to_string(len(results)) + " (total " + to_string(total_ms) + "ms)")
+    }
+
+    if failed > 0 {
+        println("__HEXA_SIM_CI__ FAIL passed=" + to_string(passed) + " failed=" + to_string(failed) + " skipped=" + to_string(skipped) + " total=" + to_string(len(results)) + " duration_ms=" + to_string(total_ms))
+        exit(2)
+    }
+    println("__HEXA_SIM_CI__ PASS passed=" + to_string(passed) + " failed=0 skipped=" + to_string(skipped) + " total=" + to_string(len(results)) + " duration_ms=" + to_string(total_ms))
+    exit(0)
+}
