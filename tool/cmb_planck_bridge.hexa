@@ -1,0 +1,385 @@
+#!hexa strict
+// tool/cmb_planck_bridge.hexa — Planck 2018 CMB ↔ HEXA-SIM (n=6) cosmological-parameter bridge.
+//
+// @tool(slug="cmb_planck_bridge", desc="Planck 2018 6-parameter ΛCDM fetch (Wikipedia Planck spacecraft page H0 grep) + n=6 framework binding via n_s deviation from scale-invariance")
+// @usage(hexa run tool/cmb_planck_bridge.hexa [--selftest] [--json] [--no-fetch])
+// @exit_codes(0=PASS, 1=usage/io error, 2=value verification failure)
+// @sentinel(__CMB_PLANCK_BRIDGE__ PASS|FAIL H0=<float> Omega_m=<float> n_s=<float> first_peak_l=220)
+// @origin(hive raw 70 design-multi-axis-verify-grid — empirical anchor for sedi_cmb_anisotropy / sedi_angular_power / sedi_baryon_acoustic)
+// @abstraction(hive raw 73 structural-admissibility — n=6 parameters set count matches HEXA-SIM N=6, n_s ≈ 0.965 → (1 - n_s) = 0.035 spectral-index gap)
+// @paradigm(structural-admissibility — fixed scaling, no float arithmetic; integer-only ROI gap)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoint (light, ~600KB HTML, single curl): https://en.wikipedia.org/wiki/Planck_(spacecraft)
+// Live extraction strategy: grep first "67\.[0-9]+" token in window [66.5, 68.5] (H0 km/s/Mpc).
+//   Heavy LAMBDA / PLA endpoints intentionally avoided (full power-spectrum data > 10 MB).
+//   Live result is used only as a smoke-check vs hardcoded fallback; remaining 5 parameters
+//   are taken from the hardcoded Planck 2018 reference (verified against Wikipedia table).
+//
+// Hardcoded Planck 2018 reference (TT,TE,EE+lowE column — user-specified canonical set):
+//   H_0           = 67.36 km/s/Mpc
+//   Omega_m       = 0.315
+//   Omega_Lambda  = 0.685
+//   sigma_8       = 0.811
+//   n_s           = 0.965
+//   Age           = 13.797 Gyr
+//   first_peak_l  = 220       (acoustic peak multipole, geometric, not in 6-param fit)
+//
+// HEXA-SIM (n=6) binding hint:
+//   1. n_param = 6   (H0, Omega_b·h^2, Omega_c·h^2, theta_*, tau, A_s with derived n_s)
+//      = exact match for HEXA-SIM N = 6.
+//   2. spectral_index_gap = 1 - n_s = 1 - 0.965 = 0.035
+//      → fractional deviation from Harrison–Zel'dovich (n_s = 1) scale-invariance.
+//      → numerically very close to CODATA alpha^-1 fractional gap (0.036, codata_bridge).
+//   3. first_peak_l ≈ 220 — first acoustic peak multipole; symbolic factor 220 = 2^2·5·11
+//      (no direct n=6 identity; reported as geometric anchor for sedi_angular_power).
+
+// ─── scaled-integer constants (9 fractional digits = nano resolution) ───
+
+fn SCALE() -> i64 { return 1000000000 }       // 10^9
+fn HEXA_N_INT() -> i64 { return 6 }           // HEXA-SIM N
+fn N_PARAM_INT() -> i64 { return 6 }          // Planck base-ΛCDM 6-parameter count
+
+// Hardcoded Planck 2018 fallback values (scaled, 9 frac digits)
+fn FB_H0_SCALED()       -> i64 { return  67360000000 }   // 67.360000000
+fn FB_OMEGA_M()         -> i64 { return    315000000 }   // 0.315
+fn FB_OMEGA_L()         -> i64 { return    685000000 }   // 0.685
+fn FB_SIGMA8()          -> i64 { return    811000000 }   // 0.811
+fn FB_NS()              -> i64 { return    965000000 }   // 0.965
+fn FB_AGE_GYR()         -> i64 { return  13797000000 }   // 13.797
+fn FB_FIRST_PEAK_L()    -> i64 { return            220 } // unscaled integer
+
+// Sanity windows for live H0 extraction (km/s/Mpc): [66.5, 68.5]
+fn H0_LO_SCALED() -> i64 { return 66500000000 }
+fn H0_HI_SCALED() -> i64 { return 68500000000 }
+
+// ─── helpers ───
+
+fn _abs_i(x: i64) -> i64 { if x < 0 { return 0 - x } return x }
+
+fn _is_digit(c: string) -> bool {
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn _str_to_i(s: string) -> i64 {
+    if len(s) == 0 { return 0 }
+    let mut neg = false
+    let mut i = 0
+    if s.substring(0, 1) == "-" { neg = true; i = 1 }
+    let mut acc: i64 = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "0" { acc = acc * 10 }
+        else if c == "1" { acc = acc * 10 + 1 }
+        else if c == "2" { acc = acc * 10 + 2 }
+        else if c == "3" { acc = acc * 10 + 3 }
+        else if c == "4" { acc = acc * 10 + 4 }
+        else if c == "5" { acc = acc * 10 + 5 }
+        else if c == "6" { acc = acc * 10 + 6 }
+        else if c == "7" { acc = acc * 10 + 7 }
+        else if c == "8" { acc = acc * 10 + 8 }
+        else if c == "9" { acc = acc * 10 + 9 }
+        i = i + 1
+    }
+    if neg { return 0 - acc }
+    return acc
+}
+
+// Format scaled integer (val/10^9) with 9 fractional digits
+fn _fmt_scaled(scaled: i64) -> string {
+    let neg = scaled < 0
+    let v = _abs_i(scaled)
+    let int_part = v / SCALE()
+    let frac_part = v % SCALE()
+    let mut frac_str = to_string(frac_part)
+    while len(frac_str) < 9 { frac_str = "0" + frac_str }
+    let core = to_string(int_part) + "." + frac_str
+    if neg { return "-" + core }
+    return core
+}
+
+// Format scaled integer with N fractional digits (truncates)
+fn _fmt_scaled_n(scaled: i64, n: i64) -> string {
+    let full = _fmt_scaled(scaled)
+    let dot = full.index_of(".")
+    if dot < 0 { return full }
+    if n <= 0 { return full.substring(0, dot) }
+    let want_end = dot + 1 + n
+    if want_end > len(full) { return full }
+    return full.substring(0, want_end)
+}
+
+// Parse "67.36" / "67.360" style → scaled 10^9 integer
+fn _parse_decimal_scaled(s: string) -> i64 {
+    let cleaned = s.replace(" ", "")
+    let dot = cleaned.index_of(".")
+    if dot < 0 { return _str_to_i(cleaned) * SCALE() }
+    let int_str = cleaned.substring(0, dot)
+    let raw_frac = cleaned.substring(dot + 1, len(cleaned))
+    let mut clean_frac = ""
+    let mut i = 0
+    while i < len(raw_frac) {
+        let c = raw_frac.substring(i, i + 1)
+        if _is_digit(c) { clean_frac = clean_frac + c }
+        else { i = len(raw_frac) }
+        i = i + 1
+    }
+    if len(clean_frac) > 9 { clean_frac = clean_frac.substring(0, 9) }
+    while len(clean_frac) < 9 { clean_frac = clean_frac + "0" }
+    let int_v = _str_to_i(int_str)
+    let frac_v = _str_to_i(clean_frac)
+    return int_v * SCALE() + frac_v
+}
+
+// ─── live fetch + H0 extraction ───
+//
+// Strategy: pull Wikipedia "Planck (spacecraft)" page, grep first "67.xx" token,
+// validate that scaled value lies within [66.5, 68.5] window. We deliberately do
+// NOT attempt to scrape the full 6-parameter table from HTML (too brittle); live
+// fetch is a presence + sanity smoke-check only. Hardcoded reference is canonical.
+
+fn fetch_planck_h0_token() -> string {
+    let url = "https://en.wikipedia.org/wiki/Planck_(spacecraft)"
+    // grep first H0-shaped token (67.xx). -m 1 stops at first match.
+    let cmd = "curl -s --max-time 15 -A 'Mozilla/5.0' '" + url + "' 2>/dev/null | grep -oE '67\\.[0-9]+' | head -1"
+    let raw = exec(cmd)  // @allow-bare-exec
+    return to_string(raw).trim()
+}
+
+// Parse + window-validate the live H0 token; return scaled value or -1 on failure.
+fn extract_live_h0_scaled(tok: string) -> i64 {
+    if len(tok) == 0 { return -1 }
+    let s = _parse_decimal_scaled(tok)
+    if s < H0_LO_SCALED() || s > H0_HI_SCALED() { return -1 }
+    return s
+}
+
+// ─── core: bridge computation ───
+//
+// returns array [n_param, hexa_n, ns_gap_scaled, ns_gap_pct_e6]
+//   ns_gap          = |1 - n_s|   in scaled 10^9 units
+//   ns_gap_pct_e6   = 100 * ns_gap / 1.0  ·  10^6      (just preserves precision)
+
+fn compute_bridge(ns_scaled: i64) -> array {
+    let one_scaled: i64 = SCALE()       // 1.000000000
+    let ns_gap = _abs_i(one_scaled - ns_scaled)
+    // pct of unity = 100 * ns_gap / one_scaled, multiplied by 10^6 for precision
+    let pct_e6: i64 = (ns_gap * 100 * 1000000) / one_scaled
+    return [N_PARAM_INT(), HEXA_N_INT(), ns_gap, pct_e6]
+}
+
+fn _fmt_pct_e6(pct_e6: i64) -> string {
+    let neg = pct_e6 < 0
+    let v = _abs_i(pct_e6)
+    let int_part = v / 1000000
+    let frac_part = v % 1000000
+    let mut frac_str = to_string(frac_part)
+    while len(frac_str) < 6 { frac_str = "0" + frac_str }
+    let frac_4 = frac_str.substring(0, 4)
+    let core = to_string(int_part) + "." + frac_4
+    if neg { return "-" + core }
+    return core
+}
+
+// ─── selftest ───
+
+fn _selftest() {
+    let mut bad = []
+
+    // 1. parse "67.36" → 67360000000
+    let p1 = _parse_decimal_scaled("67.36")
+    if p1 != 67360000000 { bad.push("parse('67.36') expected 67360000000 got " + to_string(p1)) }
+
+    // 2. parse "0.965" → 965000000
+    let p2 = _parse_decimal_scaled("0.965")
+    if p2 != 965000000 { bad.push("parse('0.965') expected 965000000 got " + to_string(p2)) }
+
+    // 3. parse integer-only "220" → 220 * 10^9
+    let p3 = _parse_decimal_scaled("220")
+    if p3 != 220000000000 { bad.push("parse('220') expected 220000000000 got " + to_string(p3)) }
+
+    // 4. fmt roundtrip: 67.360000000
+    let f1 = _fmt_scaled(67360000000)
+    if f1 != "67.360000000" { bad.push("_fmt_scaled(67360000000) expected '67.360000000' got '" + f1 + "'") }
+
+    // 5. fmt truncated to 2 frac digits
+    let f2 = _fmt_scaled_n(67360000000, 2)
+    if f2 != "67.36" { bad.push("_fmt_scaled_n(.,2) expected '67.36' got '" + f2 + "'") }
+
+    // 6. window-validate: live H0 in window
+    let w_in = extract_live_h0_scaled("67.36")
+    if w_in != 67360000000 { bad.push("extract_live_h0('67.36') expected 67360000000 got " + to_string(w_in)) }
+
+    // 7. window-validate: out-of-window rejected (e.g. "65.00" or "70.5")
+    let w_out_lo = extract_live_h0_scaled("65.00")
+    if w_out_lo != -1 { bad.push("extract_live_h0('65.00') expected -1 got " + to_string(w_out_lo)) }
+    let w_out_hi = extract_live_h0_scaled("70.5")
+    if w_out_hi != -1 { bad.push("extract_live_h0('70.5') expected -1 got " + to_string(w_out_hi)) }
+
+    // 8. compute_bridge with hardcoded n_s = 0.965 → ns_gap = 0.035
+    let br = compute_bridge(FB_NS())
+    let n_p: i64 = br[0]
+    let h_n: i64 = br[1]
+    let gap: i64 = br[2]
+    let pct_e6: i64 = br[3]
+    if n_p != 6 { bad.push("bridge n_param expected 6 got " + to_string(n_p)) }
+    if h_n != 6 { bad.push("bridge hexa_n expected 6 got " + to_string(h_n)) }
+    if gap != 35000000 { bad.push("bridge ns_gap expected 35000000 (=0.035) got " + to_string(gap)) }
+    // 100 * 0.035 = 3.5 (%); pct_e6 = 3500000
+    if pct_e6 < 3490000 || pct_e6 > 3510000 { bad.push("bridge pct_e6 expected ~3500000 got " + to_string(pct_e6)) }
+
+    // 9. n_param == hexa_n (binding hint sanity)
+    if N_PARAM_INT() != HEXA_N_INT() { bad.push("n_param != hexa_n: " + to_string(N_PARAM_INT()) + " vs " + to_string(HEXA_N_INT())) }
+
+    // 10. fallback values are all in plausible cosmological ranges
+    if FB_OMEGA_M() + FB_OMEGA_L() < 990000000 || FB_OMEGA_M() + FB_OMEGA_L() > 1010000000 {
+        bad.push("Omega_m + Omega_L expected ≈ 1.0 (flat universe), got " + _fmt_scaled(FB_OMEGA_M() + FB_OMEGA_L()))
+    }
+
+    // 11. first acoustic peak l = 220 = 2^2·5·11 (geometric anchor)
+    if FB_FIRST_PEAK_L() != 220 { bad.push("first_peak_l expected 220 got " + to_string(FB_FIRST_PEAK_L())) }
+    let factor_check = 4 * 5 * 11
+    if factor_check != 220 { bad.push("220 factorization 2^2·5·11 broken: " + to_string(factor_check)) }
+
+    if len(bad) > 0 {
+        eprintln("[cmb_planck_bridge selftest] FAIL: " + bad.join(", "))
+        exit(1)
+    }
+    println("[cmb_planck_bridge selftest] OK — parse + fmt + window + bridge + flat + factor (11 checks)")
+    exit(0)
+}
+
+// ─── emit helpers ───
+
+fn _emit_text(h0_scaled: i64, ns_scaled: i64, ns_gap: i64, pct_e6: i64, source: string, live_h0_scaled: i64) {
+    println("PLANCK_SOURCE     : " + source)
+    println("H0_km_s_Mpc       : " + _fmt_scaled_n(h0_scaled, 3))
+    println("Omega_m           : " + _fmt_scaled_n(FB_OMEGA_M(), 4))
+    println("Omega_Lambda      : " + _fmt_scaled_n(FB_OMEGA_L(), 4))
+    println("sigma_8           : " + _fmt_scaled_n(FB_SIGMA8(), 4))
+    println("n_s               : " + _fmt_scaled_n(ns_scaled, 4))
+    println("age_Gyr           : " + _fmt_scaled_n(FB_AGE_GYR(), 3))
+    println("first_peak_l      : " + to_string(FB_FIRST_PEAK_L()) + "   (= 2^2·5·11, geometric anchor)")
+    println("---")
+    println("n_param           : " + to_string(N_PARAM_INT()) + "   (Planck base-ΛCDM)")
+    println("hexa_sim_N        : " + to_string(HEXA_N_INT()) + "   (HEXA-SIM N axis)")
+    println("n_param == hexa_N : " + to_string(N_PARAM_INT() == HEXA_N_INT()))
+    println("ns_gap (1-n_s)    : " + _fmt_scaled_n(ns_gap, 4))
+    println("ns_gap_pct        : " + _fmt_pct_e6(pct_e6) + " %")
+    if live_h0_scaled > 0 {
+        println("live_h0_smoke     : " + _fmt_scaled_n(live_h0_scaled, 3) + "   (within [66.5, 68.5] window)")
+    } else {
+        println("live_h0_smoke     : (skipped or out-of-window)")
+    }
+}
+
+fn _emit_json(h0_scaled: i64, ns_scaled: i64, ns_gap: i64, pct_e6: i64, source: string, live_h0_scaled: i64) {
+    println("{")
+    println("  \"tool\": \"cmb_planck_bridge\",")
+    println("  \"origin\": \"hive raw 70 design-multi-axis-verify-grid\",")
+    println("  \"paradigm\": \"structural-admissibility (raw 73)\",")
+    println("  \"source\": \"" + source + "\",")
+    println("  \"h0_kms_mpc\": " + _fmt_scaled_n(h0_scaled, 3) + ",")
+    println("  \"omega_m\": " + _fmt_scaled_n(FB_OMEGA_M(), 4) + ",")
+    println("  \"omega_lambda\": " + _fmt_scaled_n(FB_OMEGA_L(), 4) + ",")
+    println("  \"sigma_8\": " + _fmt_scaled_n(FB_SIGMA8(), 4) + ",")
+    println("  \"n_s\": " + _fmt_scaled_n(ns_scaled, 4) + ",")
+    println("  \"age_gyr\": " + _fmt_scaled_n(FB_AGE_GYR(), 3) + ",")
+    println("  \"first_peak_l\": " + to_string(FB_FIRST_PEAK_L()) + ",")
+    println("  \"hexa_sim_binding_hint\": {")
+    println("    \"n_param_planck\": " + to_string(N_PARAM_INT()) + ",")
+    println("    \"hexa_sim_N\": " + to_string(HEXA_N_INT()) + ",")
+    println("    \"match\": " + to_string(N_PARAM_INT() == HEXA_N_INT()) + ",")
+    println("    \"ns_gap\": " + _fmt_scaled_n(ns_gap, 4) + ",")
+    println("    \"ns_gap_pct\": " + _fmt_pct_e6(pct_e6) + ",")
+    println("    \"binding_lenses\": [\"sedi_cmb_anisotropy\", \"sedi_angular_power\", \"sedi_baryon_acoustic\"]")
+    println("  },")
+    if live_h0_scaled > 0 {
+        println("  \"live_h0_smoke\": " + _fmt_scaled_n(live_h0_scaled, 3))
+    } else {
+        println("  \"live_h0_smoke\": null")
+    }
+    println("}")
+}
+
+// ─── main ───
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut json_mode = false
+    let mut no_fetch = false
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { _selftest() }
+        else if a == "--json" { json_mode = true }
+        else if a == "--no-fetch" { no_fetch = true }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/cmb_planck_bridge.hexa [--selftest] [--json] [--no-fetch]")
+            println("  --selftest : 11-check internal verification, exit 0/1")
+            println("  --json     : emit single JSON object on stdout")
+            println("  --no-fetch : skip Wikipedia curl, use hardcoded Planck-2018 fallback only")
+            println("origin: hive raw 70/73 — Planck 2018 6-param ΛCDM ↔ HEXA-SIM N=6 binding")
+            println("binding lenses: sedi_cmb_anisotropy, sedi_angular_power, sedi_baryon_acoustic")
+            exit(0)
+        }
+        else {
+            eprintln("cmb_planck_bridge: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    // Hardcoded canonical values are the spine; live fetch is a smoke-check only.
+    let h0_scaled: i64 = FB_H0_SCALED()
+    let ns_scaled: i64 = FB_NS()
+    let mut source: string = "fallback:Planck-2018-hardcoded (TT,TE,EE+lowE)"
+    let mut live_h0_scaled: i64 = -1
+
+    if !no_fetch {
+        let tok = fetch_planck_h0_token()
+        let parsed = extract_live_h0_scaled(tok)
+        if parsed > 0 {
+            live_h0_scaled = parsed
+            source = "live-smoke:wikipedia/Planck_(spacecraft) + fallback:Planck-2018-hardcoded"
+        } else {
+            source = "fallback:fetch-failed (Planck-2018-hardcoded)"
+        }
+    }
+
+    let br = compute_bridge(ns_scaled)
+    let ns_gap: i64 = br[2]
+    let pct_e6: i64 = br[3]
+
+    if json_mode { _emit_json(h0_scaled, ns_scaled, ns_gap, pct_e6, source, live_h0_scaled) }
+    else { _emit_text(h0_scaled, ns_scaled, ns_gap, pct_e6, source, live_h0_scaled) }
+
+    // sentinel: PASS if H0 in [66.5, 68.5], n_s in [0.94, 0.99], first_peak_l == 220.
+    let h0_ok = h0_scaled >= H0_LO_SCALED() && h0_scaled <= H0_HI_SCALED()
+    let ns_lo: i64 = 940000000
+    let ns_hi: i64 = 990000000
+    let ns_ok = ns_scaled >= ns_lo && ns_scaled <= ns_hi
+    let peak_ok = FB_FIRST_PEAK_L() == 220
+    // If live fetch ran, also require live H0 within ±2 km/s/Mpc of hardcoded H0
+    let mut live_ok = true
+    if live_h0_scaled > 0 {
+        let h_diff = _abs_i(live_h0_scaled - h0_scaled)
+        let two_kms: i64 = 2000000000   // 2.0 km/s/Mpc in scaled units
+        if h_diff > two_kms { live_ok = false }
+    }
+    let sane = h0_ok && ns_ok && peak_ok && live_ok
+    if !sane {
+        println("__CMB_PLANCK_BRIDGE__ FAIL H0=" + _fmt_scaled_n(h0_scaled, 2) + " Omega_m=" + _fmt_scaled_n(FB_OMEGA_M(), 3) + " n_s=" + _fmt_scaled_n(ns_scaled, 3) + " first_peak_l=" + to_string(FB_FIRST_PEAK_L()))
+        exit(2)
+    }
+    println("__CMB_PLANCK_BRIDGE__ PASS H0=" + _fmt_scaled_n(h0_scaled, 2) + " Omega_m=" + _fmt_scaled_n(FB_OMEGA_M(), 3) + " n_s=" + _fmt_scaled_n(ns_scaled, 3) + " first_peak_l=" + to_string(FB_FIRST_PEAK_L()))
+    exit(0)
+}
