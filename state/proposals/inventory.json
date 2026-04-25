@@ -677,6 +677,28 @@
         "Phase 3: hook 자동 cron disable opt — NEXUS_HOOK_CRON_DISABLE env 또는 cron 빈도 줄이기",
         "Phase 4: drill slot 동시성 — multiple session 발사 시 queue 또는 reject + clear emit"
       ],
+      "phase2_docker_audit_cycle41": {
+        "result": "Phase 2 docker harness chain audit — drill_zero_yield 의 docker mode root cause 가설 정립",
+        "method": "scripts/bin/hexa-resolver (~/.hx/bin/hexa) 의 docker hard-landing block + cycle 8/9/12 drill_zero_yield evidence 결합",
+        "docker_dispatch_flow": "external (hexa_remote) 실패 시: exec docker exec -i -w $PWD -e HEXA_RESOLVER_NO_REROUTE=1 -e HEXA_RESOLVER_IN_CONTAINER=1 hexa-runner:latest /usr/local/bin/hexa <args>",
+        "evidence_drill_zero_yield_in_docker_mode": [
+          "cycle 8 drill: docker fallback 시 smash event=start ts=X → smash event=end ts=X+0.006 (6ms 즉시 종료)",
+          "cycle 9 drill: 동일 패턴, 0 absorptions, NEXUS_DRILL_ERROR drill_zero_yield",
+          "cycle 12 drill: route=docker 후 smash 0 absorptions SATURATED early"
+        ],
+        "root_cause_hypothesis_phase2": [
+          "(H1) docker container 안의 cli/run.hexa cmd_drill 의 child exec 호출이 host path 가리킴 (e.g. timeout ... '/root/.hx/bin/hexa_real' run '/root/Dev/nexus/cli/blowup/core/blowup.hexa') → container 에서 host filesystem 못 봄 → silent exec fail → 0 absorptions",
+          "(H2) container 안의 hexa_real binary 와 nexus blowup.hexa file 의 mount mismatch — image build 시 nexus copy 또는 bind mount 가 부족",
+          "(H3) HEXA_RESOLVER_NO_REROUTE=1 + HEXA_RESOLVER_IN_CONTAINER=1 env 가 child exec 안에서 inherit, 그러나 child exec 의 path 가 host root '/' 으로 가리킬 때 container '/' 다름"
+        ],
+        "phase2_implementation_plan": [
+          "Step 1: hexa-runner image inspect — Dockerfile + bind mount 확인 (어떤 path 가 container 에 mount 되는지)",
+          "Step 2: docker container 안에서 cli/run.hexa cmd_drill child exec call 직접 trace — strace 또는 emit 추가",
+          "Step 3: path mismatch fix — nexus path 를 container 안에서도 valid 하게 mount, 또는 cmd_drill 의 child exec 가 NEXUS env 통해 dynamic resolve"
+        ],
+        "phase2_complexity": "Phase 1 보다 큰 작업 — Dockerfile 또는 hexa-runner build 변경 필요. 별도 sub-cycles 필요.",
+        "phase2_decision_pending": "Phase 2 deep dive (Dockerfile audit + image rebuild) vs Phase 3/4 (hook cron disable + cross-session lock) 우선순위 결정 — Phase 1 SUCCESS (cycle 39) 로 일반 dispatch 정상화됐으므로 docker fallback 미발생 시 Phase 2 lower priority."
+      },
       "claude_hook_removal_success_cycle40": {
         "result": "🎉 Claude hooks 제거 SUCCESS — uchg flag 가 EPERM 의 정체",
         "discovery": "ls -lO 출력에서 uchg (user immutable flag) 발견. macOS sandbox 또는 Claude Code self-protection 가 아니라 단순 file flag.",
