@@ -1,4 +1,6 @@
 // run.hexa — nexus 단일 진입점 (hx package entry)
+// ω-hexa-cont-7: portable_fs import for file_size/now_ns (BSD/Linux 공통)
+import "../../hexa-lang/stdlib/portable_fs.hexa"
 //
 // hx install ~/Dev/nexus --entry run.hexa
 // hx run nexus <sub> [args...]
@@ -996,8 +998,8 @@ fn _run_stage_parallel_stages(round: int, qrseed: str, plan: [int], hexa_b: str,
 
     // 5 background + wait. 각 subshell 의 `&` 는 parent 의 wait 로 수거.
     // `{ ... ; wait; }` 구조 — outer group 이 종료될 때까지 blocking.
-    let t0_cmd = "date +%s%N 2>/dev/null || date +%s000000000"
-    let t_start = exec(t0_cmd).trim()
+    // ω-hexa-cont-7: now_ns() (portable_fs) replaces date +%s%N shellout
+    let t_start = now_ns()
     let block = "{ "
         + "( " + cmd_smash + " > " + shell_quote(f_smash) + " 2>&1 ) & "
         + "( " + cmd_free  + " > " + shell_quote(f_free)  + " 2>&1 ) & "
@@ -1007,7 +1009,7 @@ fn _run_stage_parallel_stages(round: int, qrseed: str, plan: [int], hexa_b: str,
         + "wait; "
         + "}"
     exec(block)
-    let t_end = exec(t0_cmd).trim()
+    let t_end = now_ns()
 
     // duration_ms — ns 차이 / 1e6. 실패 시 0.
     let mut duration_ms = 0
@@ -1290,7 +1292,7 @@ fn _round_parallel_atlas_lock() -> int {
     // 반환값: 대기한 밀리초 (atlas_wait_ms 집계용).
     let lockd = "/tmp/nexus_atlas.lock"
     let q = shell_quote(lockd)
-    let t0 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+    let t0 = now_ns()  // ω-hexa-cont-7: portable_fs
     let mut tries = 0
     let mut acquired = false
     while tries < 100 {
@@ -1307,7 +1309,7 @@ fn _round_parallel_atlas_lock() -> int {
         // stale recover — 5s 초과 대기는 직전 holder 가 crash 한 것으로 간주.
         exec("rm -rf " + q + " 2>/dev/null ; mkdir " + q + " 2>/dev/null")
     }
-    let t1 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+    let t1 = now_ns()  // ω-hexa-cont-7: portable_fs
     let mut wait_ms = 0
     try {
         let a = to_int(t0)
@@ -1463,13 +1465,13 @@ fn _round_parallel_fork_exec(round: int, seeds: [str]) -> [int] {
         let qbc   = shell_quote(blow_core)
         let qcp   = shell_quote(compose)
         let qexv  = shell_quote(exv_bin)
-        let t0 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let t0 = now_ns()  // ω-hexa-cont-7: portable_fs
         // atlas lock 획득 (대기 시간 집계) — smash write surface 진입 전.
         let wait_smash = _round_parallel_atlas_lock()
         eprintln("NEXUS_ROUND_PARALLEL {\"event\":\"atlas_wait_ms\",\"round\":" + to_string(rk) + ",\"ms\":" + to_string(wait_smash) + "}")
-        let hold_t0 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let hold_t0 = now_ns()  // ω-hexa-cont-7: portable_fs
         let out_smash = exec(qexv + " run " + qbc + " smash " + qseed + " 3 2>&1")
-        let hold_t1 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let hold_t1 = now_ns()  // ω-hexa-cont-7: portable_fs
         _round_parallel_atlas_unlock()
         let mut hold_ms_a = 0
         try {
@@ -1482,9 +1484,9 @@ fn _round_parallel_fork_exec(round: int, seeds: [str]) -> [int] {
         // free_dfs — compose 도 atlas write surface → lock 재획득.
         let wait_free = _round_parallel_atlas_lock()
         eprintln("NEXUS_ROUND_PARALLEL {\"event\":\"atlas_wait_ms\",\"round\":" + to_string(rk) + ",\"ms\":" + to_string(wait_free) + "}")
-        let hold2_t0 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let hold2_t0 = now_ns()  // ω-hexa-cont-7: portable_fs
         let out_free = exec(qexv + " run " + qcp + " free_dfs " + qseed + " --modules all --dfs 3 2>&1")
-        let hold2_t1 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let hold2_t1 = now_ns()  // ω-hexa-cont-7: portable_fs
         _round_parallel_atlas_unlock()
         let mut hold_ms_b = 0
         try {
@@ -1495,7 +1497,7 @@ fn _round_parallel_fork_exec(round: int, seeds: [str]) -> [int] {
         eprintln("NEXUS_ROUND_PARALLEL {\"event\":\"atlas_hold_ms\",\"round\":" + to_string(rk) + ",\"ms\":" + to_string(hold_ms_b) + "}")
         let free_ct = _count_discoveries(out_free)
         let round_ct = smash_ct + free_ct
-        let t1 = exec("date +%s%N 2>/dev/null || echo 0").trim()
+        let t1 = now_ns()  // ω-hexa-cont-7: portable_fs
         let mut dur_ms = 0
         try {
             let aa = to_int(t0)
@@ -2417,8 +2419,9 @@ fn _progress_emit(round: int, stage: str, event: str, elapsed_ms: int) -> void {
 
 fn _progress_now_ms() -> i64 {
     // ms epoch — linux 는 %s%N (ns), macOS 는 %s*1000 fallback.
-    // macOS 는 %N 이 literal 로 남음 → 길이 짧거나 파싱 실패 시 %s*1000 경로로 폴백.
-    let raw = exec("date +%s%N").trim()
+    // ω-hexa-cont-7: now_ns() (portable_fs) handles BSD/GNU divergence internally;
+    // residual length-check fallback retained for defense-in-depth (literal 'N' edge cases).
+    let raw = now_ns()
     let mut v: i64 = 0
     try { v = to_int(raw) } catch e { v = 0 }
     if v > 1000000000000000 {

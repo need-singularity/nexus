@@ -98,7 +98,12 @@ _probe_host() {
         # L4 (2026-04-25): PSI feedback. /proc/pressure/memory 의 some avg10 (10s
         # 윈도 동안 task 메모리 stall % ratio) 을 같은 ssh round-trip 으로 수집 →
         # 외부 admission block 에서 호스트 활성 메모리 압박 기반 reject 판단.
-        err="$(ssh -o ConnectTimeout=$ctimeout -o BatchMode=yes -o ServerAliveInterval=5 \
+        # ω-network-8 (2026-04-26): LC_ALL=C on local ssh client — its stderr
+        # ("Could not resolve hostname", "Connection timed out", ...) is case-
+        # matched at lines 143-157 against English literals. Korean/CJK locale on
+        # the Mac would translate these messages and silently mis-classify probe
+        # failures. Mirrors line-104 remote-side LC_ALL=C precedent.
+        err="$(LC_ALL=C ssh -o ConnectTimeout=$ctimeout -o BatchMode=yes -o ServerAliveInterval=5 \
             -o ServerAliveCountMax=1 \
             -o ControlMaster=no -o ControlPath=none "$cand" \
             'echo OK $(LC_ALL=C free -m 2>/dev/null | awk "/^Mem:/ {print \$7}" | tr -d "[:space:]"); awk "/^some/ {gsub(/avg10=/,\"\"); print \$2; exit}" /proc/pressure/memory 2>/dev/null || echo "0.00"' 2>&1)"
@@ -1190,7 +1195,9 @@ fi
 # 옮기면 성공 가능. 휴리스틱: Darwin + loadavg≥8 이면 (B) 로 의심 → next host 1회 retry.
 _run_ssh_once() {
     local _host="$1"
-    ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
+    # ω-network-8 (2026-04-26): LC_ALL=C — caller's _run_ssh_with_reconnect (and
+    # any future stderr inspector) case-matches English ssh-client error strings.
+    LC_ALL=C ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
         -o ControlMaster=no -o ControlPath=none "$_host" "$REMOTE_CMD"
 }
 
@@ -1221,7 +1228,11 @@ _run_ssh_with_reconnect() {
     while :; do
         _err_tmp="$(mktemp -t hexa_remote_recon.XXXXXX 2>/dev/null || echo "/tmp/hexa_remote_recon.$$.$_attempt")"
         # tee preserves stderr to caller and captures for pattern match.
-        ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
+        # ω-network-8 (2026-04-26): LC_ALL=C — _err_tail case-match (lines
+        # 1241-1245) tests English ssh-client signatures. Korean/CJK locale
+        # would translate "Connection timed out" / "No route to host" → all
+        # patterns miss → _is_net=0 → silent non-retry of true network blips.
+        LC_ALL=C ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
             -o ControlMaster=no -o ControlPath=none "$_host" "$REMOTE_CMD" \
             2> >(tee -- "$_err_tmp" >&2)
         _rc=$?

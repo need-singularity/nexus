@@ -54,7 +54,14 @@ F_TOTAL=$(printf '%s' "$F_LINE" | sed -nE 's/.*total=([0-9]+).*/\1/p'); F_TOTAL=
 F_CLEAN=$(printf '%s' "$F_LINE" | sed -nE 's/.*clean=([0-9]+).*/\1/p'); F_CLEAN=${F_CLEAN:-0}
 F_TAMP=$(printf '%s' "$F_LINE"  | sed -nE 's/.*tampered=([0-9]+).*/\1/p'); F_TAMP=${F_TAMP:-0}
 
-B_OUT=$(bash "$TOOL_DIR/bridge_health.sh" --quiet 2>&1); B_EC=$?
+# BRIDGE_HEALTH_TOOL env (default = parallel; set to bridge_health.sh for legacy
+# sequential fallback) — Ω-cycle 2026-04-26 bridge_health_parallelize.
+BRIDGE_HEALTH_TOOL="${BRIDGE_HEALTH_TOOL:-bridge_health_parallel.sh}"
+if [ ! -f "$TOOL_DIR/$BRIDGE_HEALTH_TOOL" ]; then
+    # Safety: fall back to sequential if requested tool missing
+    BRIDGE_HEALTH_TOOL="bridge_health.sh"
+fi
+B_OUT=$(bash "$TOOL_DIR/$BRIDGE_HEALTH_TOOL" --quiet 2>&1); B_EC=$?
 B_LINE=$(printf '%s\n' "$B_OUT" | grep '__BRIDGE_HEALTH__' | tail -1)
 B_TOTAL=$(printf '%s' "$B_LINE" | sed -nE 's/.*total=([0-9]+).*/\1/p'); B_TOTAL=${B_TOTAL:-0}
 B_PASS=$(printf '%s' "$B_LINE" | sed -nE 's/.*pass=([0-9]+).*/\1/p'); B_PASS=${B_PASS:-0}

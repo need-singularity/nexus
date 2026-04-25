@@ -1,0 +1,116 @@
+{
+  "ts": "2026-04-26",
+  "title": "bridge_health parallelize Ω-cycle",
+  "scope": "tool/bridge_health_parallel.sh + health_check_all integration",
+  "compliance": ["raw 66 reason+fix", "raw 71 report-only", "raw 73 admissibility", "raw 77 read-only", "raw 80 sentinel"],
+  "lineage": "follows tool/falsifier_health_parallel.sh (commit 832cc05f Ω-cycle 2026-04-26 falsifier_health_parallelize)",
+  "axes": {
+    "profile": {
+      "sequential_wall_ms": 36000,
+      "entries": 16,
+      "per_bridge_dur_s_distribution": {
+        "0s": ["codata", "cmb", "icecube", "pubchem"],
+        "1s": ["horizons", "arxiv", "nanograv", "nist_atomic", "wikipedia", "gaia"],
+        "2s_plus": ["lhc"],
+        "3s_plus": ["oeis", "openalex"],
+        "4s_plus": ["gw"],
+        "6s_plus": ["simbad"],
+        "12s_plus": ["uniprot"]
+      },
+      "critical_path_floor_s": 12,
+      "bottleneck": "(a) per-bridge gtimeout 30 hexa run --selftest serialised at ~2s avg (b) uniprot 12s tail (single-bridge critical-path floor) (c) hexa runtime per-call cold start"
+    },
+    "strategy_choice": {
+      "evaluated": ["OPT-A gnu parallel", "OPT-B xargs -P", "OPT-C bash background", "OPT-D python3 multiprocessing"],
+      "picked": "OPT-D python3 ProcessPoolExecutor",
+      "rationale": "consistency with falsifier_health_parallel.sh (same OPT-D pattern); stdlib-only; clean output ordering by registry index; ProcessPoolExecutor handles ec/timeout/exc uniformly"
+    },
+    "OPT_D_impl": {
+      "tool_path": "/Users/ghost/core/nexus/tool/bridge_health_parallel.sh",
+      "line_count": 387,
+      "design": "bash wrapper materialises temp .py worker; worker fans out classify(name, rel) across N workers via ProcessPoolExecutor",
+      "per_bridge_work": [
+        "resolve script path (NEXUS_ROOT + relpath)",
+        "R1 SHA256 16-hex check vs state/bridge_sha256.tsv (skip if no decl)",
+        "subprocess.run([gtimeout, 30, hexa, run, script, --selftest]) with HEXA_RESOLVER_NO_REROUTE=1",
+        "classify PASS / FAIL / TAMPERED / OFFLINE via sentinel regex + fallback regex"
+      ],
+      "sentinel_acceptors": [
+        "__<NAME>(_BRIDGE)?__ PASS",
+        "[<name>_bridge ...selftest] OK"
+      ],
+      "fallback_regex": "fallback|offline|no.?fetch (case-insensitive)",
+      "subprocess_timeout_grace_s": 5,
+      "default_workers": "os.cpu_count() (8 on this Mac)"
+    },
+    "performance": {
+      "sequential_s": 36.0,
+      "parallel_default_s": 15.6,
+      "parallel_j4_s": 19.7,
+      "parallel_j8_s": 14.8,
+      "speedup_default_x": 2.31,
+      "speedup_j8_x": 2.43,
+      "user_cpu_s_seq": 3.08,
+      "user_cpu_s_par": 6.98,
+      "cpu_pct_seq": 15,
+      "cpu_pct_par_default": 77,
+      "expected_savings_per_task_brief_s": 20,
+      "actual_savings_s": 21
+    },
+    "equivalence": {
+      "test": "run sequential + parallel on full 16-bridge set; diff per-bridge status + sentinel fields",
+      "per_bridge_status_match": true,
+      "all_16_pass_both": true,
+      "fail_count_match": true,
+      "tampered_count_match": true,
+      "offline_fallback_count_match": true,
+      "offline_fallback_count": 3,
+      "sentinel_field_diffs": ["duration_ms only (expected: parallel faster)"],
+      "verdict": "EQUIVALENT — raw 73 admissibility preserved",
+      "per_bridge_dur_jitter_s": "0-1s (network jitter / ordering noise; non-load-bearing)"
+    },
+    "docker_bottleneck_investigation": {
+      "concern_raised_by_task_brief": "hexa runtime runs in docker container hexa-exec; concurrent invocations may serialise at container level",
+      "investigated": "read ~/core/hexa-lang/hexa wrapper",
+      "finding": "bridge_health.sh sets HEXA_RESOLVER_NO_REROUTE=1, which short-circuits the resolver's docker-exec round-trip (~/.hx/bin/hexa) and uses build/hexa.real native dispatcher directly — each subprocess is an independent native Mach-O process",
+      "implication": "hexa-exec container is NOT in the per-bridge call path; no docker serialisation",
+      "expected_speedup_per_brief_caution": "modest 2x not 3.6x",
+      "observed_speedup_x": 2.31,
+      "verdict": "matches caution prediction — limited by uniprot 12s tail (Amdahl), not docker serialisation",
+      "amdahl_analysis": "max theoretical speedup with 12s critical-path tail = 36/12 = 3.0x; achieved 2.43x at -j 8 = 81% of theoretical",
+      "follow_up": "if more speedup needed, investigate uniprot bridge selftest cold-start (12s vs 0-3s for others)"
+    },
+    "health_check_all_integration": {
+      "env_var": "BRIDGE_HEALTH_TOOL",
+      "default_value": "bridge_health_parallel.sh",
+      "fallback_value": "bridge_health.sh (if parallel tool missing)",
+      "pattern_mirrors": "FALSIFIER_HEALTH_TOOL (existing)",
+      "edited_file": "/Users/ghost/core/nexus/tool/health_check_all.sh",
+      "smoke_test_wall_s": 30.3,
+      "previous_wall_s_estimate": 51,
+      "savings_s": 21,
+      "sentinel_unchanged": true
+    }
+  },
+  "tier_1_outcomes": [
+    "tool/bridge_health_parallel.sh shipped (387L, OPT-D ProcessPoolExecutor)",
+    "equivalence verified — all 16 bridges PASS in both seq and par; sentinel fields match (total/pass/fail/tampered/offline_fallback)",
+    "health_check_all.sh integrated via BRIDGE_HEALTH_TOOL env (default = parallel)",
+    "docker bottleneck honestly investigated — N/A because HEXA_RESOLVER_NO_REROUTE=1 bypasses container; Amdahl tail (uniprot 12s) is the real ceiling",
+    "speedup 2.31x default / 2.43x at -j 8 — modest as predicted by task brief caution"
+  ],
+  "fixpoint": {
+    "marker": "bridge_health parallelize Ω-cycle reaches fixed point: parallel tool live, equivalent to sequential, integrated, witness sealed",
+    "next_cycle_candidates": [
+      "uniprot bridge selftest cold-start investigation (12s tail dominates Amdahl)",
+      "extend OPT-D pattern to atlas_status_all.sh if further parallelism needed",
+      "consider per-bridge timeout tightening (default 30s but max observed 13s; could drop to 20s)"
+    ]
+  },
+  "non_goals": [
+    "do not modify sequential bridge_health.sh — kept as canonical fallback",
+    "do not commit (main thread batches per task brief)",
+    "do not change sentinel format (raw 80)",
+    "do not add new bridges (raw 77 read-only registry)"
+  ]
+}
