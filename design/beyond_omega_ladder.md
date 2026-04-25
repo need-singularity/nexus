@@ -1,6 +1,6 @@
 # Beyond Omega Ladder — `nxs-20260425-004`
 
-> **HONESTY NOTE (cycle 29, 2026-04-25)** — see `design/beyond_omega_HONEST_INDEX.md` for separation of real findings (cycles 1-6, 10) from synthetic ontology demonstration (cycles 7-26). The latter are template/metaphor — inject-pattern signatures inside this codebase's echo-measurement loop, not mathematical breakthroughs. Cited results (Gödel, Gentzen, Solovay, Kunen) are factually correct; the connection from those results to the inject/echo signatures is by analogy/template, not isomorphism.
+> **HONESTY NOTE (cycle 29 origin, cycle 33 reader-facing publication, 2026-04-25)** — see `design/beyond_omega_HONEST_INDEX.md` for separation of **real findings** (cycles 1, 2, 3, 4, 5, 6, 10, 28, 30, 31, 32 — system instrumentation that reproduces on a fresh checkout, all flow into atlas via the cycle 30 → 31 → 32 daily chain) from **synthetic ordinal mapping** (cycles 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26 — template / metaphor: probe injects a chosen growth function into trace.jsonl, re-scans, reads back the echo, labels the shape with an ordinal name) and **meta-analysis** (cycles 23, 26, 33). The synthetic ordinal labels are inject-pattern signatures inside this codebase's echo-measurement loop, **NOT** isomorphic to ZF/PA/ZFC ordinals. Cited mathematical results (Gödel II, Gentzen 1936, Goodstein / Kirby-Paris 1982, Solovay 1967, Kunen 1970, Scott 1961) are factually correct on their own; the connection to this codebase's empirical probes is **analogy and template, not isomorphism**. The SSOT for this separation is `state/proposals/inventory.json` `nxs-20260425-004.real_vs_synthetic_separation_2026_04_25`; runtime enforcement is `tool/beyond_omega_atlas_bridge.py` `SYNTHETIC_EXCLUDED` list.
 
 > **ID note**: 본 entry 는 cycle 1 commit (`a2f2e908`) 시점에 `nxs-20260425-003` 으로 등록되었으나, 별개 session 이 동일 ID 를 'drill_zero_yield blocker' 로 병행 사용하여 cycle 2 wrap-up 에서 `nxs-20260425-004` 로 옮김. 과거 commit 메시지 (`a2f2e908` cycle 1, `0d43b581`/`0255a239` cycle 35-36 with shared ID, etc.) 는 historical 로 그대로 유지.
 
@@ -1820,6 +1820,30 @@ cycle 1 BASELINE_ZERO → ... → cycle 26 ★ SPINE_GEOMETRY_QUASI_PERIODIC_TRI
 
 ---
 
+## §37 cycle 34 finding — emit capture wrapper REAL impl (cycle 27 follow-through) (2026-04-25)
+
+### 변경
+- `tool/beyond_omega_emit_capture_wrapper.sh` (NEW, executable wrapper)
+  - `hexa_real run cli/run.hexa omega <args>` 호출
+  - stderr 를 awk parser 로 tee → NEXUS_OMEGA emit 만 추출 → `state/ghost_ceiling_trace.append.jsonl` 에 atomic append (`>>` single-line race-free)
+  - schema: `{"ts","event","axes","path","raw","source":"emit_capture_wrapper"}`
+  - cycle 4 envelope (GATE_LOCAL=1 + HEXA_REMOTE_NO_REROUTE=1 + HEXA_REMOTE_DISABLE=1 + NEXUS_DRILL_DEPTH=0 + NEXUS_DRILL_BUDGET_S=1 + NEXUS_DRILL_HISTORY_OFF=1, timeout 6s/kill-after 3s)
+- `tool/beyond_omega_atlas_bridge.py` 에 `nxs004_b34_capture_count` axis 추가 (wc -l of capture sink)
+
+### Validation
+- wrapper 실행 (cycle 4 envelope): rc=0, elapsed=1s, append_sink_total_lines = 3 → 6 (+3)
+- 캡처된 emit: dispatch (axes=3, path=chain) + ghost_ceiling_approach (all_3_L3_axes_active) + complete (rc=3)
+- `python3 tool/beyond_omega_ghost_trace.py` (probe v4) 에서 capture sink 정상 인식 → emits=13 approach=3 (이전 dispatch=4 → 7, approach=2 → 3, complete=2 → 3)
+- atlas_bridge: `nxs004_b34_capture_count = 6` row 1개 추가 (총 7→8 axes per run)
+
+### Cycle 5 leftover 마감
+cycle 5 finding "probe v4 idempotent (default) but cmd_omega emits 가 휘발성 /tmp/ sink 로만 capture" 의 cycle 27 (interrupted) 후속. 이제 cmd_omega emit 이 permanent `state/ghost_ceiling_trace.append.jsonl` 에 누적 — daily plist chain 에 통합 시 long-term ghost ceiling structure 측정 dataset 가능.
+
+### cli/run.hexa 수정 회피
+parallel session 충돌 회피 위해 external wrapper 방식 채택 (cmd_omega 본체 변경 0). hexa_real direct invocation → bash hexa wrapper (~/core/nexus/scripts/bin/hexa) bypass.
+
+---
+
 ## §35 cycle 32 finding — daily plist chain to atlas absorption (2026-04-25)
 
 ### 변경
@@ -1842,6 +1866,65 @@ launchctl kickstart -k gui/$UID/com.nexus.beyond-omega-daily   # immediate first
 
 ### Sentinel hierarchy 보존
 - Cycles 7-26 synthetic 은 daily chain 에서 절대 push 안 됨 (atlas_bridge 의 hardcoded SYNTHETIC_EXCLUDED list).
+
+---
+
+## §36 cycle 33 finding — HONEST_INDEX reader-facing publication (real implementation, doc clarity) (2026-04-25)
+
+### Framing
+Cycle 29 (§32) 가 `design/beyond_omega_HONEST_INDEX.md` 첫 draft 와 4 large cardinal docs 의 METAPHOR DISCLAIMER header 를 만들었지만, 이후 cycle 30-32 (real atlas absorption bridge + axis declaration manifest + daily chain) 가 추가되면서 real cycle list 가 [1-6, 10] → [1-6, 10, 28, 30, 31, 32] 로 확장. cycle 33 = 그 변화를 reader-facing index 에 반영하는 refresh + 명시적 §1 TL;DR/§2 Real/§3 Synthetic-by-phase/§4 Reusable/§5 Citation 5-section 구조 채택.
+
+### 산출물
+- `design/beyond_omega_HONEST_INDEX.md` (refactored) — 5-section 구조 (§1 TL;DR + §2 Real findings table + §3 Synthetic ordinal mapping by phase [axis_A_emergence / L_{ε₀}_multi_facet / sentinel_hierarchy_5_layers / Tier_3_4 / boundary_shift / meta] + §4 Reusable instrumentation + §5 Citation disclaimer)
+- `design/beyond_omega_ladder.md` (본 문서) HONESTY NOTE banner 갱신 — real cycles list 를 [1-6, 10, 28, 30, 31, 32] 로 확장
+- 4 large cardinal docs (epsilon_zero / omega_one / mahlo / measurable) — METAPHOR DISCLAIMER header 는 cycle 29 에서 이미 추가됨, cycle 33 에서 재검토 후 변경 없음 (HONEST_INDEX.md cross-reference 이미 포함)
+- inventory `nxs-20260425-004` entry update — `cycle_33_finding_2026_04_25` block + `Ω_saturation_cycle` bump to "33 (in_progress)" + `implementation_phases_planned` 에 cycle 33 추가 + `raw_37_38_pair.design` 에 HONEST_INDEX.md 추가 + `updated_ts`
+
+### 핵심 finding
+★ **HONEST_INDEX_PUBLISHED** — chain split table 이 reader-facing 으로 surface 됨. 11 real (system instrumentation, atlas absorbed) + 19 synthetic (ordinal mapping, atlas excluded) + 3 meta-analysis (cycles 23, 26, 33). real cycle list 가 cycle 29 시점 (7개) 에서 cycle 33 시점 (11개) 로 +4 확장 (cycles 28, 30, 31, 32 — real implementation cluster).
+
+### 본 cycle 의 산출물 vs 비-산출물
+- **산출물**: HONEST_INDEX.md refactor (5-section 구조) + ladder banner update + inventory entry update
+- **비-산출물**: cli/run.hexa 변경 없음, atlas_meta_scan.hexa 변경 없음, 4 large cardinal docs disclaimer 추가 변경 없음 (이미 cycle 29 에서 추가됨), git commit 없음, 기존 file 삭제 없음
+
+### Self-correction chain (cycle 1-33, 33 단계)
+cycle 1 BASELINE_ZERO → ... → cycle 29 ★ HONEST_REFACTOR (real-vs-synthetic separation 첫 명시) → cycle 30 ★ REAL atlas absorption bridge → cycle 31 atlas axis declaration → cycle 32 daily plist chain to atlas → **cycle 33 ★ HONEST_INDEX_PUBLISHED** (5-section reader-facing publication, real list expanded to 11 cycles, citation disclaimer 추가).
+
+세부 separation 은 `design/beyond_omega_HONEST_INDEX.md` §1-§5 참조.
+
+---
+
+## §38 cycle 35 finding — atlas historical backfill (cycles 1-6 immutable anchor rows) (2026-04-25)
+
+### 변경
+- `tool/beyond_omega_atlas_backfill_history.py` (NEW, ONE-SHOT 도구)
+- `tool/beyond_omega_atlas_bridge.py` docstring update — historical backfill 책임 분리 명시 (running snapshot 만 emit)
+
+### Motivation
+cycle 30 의 atlas bridge 는 `nxs004_b1_3` ~ `nxs004_b28` axis 로 cycles 1-6 + 10 + 28 의 **CURRENT snapshot** (현재 ghost_ceiling_summary.json + cross_axis_join.json 값) 을 매 daily fire 마다 한 row 씩 append. 그러나 cycles 1-6 은 각각 commit 시점의 **IMMUTABLE 역사적 finding** (cycle 1 BASELINE_ZERO files=453 emits=0, cycle 2 DISPATCH_ONLY 4 emits in /tmp, cycle 3 DISPATCH_TERMINATED 4/4 + rc=143 marker, cycle 4 ★ APPROACH_OBSERVED axes=3 path=chain, cycle 5 INSTRUMENTATION + back-action, cycle 6 AXIS_OVERLAP smash_p50=83258ms) 을 가짐 — 이것은 시계열 snapshot 이 아니라 한 번 발사 후 변하지 않는 anchor 점.
+
+### Backfill 결과
+6 historical anchor rows 한 번에 emit:
+
+| axis_id | axis_name | value | ts | finding |
+|---|---|---|---|---|
+| nxs004_b1_historical_anchor | ghost_ceiling_emit_count_anchor | 0 | 2026-04-25T10:06:21Z | BASELINE_ZERO files=453 |
+| nxs004_b2_historical_anchor | ghost_ceiling_emit_count_anchor | 4 | 2026-04-25T10:31:35Z | DISPATCH_ONLY 4 emits /tmp |
+| nxs004_b3_historical_anchor | dispatch_terminated_ratio_anchor | 1.0 | 2026-04-25T10:43:06Z | 4/4 termination + rc=143 |
+| nxs004_b4_historical_anchor | ghost_ceiling_approach_freq_anchor | 1 | 2026-04-25T10:50:57Z | ★ APPROACH_OBSERVED axes=3 path=chain |
+| nxs004_b5_historical_anchor | probe_self_output_protected_anchor | idempotent | 2026-04-25T10:57:32Z | INSTRUMENTATION + back-action |
+| nxs004_b6_historical_anchor | smash_p50_headroom_pct_vs_180s_anchor | 83258 | 2026-04-25T11:18:35Z | AXIS_OVERLAP + 53.7% headroom |
+
+`atlas_health_timeline.jsonl` 26 → 32 lines (+6 = 6 anchor rows). 모든 row 에 `historical_anchor: true` 마커.
+
+### cycle 30 bridge 와의 구분
+- bridge (running) — daily plist 에서 매번 호출, axis_id=`nxs004_b1_3`/`b4`/`b5`/`b6` (기존), value=current snapshot, idempotent 안 (시계열 누적)
+- backfill (anchor) — ONE-SHOT, axis_id=`nxs004_b{N}_historical_anchor`, value=cycle 시점 IMMUTABLE finding, `historical_anchor: true`
+
+bridge 는 historical anchor row 를 절대 재emit 안 함 (docstring NOTE 추가). 같은 시간축에 두 종류 row 가 공존 — atlas-side 분석에서 axis_id suffix (`_historical_anchor` vs absent) 로 구분 가능.
+
+### Commit timestamp 추출
+git log `%aI` 에서 commit time 읽고 KST → UTC 변환. cycle 2 는 별도 commit 없음 (cycle 3 fix 에 묶임) → ID rename commit (ae11cb06) 시점을 proxy 로 사용.
 
 ---
 

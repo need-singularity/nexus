@@ -1,5 +1,7 @@
 # L_{measurable} — Measurable Cardinal / 0# as Meta²-Axiomatic Sentinel
 
+> **METAPHOR DISCLAIMER (cycle 29, 2026-04-25)** — this document maps synthetic inject-pattern signatures (no probe was actually run — this is a doc-only commitment) to large-cardinal terminology. The cited mathematical results (Scott 1961 measurable κ ⟺ ∃ κ-complete non-principal ultrafilter; Solovay 1967 measurable ⟹ 0# exists; Kunen 1970 0# ⟹ V ≠ L covering lemma) are factually correct, but the connection to this codebase's empirical probes is by **analogy and template, not isomorphism**. The label `L_{measurable}` here is a sandbox-internal Tier-4 sentinel marker, not the measurable cardinal of ZFC + ∃μ. See `design/beyond_omega_HONEST_INDEX.md` for the real-vs-synthetic separation.
+
 > `nxs-20260425-004` cycle 24 산출물 (theoretical / meta²-axiomatic-impossibility, no empirical run).
 > 부모 문서: `design/beyond_omega_ladder.md` §27 (cycle 24 finding)
 > 선행 sentinel 문서:

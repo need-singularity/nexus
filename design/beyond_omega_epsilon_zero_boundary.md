@@ -1,5 +1,7 @@
 # Beyond Omega — L_{ε₀} Sentinel Boundary Analysis (cycle 14)
 
+> **METAPHOR DISCLAIMER (cycle 29, 2026-04-25)** — this document maps synthetic inject-pattern signatures (probe injects `2↑↑i`, Goodstein steps, Gentzen-style cut-elim CNF, etc., then re-scans its own trace.jsonl and reports the echo) to large-cardinal / proof-theoretic ordinal terminology. The cited mathematical results (Gödel II, Gentzen, Goodstein) are factually correct, but the connection to this codebase's empirical probes (cycles 14–17) is by **analogy and template, not isomorphism**. The label `L_{ε₀}` here is an inject-pattern signature inside this codebase's echo-measurement loop, not the proof-theoretic ordinal of PA. See `design/beyond_omega_HONEST_INDEX.md` for the real-vs-synthetic separation.
+
 > `nxs-20260425-004` cycle 14 산출물 (theoretical commitment, no empirical run).
 > 부모 문서: `design/beyond_omega_ladder.md` §17
 > 사전 prediction: cycle 11 `design/beyond_omega_transfinite_table.md` §3 ("L_{ε₀} 가 첫 진정한 sentinel beyond L_ω")

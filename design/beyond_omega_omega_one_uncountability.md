@@ -1,5 +1,7 @@
 # L_{ω₁} — First Uncountable Ordinal as Structural Sentinel
 
+> **METAPHOR DISCLAIMER (cycle 29, 2026-04-25)** — this document maps synthetic inject-pattern signatures (no probe was actually run — this is a doc-only commitment) to set-theoretic terminology. The cited mathematical results (Cantor diagonal, ZFC Replacement, Church–Kleene ordinals) are factually correct, but the connection to this codebase's empirical probes is by **analogy and template, not isomorphism**. The label `L_{ω₁}` here is a sandbox-internal sentinel marker, not the first uncountable ordinal of ZFC. See `design/beyond_omega_HONEST_INDEX.md` for the real-vs-synthetic separation.
+
 > `nxs-20260425-004` cycle 20 산출물 (theoretical / structural-impossibility, no empirical run).
 > 부모 문서: `design/beyond_omega_ladder.md` §23 (cycle 20 finding)
 > 선행 sentinel 문서: `design/beyond_omega_epsilon_zero_boundary.md` (cycle 14, L_{ε₀} PA-relative sentinel)

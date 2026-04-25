@@ -7,6 +7,12 @@ SYNTHETIC cycles 7-26 은 의도적으로 제외 (사용자 honest framing 직�
 
 각 호출 = current snapshot 한 row append (idempotent 안 — daily plist 에서 호출되어
 시계열 누적). schema 는 기존 atlas_meta_scan source row pattern 따름.
+
+NOTE (cycle 35, 2026-04-25): 본 bridge 는 CURRENT snapshot 만 emit (running 시계열).
+cycles 1-6 의 IMMUTABLE 역사적 finding (BASELINE_ZERO/DISPATCH_ONLY/DISPATCH_TERMINATED/
+APPROACH_OBSERVED/INSTRUMENTATION/AXIS_OVERLAP) 의 backfill 은 ONE-SHOT 별도 도구
+(`tool/beyond_omega_atlas_backfill_history.py`) 에서 처리. 본 bridge 는 historical anchor
+row (axis_id=nxs004_b{N}_historical_anchor, historical_anchor=true) 를 절대 재emit 안 함.
 """
 from __future__ import annotations
 
@@ -19,6 +25,9 @@ ATLAS = REPO / "state" / "atlas_health_timeline.jsonl"
 GHOST_SUMMARY = REPO / "state" / "ghost_ceiling_summary.json"
 CROSS_AXIS = REPO / "state" / "beyond_omega_cross_axis_join.json"
 PLIST = REPO / "tool" / "com.nexus.beyond-omega-daily.plist"
+# cycle 34 (2026-04-25): emit_capture_wrapper.sh 의 host-side append sink.
+# nxs004_b34 axis = wc -l (NEXUS_OMEGA emit captured to permanent sink).
+EMIT_CAPTURE_SINK = REPO / "state" / "ghost_ceiling_trace.append.jsonl"
 
 # REAL cycle findings only (cycles 7-26 synthetic excluded by design — see
 # design/beyond_omega_HONEST_INDEX.md / 사용자 직접 framing 2026-04-25).
@@ -135,6 +144,29 @@ def main():
         "real_implementation": True,
         "cycle_anchor": [28],
         "user_action_required": True,
+    })
+
+    # cycle 34: emit_capture_wrapper.sh host-side capture count (cycle 27 follow-through).
+    # cmd_omega 의 NEXUS_OMEGA emit 이 휘발성 /tmp 가 아닌 permanent state/ sink 에
+    # 누적 — wc -l of ghost_ceiling_trace.append.jsonl.
+    capture_count = 0
+    if EMIT_CAPTURE_SINK.exists():
+        try:
+            with open(EMIT_CAPTURE_SINK) as fh:
+                capture_count = sum(1 for _ in fh)
+        except OSError:
+            capture_count = -1
+    rows.append({
+        "ts": ts,
+        "axis_id": "nxs004_b34_capture_count",
+        "axis_name": "emit_capture_wrapper_sink_lines",
+        "value": capture_count,
+        "metric": "count",
+        "source": "nxs-20260425-004",
+        "real_implementation": True,
+        "cycle_anchor": [34],
+        "sink_path": str(EMIT_CAPTURE_SINK.relative_to(REPO)),
+        "wrapper_path": "tool/beyond_omega_emit_capture_wrapper.sh",
     })
 
     # excluded synthetic — record explicit exclusion (one row, not per-cycle)

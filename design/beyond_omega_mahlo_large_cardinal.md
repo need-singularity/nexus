@@ -1,5 +1,7 @@
 # L_{Mahlo} — Mahlo Large Cardinal as Meta-Axiomatic Sentinel
 
+> **METAPHOR DISCLAIMER (cycle 29, 2026-04-25)** — this document maps synthetic inject-pattern signatures (no probe was actually run — this is a doc-only commitment) to large-cardinal terminology. The cited mathematical results (Inaccessible κ, Mahlo κ, Gödel 1938, Shepherdson 1953, ZFC + I + M conservativity) are factually correct, but the connection to this codebase's empirical probes is by **analogy and template, not isomorphism**. The label `L_{Mahlo}` here is a sandbox-internal Tier-3 sentinel marker, not the Mahlo cardinal of ZFC + LCA. See `design/beyond_omega_HONEST_INDEX.md` for the real-vs-synthetic separation.
+
 > `nxs-20260425-004` cycle 21 산출물 (theoretical / meta-axiomatic-impossibility, no empirical run).
 > 부모 문서: `design/beyond_omega_ladder.md` §24 (cycle 21 finding)
 > 선행 sentinel 문서:
