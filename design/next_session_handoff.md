@@ -210,4 +210,21 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 1. drill slot free 확인 → atlas eig pipeline rebuild → composite 재측정 → ≥0.9 시 nxs-002 resolved
 2. nxs-012 (drill resonance OOM) σ-별 RSS 프로파일 수집 (1주 평가 진입)
 3. 잔여 견고화: debate / drill_batch / 자기-합성단 (`_dream_next_seed` 200 → NEXUS_SEED_CAP 통일)
-4. canon-aware forge idempotent (forge 가 seal_id fingerprint 매치 시 boot reject) — design 단계
+4. canon-aware forge idempotent — 적용됨 (commit 22cc8bc4)
+
+### 2026-04-25 추가 발견 (atlas eig pipeline 매핑)
+- **atlas eig 입력 source**: `~/core/nexus/n6/atlas.blowup.jsonl` (graph JSON, 54,347 edges, type∈{node/edge/absorb/bifurc/compose/deduction})
+- **atlas.n6 (hexa-native syntax) 와 별개 source** — 즉 atlas.n6 [10] → [10*] 승급은 spectral 에 직접 영향 X
+- nxs-002 resolution 4단 pipeline:
+  1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
+  2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
+  3. paircorr (`g_atlas_paircorr.jsonl`)
+  4. `bisociation/cross/atlas_x_laws_aligned.hexa` (composite 계산)
+- 5 promotion (n6@98a23750) 의 의의: atlas.n6 정합성 향상 (verified marker 정밀화), spectral 직접 영향은 H1/H2 의 cross-doc / chain-dep entries (ID 수준 graph 참조 동반) 처리에 있음
+
+### atlas omega 발전 chain (this session)
+- canon v2 (cc106db6) — atlas.n6 hash16 봉인
+- forge canon-aware (22cc8bc4) — hash unchanged → boot reject (drill 슬롯 보호)
+- composite sensitivity (dcfdbd39) — pearson 최대 지렛대
+- n6 promotion 5 [10*] (n6@98a23750) — virtual hub mirror sigma/n/phi/J2/tau 승급
+- self-feedback loop verified: canon timeline 54a7e3cf → 4fe93c15 hash 추적 작동
