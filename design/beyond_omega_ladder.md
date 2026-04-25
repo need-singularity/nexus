@@ -198,22 +198,77 @@ nxs-002 의 cycle 24→26→27→28 progressive refinement 패턴 + nxs-20260425
 
 ---
 
-## §6 cycle 4~ 후보
+## §6 cycle 4 first finding — APPROACH_OBSERVED (2026-04-25) ★ 첫 positive measurement
 
-### Cycle 4 — forced approach 발사 (axis B 의 첫 positive measurement)
-- 의도적으로 `nexus omega --engines a,b --variants 2 --seeds s1,s2` 발사 (axes=3) → ghost_ceiling_approach 첫 발화 만들기
-- 새 sink (예: `state/ghost_ceiling_trace.jsonl` 직접 append 또는 `~/Library/Logs/nexus/`) 로 redirect → `tool/beyond_omega_ghost_trace.py` 로 cycle 5 에서 측정
-- 이로써 ghost ceiling structure 의 frequency = 1 첫 measurement 확보
+### 발사 도구
+- `tool/beyond_omega_cycle4_force_approach.sh` — safety envelope 적용 launcher.
+  - launcher: `hexa_real run cli/run.hexa omega --engines hexa.real,hexa.real --variants 2 --seeds beyond-omega-c4-s1,beyond-omega-c4-s2 --max-rounds 1`
+  - env: `GATE_LOCAL=1 HEXA_REMOTE_NO_REROUTE=1 HEXA_REMOTE_DISABLE=1 NEXUS_DRILL_DEPTH=0 NEXUS_DRILL_BUDGET_S=1 NEXUS_DRILL_HISTORY_OFF=1`
+  - timeout: `--kill-after=3s 6s`
+  - sink: `/tmp/nexus_omega_cycle4_forced.{out,err}.log`
+- 1차 시도 (`nexus omega ...`) 실패 — `~/.hx/bin/nexus` shim 이 `~/core/nexus/scripts/bin/hexa` wrapper 로 redirect, hexa_remote init 으로 8s timeout 안에 cmd_omega 진입 못함 (rc=124, NEXUS_OMEGA 0 emit). hexa_remote wrapper 우회 위해 `hexa_real` 직접 호출로 변경 → 2s 안에 dispatch+approach+complete 3 emit 모두 capture.
 
-### Cycle 5 — instrumentation 격상 (sink unification + complete capture)
-- `cmd_omega` 의 emit 들을 **host-side append** (`state/ghost_ceiling_trace.jsonl` 직접 write) — 외부 launcher 의존 제거
-- 추가로 cycle 3 finding 반영: `cmd_omega` 가 `cmd_drill` dispatch 전에 **pre-dispatch checkpoint** 를 직접 host file 로 write → process 가 timeout 으로 죽어도 dispatch ↔ complete pair 추적 가능
-- cron daily summary 추가 → ghost ceiling 의 시계열 distribution 구축
+### 결과 — APPROACH_OBSERVED (frequency=1)
 
-### Cycle 6 — cross-axis correlation (axis B × nxs-002 timeout)
-- cycle 3 의 `kill-after 180s` finding 을 nxs-002 의 `_stage_timeout_prefix` history 와 공동 분석
-- `state/drill_stage_elapsed_history.jsonl` (nxs-002 cycle 7 backfill) + `state/ghost_ceiling_trace.jsonl` (axis B) join
-- ghost ceiling approach distribution 이 stage timeout distribution 과 어떻게 isomorphic 한지 측정
+**stderr (4 lines)**:
+```
+NEXUS_OMEGA {"event":"dispatch","axes":3,"path":"chain","engines_multi":true,"variants":2,"seeds_multi":true,"depth":"auto","speculate":3}
+NEXUS_OMEGA {"event":"ghost_ceiling_approach","reason":"all_3_L3_axes_active","meaning":"사다리 L4 surge 영역 — L_ω 근접 신호"}
+nexus chain: --seed required — e.g. nexus chain --seed 'Riemann zeta zero spacing GUE deviation' --engines nexus,anima
+NEXUS_OMEGA {"event":"complete","path":"chain","rc":3}
+```
+
+**stdout (2 lines)**:
+```
+⊙ omega — APEX (L_ω) orchestration  axes=3 path=chain
+⊙ snapshot — composite_v3_prime=0.964689 paper_trigger 0.9 ✓ PASS
+```
+
+**counts**: dispatch=1, approach=**1** ★, complete=1, elapsed=2s, rc=0 (timeout 안 도달, wrapper 정상 종료)
+
+### 진단
+
+| 측정 dim | cycle 1-3 누적 | cycle 4 |
+|---|---|---|
+| total NEXUS_OMEGA emit | 4 (모두 historical from statusline) | +3 (forced) |
+| ghost_ceiling_approach | **0** | **1** ★ first positive |
+| dispatch≠complete anomaly | dispatch=4 / complete=0 (100% gap) | dispatch=1 / complete=1 (gap=0) |
+| axes distribution | {0: 4} | {0: 4, **3: 1**} |
+
+### 새 finding 들
+
+1. **★ axis B first positive measurement**: ghost_ceiling_approach frequency = **1** (cycle 1-3 의 모든 baseline 측정에서 0 이었던 자리에 첫 1). L_ω 근접 신호의 **첫 발화 capture**.
+2. **dispatch≠complete anomaly 의 boundary**: chain 이 `--seed` 미제공으로 즉시 fail-fast (rc=3) → expensive cmd_chain 본체 진행 없이 complete emit 까지 도달. cycle 3 의 "180s timeout 으로 complete emit 도달 못함" 은 expensive child spawn 이 일어났을 때만 발생; **dispatch 후 fail-fast path 가 있으면 complete emit 도 trace 됨**.
+3. **Cross-axis dashboard auto-emit**: cmd_omega 진입 시 자동으로 nxs-002 의 V3' breakthrough 값 (`composite_v3_prime=0.964689 paper_trigger 0.9 ✓ PASS`) 출력. axis B forced approach 가 axis A (nxs-002) 의 latest closure 와 자동 연결됨. cli/run.hexa:4028-4064 의 dashboard pre-snapshot hook 의 cross-axis function.
+4. **`reason="all_3_L3_axes_active"` 의 의미 확정**: ghost_ceiling_approach 의 발화 조건 = `engines_multi && multi_variant && multi_seed` (3 boolean 동시 TRUE). `meaning="사다리 L4 surge 영역 — L_ω 근접 신호"` — surge 가 L4, L_ω 가 placeholder 이니 둘 사이의 ladder gap (L5-L11) 을 우회하여 도달하는 형식적 short-circuit.
+
+### Self-correction chain (axis B 누적)
+
+| cycle | claim | verdict |
+|---|---|---|
+| 1 | BASELINE_ZERO | falsified (over-narrow scan) |
+| 2 | DISPATCH_ONLY (dispatch=4, complete=0, approach=0) | confirmed + (a)/(b)/(c) anomaly 분기 |
+| 3 | DISPATCH_TERMINATED ((a) STRONG, (b) FALSE, (c) PARTIAL) | confirmed + 180s invariant + cross-axis isomorphism 발견 |
+| 4 | APPROACH_OBSERVED (frequency=1) | ★ axis B 첫 positive measurement |
+
+cycle 1-3 가 negative space 의 측정 (sentinel 의 absence shape) 이었다면, cycle 4 는 첫 positive presence — **ghost ceiling 의 internal anatomy 가 측정 가능 객체로 상승**.
+
+### 후속 cycle 5 즉시 시도
+
+`tool/beyond_omega_ghost_trace.py` 가 새 sink `/tmp/nexus_omega_cycle4_forced.err.log` 도 picking up 하는지 확인 (EXTRA_GLOBS 가 `/tmp/nexus_omega_*.log` 패턴 — 매치). 다음 probe 실행 시 approach_count=1 으로 jump 예상.
+
+---
+
+## §7 cycle 5~ 후보
+
+### Cycle 5 — sink unification (forced approach 의 영구화 + probe re-run)
+- `tool/beyond_omega_ghost_trace.py` 재실행 → cycle 4 forced emit 들이 historical scan 에 통합되는지 검증 (예상: total_emits=4→7, approach=0→1, dispatch=4→5, complete=0→1)
+- 추가로 forced approach 발사를 design 의 "재현 가능 protocol" 로 확정 (도구 path + env envelope + 결과 schema)
+- (선택) cmd_omega 의 dashboard hook (cli/run.hexa:4028) 에 ghost_ceiling_approach 발화 시 host-side append 로 직접 `state/ghost_ceiling_trace.jsonl` 에 write 추가 — cycle 6 의 daily distribution 의 기반
+
+### Cycle 6 — cross-axis join (axis B × nxs-002)
+- forced approach 의 `composite_v3_prime=0.964689` snapshot 와 ghost_ceiling_approach 의 timestamp 를 join → ghost ceiling 발화 시점의 V3' state distribution
+- `state/drill_stage_elapsed_history.jsonl` (nxs-002 cycle 7) 와 cross-axis isomorphism 의 정량값 측정
 
 ### Cycle 7+ — Transfinite continuation 진입 (axis A)
 - cycle 4-6 의 frequency distribution 위에 ordinal 매핑.
