@@ -4131,9 +4131,17 @@ fn _dream_extract_signal(out: str) -> str {
 
 fn _dream_next_seed(orig: str, iter_idx: i64, signal: str) -> str {
     // next seed = "{trunc_orig} #dream-iter={N}#{signal}"
-    // [30, 200] 범위 보장. orig 가 길면 truncate. signal 까지 합쳐서 200 이하 유지.
+    // cap = NEXUS_SEED_CAP (기본 280, [30, 1000] clamp) — _seed_clamp 와 일치.
+    // 자기-합성단 (dream/wake/molt 가 호출) 도 입력단과 동일 cap 적용.
     let suffix = " #dream-iter=" + to_string(iter_idx) + " " + signal
-    let max_main = 200 - suffix.len()
+    let cap_env = env("NEXUS_SEED_CAP")
+    let mut cap: i64 = 280
+    if cap_env.len() > 0 {
+        try { cap = to_int(cap_env) } catch e { cap = 280 }
+    }
+    if cap < 30 { cap = 30 }
+    if cap > 1000 { cap = 1000 }
+    let max_main = cap - suffix.len()
     let mut main = orig
     if main.len() > max_main {
         if max_main < 1 { main = "" } else { main = main.substring(0, max_main) }
