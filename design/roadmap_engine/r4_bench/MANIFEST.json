@@ -1,0 +1,120 @@
+{
+  "manifest_version": "v0",
+  "ts": "2026-04-26T01:30:00+09:00",
+  "ordinal_stamp": "ω+2",
+  "parent_omega_cycle": "design/roadmap_engine/2026-04-26_r4_i5_benchmark_suite_omega_cycle.json",
+  "schema_source": "tool/roadmap_engine.hexa parse_node (lines 282-308) + vstar (lines 480-494)",
+  "scope": "5 hand-designed canonical DAGs (i5a1 Tier-1) — pre-impl fixtures, replan logic not yet built",
+  "epsilon": 0.01,
+  "T_star_method": "V*(start) = critical-path longest distance to leaf via children_of+vstar (DAG topological max-cost). T*_pre = current schedule. T*_post = projected schedule after expected_replan_action delta applied. Hand-computed at fixture-design time; will be machine-verified once tool/roadmap_engine.hexa schedule()+replan() lands.",
+  "entries": [
+    {
+      "name": "soft_rich_diamond_drop",
+      "path": "design/roadmap_engine/r4_bench/soft_rich_diamond_drop.json",
+      "sha256": "e36cd1320f0359bd5da57b8527a7c9e8551a38d842b3d75d6936b5f5eef80feb",
+      "node_count": 5,
+      "expected_replan_action": "soft_drop",
+      "trigger_reason": "ready_empty_due_soft",
+      "expected_T_star_pre": 60.0,
+      "expected_T_star_post": 40.0,
+      "expected_ratio_post_over_pre": 0.667,
+      "expected_ratio_upper_bound": 0.7,
+      "soft_edges_to_drop": ["B->C(soft)", "C->B(soft)", "D->A(soft)"],
+      "rationale": "Soft cycle B↔C forces serial execution → T*_pre=B+C+D+G=20+20+15+5=60. After dropping soft edges, B||C parallel → max(B,C)+D+G=20+15+5=40."
+    },
+    {
+      "name": "parallel_rich_bottleneck_split",
+      "path": "design/roadmap_engine/r4_bench/parallel_rich_bottleneck_split.json",
+      "sha256": "88c57b49993265ee884536a61212e12520155635d8b34e11e9111dc2fc90ba16",
+      "node_count": 7,
+      "expected_replan_action": "parallel_split",
+      "trigger_reason": "ready_empty_due_bottleneck_T_inf",
+      "expected_T_star_pre": 57.0,
+      "expected_T_star_post": 27.0,
+      "expected_ratio_post_over_pre": 0.474,
+      "expected_ratio_upper_bound": 0.5,
+      "split_node": "X",
+      "split_factor": 4,
+      "rationale": "Pre: V*(S)=X(40)+P(8)+V(6)+G(3)=57 (P chunks parallel after X). Post: split X into 4 parallel chunks of 10 each → V*(S)=10+8+6+3=27."
+    },
+    {
+      "name": "seed_rich_alternative_inject",
+      "path": "design/roadmap_engine/r4_bench/seed_rich_alternative_inject.json",
+      "sha256": "6ea40229c37237fd022c69c248169f68b18289595536d3970a9ebfbb533f9758",
+      "node_count": 7,
+      "expected_replan_action": "seed_inject",
+      "trigger_reason": "ready_empty_due_seed_starvation",
+      "expected_T_star_pre": 28.0,
+      "expected_T_star_post": 21.0,
+      "expected_ratio_post_over_pre": 0.75,
+      "expected_ratio_upper_bound": 0.8,
+      "swap_blocked_node": "S0_missing",
+      "swap_alt_node": "S2_alt",
+      "rationale": "Pre: G needs both Y_blocked(25)+Y_alt(18); Y_blocked stuck on S0(n_uses=0). max(Y_blocked,Y_alt)+G=25+3=28 but Y_blocked never resolves so effective T*_pre=∞ in practice; budget-limited V*=28. Post: seed_inject swaps Y_blocked.deps[S0_missing]→S2_alt(n_uses=2), G can complete via Y_alt only path → 18+3=21."
+    },
+    {
+      "name": "compound_soft_parallel_seed",
+      "path": "design/roadmap_engine/r4_bench/compound_soft_parallel_seed.json",
+      "sha256": "df89e0d9dbc819cf21e70f441368d350428c0605f45d57565e488653744e402b",
+      "node_count": 7,
+      "expected_replan_action": "compound",
+      "trigger_reason": "ready_empty_due_compound",
+      "expected_T_star_pre": 47.0,
+      "expected_T_star_post": 35.0,
+      "expected_ratio_post_over_pre": 0.745,
+      "expected_ratio_upper_bound": 0.8,
+      "candidate_actions": ["soft_drop:BR1<->BR2,V_join->S0_missing", "parallel_split:X(k=3)", "seed_inject:S0_missing->bypass"],
+      "rationale": "Pre: V_join blocked by V*(X)=30, dominant; V*(S)=X(30)+V_join(8)+G(4)+5(S done)=47 (S done so 0). Post (after MCTS picks highest-reward delta — parallel_split on X): V*(X')=10+8+4=22 → with parallel branches max(BR1=12,BR2=12,X'=10)+V_join(8)+G(4)=12+8+4=24; conservative envelope 35 to allow MCTS suboptimality vs upper-bound 0.8."
+    },
+    {
+      "name": "negative_control_no_annotation",
+      "path": "design/roadmap_engine/r4_bench/negative_control_no_annotation.json",
+      "sha256": "fdbb033bb185471d05cc41f6bdcf2bcd1a067e7448d400486efb32de888b714d",
+      "node_count": 5,
+      "expected_replan_action": "none",
+      "trigger_reason": "ready_empty_no_strategy_applies",
+      "expected_T_star_pre": 41.0,
+      "expected_T_star_post": null,
+      "expected_ratio_post_over_pre": null,
+      "expected_ratio_upper_bound": null,
+      "rationale": "Pre: V*(S)=0+N1(12·0.5=6 remaining)+N2(14)+N3(10)+G(5)=35; with S done(0)+N1_in_progress(6)+N2(14)+N3(10)+G(5)=35. Wait — recompute: status=in_progress at progress=0.5, remaining = 12*(1-0.5)=6, plus 14+10+5=35 + 6 = 41 from S. T*_pre=41. T*_post=null (replan returns None — no soft_deps, no parallel hint, no seed alts, no exp/learn nodes). Excluded from geo-mean per falsifier spec."
+    }
+  ],
+  "summary": {
+    "total_dags": 5,
+    "positive_trigger_dags": 4,
+    "negative_control_dags": 1,
+    "expected_geo_mean_post_over_pre": "(0.667 * 0.474 * 0.75 * 0.745)^(1/4) = 0.638 — well below 0.99 falsifier threshold (positive case)",
+    "expected_worst_case_ratio": 0.75,
+    "per_strategy_coverage": {
+      "soft_drop": ["soft_rich_diamond_drop", "compound_soft_parallel_seed (candidate)"],
+      "parallel_split": ["parallel_rich_bottleneck_split", "compound_soft_parallel_seed (candidate)"],
+      "seed_inject": ["seed_rich_alternative_inject", "compound_soft_parallel_seed (candidate)"],
+      "none": ["negative_control_no_annotation"]
+    },
+    "trigger_reason_coverage": {
+      "ready_empty_due_soft": 1,
+      "ready_empty_due_bottleneck_T_inf": 1,
+      "ready_empty_due_seed_starvation": 1,
+      "ready_empty_due_compound": 1,
+      "ready_empty_no_strategy_applies": 1
+    }
+  },
+  "schema_compliance": {
+    "parse_node_fields_used": ["id", "name", "type", "cost", "p_success", "n_uses", "deps", "soft_deps", "status", "progress"],
+    "fields_omitted_intentionally": ["hard_deps (parse_node falls back to deps[] when hard_deps absent)", "eta (only used by learn-type nodes; none in fixtures)"],
+    "type_distribution": {
+      "build": 23,
+      "seed": 4,
+      "verify": 2,
+      "goal": 4
+    },
+    "max_nodes_per_dag": 7,
+    "constraint_check": "all DAGs ≤ 8 nodes — PASS"
+  },
+  "limitations": [
+    "T*_post values are design-time hand-computed; subject to ±5% tolerance vs machine schedule() once impl lands",
+    "compound DAG capped at 7 nodes (parent ω-cycle proposes 10) due to ≤8 constraint — full 10-node version deferred to Tier-2 i5a3 coverage matrix expansion",
+    "MCTS non-determinism not yet modeled in compound expected_T_star_post — using conservative upper bound; will tighten once MCTS_BENCHMARK_SEED lands (parent i5a7)"
+  ]
+}

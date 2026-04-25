@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "spec/m3_anchor_log_schema.json",
+  "title": "m3 meta_cert_anchor_log row schema",
+  "description": "JSON schema for one append-only row in state/meta_cert_anchor_log.jsonl. Each row records one external trust anchor publication event (git tag + detached signature) per spec/m3_external_anchor_workflow.md. Append-only; fsync per row; gitignored under state/. Truncates Tarski meta-verifier regress at V_1 by epistemic decree (ordinal stamp ω·2+2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ts",
+    "chain_head_hash",
+    "tag_name",
+    "signed_by_keyid",
+    "anchored_round_range",
+    "verification_command",
+    "schema_version"
+  ],
+  "properties": {
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp (with offset) of the anchor publication event, recorded by the operator at tag-push time. NOT trusted as the canonical anchor time — the canonical timestamp is GitHub's server-side receipt, not this field."
+    },
+    "chain_head_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 (lowercase hex, 64 chars) of the last row of state/meta_decision_cert.jsonl at anchor time. Equals the annotation message of the corresponding git tag exactly (no prefix, no trailing newline)."
+    },
+    "tag_name": {
+      "type": "string",
+      "pattern": "^meta-cert-anchor-\\d{4}-\\d{2}-\\d{2}-\\d{6}-[0-9a-f]{12}$",
+      "description": "Git tag name, format meta-cert-anchor-YYYY-MM-DD-HHMMSS-<short_hash> where short_hash = chain_head_hash[:12]. UTC."
+    },
+    "signed_by_keyid": {
+      "type": "string",
+      "minLength": 8,
+      "description": "Fingerprint or long-form keyid of the PGP/SSH key used by `git tag -s`. Allows consumers to map signatures back to a known operator identity and to detect post-compromise rotations (§5 of workflow spec)."
+    },
+    "anchored_round_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_round", "to_round"],
+      "properties": {
+        "from_round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Inclusive lower bound: first cert round (R-number) covered by this anchor. Equals previous anchor's to_round + 1, or 0 for the first anchor ever."
+        },
+        "to_round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Inclusive upper bound: last cert round covered by this anchor — i.e., the round whose row's content-address is chain_head_hash."
+        }
+      },
+      "description": "Round span this anchor commits to. Verifier must re-hash every cert row in [from_round, to_round] and confirm the chain reproduces chain_head_hash exactly. Any divergence falsifies the anchor (see m3_anchor_falsifier.md)."
+    },
+    "verification_command": {
+      "type": "string",
+      "description": "Literal shell command consumers run to re-verify this anchor independently. Conventionally: `git fetch --tags && git tag -v <tag_name>`. Stored verbatim per row so future schema additions don't break old verifiers' replay paths."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^v\\d+(\\.\\d+)*$",
+      "description": "Schema version of this row (e.g., 'v1', 'v1.1'). Append-only evolution: new fields → new schema_version; old rows unchanged. raw 77 audit-append-only invariant."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-form annotation. Used for key-rotation events (referencing previous tag_name under old keyid), known clock-skew, or operator commentary. Not load-bearing for verification."
+    }
+  }
+}

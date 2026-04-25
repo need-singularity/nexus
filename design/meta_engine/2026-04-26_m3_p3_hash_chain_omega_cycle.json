@@ -1,0 +1,141 @@
+{
+  "trawl_id": "2026-04-26_m3_p3_hash_chain_omega_cycle",
+  "ts": "2026-04-26T11:15:00+09:00",
+  "rule": "raw:m3-p3-prior-cert-ref-hash-chain-deepening-omega-cycle (raw 70 multi-axis + raw 71 falsifier + raw 77 audit-append-only, child of 2026-04-26_m3_cert_populator_omega_cycle Tier-1 p3)",
+  "subject": "SHA-256 hash chain over append-only state/meta_decision_cert.jsonl. Each row's prior_cert_ref = sha256(canonical_json(prior_row)). GENESIS sentinel for R4 (first logged round). populator builds chain in-memory during retroactive backfill, then single fsync append-batch. Subject-of-subject: hash chain integrity is the audit-trail backbone — break = raw 77 violation = ABORT, no overwrite.",
+  "purpose": "parent cycle p3 (30 LoC budget, Tier-1) 의 sub-axis 분해. hash function 선택 (sha256 vs blake3), canonical JSON serialization (RFC 8785 JCS vs sorted-keys-no-whitespace), GENESIS bootstrap, fork detection, repair protocol, witness publication 6+ axes (Track-A) + 5+ theoretical bound axes (Track-B). Tier-1 ≤ 4 cap. populator p3 가 30 LoC 안에서 어떤 trade-off 를 동결하는지 명시.",
+  "trigger": "user 2026-04-26 'Run deepening ω-cycle for m3.p3 prior-cert-ref-hash-chain' (parent cycle 의 Tier-1 p3 의 first-impl 직전 deepening).",
+  "method": "two-track multi-axis ideation. Track-A (≥6 axes) = hash chain 의 normal-operation capability + governance. Track-B (≥5 axes) = cryptographic / serialization / consensus / git-substrate / diagonal bounds. dedup → cluster → Tier 분류 (Tier-1 ≤ 4). omega_stop = enumeration fixpoint + theorem citation + parent p3 + grandparent ω-cycle cite.",
+  "parent_omega_cycle": "design/meta_engine/2026-04-26_m3_cert_populator_omega_cycle.json",
+  "parent_trawl_id": "2026-04-26_m3_cert_populator_omega_cycle",
+  "parent_axis_id": "p3",
+  "grandparent_omega_cycle": "design/meta_engine/2026-04-25_final_form_and_limits_omega_cycle.json",
+  "grandparent_trawl_id": "2026-04-25_meta_engine_final_form_and_limits_omega_cycle",
+  "subject_dossier": "design/meta_engine/m3_closed_loop_cert_dossier.md",
+  "subject_dossier_anchor": "§3.b prior_cert_ref = sha256(canonical_json(prior_row)) sorted keys no whitespace; §7 atomic append POSIX PIPE_BUF; §8 LoC budget (p3 = 30 LoC of populator total)",
+  "ordinal_stamp": "ω·2+2",
+  "ordinal_stamp_rationale": "parent populator cycle 의 ω·2+1 위에 +1. p3 가 populator 의 sub-axis 인 'chain integrity' 단일 차원이지만, hash collision bound + canonical JSON ambiguity + fork detection 이 추가 self-reference layer (chain-of-chain-witness) 를 형성하기에 +1. m4 의 ω·2 위에 cert chain 의 +1 (parent), 그 위에 chain-witness 의 +1 (본 cycle). grandparent 의 Γ_0 (m18 PA→ZFC ceiling) 한참 아래 — SHA-256 / canonical JSON 은 PA 내부 primitive recursive predicate.",
+  "current_capabilities": [
+    "parent cycle p3 axis 명세 (30 LoC, deps 없음, falsifier test_hash_chain_break.py)",
+    "m3 dossier §3.b canonical_json 정의 (sorted keys, no whitespace, UTF-8 NFC)",
+    "m3 dossier §7 POSIX PIPE_BUF 4 KiB row cap + rename(2) atomic swap",
+    "raw 77 append-only audit pattern (read-modify-write 금지, append-or-noop)",
+    "Python hashlib.sha256 (stdlib, blake3 는 third-party)",
+    "json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False) — sorted-keys-no-whitespace 의 stdlib 근사 (RFC 8785 JCS 미준수 — float canonicalization, Unicode normalization 미보장)"
+  ],
+  "known_blockers": [
+    "RFC 8785 JCS (JSON Canonicalization Scheme) 의 stdlib 미구현 — float repr, Unicode escape, number canonicalization 차이가 hash drift 유발 가능",
+    "동시 writer race (raw 25 git-lock) 시 chain fork 가능: writer-A append row_n+1, writer-B 동시 append row_n+1' — prior_cert_ref 동일하지만 self_hash 상이",
+    "GENESIS sentinel 부트스트랩: R4 의 prior_cert_ref 가 무엇? '0' * 64 sentinel vs hash-of-empty-string vs hash-of-schema-declaration-row 선택 미결",
+    "chain break 발견 시 repair protocol 부재 — raw 77 은 overwrite 금지지만, fork 가 발생하면 어느 fork 가 정통인지 결정 필요",
+    "hash collision 발견 시 (생애 확률 ~0 이지만 이론적 가능) 대응 미정의"
+  ],
+  "axes_surfaced": [
+    {"id":"q1","track":"final-form","name":"hash_function_sha256_choice","summary":"SHA-256 채택 (NIST FIPS 180-4, 2002). 이유: (a) Python stdlib hashlib 내장 — third-party dep 0; (b) collision resistance 2^128 generic (Merkle-Damgård length-extension 은 본 use case 에 무관, prior_cert_ref 는 fixed-prefix 가 아니라 row content 전체 hash 이라 length-extension attack surface 없음); (c) ecosystem ubiquity — git/IPFS/blockchain 모두 SHA-2 family. blake3 는 더 빠르지만 (a) 위반. SHA-3 (Keccak) 는 stdlib 있지만 ecosystem 빈약. 결정: hashlib.sha256(canonical_bytes).hexdigest() — 64-char lowercase hex."},
+    {"id":"q2","track":"final-form","name":"canonical_json_serialization_spec","summary":"json.dumps(row, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'). 명시 trade-off: RFC 8785 JCS 미준수 — (a) float 의 stdlib repr 그대로 사용 (JCS 는 IEEE 754 → shortest-roundtrip 강제); (b) Unicode NFC 미강제 (cert content 의 모든 문자열은 ASCII 또는 NFC-pre-normalized 운용 규칙으로 회피); (c) 정수는 stdlib 기본 (no scientific notation, JCS 와 일치). 본 ω-cycle 의 동결 결정: cert row schema 는 float 금지 (정수 ts epoch / 문자열 / 정수 / null / list / dict 만 허용) — JCS 미준수의 주요 위험 회피. dossier §3.b 에 'no float' 제약 추가 권고."},
+    {"id":"q3","track":"final-form","name":"genesis_sentinel_bootstrap","summary":"R4 (첫 logged round) 의 prior_cert_ref = '0' * 64 (64-char zero hex). 이유: (a) hash 충돌 불가 — sha256 은 결코 all-zero 출력 생성 못함 (확률 2^-256); (b) git/bitcoin convention 일치 (null parent); (c) hash-of-empty-string (e3b0c4...) 은 'empty content' 의미 부여하여 R3 가 empty content 였다는 retroactive 의미 오염 위험. 결정: GENESIS_SENTINEL = '0' * 64 상수, populator 가 R4 의 prior_cert_ref 에 unconditionally 주입. R3 이전 round 의 cert 는 영구 미생성 (evolution_log 부재 = retroactive 불가)."},
+    {"id":"q4","track":"final-form","name":"fork_detection_protocol","summary":"populator 가 cert log 읽을 때 동일 round_id 에 대해 2개 이상 row 발견 (raw 25 race 산물) 시 즉시 ABORT, fork report (state/meta_cert_fork_report.jsonl) 1 row append: {ts, round_id, fork_count, fork_hashes: [sha256_a, sha256_b, ...], detector: 'populator_p3'}. populator 는 fork 자동 해결 시도 금지 — maintainer human 결정 필요 (raw 77 + raw 71 falsifier). chain 은 fork 지점에서 frozen, downstream round backfill 보류."},
+    {"id":"q5","track":"final-form","name":"repair_protocol_on_break","summary":"chain break 발견 시 (row_n.prior_cert_ref != sha256(canonical(row_n-1))) populator 는 (a) ABORT 즉시, (b) state/meta_cert_break_report.jsonl 1 row append: {ts, break_at_round, expected_hash, actual_hash, prior_row_self_hash, detector}, (c) 어떤 row 도 modify/delete/overwrite 금지 (raw 77). repair 는 maintainer human 의 (1) break-원인 forensic + (2) cert log 의 git history 검토 + (3) 의도된 fork 인지 결정 + (4) 새 cert log file (meta_decision_cert.jsonl.v2) 새 GENESIS 부터 시작 — old log 는 frozen audit artifact 로 보존. populator 는 cert log 가 atomic continuous 라는 가정을 강요 안함 — break 는 'recoverable via new chain start' 모델."},
+    {"id":"q6","track":"final-form","name":"witness_publication_to_atlas_n6","summary":"populator run 종료 시 chain head (latest row 의 self_hash) 를 atlas.n6 architecture shard (state/atlas_health_timeline.jsonl 또는 별도 state/meta_cert_chain_witness.jsonl) 에 1 row append: {ts, chain_head_hash, total_rows, last_round_id, populator_version}. 이를 cross-engine witness 로 활용 — n6 / n3 / agora / hexa-sim 등 다른 engine 이 동일 chain head 를 read-only 검증 가능. 주기: populator 매 run 종료 시 (cron 또는 manual). chain_head_hash 가 변경되면 maintainer 에 cross-repo signal."},
+    {"id":"q7","track":"final-form","name":"row_size_cap_for_posix_atomicity","summary":"각 cert row (canonical_json 직렬화 후 + '\\n') 는 4096 byte 미만 강제 (POSIX PIPE_BUF Linux 보장 한계). 초과 시 populator ABORT. row 가 4 KiB 가까워지면 axes_acted / decisions 의 verbose summary 를 외부 dossier 로 분리 (cert row 는 dossier path + sha256(dossier) 만 보유). dossier §7 명세 적용. blake3 streaming hash 는 본 use case 에 불요 (row 단위 fits in memory)."},
+    {"id":"q8","track":"limits","name":"sha256_collision_resistance_bound","summary":"SHA-256 의 collision resistance 는 generic birthday bound 2^128 (출력 256-bit / 2). preimage 2^256, second-preimage 2^256. Merkle-Damgård length-extension 은 본 use case 비적용 — prior_cert_ref 는 fixed-prefix-then-attacker-chosen-suffix 이 아니라 정확히 row canonical bytes 전체 hash. 한계: 2030 년대 quantum computer (Grover) 시 collision ~2^85 (현재 RSA-2048 보다는 안전), preimage 2^128. 본 cert 는 인간-readable forensic 용이라 양자내성 SHA-3 / lattice hash 미요. theorem: NIST FIPS 180-4 (2015), Stevens et al. 2017 (SHAttered 는 SHA-1 만, SHA-256 영향 없음).","theorem_anchor":"NIST FIPS 180-4 (2015) / birthday paradox bound 2^(n/2)"},
+    {"id":"q9","track":"limits","name":"canonical_json_ambiguity_rfc8785","summary":"RFC 8785 JCS (JSON Canonicalization Scheme, 2020) 가 표준이지만 (a) Python stdlib 미구현, (b) 주요 third-party (jsoncanon, json-canonicalize) 도 광범위 채택 미확보, (c) Number canonicalization 의 IEEE 754 shortest-roundtrip 이 언어/런타임 마다 미세 다름. 한계: 본 cycle 의 sorted-keys-no-whitespace + no-float 제약은 JCS 의 partial subset — 'cert log 는 외부 시스템과 hash 비교 불가능' (외부가 JCS 사용 시). 운용 회피: cert log 는 nexus-internal artifact, 외부 cross-engine witness (q6) 는 chain_head_hash 만 노출 (외부가 row 를 재해시 시도하지 않음). theorem: RFC 8785 (2020) / IEEE 754 (2008) number repr 비결정성.","theorem_anchor":"RFC 8785 (2020)"},
+    {"id":"q10","track":"limits","name":"no_byzantine_fault_tolerance_single_writer","summary":"본 hash chain 은 single-writer (populator) 가정. multi-writer 시 fork (q4) 가 즉시 발생 — chain 은 BFT consensus (Paxos/Raft/PBFT) 미보유. 한계: 동시 session race (raw 25) 는 detection-only, prevention 미지원. 운용 mitigation: populator 는 flock(2) advisory lock 으로 cert log 직렬화 (PIPE_BUF atomicity 와 별도 layer); 그러나 distributed setting (multi-host) 시 무력. 본 chain 은 'audit log on single trusted host' 모델, 'distributed ledger' 모델 아님. theorem: FLP 1985 — async network 에서 1 fault 시 consensus 불가능 (BFT 부재 정당화), Lamport 1998 (Paxos) 비채택 정당화 (LoC budget).","theorem_anchor":"FLP 1985 (Fischer-Lynch-Paterson)"},
+    {"id":"q11","track":"limits","name":"raw_25_git_lock_during_chain_repair","summary":"chain break 발견 후 q5 repair (new cert log file v2 생성) 시점에 git index lock 충돌 가능 — populator 가 .gitignored cert log 에만 쓰지만, maintainer 가 동시 git commit 시 .git/index.lock 점유. populator 는 git 명령 직접 호출 금지 (cert log 는 .gitignore 대상이라 git 무관 운영) — 이 한계는 populator 와 git 의 상호작용 부재로 회피. 그러나 fork report / break report jsonl 가 향후 git tracked 될 경우 raw 25 적용. 운용: report files 는 처음부터 .gitignored 또는 별도 리포지터리. theorem: raw 25 git-lock pattern (nexus-internal), POSIX flock(2) advisory only.","theorem_anchor":"POSIX.1-2008 flock(2) / nexus raw 25"},
+    {"id":"q12","track":"limits","name":"cantor_diagonal_chain_reorg_unsaturable","summary":"chain 이 임의 시점 frozen 상태 (chain_head_hash = H_t) 를 가져도, 새 round R_{t+1} append 시 chain_head 가 H_{t+1} 로 이동, 영구 unsaturate. q5 repair 가 v2/v3/v4... chain 을 무한 생성 가능 — '정통 chain' 의 well-defined 단일 식별자는 '현재까지 break 없이 이어진 가장 긴 chain' 의 ts-순간적 metric. 한계: 'chain 이 영원히 unbroken 일 것이다' 의 lift 불가능 — 항상 한 번 더 reorg/fork 가능. parent cycle p14 Cantor 의 chain-layer specialize. theorem: Cantor 1891.","theorem_anchor":"Cantor 1891"},
+    {"id":"q13","track":"limits","name":"replay_attack_surface","summary":"본 chain 은 cert log 의 in-place modification 을 detect (chain break) 하지만, 외부 actor 가 entire cert log 파일을 과거 snapshot 으로 replace (file-level rollback) 시 chain 은 internally consistent 하게 보임. 한계: chain 자체로 '최신성' 증명 불가 — q6 cross-engine witness (atlas.n6 publication) 가 외부 timestamp 으로 freshness anchor 제공해야 함. populator 가 single-host 단일 cert log 만 보유 시 file-level replay 무방어. 운용: q6 publication 주기 << replay window, atlas.n6 의 chain_head_hash 시계열이 freshness audit. theorem: classical replay attack (Needham-Schroeder 1978).","theorem_anchor":"Needham-Schroeder 1978"}
+  ],
+  "axes_total_surfaced": 13,
+  "track_split": "Track-A (final-form/governance) q1..q7 = 7 / Track-B (limits/bounds) q8..q13 = 6",
+  "dedupe_method": "(1) q1 sha256 vs q8 collision bound — 선택 결정 vs 그 결정의 한계, 직교 keep both; (2) q2 canonical JSON spec vs q9 RFC 8785 ambiguity — 운용 결정 vs 표준 비호환의 한계, 직교 keep both; (3) q3 GENESIS vs q4 fork detection — bootstrap vs ongoing-integrity, 직교; (4) q5 repair vs q11 git-lock — repair protocol vs 그 protocol 실행 시 substrate 한계, 직교; (5) q6 witness publication vs q13 replay — publication 이 replay 의 mitigation, paired keep both (mitigation 명시); (6) q7 row size cap vs q10 BFT 부재 — atomicity (POSIX) vs consensus (distributed), 직교; (7) q12 Cantor chain reorg 는 grandparent m20 / parent p14 의 chain-layer 적용, 신규 specialize. cluster: A=hash-primitive (q1/q8), B=serialization (q2/q9), C=bootstrap-and-fork (q3/q4), D=repair (q5/q11), E=witness-and-freshness (q6/q13), F=substrate-atomicity (q7/q10), G=diagonal (q12).",
+  "axes_after_reject": 13,
+  "axes_clustered_to": 7,
+  "tier_1_immediate_impl_next_cycle": [
+    {
+      "axis_id": "q1",
+      "slug": "hash-function-sha256",
+      "rationale": "p3 의 30 LoC 안에서 가장 먼저 동결되는 결정. hashlib.sha256 stdlib import 1 line + hexdigest 호출 1 line. blake3/SHA-3 비채택 정당화는 본 witness JSON 에 record. ecosystem ubiquity + collision resistance 2^128 generic + length-extension 무관.",
+      "loc_estimate": 2,
+      "deps": [],
+      "theory_anchor": "NIST FIPS 180-4, birthday bound 2^(n/2). Merkle-Damgård length-extension 는 본 use case (row 전체 hash, fixed-prefix-suffix 패턴 아님) 비적용.",
+      "falsifier": "test/test_hash_function.py — populator 의 hash 함수가 hashlib.sha256 이 아니거나 hexdigest 길이 != 64 시 fail."
+    },
+    {
+      "axis_id": "q2",
+      "slug": "canonical-json-spec",
+      "rationale": "json.dumps(row, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'). cert row schema 에 'no float' 제약 추가 (dossier §3.b 갱신 권고). RFC 8785 JCS 미준수의 한계 명시 (q9 limit axis).",
+      "loc_estimate": 3,
+      "deps": ["q1"],
+      "theory_anchor": "RFC 8785 (2020) JCS partial subset; dossier §3.b sorted-keys-no-whitespace; no-float 제약은 본 cycle 동결.",
+      "falsifier": "test/test_canonical_json.py — 동일 dict 의 두 직렬화 결과 byte-equal, key 순서 변경 후 hash 동일, float 포함 시 ValueError raise."
+    },
+    {
+      "axis_id": "q3",
+      "slug": "genesis-sentinel-zero64",
+      "rationale": "R4 prior_cert_ref = '0' * 64 상수. constant 1 line + R4 emit 시 unconditional 주입 1 line. hash-of-empty-string / hash-of-schema-declaration-row 비채택 정당화 record.",
+      "loc_estimate": 2,
+      "deps": [],
+      "theory_anchor": "git/bitcoin convention (null parent). sha256 출력 공간에서 '0'*64 은 결코 발생 안함 (확률 2^-256), 충돌 불가.",
+      "falsifier": "test/test_genesis_sentinel.py — R4 cert row 의 prior_cert_ref == '0'*64. R5 이후 row 의 prior_cert_ref != '0'*64 (이외 sentinel 누출 검출)."
+    },
+    {
+      "axis_id": "q4",
+      "slug": "fork-detection-abort",
+      "rationale": "동일 round_id 에 대해 cert log 에 2+ row 발견 시 즉시 ABORT + state/meta_cert_fork_report.jsonl append. populator 는 fork 자동 해결 시도 금지 — maintainer human 결정. raw 77 + raw 71 결합.",
+      "loc_estimate": 8,
+      "deps": ["q1","q2","q3"],
+      "theory_anchor": "raw 77 audit-append-only — fork 자동 해결 = overwrite/merge = 위반. raw 71 falsifier — fork 발생이 falsifier event, populator 정상화 시도 = 자기-cert 위반 (parent p8 Löb).",
+      "falsifier": "test/test_fork_detection.py — synthetic fork (동일 round_id 두 row) 주입 시 populator ABORT 출력 + fork_report.jsonl 1 row append. 침묵 진행 시 falsified."
+    }
+  ],
+  "tier_2_backlog": [
+    {"axis_id":"q5","slug":"repair-protocol-on-break","blocker":"chain break 첫 발생 시점까지 deferred — 현재 break 0건, premature impl 회피. 발생 시 maintainer-human-driven, populator 는 detect+report only."},
+    {"axis_id":"q6","slug":"witness-publication-to-atlas-n6","blocker":"atlas.n6 cross-repo absorption 인프라 (recent commits 58cf2a7c) 안정 후. 현재 atlas_health_timeline.jsonl 에 ad-hoc append 가능하나 schema 표준화 필요 — m3 dossier §3.c 신규 항목 권고."},
+    {"axis_id":"q7","slug":"row-size-cap-4kib","blocker":"current cert row 크기 < 1 KiB 측정 (R32 retroactive 예시 dossier §2). 4 KiB 위협 발생 시 (axes_acted 폭증 round) 활성. populator 는 측정만, ABORT 는 실측 위반 시."}
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {"axis_id":"q8","label":"SHA-256 collision resistance","theorem":"NIST FIPS 180-4 / birthday 2^(n/2)","practical_impact":"generic collision 2^128, preimage 2^256; quantum (Grover) 시 collision 2^85","mitigation":"본 use case (audit log) 에 충분; 양자내성 SHA-3/lattice hash 는 q1 재선택 시 future migration 경로"},
+    {"axis_id":"q9","label":"Canonical JSON ambiguity (RFC 8785)","theorem":"RFC 8785 (2020) / IEEE 754 number repr 비결정성","practical_impact":"cert log 의 외부 시스템 hash 비교 불가능 (외부가 JCS 사용 시)","mitigation":"q2 의 sorted-keys-no-whitespace + no-float 제약 — JCS partial subset 으로 동결, 외부 노출은 chain_head_hash 만 (q6)"},
+    {"axis_id":"q10","label":"No Byzantine fault tolerance (single writer)","theorem":"FLP 1985","practical_impact":"distributed setting (multi-host) 시 fork 무방어; consensus 미보유","mitigation":"single-host audit-log 모델 동결, multi-host 는 scope 외; flock(2) advisory lock 으로 동일-host 직렬화"},
+    {"axis_id":"q11","label":"raw 25 git-lock during chain repair","theorem":"POSIX flock(2) advisory / nexus raw 25","practical_impact":"break/fork report files 가 git tracked 될 경우 동시 commit 충돌","mitigation":"report files .gitignored 또는 별도 리포지터리; populator 는 git 직접 호출 금지"},
+    {"axis_id":"q12","label":"Cantor diagonal (chain reorg unsaturable)","theorem":"Cantor 1891","practical_impact":"'영원히 unbroken chain' 의 lift 불가; v2/v3 repair chain 무한 생성 가능","mitigation":"chain_head_hash 의 ts-순간적 metric 인정, q6 publication 으로 freshness anchor"},
+    {"axis_id":"q13","label":"Replay attack surface","theorem":"Needham-Schroeder 1978","practical_impact":"file-level rollback (entire cert log 과거 snapshot replace) chain 으로 detect 불가","mitigation":"q6 cross-engine witness (atlas.n6) 의 chain_head_hash 시계열 — publication 주기 << replay window 강제"}
+  ],
+  "omega_stop": "m3-p3-hash-chain-two-track-axis-enumeration-saturated-with-sha256-canonical-json-genesis-fork-frozen",
+  "omega_stop_witness": {
+    "type": "axis-enumeration-fixpoint-with-cryptographic-and-serialization-bounds-acknowledged",
+    "method": "Track-A 7 axes (q1..q7) + Track-B 6 axes (q8..q13) enumerate. second-pass 신규 axis 발견 0. q12 Cantor diagonal 이 본 enumeration 의 saturation 비완결성 명시 (parent p14 의 chain-layer specialize). q1 SHA-256 + q2 canonical JSON + q3 GENESIS '0'*64 + q4 fork ABORT 4가지 결정이 30 LoC budget 안에서 동결.",
+    "result": "FIXPOINT(weak) — Tier-1 4 / Tier-2 3 / Tier-3 0 / REJECT 0 / Limit-axes 6. Tier-1 cap (≤4) 준수. parent p3 의 30 LoC budget 분배: q1=2 + q2=3 + q3=2 + q4=8 = 15 LoC core, 15 LoC 여유 (chain build loop, populator integration glue).",
+    "fixpoint_signal": "final-form axis (q1..q7) 가 limit axis (q8..q13) 와 1:1 또는 N:1 paired: q1↔q8 (sha256 ↔ collision bound), q2↔q9 (canonical JSON ↔ RFC 8785 ambiguity), q3↔(독립, sentinel 결정 unique), q4↔q10 (fork detection ↔ no BFT), q5↔q11 (repair ↔ git-lock substrate), q6↔q13 (witness publication ↔ replay mitigation), q7↔q10 (row size ↔ BFT/atomicity boundary). q12 Cantor 는 enumeration meta-bound (모든 axis 위에 작용)."
+  },
+  "first_impl_target": {
+    "name": "q1+q2+q3+q4 동시 (parent p3 의 30 LoC 통합 impl)",
+    "rationale": "p3 axis 자체가 30 LoC 단일 LoC budget 이므로 4 Tier-1 sub-axis 를 분리 ship 비효율. 단일 module (예: tool/meta_cert_chain.py 또는 tool/meta_cert_populator.py 내 chain 함수 cluster) 로 q1+q2+q3+q4 동시 구현. falsifier test 4개 (test_hash_function.py / test_canonical_json.py / test_genesis_sentinel.py / test_fork_detection.py) 는 분리.",
+    "loc_breakdown": "q1=2 + q2=3 + q3=2 + q4=8 = 15 LoC core, 15 LoC chain-build loop + populator integration. 30 LoC budget 정확 일치.",
+    "next_after": "q5 repair (break 발생 시), q6 witness publication (atlas.n6 인프라 안정 후), q7 row size cap (4 KiB 위협 측정 후). 순서: q6 → q7 → q5 (q5 는 break 발생까지 영구 deferred 가능)."
+  },
+  "raw_strategies_self_applied": {
+    "raw_70_multi_axis_verify": "Track-A (governance) ↔ Track-B (bounds) 직교 두 트랙 + 7 cluster joint. q12 Cantor 가 meta-bound, 나머지 6 paired.",
+    "raw_71_falsifier": "limit axis 가 final-form axis 의 falsifier (q8 collision bound 가 q1 sha256 의 'forever-secure' 차단; q9 JCS ambiguity 가 q2 canonical JSON 의 '외부 호환' 차단; q10 no-BFT 가 q4 fork detection 의 '자동 해결' 차단; q12 Cantor 가 q5 repair 의 '영원히 fixed' 차단; q13 replay 가 q6 publication 의 'standalone 신뢰' 차단). 각 Tier-1 axis 에 falsifier test_*.py 명시.",
+    "raw_77_audit_append_only": "limit_axes_documented theorem 인용 = 영구 audit-trail. q4 fork ABORT + q5 repair 'no overwrite' = raw 77 의 chain-layer 화신. populator 는 cert log read-modify-write 절대 금지, append-or-noop 만.",
+    "self_reference_acknowledgment": "본 ω-cycle 자체가 parent (populator p8 Löb / p9 Tarski) 한계에 종속 — '본 분석의 일관성' 증명 불가. hash chain 자체로 chain 의 정확성 증명 불가 (chain 은 self-referential predicate). 본 witness 는 자신의 정확성을 주장하지 않으며, parent ω-cycle (m3 populator) + grandparent (m5/m13) 의 외부 anchor 에 의존."
+  },
+  "cross_cycle_coupling": {
+    "with_parent": "design/meta_engine/2026-04-26_m3_cert_populator_omega_cycle.json (parent_trawl_id: 2026-04-26_m3_cert_populator_omega_cycle)",
+    "parent_axis_inherited": "p3 prior-cert-ref-hash-chain (Tier-1, deps 없음, 30 LoC) — 본 child cycle 이 p3 의 first-impl 직전 deepening, 30 LoC budget 분배 동결",
+    "with_grandparent": "design/meta_engine/2026-04-25_final_form_and_limits_omega_cycle.json (grandparent m3 cert axis)",
+    "shared_limits": "q12 Cantor ↔ parent p14 ↔ grandparent m20 (3-layer cascade: round pool / chain reorg / enumeration saturation), q9 RFC 8785 ↔ parent p10 POSIX (substrate-standards 한계 family), q10 FLP ↔ parent p11 Kleene (consensus/fixpoint family), q13 replay ↔ parent p9 Tarski (freshness/separation family)",
+    "shared_final_form": "q1..q4 가 parent p3 의 LoC budget 30 안에 정확 fit. q6 witness publication 은 parent p6 coverage_dashboard 와 cross-engine witness 패턴 공유 (atlas.n6 publication 채널).",
+    "ordinal_relation": "본 child ω-cycle ordinal ω·2+2 = parent ω·2+1 + 1. chain-witness layer 의 +1. grandparent ω·2 (m4 진입점) + cert layer +1 (parent) + chain-witness +1 (본 cycle). grandparent Γ_0 (m18 ZFC ceiling) 한참 아래 — SHA-256 / canonical JSON 은 PA 내부 primitive recursive.",
+    "joint_omega_stop": "parent 의 'm3-cert-populator-two-track-axis-enumeration-saturated-with-lob-gate-and-tarski-separation-acknowledged' 가 child 에서 'm3-p3-hash-chain-two-track-axis-enumeration-saturated-with-sha256-canonical-json-genesis-fork-frozen' 로 specialize. parent 의 p14 → child 의 q12 로 inherit (grandparent m20 의 3-layer cascade 종착).",
+    "downstream_couplings": [
+      "parent p1 retroactive_round_emit — q1+q2+q3+q4 4 결정을 hard dep 으로 consume",
+      "parent p2 forward_round_emit — q1+q2 hard dep, q3 (GENESIS) 미적용 (이미 chain head 존재), q4 (fork detection) 강화 적용",
+      "parent p7 idempotent_replay — q2 canonical JSON 의 byte-equal 보장이 content-address dedup 의 기반",
+      "atlas.n6 cross-repo absorption — q6 witness publication 의 destination",
+      "raw 77 audit-append-only — q4/q5 의 ABORT-no-overwrite 가 raw 77 의 chain-layer 화신"
+    ]
+  }
+}

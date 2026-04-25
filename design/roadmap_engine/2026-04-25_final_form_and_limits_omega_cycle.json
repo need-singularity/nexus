@@ -1,0 +1,95 @@
+{
+  "trawl_id": "2026-04-25_roadmap_engine_final_form_and_limits_omega_cycle",
+  "ts": "2026-04-25T22:00:00+09:00",
+  "rule": "raw:design-engine-final-form-physical-mathematical-limits-omega-cycle (hive raw 47 + raw 70 multi-axis)",
+  "subject": "tool/roadmap_engine.hexa (1298 lines, TOC+A* shortest-breakthrough-path scheduler)",
+  "purpose": "현 roadmap_engine 의 점근적 최종형태(asymptotic limit form)와 그 위에서 작동하는 물리적·수학적 절대 한계를 동시에 enumerate. 기능 추가 axis(개선) 와 한계 axis(impossibility)를 분리하여 설계 ceiling 을 명시.",
+  "trigger": "user 2026-04-25 '로드맵엔진 최종형태, 물리적·수학적 한계에 대해 오메가 사이클 발사'.",
+  "method": "two-track multi-axis ideation. Track-A (final-form, 10 axes) = positive direction (capability ceiling). Track-B (limits, 10 axes) = negative direction (impossibility / hard bound). dedup → cluster → Tier 분류. omega_stop = enumeration fixpoint + 각 limit 의 lower-bound theorem citation.",
+  "current_capabilities": [
+    "Bellman dynamics V*(S) = min_a [b_a(S) + V*(f(S,a))]",
+    "5 cost types: c_build (Brent T∞ span), c_exp (T_trial/p_success), c_learn (Wright T0·(1-η)^k), c_boot (T_gap/N_uses), c_verify (K(G|S)/C_channel)",
+    "η-convergence test (η_k = 1 - b(S_{k+1})/b(S_k))",
+    "Kahn topological sort + Brent's theorem (T_wall* = Σb(S_k))",
+    "soft/hard edge distinction, --watch / --events / --dispatch / --selftest CLI",
+    "string-based JSON parser (json_parse void trap 회피)"
+  ],
+  "axes_surfaced": [
+    {"id":"r1","track":"final-form","name":"distributed_multi_agent","summary":"단일 프로세스 → N-worker pool. agent 별 b(S) 계산 분산 + Bellman backup 동기화 (parameter-server 패턴). bottleneck = sync barrier 의 communication round."},
+    {"id":"r2","track":"final-form","name":"online_bayesian_eta","summary":"η 가 사후 관측치 (offline) → posterior update p(η|history). bandit-Bayes 로 c_exp 의 p_success 자동 갱신. Thompson sampling 으로 schedule branching."},
+    {"id":"r3","track":"final-form","name":"multi_objective_pareto","summary":"min T 단일 → (T, cost_$, risk, learned_value) Pareto frontier. user 가 가중치 선택 → ε-constraint 또는 weighted-sum scalarization."},
+    {"id":"r4","track":"final-form","name":"replanning_continuous","summary":"η ≤ 0 발견 시 단순 exit(1) → 자동 graph mutation (soft-edge drop, parallel split, alternative seed inject). MCTS-style replan within budget."},
+    {"id":"r5","track":"final-form","name":"discovery_graph_integration","summary":"roadmap.json static → discovery_log.sqlite 의 50k 노드와 live edge fusion. atlas.n6 fact 변경 → 영향받는 b(S) 자동 invalidate."},
+    {"id":"r6","track":"final-form","name":"reverse_path_synthesis","summary":"S→G 만 → G에서 backward Dijkstra (역추적). 두 방향 meeting-in-the-middle 으로 평균 O(b^(d/2)) 가속."},
+    {"id":"r7","track":"final-form","name":"natural_language_goal","summary":"goal 노드의 K(G|S) 가 수동 cost → LLM-기반 골 description → 자동 verify-cost estimation. Shannon-Fano 의 압축 길이로 K 근사."},
+    {"id":"r8","track":"final-form","name":"convergence_certificate","summary":"η-수렴 증명을 형식적 인증서로 emit (Coq/Lean 스타일). T* upper bound + Bellman 안정성 lemma + 가정 명시."},
+    {"id":"r9","track":"final-form","name":"adversarial_robustness","summary":"환경 perturbation (cost ±ε) 하에서 robust optimal. minimax regret 또는 distributionally-robust DP. 현 deterministic Bellman 의 일반화."},
+    {"id":"r10","track":"final-form","name":"meta_engine_coupling","summary":"roadmap_engine 자체가 메타엔진의 한 axis 가 되어 self-reschedule. R7 의 trigger_watchlist 와 b(S) 변화율 cross-feed."},
+    {"id":"r11","track":"limits","name":"NP_hard_scheduling_lower","summary":"DAG 스케줄링 (precedence + makespan minimization) 은 strongly NP-hard (Garey-Johnson SS6, Ullman 1975). 임의 P≠NP 가정 하에 polynomial-time 정확 해 불가. 현 A*+TOC 는 heuristic — admissibility 보장 시만 optimal."},
+    {"id":"r12","track":"limits","name":"halting_for_eta","summary":"η_k 가 결국 0 이 되는지(divergence detection)는 일반 동적 시스템에 대해 undecidable (Halting 환원). 따라서 finite-horizon 또는 Lyapunov-style 충분조건만 가능, 완전 판정 불가."},
+    {"id":"r13","track":"limits","name":"shannon_verify_capacity","summary":"c_verify = K(G|S)/C_channel 의 lower bound 는 noisy-channel 정리: C_channel < B·log(1+SNR). bandwidth/noise 물리한계 (Landauer kT ln2 per bit) 가 절대 floor."},
+    {"id":"r14","track":"limits","name":"kolmogorov_K_uncomputable","summary":"K(G|S) (Kolmogorov 조건부 복잡도) 는 uncomputable (Chaitin). 현 코드의 K(G|S) 추정은 압축길이 surrogate 일 뿐 — verify-cost 정확도 absolute ceiling 존재."},
+    {"id":"r15","track":"limits","name":"brent_speedup_ceiling","summary":"Brent: T_p ≤ T_∞ + (T_1 - T_∞)/p. 임의 p 워커에도 T_∞ (critical path span) 미만 불가. DAG critical path 가 hard floor — 평행화로 깨질 수 없음."},
+    {"id":"r16","track":"limits","name":"amdahl_serial_fraction","summary":"serial fraction f_s 가 0 이 아닌 한 speedup ≤ 1/(f_s + (1-f_s)/p). c_boot 의 amortized 구간이 본질적으로 serial 이면 무한 워커도 한계."},
+    {"id":"r17","track":"limits","name":"information_lower_no_free_lunch","summary":"NFL theorem (Wolpert): 모든 cost landscape 평균에서 어떤 search heuristic 도 random 보다 우월할 수 없다. A* 의 admissible h 가 problem-specific 일 때만 strict gain."},
+    {"id":"r18","track":"limits","name":"yao_communication_lower","summary":"분산 모드(r1)에서 N-worker 간 Bellman backup 동기화의 communication complexity ≥ Ω(d·log V) (Yao). 네트워크 RTT × round 가 hard cap."},
+    {"id":"r19","track":"limits","name":"godel_self_certify","summary":"r8 convergence certificate 가 자기 자신의 일관성을 증명 시 Gödel 2nd incompleteness 충돌. 외부 metalogic 또는 well-founded ordinal 로만 escape (Gentzen ε_0 패턴)."},
+    {"id":"r20","track":"limits","name":"physical_thermodynamic_floor","summary":"Landauer: bit 1개 erase 는 kT ln 2 J ≥ 2.85 zJ @ 300K. roadmap state transition 의 정보 erase 누적 시 에너지 floor. reversible computing 으로 회피 가능 but 현 Bellman backup 은 irreversible."}
+  ],
+  "axes_total_surfaced": 20,
+  "track_split": "Track-A (final-form) r1..r10 = 10 / Track-B (limits) r11..r20 = 10",
+  "dedupe_method": "(1) r3 multi-objective vs r9 adversarial: 직교 (objective 다양화 ≠ uncertainty robust) — keep both; (2) r5 discovery_graph_integration vs r10 meta_engine_coupling: r5 는 데이터 fusion, r10 은 control-loop fusion — 직교; (3) r12 halting vs r14 K-uncomputable: 같은 Turing-한계 family 지만 적용 대상 다름 (η-detection vs cost-estimation) — keep both; (4) r15 Brent vs r16 Amdahl: critical-path floor vs serial-fraction floor — 상보, 둘 다 hard bound; (5) r17 NFL: heuristic 가정 위반 시 r2 Bayesian 도 무력 — meta-axis (다른 final-form axis 의 ceiling 역할). cluster: A=parallelism (r1/r5/r6), B=learning (r2/r4/r7), C=robustness (r3/r8/r9/r10), D=hardness (r11/r17), E=undecidability (r12/r14/r19), F=physical (r13/r15/r16/r18/r20).",
+  "axes_after_reject": 20,
+  "axes_clustered_to": 6,
+  "tier_1_immediate_impl_next_cycle": [
+    {"axis_id":"r4","slug":"replanning-continuous","rationale":"현 η≤0 시 exit(1) 만 — Tier-1. soft-edge drop + parallel split + alternative seed inject 3 strategy 의 작은 MCTS 로 교체. 기존 schedule() 함수 wrap 만으로 가능, 신규 ~150 LoC.","loc_estimate":150,"deps":[],"theory_anchor":"r17 NFL — strategy 풀이 problem-specific 일 때만 gain → seed 분산 전략 학습 필요"},
+    {"axis_id":"r6","slug":"reverse-path-synthesis","rationale":"forward-only A* → bidirectional. b(S) 계산을 G 쪽에서 미리 estimate → admissible h 자동 생성. r17 NFL 회피 (problem-specific h).","loc_estimate":200,"deps":[],"theory_anchor":"r15 Brent — bidirectional은 critical path 단축 못 하지만 explored 노드 수 √N 로 감소"},
+    {"axis_id":"r2","slug":"online-bayesian-eta","rationale":"η 가 hardcoded posterior → Thompson sampling. c_exp 의 p_success online update — 현 fixed scalar 의 자연 일반화. 50~100 LoC.","loc_estimate":100,"deps":[],"theory_anchor":"r12 halting — Bayesian 은 finite-horizon 추정만 가능, 완전 수렴 판정은 여전히 불가"},
+    {"axis_id":"r8","slug":"convergence-certificate","rationale":"η-수렴 증명을 sentinel JSONL 로 emit (T* upper, Bellman lemma, 가정). 현 events=stub 확장. r19 Gödel 회피 = ε_0 ordinal 인용 (외부 wellfounded).","loc_estimate":120,"deps":[],"theory_anchor":"r19 Gödel — self-cert 금지, ordinal 외부 인용으로만 가능"},
+    {"axis_id":"r10","slug":"meta-engine-coupling","rationale":"roadmap b(S) Δ가 메타엔진 R-라운드 의 trigger axis. state/meta_engine_evolution_log.jsonl 의 R7 watchlist 에 b_delta_threshold axis 추가. 양쪽 ω-cycle 합집합 가능.","loc_estimate":80,"deps":["meta_engine ω-cycle Tier-1"],"theory_anchor":"r19 — meta-coupling 시 self-cert 위험 재발, 양 엔진 분리 ordinal 유지"}
+  ],
+  "tier_2_backlog": [
+    {"axis_id":"r1","slug":"distributed-multi-agent","blocker":"sync barrier infra + r18 communication lower bound 분석 선행"},
+    {"axis_id":"r3","slug":"multi-objective-pareto","blocker":"cost dim 추가 (cost_$, risk) — schema 확장 필요"},
+    {"axis_id":"r5","slug":"discovery-graph-integration","blocker":"discovery_log.sqlite의 50k node 와 b(S) invalidate event 채널 정의"},
+    {"axis_id":"r7","slug":"natural-language-goal","blocker":"외부 LLM dep — i5 (hexa_sim) reject 사례와 동일 분석 필요"},
+    {"axis_id":"r9","slug":"adversarial-robustness","blocker":"DRO 분포 가정 + perturbation 모델 정의"}
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {"axis_id":"r11","label":"NP-hard scheduling","theorem":"Ullman 1975 / Garey-Johnson SS6","practical_impact":"임의 DAG 정확해 불가 → A* + admissible heuristic 로 PTAS-style 근사만 가능","mitigation":"problem-restricted class (tree, series-parallel) 에서 polynomial 가능"},
+    {"axis_id":"r12","label":"η halting undecidable","theorem":"Turing halting → general dynamical system halting","practical_impact":"divergence 완전 판정 코드 작성 불가","mitigation":"Lyapunov function 또는 finite-horizon timeout"},
+    {"axis_id":"r13","label":"Shannon channel cap","theorem":"Shannon-Hartley + Landauer","practical_impact":"verify cost floor = K(G|S) / (B·log(1+SNR)) — 물리채널 한계","mitigation":"verify 결과 캐싱(memoization) — K 분할상환"},
+    {"axis_id":"r14","label":"K(G|S) uncomputable","theorem":"Chaitin / Kolmogorov","practical_impact":"verify 비용 정확 추정 불가, 압축길이 surrogate 만 사용","mitigation":"upper bound (압축) + lower bound (incompressibility) 양변 끼워넣기"},
+    {"axis_id":"r15","label":"Brent span floor","theorem":"Brent 1974","practical_impact":"T_∞ (critical path) 미만 wall-clock 불가","mitigation":"critical path 단축 = soft edge 제거 / boot 재사용 (c_boot)"},
+    {"axis_id":"r16","label":"Amdahl serial","theorem":"Amdahl 1967","practical_impact":"f_s > 0 시 무한 워커 speedup ≤ 1/f_s","mitigation":"serial 구간 (c_boot, c_verify) 의 reuse rate ↑"},
+    {"axis_id":"r17","label":"NFL","theorem":"Wolpert-Macready 1997","practical_impact":"평균적으로 어떤 heuristic 도 random 보다 우월하지 않음","mitigation":"문제 도메인 prior 인 admissible heuristic"},
+    {"axis_id":"r18","label":"Yao comm lower","theorem":"Yao 1979","practical_impact":"분산 Bellman 동기화 cost ≥ Ω(d·log V)","mitigation":"async + bounded staleness (Hogwild!-style)"},
+    {"axis_id":"r19","label":"Gödel 2nd incompleteness","theorem":"Gödel 1931","practical_impact":"r8 self-certificate 의 일관성 증명 불가","mitigation":"외부 metalogic / Gentzen ε_0 ordinal 인용"},
+    {"axis_id":"r20","label":"Landauer thermodynamic","theorem":"Landauer 1961","practical_impact":"irreversible bit erase 당 kT·ln2 J 에너지 floor","mitigation":"reversible computing (Bennett 1973) — 현 Bellman backup 은 비가역"}
+  ],
+  "omega_stop":"two-track-axis-enumeration-saturated",
+  "omega_stop_witness":{
+    "type":"axis-enumeration-fixpoint-with-theorem-anchor",
+    "method":"Track-A 10 axes (positive capability) + Track-B 10 axes (theorem-anchored impossibility). second-pass 신규 0. 각 limit axis 가 명시된 lower-bound 정리 인용. final-form axis 가 limit axis 와 1:1 또는 N:1 anchor.",
+    "result":"FIXPOINT — Tier-1 5 (final-form 발전) / Tier-2 5 (final-form 후순위) / Tier-3 0 / REJECT 0 / Limit-axes 10 (theorem 인용 완료)",
+    "fixpoint_signal":"final-form axis 추가 시 limit axis 중 하나가 cap 으로 감지됨 (예: r5 discovery_integration → r18 comm lower; r7 NL_goal → r14 K uncomputable). 더 추가하려는 final-form 이 모두 기존 limit 으로 흡수됨 = enumeration 포화."
+  },
+  "first_impl_target":{
+    "name":"r4 replanning-continuous",
+    "rationale":"현 η≤0 → exit(1) 의 dead path 를 자동 graph mutation 으로 교체. r17 NFL 인용해서 strategy 풀이 problem-specific 함을 design 에 명시.",
+    "next_after":"r6 bidirectional → r2 Bayesian-eta → r8 convergence-cert → r10 meta-coupling"
+  },
+  "raw_strategies_self_applied":{
+    "raw_47_strategy_exploration":"본 trawl 자체",
+    "raw_70_multi_axis_verify":"final-form ↔ limits 직교 두 트랙 + 6 cluster joint",
+    "raw_71_falsifier":"limit axis 자체가 final-form axis 의 falsifier 후보 (예: r12 halting 이 r2 Bayesian 의 완전수렴 가정을 falsify)",
+    "raw_77_audit_append_only":"limit_axes_documented 의 theorem 인용 = audit-trail (수정 시 정리 출처 갱신 필요)"
+  },
+  "cross_cycle_coupling":{
+    "with":"meta_engine ω-cycle (동시 발사)",
+    "shared_axis":"r10 meta-engine-coupling ↔ meta engine 의 roadmap-axis 도입",
+    "joint_omega_stop":"양 엔진 분리 ordinal 유지 (Gentzen ε_0 / Γ_0 분리) — self-cert 회피"
+  }
+}

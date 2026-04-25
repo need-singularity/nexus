@@ -1,0 +1,94 @@
+{
+  "trawl_id": "2026-04-26_atlas_ingest_arg_fix_omega_cycle",
+  "ts": "2026-04-26T04:30:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw 25 (environmental coupling — runner argv divergence)",
+  "ordinal_stamp": "ω (terminal patch — no transcendental jump needed; bounded scope LoC ≤ 20/axis)",
+  "purpose": "tool/omega_cycle_atlas_ingest.hexa line 815 `let mut ai = 2` — hardcoded argv skip. Under remote hexa runner, argv[2] = script path itself (not user flag), so the script path is consumed as `unknown arg` and exit(1) on every invocation. Local runner uses different argv layout. Fix the argv parser robustly without breaking either runner.",
+  "trigger": "user 2026-04-26 04:25 observed-yesterday symptom: `omega_cycle_atlas_ingest: unknown arg \\`tool/omega_cycle_atlas_ingest.hexa\\`` on every invocation through remote dispatcher. Parents (meta/roadmap ω-cycles) wanted to absorb but couldn't — environmental blocker.",
+  "method": "main-thread multi-axis ideation, two-track. Track-A = ≥6 final-form solution axes; Track-B = ≥5 epistemic limits. dedup → Tier-1 ≤ 5 with line-precise loc_estimate (5–20 LoC each, this is small).",
+  "context_evidence": {
+    "tool_path": "tool/omega_cycle_atlas_ingest.hexa",
+    "bug_line": 815,
+    "bug_snippet": "let mut ai = 2",
+    "surrounding_code": "let raw_args = args(); eprintln(\"DEBUG argc=\" + to_string(len(raw_args))); let mut cli = []; let mut ai = 2; while ai < len(raw_args) { cli.push(raw_args[ai]); ai = ai + 1 }",
+    "observed_symptom": "omega_cycle_atlas_ingest: unknown arg `tool/omega_cycle_atlas_ingest.hexa`",
+    "exit_code_observed": 1,
+    "argv_layout_remote": "argv[0]=hexa, argv[1]=run, argv[2]=tool/omega_cycle_atlas_ingest.hexa, argv[3..]=user_flags (when args() returns full system argv)",
+    "argv_layout_local": "argv[0]=tool/omega_cycle_atlas_ingest.hexa, argv[1..]=user_flags (when stage0 hexa pre-strips runner prefix)",
+    "current_skip_constant": 2,
+    "parent_omega_cycles_blocked": [
+      {"path":"design/hexa_sim/2026-04-26_atlas_ingest_omega_cycle.json","role":"meta — bridge-tool atlas auto-ingest; 13 bridges → atlas.n6 absorption depends on this tool running"},
+      {"path":"design/hexa_sim/2026-04-26_atlas_ingest_tool_evolution_omega_cycle.json","role":"roadmap — phase_2_target=omega_cycle_atlas_ingest.hexa; phase 3/4 evolution path blocked while arg parser bug stands"}
+    ],
+    "n6_atlas_absorption_witness_dependency": "atlas.append.<cycle_slug>.n6 emission per witness JSON requires successful --absorb invocation; remote-runner unreachable today"
+  },
+  "track_a_final_form_axes": [
+    {"id":"a1","name":"runner_detection_heuristic","summary":"detect remote vs local runner via env probe (HEXA_RUNNER, HEXA_FORCE_LOCAL) + argv[0] basename check (`hexa` → remote, `*.hexa` → local). branch ai initial value (2 vs 1 vs 0) accordingly.","loc_estimate":15},
+    {"id":"a2","name":"self_path_strip","summary":"scan raw_args; drop any element whose basename equals the script's own basename (`omega_cycle_atlas_ingest.hexa`) AND ends in `.hexa`. runner-agnostic. handles 0/1/multiple occurrences.","loc_estimate":12},
+    {"id":"a3","name":"input_mode_flag_override","summary":"`--input-mode=local|remote|raw` user-explicit override. if present, skip auto-detect entirely. escape hatch when heuristic misfires.","loc_estimate":10},
+    {"id":"a4","name":"regression_test_corpus","summary":"3-path invocation matrix in _selftest(): (P1) `hexa run tool/...hexa --selftest`; (P2) `hexa run -- tool/...hexa --selftest`; (P3) `HEXA_FORCE_LOCAL=1 hexa run tool/...hexa --selftest` and direct `./tool/...hexa --selftest`. all must exit 0 and emit `__OMEGA_CYCLE_ATLAS_INGEST__ PASS`.","loc_estimate":18},
+    {"id":"a5","name":"invocation_shim_wrapper","summary":"tool/omega_cycle_atlas_ingest.sh wraps the real hexa invocation; sets HEXA_RUNNER=remote and forwards $@ verbatim. callers can use shim if direct .hexa invocation flaky. ~20 LoC bash, no hexa change.","loc_estimate":20},
+    {"id":"a6","name":"dual_runner_ci_matrix","summary":"GitHub Actions / local-make matrix: {runner: remote, local} × {invocation_path: P1, P2, P3} = 6 cells. each runs `--selftest`. fail any → block merge. catches future regressions on runner-version bumps.","loc_estimate":15},
+    {"id":"a7","name":"args_normalize_helper","summary":"_normalize_args(raw) → cli — single function encapsulating a1+a2+a3 logic. callers (main, _selftest) share same parser. avoids drift between selftest and main.","loc_estimate":12}
+  ],
+  "track_b_limits_axes": [
+    {"id":"b1","name":"open_set_runner_conventions","summary":"cannot enumerate all future hexa runner conventions (stage1, stage2, third-party wrappers, IDE plugins). heuristic fixed at present runner set; new runners may invent argv[k] = config-blob etc."},
+    {"id":"b2","name":"runner_detect_false_positive","summary":"a1 heuristic mis-classifies if user has a script named `hexa` in PATH that is not the canonical runner, or symlinks. argv[0] basename probe is necessary but not sufficient. acceptable risk only because a3 escape hatch exists."},
+    {"id":"b3","name":"self_path_strip_is_heuristic","summary":"a2 self-path strip is not a theorem — pathological case: user passes `tool/omega_cycle_atlas_ingest.hexa` AS A DATA ARGUMENT (e.g., as input to a hypothetical --witness-path=… flag). then strip incorrectly drops user data. mitigated only by convention (no current flag accepts a .hexa path), not by proof."},
+    {"id":"b4","name":"hexa_stage0_args_unstable","summary":"hexa.real / stage0 `args()` semantics not contract-locked across versions. observed: stage0 sometimes returns full system argv, sometimes pre-stripped. version pinning + arg-shape regression test (a4/a6) only — no upstream contract to depend on."},
+    {"id":"b5","name":"raw_25_environmental_coupling","summary":"this is fundamentally a raw-25 family bug (environmental coupling via implicit argv shape). no cross-version contract from hexa lang spec. parser is defensive, not provably correct. each new runner version requires re-running a4 corpus."},
+    {"id":"b6","name":"shim_drift_risk","summary":"a5 invocation shim duplicates argv handling outside the .hexa file → risk of drift if either side changes. acceptable as belt-and-suspenders only because direct invocation also fixed via a1+a2+a3."}
+  ],
+  "axes_total_surfaced": 13,
+  "track_a_count": 7,
+  "track_b_count": 6,
+  "dedupe_method": "(1) merge a7 into a1+a2+a3 as helper-extraction (Tier-2 cleanup); (2) cluster Track-A 4 family: parser-core (a1/a2/a3), test (a4), wrapper (a5), CI (a6); (3) Tier 분류 by minimal-fix-now vs hardening: parser-core fix is blocker-removal, test/CI is regression armor, shim is fallback.",
+  "tier_1_immediate_impl": [
+    {"axis_id":"a2","slug":"self-path-strip","rationale":"runner-agnostic — works on every argv layout without env probe. drops .hexa elements whose basename matches the script's own. SINGLE most-impactful axis: removes the bug for all 3 invocation paths simultaneously.","loc_estimate":12,"deps":[],"line_precise_diff_intent":"Replace lines 814-819 (`let mut cli = []; let mut ai = 2; while ai < len(raw_args) { cli.push(raw_args[ai]); ai = ai + 1 }`) with: `let mut cli = []; let self_base = \"omega_cycle_atlas_ingest.hexa\"; let mut ai = 0; while ai < len(raw_args) { let a = raw_args[ai]; let is_self = ends_with(a, self_base); let is_runner = (a == \"hexa\") || (a == \"run\"); if !is_self && !is_runner { cli.push(a) } ai = ai + 1 }`. Net: ~12 LoC, replaces magic constant `2` with content-aware filter."},
+    {"axis_id":"a3","slug":"input-mode-flag-override","rationale":"escape hatch when a2 heuristic misfires (b3 pathological case). user-explicit precedence over auto-detect.","loc_estimate":10,"deps":["a2"],"line_precise_diff_intent":"Add early-pass over raw_args BEFORE self-path-strip: scan for `--input-mode=raw` (skip filtering entirely) / `--input-mode=local` (ai=0) / `--input-mode=remote` (ai=2). When present, bypass a2 logic and use legacy slice. ~10 LoC, inserts before line 814."},
+    {"axis_id":"a1","slug":"runner-detection-heuristic","rationale":"defense-in-depth: env var HEXA_FORCE_LOCAL=1 + argv[0] basename. only used as TIE-BREAKER when a2 produces ambiguous result (≥2 .hexa elements).","loc_estimate":15,"deps":["a2","a3"],"line_precise_diff_intent":"Add helper `_detect_runner() -> string` returning {\"remote\",\"local\",\"unknown\"} from env+argv[0]. invoked only inside a2 when 2+ .hexa elements survive filtering. ~15 LoC, new fn before main()."},
+    {"axis_id":"a4","slug":"regression-test-corpus","rationale":"concrete falsifier — 3 invocation paths × `--selftest` must exit 0 and emit pass marker. without this, fix is asserted-not-tested.","loc_estimate":18,"deps":["a2","a3","a1"],"line_precise_diff_intent":"In _selftest(), add stanza after existing tests: simulate raw_args = [[\"hexa\",\"run\",\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"], [\"hexa\",\"run\",\"--\",\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"], [\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"]] — each → _normalize_args() must yield [\"--selftest\"]. assert + emit `__OMEGA_CYCLE_ATLAS_INGEST__ PASS` then exit(0). ~18 LoC inside _selftest()."},
+    {"axis_id":"a5","slug":"invocation-shim-wrapper","rationale":"belt-and-suspenders fallback for callers who can't depend on .hexa parser fix landing first. shell script, zero hexa dep.","loc_estimate":20,"deps":[],"line_precise_diff_intent":"NEW FILE tool/omega_cycle_atlas_ingest.sh: `#!/usr/bin/env bash; export HEXA_RUNNER=remote; exec hexa run tool/omega_cycle_atlas_ingest.hexa \"$@\"`. ~20 LoC including header, error handling, and chmod +x note."}
+  ],
+  "tier_2_backlog": [
+    {"axis_id":"a6","slug":"dual-runner-ci-matrix","blocker":"requires CI infra (GitHub Actions or local-make) wired up for the repo; defer until Tier-1 a4 selftest passes manually 3-path"},
+    {"axis_id":"a7","slug":"args-normalize-helper","blocker":"refactor — extract a1+a2+a3 logic into _normalize_args() once Tier-1 lands; cleanup pass only"}
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "omega_stop": "fixpoint-bounded-patch-scope-saturated",
+  "omega_stop_witness": {
+    "type": "bounded-patch-fixpoint",
+    "method": "Track-A 7 axes (parser-core / test / wrapper / CI) + Track-B 6 limits — second-pass produced no new axis (env probe + self-path strip + flag override = exhaustive within current hexa runtime). all Tier-1 axes ≤ 20 LoC.",
+    "result": "FIXPOINT — Tier-1 5개 / Tier-2 2개 / Track-B 6 limits. ordinal=ω (terminal: no transcendental jump, just bounded patch)."
+  },
+  "concrete_falsifier": {
+    "name": "F_argfix_3path",
+    "spec": "Under all 3 invocation paths {P1=`hexa run tool/omega_cycle_atlas_ingest.hexa --selftest`, P2=`hexa run -- tool/omega_cycle_atlas_ingest.hexa --selftest`, P3=`HEXA_FORCE_LOCAL=1 ./tool/omega_cycle_atlas_ingest.hexa --selftest`}, the process MUST exit 0 AND emit literal substring `__OMEGA_CYCLE_ATLAS_INGEST__ PASS` to stdout. Any non-zero exit OR missing marker on any path = falsifier triggered.",
+    "trigger_condition": "exit_code != 0 OR stdout !~ /__OMEGA_CYCLE_ATLAS_INGEST__ PASS/",
+    "cleanup_action": "rollback parser change, re-open ω-cycle for revised runner-detection heuristic"
+  },
+  "first_impl_target": {
+    "name": "tool/omega_cycle_atlas_ingest.hexa",
+    "scope": "Tier-1 a2+a3+a1+a4 in single .hexa file (~55 LoC delta) + a5 new .sh shim (~20 LoC)",
+    "axes_combined": ["a2 self-path strip", "a3 input-mode override", "a1 runner detection (tie-break)", "a4 regression test corpus"],
+    "primary_diff_target": "tool/omega_cycle_atlas_ingest.hexa lines 814-819 (replace `let mut ai = 2` legacy slice with content-aware filter)",
+    "auxiliary_files_new": ["tool/omega_cycle_atlas_ingest.sh (a5 shim, ~20 LoC)"],
+    "verification": "_selftest() 3-path corpus must exit 0 + emit `__OMEGA_CYCLE_ATLAS_INGEST__ PASS` for each. Then re-run blocked parent ω-cycles (atlas_ingest, atlas_ingest_tool_evolution) — atlas.append.<slug>.n6 shards must emit successfully.",
+    "exit_code_contract": "0 on all 3 paths after fix",
+    "stdout_marker": "__OMEGA_CYCLE_ATLAS_INGEST__ PASS"
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "본 trawl 자체",
+    "raw_25_environmental_coupling": "Track-B b5 의 핵심 — argv shape 가 runner 의 환경적 결합. parser 는 defensive 만, contract 는 없음.",
+    "raw_70_multi_axis_verify": "axes Tier 분류 = 4 axis (impl-readiness + falsifier coverage + parent-cycle unblock ROI + LoC bound) joint",
+    "raw_71_falsifier": "F_argfix_3path concrete + measurable + exit-code+stdout dual check",
+    "raw_77_audit_append_only": "post-fix → state/atlas_ingest_history.jsonl 의 첫 successful run 을 append (parent-cycle 의 a8 audit-ledger)"
+  },
+  "downstream_unblocks": [
+    "atlas_ingest_omega_cycle Tier-1 a1/a3/a4/a5/a6/a11/a14 — bridges → atlas.n6 absorption now reachable",
+    "atlas_ingest_tool_evolution_omega_cycle phase_2_target verification — omega_cycle_atlas_ingest.hexa 가 actually 실행 가능 → phase 3/4 evolution path 재개",
+    "improvement_ideas_omega_cycle i18 (incremental-glob-since) — base case (full glob) 가 작동해야 incremental 의미 있음"
+  ],
+  "ts_iso": "2026-04-26T04:30:00+09:00"
+}

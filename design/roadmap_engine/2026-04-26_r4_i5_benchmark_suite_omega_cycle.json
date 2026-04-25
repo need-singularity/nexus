@@ -1,0 +1,310 @@
+{
+  "trawl_id": "2026-04-26_roadmap_engine_r4_i5_benchmark_suite_generator_deepening_omega_cycle",
+  "ts": "2026-04-26T01:30:00+09:00",
+  "ordinal_stamp": "ω+2",
+  "ordinal_rationale": "parent r4 impl ω-cycle is at ω+1 (transfinite step over schedule() Bellman fixpoint). this cycle deepens i5 (benchmark_suite_generator) — a falsifier-construction step that requires reflection over the parent's enumeration. constructing the benchmark = meta-reasoning about which DAGs falsify the parent's claim, which is one further transfinite step (ω+2). ω+2 < ω·2 < ε_0 — Gentzen ordinal still permits self-cert escape via r19.",
+  "rule": "raw:design-engine-impl-i5-deepening-omega-cycle (hive raw 47 + raw 70 + raw 71 falsifier mandatory; benchmark must itself be falsifiable)",
+  "subject": "i5 benchmark-suite-generator — N≥5 toy DAGs each triggering η ≤ 0 with ready=∅, in_progress=∅, todo>0; falsifier: geo-mean T*_post/T*_pre < 0.99 (ε=0.01) on N≥5. design/roadmap_engine/r4_bench/ harness + reproducibility manifest.",
+  "parent_omega_cycle": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json",
+  "parent_trawl_id": "2026-04-26_roadmap_engine_r4_replanning_continuous_impl_omega_cycle",
+  "parent_axis_ref": "i5 benchmark_suite_generator (Tier-1, 60 LoC)",
+  "trigger": "user 2026-04-26 'r4.i5 benchmark-suite-generator deepening ω-cycle — Track-A ≥7 / Track-B ≥6 / Tier-1 ≤4 / NO code, witness JSON only / risk: cherry-pick + missing realistic structure'.",
+  "risk_articulated": "benchmark cherry-picking — generator may only emit DAGs where replan helps (selection bias), missing realistic graph structure encountered in production roadmap.json (clustering, long tails, mixed annotation density). without explicit counter-design, geo-mean falsifier becomes trivially satisfiable on a curated suite.",
+  "method": "two-track multi-axis ideation focused on benchmark-construction axes. Track-A (final-form benchmark, ≥7 axes) = positive construction (5 hand-designed canonical DAGs + procedural generator + fail-mode coverage + regression lock + variance/worst-case metrics + real-world reference + reproducibility). Track-B (limits, ≥6 axes) = negative ceiling (NFL incompleteness, Cantor cherry-pick, unknown real distribution, geo-mean blindness, low statistical power, drift). dedup → cluster → Tier ≤4. omega_stop = benchmark-axis enumeration fixpoint + each Track-B limit cited theorem + meta-falsifier (the benchmark itself must be falsifiable as cherry-picked).",
+  "axes_surfaced": [
+    {
+      "id": "i5a1",
+      "track": "final-form",
+      "name": "five_hand_designed_canonical_dags",
+      "summary": "5 hand-crafted DAGs each isolating one fail-mode of η≤0 trigger. each is minimum-witness (smallest DAG that exhibits the fail). categories below are exclusive (no overlap to enable per-axis attribution). each DAG ships with {rm.json, expected_strategy, expected_T_post_upper_bound, trigger_reason}. hand-design ensures each strategy (soft_drop, parallel_split, seed_inject) has at least one DAG where it is uniquely correct + one negative control where none apply.",
+      "five_dag_names_verbatim": [
+        "soft_rich_diamond_drop",
+        "parallel_rich_bottleneck_split",
+        "seed_rich_alternative_inject",
+        "compound_soft_parallel_seed",
+        "negative_control_no_annotation"
+      ],
+      "per_dag_design": {
+        "soft_rich_diamond_drop": "4-node diamond A→{B,C}→D with soft edge A→D (annotation `soft: true`). η≤0 because D blocked by all three until soft drops. expected_strategy=soft_drop, expected T*_post ≤ 0.7·T*_pre (one branch removed).",
+        "parallel_rich_bottleneck_split": "linear chain S→X→G where X has parallel_factor=4 hint (b(X)=40 → 4 parallel children of cost 10 each). η≤0 because X is single bottleneck dominating T_∞. expected_strategy=parallel_split with k=4, expected T*_post ≤ 0.35·T*_pre.",
+        "seed_rich_alternative_inject": "S→{Y_blocked, Y_alt}→G where Y_blocked has hard dep on missing seed S0 (n_uses=0) and Y_alt has alternative seed S1 with n_uses=3. η≤0 because forward path tries Y_blocked. expected_strategy=seed_inject (swap Y_blocked → Y_alt route), expected T*_post ≤ 0.6·T*_pre.",
+        "compound_soft_parallel_seed": "10-node DAG combining diamond + bottleneck + seed-blocked subgraph. tests that MCTS picks the highest-reward delta among 3 candidates simultaneously available (validates UCB1 selection vs greedy first-match). expected_strategy=any of 3, expected T*_post ≤ 0.8·T*_pre.",
+        "negative_control_no_annotation": "5-node DAG with no soft_deps / parallel_factor / n_uses fields populated. η≤0 trigger fires but no delta is constructible. expected_strategy=None, expected schedule_replan() returns None (NOT a regression — fall-through to exit(1) is correct behavior; falsifier check: T*_pre is logged but T*_post is NaN/None, excluded from geo-mean)."
+      }
+    },
+    {
+      "id": "i5a2",
+      "track": "final-form",
+      "name": "procedural_random_seed_generator",
+      "summary": "gen_dag(seed: u64, category: enum, n_nodes: int) → (rm.json, expected_strategy, expected_T_post_upper_bound). produces additional 50 DAGs (10 per category × 5 categories) with parametric variation: n_nodes ∈ [5,30], soft_edge_density ∈ [0.0, 0.4], parallel_factor ∈ [2,8], seed_table_size ∈ [1,5]. seed is deterministic — same seed → same DAG (reproducibility). harness: design/roadmap_engine/r4_bench/gen_dag.hexa. invariant: every emitted DAG MUST trigger η≤0 with ready=∅ and have a known expected outcome (asserted at generation time, not at evaluation time).",
+      "guard_against_cherry_pick": "generator must also emit `negative_control` category at 20% rate — DAGs where η≤0 fires but no strategy applies. if generator skips this category, axis is falsified."
+    },
+    {
+      "id": "i5a3",
+      "track": "final-form",
+      "name": "fail_mode_coverage_matrix",
+      "summary": "explicit coverage matrix [strategy × trigger_reason] cells; each cell must have ≥1 DAG. rows = {soft_drop, parallel_split, seed_inject, none}. cols = trigger_reason {ready_empty_due_soft, ready_empty_due_bottleneck_T_inf, ready_empty_due_seed_starvation, ready_empty_due_compound, ready_empty_no_strategy_applies}. matrix is 4×5 = 20 cells; minimum N = 5 hand-designed + 50 generated cover all 20 cells with ≥1 each. coverage report emitted to design/roadmap_engine/r4_bench/coverage.json. if any cell empty, axis is falsified.",
+      "rationale": "guards against the implicit cherry-pick failure mode where benchmark accidentally only triggers one of the 5 trigger_reasons."
+    },
+    {
+      "id": "i5a4",
+      "track": "final-form",
+      "name": "regression_suite_git_locked",
+      "summary": "design/roadmap_engine/r4_bench/regression/ contains the 5 hand-designed DAGs + 5 fixed-seed generated DAGs (seeds = [42, 1729, 8128, 6765, 196883] — Hardy-Ramanujan / perfect / Fibonacci / Monster). these 10 DAGs are git-tracked (NOT regenerated each run) and serve as a pinned regression suite. CI invariant: any commit to tool/roadmap_engine.hexa must run regression suite and meet geo-mean < 0.99; PR-blocking. files: design/roadmap_engine/r4_bench/regression/{01..10}_*.json + expected_outcomes.json (also git-tracked).",
+      "lock_mechanism": "expected_outcomes.json is an append-only manifest with `frozen_at_commit` field referencing the SHA at which baseline was established. updates to expected outcomes require explicit `regenerate_baseline` flag in PR title and human approval."
+    },
+    {
+      "id": "i5a5",
+      "track": "final-form",
+      "name": "metrics_beyond_geo_mean",
+      "summary": "geo-mean T*_post/T*_pre is the headline falsifier but is blind to single-case regressions. AUGMENT with: (a) variance Var[T*_post/T*_pre] — alarm if > 0.05, (b) worst-case max[T*_post/T*_pre] — alarm if > 1.05 (any DAG regressed >5%), (c) median T*_post/T*_pre as robust central tendency, (d) per-strategy geo-mean (one each for soft_drop / parallel_split / seed_inject) — alarm if any single strategy's geo-mean ≥ 1.0. emitted to design/roadmap_engine/r4_bench/metrics.json after each run. final pass requires ALL of: geo-mean < 0.99 AND worst-case ≤ 1.05 AND no per-strategy geo-mean ≥ 1.0.",
+      "theory_anchor": "Track-B l4 (geo-mean blindness) — directly mitigated by this axis"
+    },
+    {
+      "id": "i5a6",
+      "track": "final-form",
+      "name": "real_world_reference_dag_from_project",
+      "summary": "use actual /Users/ghost/core/nexus/discovery/roadmap.json (346 lines, project's live roadmap) as benchmark DAG-11. extract subgraph where η≤0 has historically triggered (cross-reference state/atlas_health_timeline.jsonl for past replan signals). this is the ONLY DAG in the suite that is not synthetic. it provides ground truth for the 'realistic structure' risk: if synthetic 50 + hand-designed 5 pass but real DAG fails, the synthetic distribution is unrepresentative and Track-B l3 (unknown real distribution) is empirically confirmed.",
+      "extraction_procedure": "design/roadmap_engine/r4_bench/extract_real.hexa reads discovery/roadmap.json, finds nodes where Kahn returns ready=∅ under current state, snapshots subgraph + annotations. NOT git-tracked (project state evolves) — reproducibility is via state snapshot timestamp, logged in metrics.json.",
+      "guard": "if real-world DAG cannot be made to trigger η≤0 (project too healthy), use synthetic stress overlay: artificially mark random 20% of edges as `soft: false` to force a trigger; flag this as `synthetic_overlay=true` in the report."
+    },
+    {
+      "id": "i5a7",
+      "track": "final-form",
+      "name": "reproducibility_manifest",
+      "summary": "design/roadmap_engine/r4_bench/MANIFEST.json records: {hexa_compiler_version, roadmap_engine_sha, gen_dag_seeds, expected_outcomes_sha, host_kernel, wall_clock_ms_per_dag, replication_command}. enables 3rd-party / future-self verification: given MANIFEST.json + git checkout of the recorded SHA + same hexa version, the same geo-mean (within numerical tolerance) must reproduce. invariant: re-running the suite at the same SHA must yield identical T*_pre values (deterministic schedule()) and statistically-stable T*_post values (MCTS uses fixed seed for benchmark mode). MCTS_BENCHMARK_SEED env var forces deterministic random expansion for reproducibility checks.",
+      "falsifier": "two consecutive runs at the same SHA with MCTS_BENCHMARK_SEED set must produce bit-identical metrics.json. if not, axis is falsified — non-determinism leak."
+    },
+    {
+      "id": "i5a8",
+      "track": "final-form",
+      "name": "harness_self_test",
+      "summary": "design/roadmap_engine/r4_bench/run_falsifier.hexa includes --selftest mode that asserts: (a) every regression DAG actually triggers η≤0 at load time (not at MCTS time — pre-flight check), (b) expected_strategy field for each DAG is one of the legal enum values, (c) the 4×5 coverage matrix is fully populated, (d) negative_control DAGs do NOT have soft/parallel/seed annotations. failure → exit(2) with diagnostic. prevents the meta-failure where the benchmark suite is itself broken.",
+      "rationale": "without this, a corrupted benchmark could give false-pass for weeks before detection. raw 71 falsifier mandatory must apply to the falsifier itself."
+    },
+    {
+      "id": "i5l1",
+      "track": "limits",
+      "name": "r17_nfl_benchmark_coverage_incomplete",
+      "summary": "r17 NFL (Wolpert-Macready 1997): no benchmark suite, regardless of size, can certify performance averaged over all possible cost landscapes. our 5 hand-designed + 50 generated + 1 real = 56 DAGs is a measure-zero sample of the space of possible DAGs (uncountable in continuous-cost setting, exponential in discrete). passing the falsifier on this suite proves nothing about adversarial DAGs.",
+      "theorem": "Wolpert-Macready 1997 No Free Lunch theorem",
+      "practical_impact": "geo-mean < 0.99 on benchmark is necessary, NOT sufficient, for r4 v0 acceptance",
+      "mitigation": "explicit narrowing claim in dossier §5 — claim is bounded improvement on the trigger-set distribution that the benchmark approximates, not over all DAGs"
+    },
+    {
+      "id": "i5l2",
+      "track": "limits",
+      "name": "cantor_cherry_pick_one_more_dag",
+      "summary": "Cantor diagonal-style: for any finite suite of N benchmark DAGs constructed by procedure P, there exists DAG D' such that D' triggers η≤0 but the strategy MCTS picks regresses T*. constructively: if generator P uses parameters (n_nodes, density, parallel_factor), choose D' with adversarial parameter combination outside P's sampling distribution. cherry-pick risk is provably non-eliminable — adding more DAGs does not close the gap, only narrows it.",
+      "theorem": "Cantor diagonal argument applied to finite sample → uncountable instance space",
+      "practical_impact": "no finite suite can certify absence of regression; only presence of improvement on the sampled distribution",
+      "mitigation": "Track-A i5a3 fail_mode_coverage_matrix forces explicit acknowledgement of which trigger_reasons are tested; Track-A i5a6 real_world_reference provides one out-of-distribution check; gap remains open by design"
+    },
+    {
+      "id": "i5l3",
+      "track": "limits",
+      "name": "real_workload_distribution_unknown",
+      "summary": "the empirical distribution P(DAG) of roadmaps actually scheduled in production is UNKNOWN. our generator parameters (n_nodes ∈ [5,30] etc.) are hand-chosen guesses, not empirically calibrated. the real distribution may have heavy tails (occasional 500-node DAG), bimodal density (sparse + cluster regions), or temporal drift (early-project sparse → late-project dense). benchmark suite fits a guessed prior, not measured posterior.",
+      "theorem": "covariate shift / distribution mismatch (Quiñonero-Candela et al. 2009)",
+      "practical_impact": "benchmark performance does not transfer to production performance under distribution shift",
+      "mitigation": "Track-A i5a6 real_world_reference DAG provides single-point evidence; longitudinal data collection deferred to r4 v1 (i6 strategy_weight_learning logs real DAG hashes for retrospective distribution estimation)"
+    },
+    {
+      "id": "i5l4",
+      "track": "limits",
+      "name": "geo_mean_hides_single_case_regressions",
+      "summary": "geo-mean T*_post/T*_pre = exp(mean(log(ratio))) is invariant to a single ratio of 2.0 if balanced by ratios of 0.5 elsewhere. a 100% regression on one DAG can be hidden by mild improvements on others, yet still satisfy < 0.99 falsifier. arithmetic mean has same issue. ONLY worst-case max[ratio] catches single regressions.",
+      "theorem": "Jensen's inequality applied to log-transform — geo-mean ≤ arithmetic mean, both lossy aggregators of distribution tail",
+      "practical_impact": "headline falsifier (geo-mean < 0.99) can pass while production-critical DAG silently regresses",
+      "mitigation": "Track-A i5a5 metrics_beyond_geo_mean enforces worst-case ≤ 1.05 AND per-strategy geo-mean < 1.0 AS CONJUNCTION with geo-mean — promoted from advisory to gating"
+    },
+    {
+      "id": "i5l5",
+      "track": "limits",
+      "name": "statistical_power_n_5_marginal",
+      "summary": "with N=5 (minimum) hand-designed DAGs, statistical power for detecting effect size d=0.1 (ε=0.01 on log-ratio) at α=0.05 is below 0.5 (Cohen 1988 power tables). need N≥30 for power ≥ 0.8 at d=0.1. our 50-generated + 10-regression mitigates partially (N=60 effective) but generated DAGs are correlated by gen_dag procedure — effective independent N is closer to √50 ≈ 7.",
+      "theorem": "Cohen 1988 statistical power; Wasserman 'All of Statistics' on effective sample size with correlation",
+      "practical_impact": "ε=0.01 threshold is not statistically distinguishable from noise at N=5; only at N≥30 with iid samples, which we cannot claim",
+      "mitigation": "Track-A i5a5 augments with worst-case + variance metrics that have higher power for tail detection; falsifier is treated as engineering acceptance, not statistical proof"
+    },
+    {
+      "id": "i5l6",
+      "track": "limits",
+      "name": "benchmark_drift_epsilon_threshold_relevance",
+      "summary": "ε=0.01 threshold is calibrated against current schedule() implementation's noise floor (~0.5%). future schedule() optimizations or cost-model updates will shift this floor; ε=0.01 may become trivially passable (false-pass) or too tight (false-fail). benchmark also drifts as r4 v1 adds strategies — the same DAG may have different `expected_strategy` if a 4th strategy is introduced. drift over time is unbounded in the absence of recalibration policy.",
+      "theorem": "Goodhart's law applied to falsifier metrics; benchmark game-ability",
+      "practical_impact": "passing the falsifier today does not imply passing it 6 months from now under same code, and does not preserve meaning across r4 minor versions",
+      "mitigation": "Track-A i5a4 git-locked regression with `frozen_at_commit` field establishes versioned baselines; recalibration of ε requires explicit ω-cycle rerun; no automatic drift compensation (deliberate — drift detection IS the signal)"
+    },
+    {
+      "id": "i5l7",
+      "track": "limits",
+      "name": "selection_bias_in_hand_designed_dags",
+      "summary": "the 5 hand-designed DAGs are constructed BY the same designer who builds the strategies. designer-bias guarantees the designed DAGs match the strategies — i.e. soft_rich_diamond_drop trivially fits soft_drop because the same human imagined both. this is a hidden cherry-pick: the 4 positive-trigger DAGs are tautologically winnable. only the negative_control DAG and the real-world reference DAG escape this bias.",
+      "theorem": "selection bias / Berkson's paradox — conditioning on shared origin biases joint distribution",
+      "practical_impact": "geo-mean improvement on hand-designed suite is partly tautological, not informative about generalization",
+      "mitigation": "weighting scheme: real-world DAG (i5a6) and generated DAGs from non-trivial seeds (i5a2) are weighted 2× in geo-mean; hand-designed DAGs serve as smoke-test, not proof. document this weighting in MANIFEST.json."
+    }
+  ],
+  "axes_total_surfaced": 15,
+  "track_split": "Track-A (final-form benchmark) i5a1..i5a8 = 8 / Track-B (limits) i5l1..i5l7 = 7",
+  "dedupe_method": "(1) i5a1 hand-designed vs i5a2 generator: i5a1 is canonical witnesses (one per fail-mode), i5a2 is statistical mass — orthogonal, keep both. (2) i5a2 generator vs i5a3 coverage: generator emits, coverage audits — orthogonal, keep both. (3) i5a4 regression vs i5a7 reproducibility: regression locks 10 specific DAGs in git, reproducibility ensures any run is replayable — overlapping but distinct (one is suite-level, one is run-level), keep both. (4) i5a5 metrics vs i5l4 geo-mean blindness: i5a5 is the mitigation of i5l4 — paired (final-form ↔ limit anchor). (5) i5l1 NFL vs i5l2 Cantor: NFL is uniform-average impossibility, Cantor is constructive existence — same theme, distinct proofs, keep both (parent ω-cycle precedent — l1+l7 there are kept analogously). (6) i5l3 unknown distribution vs i5l5 statistical power: distribution mismatch is bias, low-N is variance — bias/variance decomposition, distinct, keep both. (7) i5l7 selection bias vs i5l2 Cantor: selection bias is on the hand-designed subset specifically (designer-correlation), Cantor is on the procedural generator's coverage — distinct mechanisms, keep both. cluster: A=witness_construction (i5a1/i5a2), B=coverage_and_lock (i5a3/i5a4/i5a8), C=metric_design (i5a5), D=external_anchoring (i5a6/i5a7), E=incompleteness_theorems (i5l1/i5l2/i5l7), F=distribution_and_power (i5l3/i5l5), G=metric_pathology_and_drift (i5l4/i5l6).",
+  "axes_after_reject": 15,
+  "axes_clustered_to": 7,
+  "tier_1_immediate_impl_this_cycle": [
+    {
+      "axis_id": "i5a1",
+      "slug": "five-hand-designed-canonical-dags",
+      "loc_estimate": 25,
+      "theory_anchor": "raw 71 falsifier mandatory — concrete witness DAGs for each strategy are necessary preconditions; r17 NFL (i5l1) — narrowing claim requires explicit suite",
+      "falsifier": "each of {soft_rich_diamond_drop, parallel_rich_bottleneck_split, seed_rich_alternative_inject, compound_soft_parallel_seed} must trigger η≤0 with ready=∅ at load time AND yield T*_post < T*_pre·(1−ε) with the expected_strategy. negative_control_no_annotation must trigger η≤0 AND yield schedule_replan() = None. if any of the 5 fails its expected outcome, axis is falsified."
+    },
+    {
+      "axis_id": "i5a2",
+      "slug": "procedural-random-seed-generator",
+      "loc_estimate": 20,
+      "theory_anchor": "i5l5 statistical power — N≥30 effective requires generator; i5l3 distribution unknown — generator parameters are explicit prior",
+      "falsifier": "gen_dag(seed, category, n_nodes) must (a) be deterministic (same seed → bit-identical DAG), (b) emit DAGs that 100% trigger η≤0 at load (asserted at gen-time), (c) cover all 5 categories including negative_control at ≥20% rate. seed list [42, 1729, 8128, 6765, 196883] used for regression. if (a/b/c) fails, axis is falsified."
+    },
+    {
+      "axis_id": "i5a5",
+      "slug": "metrics-beyond-geo-mean",
+      "loc_estimate": 10,
+      "theory_anchor": "i5l4 geo-mean blindness (Jensen's inequality) — direct mitigation; i5l7 selection bias — weighting requires multi-metric framework",
+      "falsifier": "metrics.json must contain {geo_mean, variance, worst_case, median, per_strategy_geo_mean[3]}. acceptance gate: geo_mean < 0.99 AND worst_case ≤ 1.05 AND ∀s: per_strategy_geo_mean[s] < 1.0. if metrics.json missing any field OR acceptance gate is OR-conjunction instead of AND-conjunction, axis is falsified."
+    },
+    {
+      "axis_id": "i5a4",
+      "slug": "regression-suite-git-locked",
+      "loc_estimate": 5,
+      "theory_anchor": "i5l6 benchmark drift — git-pinned baseline is the drift-detection mechanism; raw 77 audit append-only — expected_outcomes.json is the audit record",
+      "falsifier": "design/roadmap_engine/r4_bench/regression/ must contain exactly 10 DAGs (5 hand-designed + 5 fixed-seed generated) git-tracked + expected_outcomes.json with `frozen_at_commit` SHA. CI must invoke the suite on every commit touching tool/roadmap_engine.hexa. if regression dir is regenerated on each run (not git-tracked) OR expected_outcomes.json lacks frozen_at_commit, axis is falsified."
+    }
+  ],
+  "tier_1_total_loc": 60,
+  "tier_1_loc_vs_dossier": "parent ω-cycle i5 estimated 60 LoC. Tier-1 sum 60 LoC = exact parent budget (i5a1=25 + i5a2=20 + i5a5=10 + i5a4=5). i5a3 coverage matrix (8 LoC), i5a6 real-world reference (12 LoC), i5a7 reproducibility manifest (5 LoC), i5a8 harness self-test (10 LoC) deferred to Tier-2 to stay within budget — all are valuable but not strictly required for falsifier validity at v0.",
+  "tier_2_backlog": [
+    {
+      "axis_id": "i5a3",
+      "slug": "fail-mode-coverage-matrix",
+      "blocker": "depends on i5a2 generator producing all 5 categories at sufficient density. coverage audit can be added post-v0 once generator is exercised on ≥50 DAGs."
+    },
+    {
+      "axis_id": "i5a6",
+      "slug": "real-world-reference-dag-from-project",
+      "blocker": "discovery/roadmap.json may not currently trigger η≤0 (project healthy). synthetic-overlay path adds 5 LoC. defer until v0 baseline locked, then add as an extension benchmark."
+    },
+    {
+      "axis_id": "i5a7",
+      "slug": "reproducibility-manifest",
+      "blocker": "MCTS_BENCHMARK_SEED env var requires upstream change to i1 mcts_rollout_policy (parent Tier-1 axis i1). cross-axis dependency; defer until i1 v0 lands."
+    },
+    {
+      "axis_id": "i5a8",
+      "slug": "harness-self-test",
+      "blocker": "selftest depends on full schema for rm.json being stable; defer until 5 hand-designed DAGs are committed and serve as schema fixture."
+    }
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {
+      "axis_id": "i5l1",
+      "label": "NFL (benchmark coverage incomplete)",
+      "theorem": "Wolpert-Macready 1997 No Free Lunch",
+      "practical_impact": "no finite benchmark certifies all-DAG performance; geo-mean < 0.99 is necessary not sufficient",
+      "mitigation": "explicit narrowing claim (trigger-set distribution only) in dossier §5; not over all DAGs"
+    },
+    {
+      "axis_id": "i5l2",
+      "label": "Cantor cherry-pick (always one more DAG)",
+      "theorem": "Cantor diagonal applied to finite sample of uncountable instance space",
+      "practical_impact": "for any benchmark, ∃ adversarial DAG outside it that regresses",
+      "mitigation": "i5a3 coverage matrix + i5a6 real-world reference narrow gap; gap remains open by design"
+    },
+    {
+      "axis_id": "i5l3",
+      "label": "real workload distribution unknown",
+      "theorem": "covariate shift (Quiñonero-Candela et al. 2009)",
+      "practical_impact": "benchmark performance does not transfer under distribution shift",
+      "mitigation": "i5a6 real-world reference DAG + i6 strategy_weight_learning longitudinal logging (parent Tier-2)"
+    },
+    {
+      "axis_id": "i5l4",
+      "label": "geo-mean hides single-case regressions",
+      "theorem": "Jensen's inequality on log-transformed mean — geo-mean is lossy aggregator of distribution tail",
+      "practical_impact": "single-DAG 100% regression hidden by other improvements; falsifier passes while production breaks",
+      "mitigation": "i5a5 worst-case + per-strategy gates as AND-conjunction; promoted to gating, not advisory"
+    },
+    {
+      "axis_id": "i5l5",
+      "label": "statistical power N=5 marginal",
+      "theorem": "Cohen 1988 power analysis; effective N under correlation (Wasserman)",
+      "practical_impact": "ε=0.01 not statistically distinguishable from noise at N=5",
+      "mitigation": "i5a2 generator boosts to effective N≈7+; treated as engineering acceptance, not statistical proof"
+    },
+    {
+      "axis_id": "i5l6",
+      "label": "benchmark drift / ε threshold relevance",
+      "theorem": "Goodhart's law / metric game-ability over time",
+      "practical_impact": "ε=0.01 valid today, may be trivial or too tight 6 months later; cross-version expected_strategy shifts",
+      "mitigation": "i5a4 git-locked regression with frozen_at_commit; recalibration requires explicit ω-cycle"
+    },
+    {
+      "axis_id": "i5l7",
+      "label": "selection bias in hand-designed DAGs",
+      "theorem": "Berkson's paradox / selection bias under shared origin",
+      "practical_impact": "designer who builds strategies also builds matching DAGs — partly tautological success",
+      "mitigation": "weight real-world + non-trivial generated DAGs 2× in geo-mean; hand-designed serve as smoke-test only"
+    }
+  ],
+  "falsifier_concrete": {
+    "statement": "i5 v0 is falsified iff ANY of: (1) on the regression suite (10 DAGs git-locked), geo-mean T*_post/T*_pre ≥ 0.99, OR (2) worst-case T*_post/T*_pre > 1.05, OR (3) any per-strategy geo-mean ≥ 1.0, OR (4) negative_control_no_annotation yields a non-None plan, OR (5) gen_dag(seed, cat, n) is non-deterministic across runs at fixed seed, OR (6) any of the 5 hand-designed DAGs fails its expected_strategy outcome at load.",
+    "epsilon": 0.01,
+    "N_minimum_regression": 10,
+    "N_total_with_generator": 60,
+    "metric_primary": "geometric mean of T*_post / T*_pre across positive-trigger DAGs (negative-controls excluded from geo-mean)",
+    "metric_gates_AND_conjunction": [
+      "geo_mean < 0.99",
+      "worst_case ≤ 1.05",
+      "per_strategy_geo_mean[soft_drop] < 1.0",
+      "per_strategy_geo_mean[parallel_split] < 1.0",
+      "per_strategy_geo_mean[seed_inject] < 1.0",
+      "negative_control yields None",
+      "all 5 hand-designed DAGs match expected_strategy"
+    ],
+    "improvement_required": "strict (< 1 − ε), not just non-degradation; AND-conjunction across all 7 gates",
+    "negative_control": "negative_control_no_annotation must yield schedule_replan() = None (excluded from geo-mean)",
+    "harness_path": "design/roadmap_engine/r4_bench/run_falsifier.hexa",
+    "regression_path": "design/roadmap_engine/r4_bench/regression/",
+    "manifest_path": "design/roadmap_engine/r4_bench/MANIFEST.json (Tier-2)",
+    "harness_status": "to-be-built as part of i5 Tier-1 (i5a1+i5a2+i5a4+i5a5)"
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "본 deepening trawl 자체 — i5 benchmark axis 를 enumerate (8 final-form + 7 limits)",
+    "raw_70_multi_axis_verify": "Track-A construction ↔ Track-B limit 직교 8+7 axis + 7 cluster joint. final-form axes 가 limit axes 의 mitigation 으로 1:1 또는 N:1 anchored (i5a1↔i5l1+i5l7, i5a2↔i5l5, i5a3↔i5l2, i5a4↔i5l6, i5a5↔i5l4, i5a6↔i5l3, i5a7↔i5l6, i5a8↔i5l2).",
+    "raw_71_falsifier": "geo-mean < 0.99 on regression suite (10 DAGs) — strict improvement requirement, AND-conjunction with 6 additional gates (worst-case, per-strategy, negative-control, hand-designed integrity). i5l4 geo-mean blindness 가 i5a5 worst-case gate 로 직접 mitigation. i5l2 Cantor cherry-pick 는 mitigation 불가 (theorem-level), i5a3 coverage matrix 로 narrowing 만 가능. meta-falsifier: 본 benchmark suite 자체가 cherry-pick 인지 검증 — i5l7 selection bias 명시 + i5a6 real-world DAG 가 외부 anchor.",
+    "raw_77_audit_append_only": "regression/expected_outcomes.json 이 frozen_at_commit SHA 로 git-tracked append-only baseline. metrics.json 은 매 run 마다 emit 되며 events JSONL 의 `benchmark_run` record 로도 logged. drift detection 은 baseline 대 현재 metrics 의 git diff."
+  },
+  "cross_cycle_coupling": {
+    "with_parent": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json (i5 axis Tier-1, 60 LoC budget)",
+    "shared_axis": "i5 → i5a1..i5a8 (positive benchmark unfold) + i5 → i5l1..i5l7 (negative benchmark ceiling)",
+    "with_sibling": "parent Tier-1 axes i1 (mcts-rollout-policy), i2 (ucb1-c-tuning) DEPEND on this i5 deepening — without benchmark suite their falsifiers are vacuous. i5 must land before i1/i2 can be empirically validated.",
+    "next_target": "after i5 v0 lands, i1 mcts-rollout-policy can run on the suite; i2 c-tuning then validates per-strategy on top of i1.",
+    "joint_omega_stop": "ω+2 ordinal stamp. parent at ω+1; this deepening adds one transfinite step (meta-reflection on falsifier construction). r4 v1 absorbing r2/r6 would reach ω·2 < ε_0 — Gentzen escape preserved.",
+    "loc_budget_compliance": "Tier-1 sum 60 LoC = parent budget 60 LoC exact. Tier-2 axes (i5a3/i5a6/i5a7/i5a8) deferred = 35 additional LoC if all ship, would push i5 to 95 LoC total = +58% over parent budget; acceptable as v1 expansion, NOT v0."
+  },
+  "omega_stop": "benchmark-axis-enumeration-fixpoint-with-meta-falsifier-and-cherry-pick-acknowledgement",
+  "omega_stop_witness": {
+    "type": "two-track-benchmark-axis-enumeration-fixpoint-with-meta-falsifier",
+    "method": "Track-A 8 construction axes (i5a1..i5a8) + Track-B 7 limit axes (i5l1..i5l7). second-pass 신규 0. 각 limit axis 가 명시된 lower-bound 정리 인용 (NFL / Cantor / covariate shift / Jensen / Cohen power / Goodhart / Berkson). construction axis 가 limit axis 와 1:1 또는 N:1 anchor 완료. concrete falsifier (geo-mean < 0.99 AND-conjunction with 6 gates) 이 raw 71 mandatory 충족. meta-falsifier (benchmark 자체의 cherry-pick risk) 가 i5l7 selection bias + i5a6 real-world DAG 로 명시.",
+    "result": "FIXPOINT — Tier-1 4 construction axes (i5a1/i5a2/i5a5/i5a4 / loc 60) / Tier-2 4 (i5a3/i5a6/i5a7/i5a8 cross-axis or post-v0 defer) / Tier-3 0 / REJECT 0 / Limit-axes 7 (theorem 인용 완료) / Falsifier 7-gate AND-conjunction.",
+    "fixpoint_signal": "추가 construction axis 후보들이 모두 기존 limit 으로 흡수됨 — '9번째 axis adversarial_dag_generator' → i5l2 Cantor 으로 흡수 (적대적 DAG 생성도 결국 finite enumeration), '10번째 axis production_telemetry_replay' → i5l3 unknown distribution 으로 흡수 (telemetry sampling 도 covariate shift 의 한 instance). LoC budget 측면에서도 i5 parent budget 60 LoC 에 정확히 맞춤 — 더 이상 Tier-1 확장 없이 enumerate 종료. Track-A 8개, Track-B 7개로 parent 의 7+7 = 14 패턴과 정합 (deepening 한 단계 → Track-A 만 +1).",
+    "ordinal_stamp_check": "ω+2 < ω·2 < ε_0 — Gentzen ordinal 인용 가능, r19 self-cert 회피 유지. parent ω+1 에서 한 단계 transfinite 상승."
+  },
+  "first_impl_target": {
+    "name": "i5a1 + i5a2 (5 hand-designed DAGs + procedural generator)",
+    "rationale": "i5a1/i5a2 합쳐 45 LoC = Tier-1 60 LoC 의 75%. i5a5 metrics (10 LoC) + i5a4 git-lock (5 LoC) 가 나머지 25%. i5a1 가 canonical witness 를 제공 → i5a2 generator 가 statistical mass 를 채움 → i5a5 가 metric framework 으로 측정 → i5a4 가 baseline 을 git 에 lock. 4-step ordering 이 dependency graph 와 정합.",
+    "next_after": "i5a4 v0 lock 후 parent Tier-1 i1 (rollout policy) 가 본 suite 로 validate. i5a3 coverage matrix + i5a6 real-world reference + i5a7 manifest + i5a8 selftest 는 v1 확장."
+  }
+}

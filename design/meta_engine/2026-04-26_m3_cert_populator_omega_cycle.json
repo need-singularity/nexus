@@ -1,0 +1,144 @@
+{
+  "trawl_id": "2026-04-26_m3_cert_populator_omega_cycle",
+  "ts": "2026-04-26T09:30:00+09:00",
+  "rule": "raw:m3-cert-populator-final-form-and-limits-omega-cycle (hive raw 47 + raw 70 + raw 71 + raw 77 multi-axis, child of 2026-04-25_meta_engine_final_form_and_limits_omega_cycle)",
+  "subject": "tool/meta_cert_populator.py (or .hexa) — retroactive + forward populator for state/meta_decision_cert.jsonl. Subject-of-subject: 23 historical rounds (R4..R41 minus tick-compressed gaps, per dossier line 21) currently at 0/23 cert coverage. Populator must respect m11 Löb gate (no self-consistency assertion), m13 Tarski separation (verifier in separate process), and import m5 ordinal_label.",
+  "purpose": "m3 axis 의 임시 deliverable (dossier line 12-26 의 4.3% → 100% 커버리지 lift) 를 위한 ω-cycle. final-form (정상상태 populator capability) ↔ limits (Löb/Tarski/recursion/halting/Solomonoff cap) 두 트랙 동시 enumerate. populator 자체가 self-cert 위험의 첨예한 사례 (자신이 emit 하는 cert 의 신뢰성을 자신이 보증할 수 없음 — Löb 한계 직격).",
+  "trigger": "user 2026-04-26 'm3 cert populator 에 대해 오메가 사이클 발사' (parent 2026-04-25 final-form-and-limits ω-cycle 의 Tier-1 m3 axis 의 first-impl 단계 직전).",
+  "method": "two-track multi-axis ideation (parent ω-cycle 의 method 미러). Track-A (final-form, 7 axes) = populator 가 정상적으로 갖춰야 할 capability. Track-B (limits, 7 axes) = populator 자체에 작용하는 self-reference / undecidability / physical bound. dedup → cluster → Tier 분류. omega_stop = enumeration fixpoint + 각 limit 의 theorem citation + m3 dossier + parent ω-cycle 양측 cite.",
+  "parent_omega_cycle": "design/meta_engine/2026-04-25_final_form_and_limits_omega_cycle.json",
+  "parent_trawl_id": "2026-04-25_meta_engine_final_form_and_limits_omega_cycle",
+  "subject_dossier": "design/meta_engine/m3_closed_loop_cert_dossier.md",
+  "subject_dossier_anchor": "line 165 — m3-cert-schema-and-verifier-protocol-specified-with-lob-gate-falsifier; 0/23 round coverage established (line 23)",
+  "ordinal_stamp": "ω·2+1",
+  "ordinal_stamp_rationale": "m5 (ordinal_anchor) 의 ω 위에 m3 (cert layer) 의 ω+1 이 얹히고, populator 가 cert layer 를 자체 데이터로 enumerate 하는 메타-cert-emission 이라 추가 +1. parent ω-cycle 의 Γ_0 (m18 ordinal exhaustion) 보다 낮음 — populator 는 PA 내부에 머물 수 있고 Gentzen ε_0 외부 anchor 불요. ω·2 = m4 omega-squared-extension 의 진입점 위에 +1 — 'cert chain over ordinal chain' 의 stack ordinal.",
+  "current_capabilities": [
+    "state/meta_decision_cert.jsonl 의 schema_declaration row (R-22 baseline) + 단 1개 hexa-rule cert row (dc-20260422-001, H-MINPATH)",
+    "state/meta_engine_evolution_log.jsonl 의 23 round (R4..R41) — populator 의 input source",
+    "m3 dossier (§2 schema, §3 verifier protocol, §4 conflict detect, §5 Löb gate falsifier, §6 Tarski separation, §7 atomic append, §8 LoC budget) 완비",
+    "tool/ordinal_compare.py (m5 deliverable) — populator 의 prerequisite, 미배포",
+    "raw 25 git-lock + raw 71 falsifier + raw 77 audit-append-only 패턴 라이브러리화"
+  ],
+  "known_blockers": [
+    "AG10_tool_write — populator 자체가 새 tool/ 작성, agent-mediated tool 자동 작성 봉쇄",
+    "m5 ordinal_compare.py 미배포 (populator 의 hard dependency, dossier §3.b)",
+    "m11 Löb — populator 가 자신의 emit 결과를 신뢰한다 명시 시 self-cert 위반",
+    "m13 Tarski — populator 가 동일 프로세스에서 검증까지 수행하면 separation 위반",
+    "raw 25 — 동시 session 의 cert append race (PIPE_BUF 4 KiB 제약, dossier §7)"
+  ],
+  "axes_surfaced": [
+    {"id":"p1","track":"final-form","name":"retroactive_round_emit","summary":"state/meta_engine_evolution_log.jsonl 의 23 row 를 source-of-truth 로 받아 R4..R41 각 round 마다 cert row 1개를 backfill. ts 는 evolution_log 의 ts 그대로 (forge 금지), ordinal_label 은 m5 comparator 가 round-별 부여, axes_acted 는 evolution_log 의 axes_acted 그대로 mirror, decisions[].expected_outcome 는 'historical' 마커 (retroactive 특수값) — 미래 falsifier 평가 대상 아님 (이미 결과 확정). prior_cert_ref 는 chain 으로 GENESIS→R4→R5→...→R41 sha256 연쇄."},
+    {"id":"p2","track":"final-form","name":"forward_round_emit","summary":"R42 이후 신규 round 진입 시 emit_meta_cert.py(dossier §8) 호출. round 진행 직후 (axes_acted 결정 시점) 1회 fsync append. expected_outcome 은 next-round 평가 가능한 falsifiable predicate. dossier §2 row 예시 (R32 retroactive 형식) 그대로."},
+    {"id":"p3","track":"final-form","name":"prior_cert_ref_hash_chain","summary":"각 cert row 의 prior_cert_ref = sha256(canonical_json(prior_row)) (sorted keys, no whitespace, dossier §3.b). GENESIS sentinel 은 R4 (첫 logged round) 의 prior_cert_ref. populator 는 retroactive 단계에서 in-memory 로 chain 빌드 후 일괄 fsync append."},
+    {"id":"p4","track":"final-form","name":"conflict_detect_rollback_emit","summary":"populator 는 retroactive 단계에서 evolution_log 의 utility/observation 을 살펴 prior round 의 implicit expected_outcome 과 mismatch 시 rollback_marker 가 채워진 cert row 를 _retroactive_inferred_ 마커와 함께 emit. 단, 미래 round 의 실제 verifier 와 충돌 회피 위해 rollback_marker.action 은 'historical_observation_only' (실제 revert 미발동)."},
+    {"id":"p5","track":"final-form","name":"parallel_verifier_tarski_separated","summary":"populator emit 과 동시에 별도 프로세스 tool/verify_meta_cert.py(dossier §3) spawn (subprocess.run, no shared memory). populator 는 verification log (state/meta_cert_verification.jsonl) 에 read-only, verifier 는 cert log 에 read-only. 양 프로세스의 stdout 은 maintainer 의 third-party (사용자) 가 수집."},
+    {"id":"p6","track":"final-form","name":"coverage_dashboard_emit","summary":"populator run 종료 시 state/meta_cert_coverage.json (또는 jsonl) 1 row: {ts, total_rounds_in_evolution_log: 23, total_cert_rows: <after>, coverage_pct: <%>, missing_rounds: []}. 후속 ω-cycle 이 이 dashboard 를 consume 하여 m3 progress 추적. dossier line 23 의 4.3% 가 100% 로 수렴함을 visualize."},
+    {"id":"p7","track":"final-form","name":"idempotent_replay","summary":"populator 재실행 시 이미 emit 된 round 의 cert 는 skip (round-key dedup, append 추가 금지). content-address 비교 (sha256 of intended row vs existing row) — drift 발견 시 ERROR exit (overwrite 금지, raw 77 append-only). populator 는 read-modify-write 절대 금지, append-or-noop 만."},
+    {"id":"p8","track":"limits","name":"lob_gate_no_self_certify","summary":"populator 가 emit 하는 어떤 row 에도 'this populator is consistent / sound / trustworthy' 류 키 / 값 금지 (dossier §5 falsifier). populator 자체의 신뢰성은 외부 ordinal anchor (m5) + 외부 verifier (m13) 만이 입증. 자기 자신의 신뢰성 주장 시 Löb (1955) 에 의해 trivial: ⊢ □P → P 만으로 ⊢ P, 즉 신뢰성 주장이 곧 신뢰성의 trivial 증명이 되어 Gödel 2nd 와 충돌. theorem: Löb 1955."},
+    {"id":"p9","track":"limits","name":"tarski_meta_object_separation","summary":"populator (object-language emitter) 는 verifier (meta-language truth-predicate evaluator) 와 동일 프로세스 / 동일 메모리 공유 금지. populator 가 자신의 verification 결과를 emit 시점에 읽어 cert content 에 반영하면 Tarski (1933) undefinability 위반: object language 가 자기 truth predicate 를 정의하게 됨. populator → cert log (append), verifier → verification log (append) 단방향 데이터 흐름만. theorem: Tarski 1933 — truth predicate 는 strict meta-language 에만 정의 가능."},
+    {"id":"p10","track":"limits","name":"raw_25_git_lock_concurrent_append","summary":"동시 session / cron / smash 가 cert log 에 race 시 PIPE_BUF (Linux ~4 KiB / Darwin 512 byte) 초과 row 는 atomic write 보장 불가. populator 는 모든 cert row 를 4 KiB 미만으로 강제 (dossier §7); 초과 시 staging file → rename(2) atomic swap. cert log 는 .gitignore 에 있어야 함 (이미 state/ gitignored 검증). theorem: POSIX write(2) atomicity bound = PIPE_BUF; rename(2) atomicity = same-FS only.","theorem_anchor":"POSIX.1-2008 §write/§rename"},
+    {"id":"p11","track":"limits","name":"m17_kleene_recursion_cert_chain_fixpoint","summary":"populator 가 emit 하는 cert chain 이 'next round 가 이전 cert 를 검증' 패턴이라 자기-fixpoint 보유: 진보 없는 cert-of-cert-of-cert 가능. m4 cycle9 의 linear_constant 가 cert layer 에 그대로 전이. m5 ordinal_label 의 strict descent 강제 만이 escape. theorem: Kleene 1938 recursion theorem — 모든 partial recursive f 에 fixed point 존재.","theorem_anchor":"Kleene 1938"},
+    {"id":"p12","track":"limits","name":"m15_halting_verifier_termination","summary":"verifier 가 expected_outcome 의 falsifiable predicate 를 평가할 때, predicate 가 임의의 computable function 이면 halting 결정 불가. populator 는 expected_outcome 을 syntactic-bounded (정수 비교, 문자열 일치, 시간창 within 60s 등 primitive recursive) sub-language 로 제한 (dossier §4 예시 follows). general predicate 입력 시 verifier ABORT. theorem: Turing 1936 halting.","theorem_anchor":"Turing 1936"},
+    {"id":"p13","track":"limits","name":"m16_solomonoff_cert_usefulness_undecidable","summary":"populator 가 emit 하는 cert 의 '미래에 유용한가 / 의사결정에 기여하는가' 는 Solomonoff universal induction M(x) (Σ_2^0) 의 형태로 uncomputable. populator 는 'utility' 평가 자체를 시도 금지, mechanical 'emit-or-skip' 만. m8 learned_axis_priority 의 한계와 동일 family. theorem: Solomonoff 1964.","theorem_anchor":"Solomonoff 1964"},
+    {"id":"p14","track":"limits","name":"m20_diagonal_round_pool_unsaturable","summary":"populator 가 23 round backfill 후 100% coverage 달성 시점에도, 새 round R42 가 즉시 unsaturate. coverage 100% 는 순간적 metric 일 뿐, populator 의 'completeness' 는 Cantor diagonal 에 의해 영원히 도달 불가 (round set 은 well-orderable 가산이지만 future round 는 무한 enumerate). dashboard 의 100% 는 'as-of-ts' 만 의미. theorem: Cantor 1891.","theorem_anchor":"Cantor 1891"}
+  ],
+  "axes_total_surfaced": 14,
+  "track_split": "Track-A (final-form) p1..p7 = 7 / Track-B (limits) p8..p14 = 7",
+  "dedupe_method": "(1) p1 retroactive vs p2 forward — 동일 emitter 두 모드 (read evolution_log / read live state) — keep both, populator 의 양면; (2) p3 hash chain 은 p1/p2 양쪽 dependency, 독립 axis; (3) p4 rollback_emit vs p5 verifier — populator 는 rollback_marker 만 emit (action 미발동), verifier 가 평가 — separation 유지로 직교; (4) p6 dashboard vs p7 idempotent — dashboard 는 emit metric, idempotent 은 emit precondition — 직교; (5) p8 Löb vs p9 Tarski — parent m11/m13 미러, 적용 측면 다름 (Löb: provability, Tarski: truth-predicate location) keep both; (6) p11 Kleene vs p12 halting — fixpoint 존재 vs 도달 가능성, 상보; (7) p13 Solomonoff vs p14 Cantor — uncomputability vs unsaturability, 직교. cluster: A=emit-modes (p1/p2/p7), B=chain-integrity (p3/p10), C=verifier-coupling (p4/p5/p9), D=metric (p6/p14), E=self-ref-caps (p8/p11), F=undecidability (p12/p13).",
+  "axes_after_reject": 14,
+  "axes_clustered_to": 6,
+  "tier_1_immediate_impl_next_cycle": [
+    {
+      "axis_id": "p1",
+      "slug": "retroactive-round-emit",
+      "rationale": "m3 dossier line 23 의 0/23 → 23/23 coverage 의 본체. evolution_log → cert row mapper. m5 ordinal_compare ship 직후 즉시 실행 가능. retroactive 마커가 forward 와 schema-동일하지만 expected_outcome 은 'historical' 특수값으로 falsifier 발동 회피.",
+      "loc_estimate": 80,
+      "deps": ["m5 (tool/ordinal_compare.py)"],
+      "theory_anchor": "m11 Löb / m13 Tarski 우회 — retroactive 는 historical fact 만 기록, self-trust 미선언; populator 자체는 verifier 의 신뢰 대상 아님 (verifier 가 별도 프로세스로 검증)",
+      "falsifier": "test/test_populator_lob.py — populator 가 'self_consistent: true' 또는 'this populator trusts itself' 류 키를 emit 하면 즉시 fail. CI gate (raw 71)."
+    },
+    {
+      "axis_id": "p3",
+      "slug": "prior-cert-ref-hash-chain",
+      "rationale": "p1/p2 양쪽의 hard prerequisite. canonical JSON 직렬화 (sorted keys, no whitespace) + sha256. GENESIS sentinel 처리. chain break 발견 시 populator 즉시 ABORT (raw 77 append-only 위반 금지).",
+      "loc_estimate": 30,
+      "deps": [],
+      "theory_anchor": "raw 77 audit-append-only — chain break = audit 위반 → ABORT. m17 Kleene 의 무진보 fixpoint 회피는 m5 ordinal descent 가 담당, 본 axis 는 chain integrity 만.",
+      "falsifier": "test/test_hash_chain_break.py — chain 중간 row 의 self_hash 1 byte 변조 시 populator 가 ABORT 출력. ACCEPT 시 falsified."
+    },
+    {
+      "axis_id": "p7",
+      "slug": "idempotent-replay",
+      "rationale": "populator 재실행 안전성. round-key dedup + content-address drift 검출. raw 77 강제. 운영 단계에서 cron 재시도 / human 재실행 / 부분실패 복구 시 안정성의 기반.",
+      "loc_estimate": 20,
+      "deps": ["p3"],
+      "theory_anchor": "raw 77 append-only — read-modify-write 금지, append-or-noop. drift 발견 = ABORT (overwrite 금지).",
+      "falsifier": "test/test_idempotent_double_run.py — 동일 input 두 번 실행 시 두 번째 run 의 emit count == 0 이어야 함. > 0 시 falsified."
+    },
+    {
+      "axis_id": "p5",
+      "slug": "parallel-verifier-tarski-separated",
+      "rationale": "p1/p2 emit 결과의 검증을 외부 프로세스에서 강제 — m13 Tarski separation 의 운영 화신. populator 는 verifier 신뢰 못함 (cert content 에 verifier 결과 반영 금지), maintainer 만 양 log 통합.",
+      "loc_estimate": 30,
+      "deps": ["dossier §3 verify_meta_cert.py"],
+      "theory_anchor": "m13 Tarski 1933 — object/meta language separation, 동일 프로세스 / 메모리 공유 금지. populator 와 verifier 는 subprocess 격리.",
+      "falsifier": "test/test_tarski_no_crosstalk.py — populator 가 verification log 를 mid-run 에 read 시도 시 fail (lsof / fcntl 검사). ACCEPT 시 falsified."
+    },
+    {
+      "axis_id": "p6",
+      "slug": "coverage-dashboard-emit",
+      "rationale": "m3 progress visualization. dossier line 23 의 4.3% 가 100% 로 수렴함을 후속 ω-cycle 에 visible 하게 만들어 m3 axis closure 신호 제공. p14 Cantor 한계 명시 (as-of-ts 만 의미).",
+      "loc_estimate": 20,
+      "deps": ["p1"],
+      "theory_anchor": "p14 Cantor 1891 — 100% 는 '현재 enumerate 된 round 기준' 만; future round 는 자동 unsaturate. dashboard 가 이 한계 명시.",
+      "falsifier": "test/test_coverage_metric.py — backfill 후 missing_rounds == [] 이어야 함. non-empty 시 falsified."
+    }
+  ],
+  "tier_2_backlog": [
+    {"axis_id":"p2","slug":"forward-round-emit","blocker":"AG10_tool_write lifted + m1 자가-trigger daemon 도입 후 (parent ω-cycle Tier-2). retroactive (p1) 가 먼저, forward 는 R42 진입 시 활성."},
+    {"axis_id":"p4","slug":"conflict-detect-rollback-emit","blocker":"verifier (p5) 안정 + m9 atomic-rollback axis ship 후. retroactive 단계에서는 'historical_observation_only' 마커만, 실제 revert 미발동."}
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {"axis_id":"p8","label":"Löb gate (no self-certify)","theorem":"Löb 1955","practical_impact":"populator 가 자신의 신뢰성 주장 시 trivial/inconsistent — Gödel 2nd 충돌","mitigation":"외부 ordinal anchor (m5) + 외부 verifier (m13/p9). cert content 에 self-trust 키 / 값 금지, falsifier CI gate."},
+    {"axis_id":"p9","label":"Tarski meta/object separation","theorem":"Tarski 1933","practical_impact":"populator 가 동일 프로세스에서 verify 시 truth predicate object-language 누출","mitigation":"subprocess 격리, 단방향 append 데이터 흐름 (cert→verifier read, verifier→verification append)"},
+    {"axis_id":"p10","label":"raw 25 git-lock + POSIX atomicity","theorem":"POSIX.1-2008 write(2) PIPE_BUF / rename(2)","practical_impact":"동시 append race 시 부분 write 가능 (>4 KiB row), git index lock 충돌","mitigation":"row 4 KiB 강제, staging+rename for >4KiB, cert log gitignored"},
+    {"axis_id":"p11","label":"Kleene recursion (cert chain fixpoint)","theorem":"Kleene 1938","practical_impact":"cert-of-cert 무진보 self-loop 가능 (m4 linear_constant 전이)","mitigation":"m5 ordinal_label strict descent 강제 — same ordinal 시 axes_acted != [] 필수 (dossier §3.b)"},
+    {"axis_id":"p12","label":"Halting (verifier termination)","theorem":"Turing 1936","practical_impact":"임의 expected_outcome predicate 평가 종료 결정 불가","mitigation":"expected_outcome 을 primitive recursive sub-language 로 제한 (정수비교/문자열일치/시간창)"},
+    {"axis_id":"p13","label":"Solomonoff uncomputable","theorem":"Solomonoff 1964","practical_impact":"cert 의 미래 'usefulness' 평가 uncomputable (Σ_2^0)","mitigation":"populator 는 utility 평가 시도 금지, mechanical emit-or-skip 만"},
+    {"axis_id":"p14","label":"Cantor diagonal (round pool unsaturable)","theorem":"Cantor 1891","practical_impact":"100% coverage 는 as-of-ts 만; future round 자동 unsaturate","mitigation":"dashboard 에 ts 명시, 'incomplete-but-growing' 모드 인정"}
+  ],
+  "omega_stop": "m3-cert-populator-two-track-axis-enumeration-saturated-with-lob-gate-and-tarski-separation-acknowledged",
+  "omega_stop_witness": {
+    "type": "axis-enumeration-fixpoint-with-self-reference-paradox-bounded-at-cert-layer",
+    "method": "Track-A 7 axes (p1..p7) + Track-B 7 axes (p8..p14) enumerate. second-pass 신규 axis 발견 0. p14 Cantor diagonal 이 본 enumeration 의 saturation 비완결성 명시. p8 Löb + p9 Tarski 가 populator 의 self-cert 시도를 영구 차단 — populator 는 자신의 정확성 / 일관성 / 유용성 을 '주장' 하는 cert 를 emit 할 수 없으며, 외부 ordinal (m5) + 외부 verifier (별도 프로세스) 만이 trust anchor.",
+    "result": "FIXPOINT(weak) — Tier-1 5 / Tier-2 2 / Tier-3 0 / REJECT 0 / Limit-axes 7. parent ω-cycle 의 m20 Cantor acknowledgment 가 본 child cycle 의 p14 로 하강 — '100% coverage' 는 ts-순간적 metric 임을 명시.",
+    "fixpoint_signal": "final-form axis (p1~p7) 추가 시 limit axis (p8~p14) 중 하나가 cap 으로 anchor: p1 retroactive ↔ p8 Löb (no self-cert in retroactive rows), p2 forward ↔ p11 Kleene (cert chain fixpoint), p3 hash chain ↔ p10 POSIX atomicity, p4 conflict detect ↔ p12 halting (predicate sub-language 제한), p5 parallel verifier ↔ p9 Tarski (subprocess 격리), p6 dashboard ↔ p14 Cantor (as-of-ts), p7 idempotent ↔ p13 Solomonoff (mechanical emit-or-skip). 모든 final-form axis 가 정확히 1개 limit axis 와 짝지어짐 — bipartite saturation."
+  },
+  "first_impl_target": {
+    "name": "p1 retroactive-round-emit",
+    "rationale": "m3 dossier line 23 의 0/23 coverage gap 의 직접 해소. m5 (tool/ordinal_compare.py) ship 직후 즉시 실행 가능 (deps 단일). 80 LoC. p3 hash chain 과 p7 idempotent 은 prerequisite (총 130 LoC, dossier §8 의 150 LoC budget 내). p5 verifier 는 p1 emit 결과 검증을 위해 동시 ship 필요하지만 dossier §3 에 70 LoC 별도 명세.",
+    "next_after": "p3 hash-chain → p7 idempotent → p5 parallel-verifier → p6 coverage-dashboard. p2 forward-emit + p4 conflict-detect-rollback 은 Tier-2 (m1 daemon + m9 rollback ship 후)."
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "본 child trawl 자체 (parent ω-cycle 의 Tier-1 m3 의 sub-axis 분해 — 메타-메타-메타: meta engine → m3 cert → cert populator)",
+    "raw_70_multi_axis_verify": "final-form ↔ limits 직교 두 트랙 + 6 cluster joint",
+    "raw_71_falsifier": "limit axis 가 final-form axis 의 falsifier (p8 Löb 가 p1 retroactive 의 self-trust path 차단; p14 Cantor 가 p6 dashboard 의 영구 100% 차단; p10 POSIX 가 p3 hash chain 의 >4KiB row 차단). 각 Tier-1 axis 에 falsifier test_*.py 명시.",
+    "raw_77_audit_append_only": "limit_axes_documented 의 theorem 인용 = 영구 audit-trail. populator 자체가 read-modify-write 금지, append-or-noop 만.",
+    "self_reference_acknowledgment": "본 ω-cycle 자체가 Tarski/Löb/Gödel 한계에 종속 — '본 분석의 일관성' 증명 불가 (p8/p9). populator 의 자기 신뢰 주장 금지가 본 분석에도 적용 — 본 witness 는 자신의 정확성을 주장하지 않으며, parent ω-cycle (m5/m13) 의 외부 anchor 에 의존."
+  },
+  "cross_cycle_coupling": {
+    "with_parent": "design/meta_engine/2026-04-25_final_form_and_limits_omega_cycle.json (parent_trawl_id: 2026-04-25_meta_engine_final_form_and_limits_omega_cycle)",
+    "parent_axis_inherited": "m3 (Tier-1, depends on m5) — 본 child cycle 이 m3 의 first-impl 직전 단계 sub-axis 분해",
+    "shared_limits": "p8 Löb ↔ parent m11 Löb (동일 정리, populator 적용), p9 Tarski ↔ parent m13 Tarski (동일 정리, subprocess 격리 적용), p11 Kleene ↔ parent m17 Kleene (동일 정리, cert chain 적용), p12 halting ↔ parent m15 halting (동일 정리, verifier termination 적용), p13 Solomonoff ↔ parent m16 Solomonoff (동일 정리, cert utility 적용), p14 Cantor ↔ parent m20 Cantor (동일 정리, round pool 적용)",
+    "shared_final_form": "p1 retroactive_round_emit + p2 forward_round_emit 은 parent m3 의 deliverable; p5 parallel_verifier 는 parent m13 (Tarski) 의 운영 화신; p6 coverage_dashboard 는 parent m3 의 progress signal",
+    "ordinal_relation": "본 child ω-cycle ordinal ω·2+1 은 parent ω-cycle 의 m5 (ω) 와 m4 (ω·2 진입점) 보다 strictly higher — m4 의 ω·2 위에 cert layer 의 +1. parent 의 Γ_0 (m18 PA→ZFC ceiling) 보다 낮음 — populator 는 PA 내부 작동, ZFC 외부 anchor 불요.",
+    "joint_omega_stop": "parent 의 'two-track-axis-enumeration-saturated-with-diagonal-paradox-acknowledged' 가 child 에서 'm3-cert-populator-two-track-axis-enumeration-saturated-with-lob-gate-and-tarski-separation-acknowledged' 로 specialize. parent 의 m20 → child 의 p14 로 inherit.",
+    "downstream_couplings": [
+      "m5 ordinal_anchor — populator 의 hard dep (p1/p3 모두 ordinal_label 필요)",
+      "m9 atomic-rollback — populator p4 의 rollback_marker 를 consume",
+      "m6 falsifier-F1 — populator Tier-1 의 5 falsifier test_*.py 가 첫 entries"
+    ]
+  }
+}

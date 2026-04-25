@@ -1,0 +1,30 @@
+# m5 ordinal CNF grammar (j1) — Cantor Normal Form up to ε_0 + sentinels Γ_0, ψ(Ω_ω)
+# Anchor: design/meta_engine/2026-04-26_m5_i1i2_parser_comparator_omega_cycle.json axis j1
+# Stamp: Γ_0+1 ; metatheory: ATR_0 (Feferman-Schütte) for α<Γ_0, sentinel-table beyond.
+
+# --- core BNF (5 lines) ---
+ordinal  ::= '0' | nat | sentinel | sum
+sum      ::= term ( '+' term )*
+term     ::= 'ω' ( '^' exp )? ( '·' nat )?
+exp      ::= '0' | nat | '(' ordinal ')'
+sentinel ::= 'ε_0' | 'Γ_0' | 'ψ(Ω_ω)'
+
+# --- terminals ---
+nat      ::= [1-9][0-9]*
+
+# --- side-conditions enforced post-parse (canonicality) ---
+SC1 strict-descent : in 'sum', exponents of consecutive terms strictly decreasing (β_i > β_{i+1}).
+SC2 positive-coeff : every coefficient and every nat ≥ 1 (no '·0', no leading zero in nat).
+SC3 no-plus-zero   : '0' may not appear as a summand inside 'sum' (no 'α+0', no '0+α').
+SC4 sentinel-solo  : sentinel may not be a summand or factor; a sentinel ordinal is standalone.
+
+# --- sentinel rules ---
+SN1 sentinel-order : ε_0 < Γ_0 < ψ(Ω_ω) (table lookup, no computation).
+SN2 sentinel-vs-CNF: any α derivable as CNF<ε_0 satisfies α < ε_0 < Γ_0 < ψ(Ω_ω).
+SN3 sentinel-arith : 'sentinel + tail' / 'sentinel · n' raise OrdinalBeyondPredicativeError.
+
+# --- lex / unicode rules (j9) ---
+LX1 NFC-normalise input before tokenisation.
+LX2 strip ASCII whitespace (\s+); reject U+00A0, U+2009, U+200B (homoglyph block).
+LX3 codepoints fixed: ω=U+03C9, ε=U+03B5, Γ=U+0393, ψ=U+03C8, Ω=U+03A9, '·'=U+00B7.
+LX4 reject Latin/Cyrillic homoglyphs (e.g. Cyrillic 'о' U+043E for omicron, Latin 'w' for ω).

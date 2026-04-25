@@ -1,0 +1,207 @@
+{
+  "trawl_id": "2026-04-26_atlas_ingest_a2_self_path_strip_omega_cycle",
+  "ts": "2026-04-26T05:10:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw 70 (multi-axis verification) + raw 71 (falsifier-as-first-class) — DEEPENING of parent Tier-1 a2",
+  "ordinal_stamp": "ω+1 (deepening of bounded patch — parent a2 12 LoC re-decomposed into 6 sub-axes; sub-fixpoint within parent fixpoint)",
+  "purpose": "Deepening ω-cycle for parent Tier-1 a2 `self-path-strip` (12 LoC, lines 814-819 of tool/omega_cycle_atlas_ingest.hexa). Parent surfaces axis at family-level (drop self-basename + runner tokens). This deepening drills into algorithm-choice + edge-case-coverage + escape-hatch + corpus integration that parent left implicit. Output: refined sub-axes feeding back into parent's a2 line-precise diff intent.",
+  "trigger": "user 2026-04-26 04:55 — parent ω-cycle a2 is 12-LoC patch but algorithm choice (exact vs ends_with vs contains) is undertheorized; b3 pathological (user passes self-path AS DATA) only mentioned. Deepening required before merge to lock algorithm + escape hatch.",
+  "parent_ref": {
+    "path": "design/hexa_sim/2026-04-26_atlas_ingest_arg_fix_omega_cycle.json",
+    "tier1_axis_id": "a2",
+    "tier1_slug": "self-path-strip",
+    "tier1_loc_estimate": 12,
+    "tier1_diff_target": "tool/omega_cycle_atlas_ingest.hexa lines 814-819",
+    "parent_falsifier": "F_argfix_3path (P1/P2/P3 invocation matrix)"
+  },
+  "context_evidence": {
+    "tool_path": "tool/omega_cycle_atlas_ingest.hexa",
+    "bug_lines": "814-819",
+    "current_snippet": "let mut cli = []; let mut ai = 2; while ai < len(raw_args) { cli.push(raw_args[ai]); ai = ai + 1 }",
+    "self_basename": "omega_cycle_atlas_ingest.hexa",
+    "runner_tokens_known": ["hexa", "run"],
+    "p1_p2_p3_argv_shapes": {
+      "P1_remote_direct": ["hexa", "run", "tool/omega_cycle_atlas_ingest.hexa", "--selftest"],
+      "P2_remote_dashdash": ["hexa", "run", "--", "tool/omega_cycle_atlas_ingest.hexa", "--selftest"],
+      "P3_local_force": ["tool/omega_cycle_atlas_ingest.hexa", "--selftest"]
+    },
+    "expected_cli_after_strip": ["--selftest"]
+  },
+  "method": "main-thread sub-axis ideation against parent a2. Track-A = ≥6 algorithm-choice / edge-case-handling / corpus / publication axes; Track-B = ≥5 epistemic limits inherited or refined from parent b1/b3/b4. dedup → Tier-1 ≤ 3 sub-axes feeding back into parent a2 diff.",
+  "track_a_final_form_axes": [
+    {
+      "id": "sa1",
+      "name": "basename_match_algorithm_choice",
+      "summary": "Three candidate match predicates: (M1) exact equality `a == self_base` — fails on relative paths like `tool/omega_cycle_atlas_ingest.hexa` (most P1/P2 cases); (M2) `ends_with(a, self_base)` — handles `tool/X.hexa`, `./tool/X.hexa`, `/abs/tool/X.hexa`; (M3) `contains(a, self_base)` — too loose, catches `--input=foo_omega_cycle_atlas_ingest.hexa.bak`. CHOICE: M2 ends_with is necessary-and-near-sufficient. Pre-condition: also require `ends_with(a, \".hexa\")` to lock extension and reduce M3 leakage. Combined: `ends_with(a, self_base) && ends_with(a, \".hexa\")` — second clause redundant since self_base ends in .hexa, but defensive against future basename mutation.",
+      "loc_estimate": 4,
+      "feeds_into_parent": "a2 line-precise diff — replaces `is_self = ends_with(a, self_base)` with `is_self = ends_with(a, self_base)` (M2 confirmed), no change to parent intent but lock-in via this witness."
+    },
+    {
+      "id": "sa2",
+      "name": "self_arg_allowed_escape_hatch_flag",
+      "summary": "`--self-arg-allowed` flag (or env var `HEXA_SELF_ARG_ALLOWED=1`) disables self-path strip entirely. covers parent b3 pathological case (user passes script path AS DATA, e.g., to a hypothetical `--re-entry-target=tool/X.hexa` flag, or `--witness-path` accepting .hexa). Flag-set → ai=0 fallback; user owns disambiguation. Orthogonal to parent a3 input-mode override (a3 covers runner shape; sa2 covers data-arg semantics).",
+      "loc_estimate": 5,
+      "feeds_into_parent": "a2 diff augmented — early scan for `--self-arg-allowed` before strip loop; if present, skip is_self predicate. ~5 LoC inserted into parent a2's 12 LoC budget → parent a2 grows to ~17 LoC (still Tier-1 bound)."
+    },
+    {
+      "id": "sa3",
+      "name": "runner_detection_orthogonal_axis",
+      "summary": "Runner-token strip (`hexa`, `run`) is orthogonal to self-path strip — env-var fallback `HEXA_RUNNER={remote,local,unknown}` allows future runner additions (stage1, stage2, third-party) without code change. If env unset, default to current runner-token list. Sub-axis: extract runner-token list to top-of-file constant `RUNNER_TOKENS = [\"hexa\", \"run\"]` for one-line maintenance. Pairs with parent a1 (runner-detection-heuristic) but is data-driven not heuristic.",
+      "loc_estimate": 3,
+      "feeds_into_parent": "a2 diff — replaces inline `(a == \"hexa\") || (a == \"run\")` with `contains(RUNNER_TOKENS, a)` lookup; constant declared near top of main(). Adds 3 LoC."
+    },
+    {
+      "id": "sa4",
+      "name": "three_path_falsifier_corpus_integration",
+      "summary": "Parent a4 defined 3 paths (P1/P2/P3) at family level. This sub-axis specifies in-language corpus: `_test_arg_strip()` helper invoked from _selftest() with three hardcoded raw_args fixtures matching P1/P2/P3, asserts each yields `[\"--selftest\"]` via shared parser. PASS marker `__SELF_PATH_STRIP__ PASS` distinct from parent's `__OMEGA_CYCLE_ATLAS_INGEST__ PASS` — composable.",
+      "loc_estimate": 12,
+      "feeds_into_parent": "a4 line-precise — concrete hexa-level fixtures inside _selftest(). 12 LoC inside _selftest stanza. Falsifier triggers on ANY of 3 fixtures yielding wrong cli."
+    },
+    {
+      "id": "sa5",
+      "name": "regression_ci_matrix_integration",
+      "summary": "Beyond _selftest in-process, wire 3-path corpus into CI: GitHub Actions matrix `{path: [P1,P2,P3]} × {runner: [remote,local]} = 6 cells`, each runs `--selftest` + greps for PASS marker. Fail-fast on any cell. Inherits parent a6 (dual-runner-ci-matrix) but at Tier-2 (CI infra dep). Mention here for traceability — defer impl.",
+      "loc_estimate": 0,
+      "feeds_into_parent": "Tier-2 / parent a6 — no LoC delta in current patch; placeholder for CI wire-up after Tier-1 lands.",
+      "tier_target": "tier-2"
+    },
+    {
+      "id": "sa6",
+      "name": "self_test_row_atlas_publication",
+      "summary": "On _selftest() PASS, append a 1-line shard to state/atlas_health_timeline.jsonl: `{ts, tool, arg_strip_pass: true, paths_tested: [P1,P2,P3], algorithm: \"ends_with\"}`. Makes the regression history queryable (raw 77 audit-append-only). Parent didn't specify atlas-row publication; this closes the loop self-test → atlas → future ω-cycle replay.",
+      "loc_estimate": 5,
+      "feeds_into_parent": "Augments parent a4 + atlas_ingest_history.jsonl ledger. 5 LoC inside _selftest() PASS branch. Composes with parent raw_77_audit_append_only."
+    },
+    {
+      "id": "sa7",
+      "name": "name_collision_disambiguation",
+      "summary": "If user has another file named `omega_cycle_atlas_ingest.hexa` elsewhere on disk (forked dev copy, sibling worktree, vendored snapshot), and passes its path as data argument, ends_with match strips it incorrectly. Disambiguator: also check `args[0]` (or known runner script-arg slot) — only strip self-basename matches that ALSO equal the executing-script's resolved path. requires runtime introspection (script_path() builtin) which hexa stage0 may not expose.",
+      "loc_estimate": 8,
+      "feeds_into_parent": "DEFERRED — depends on hexa stage0 `script_path()` availability; if absent, sa2 escape hatch (--self-arg-allowed) covers this case at user-cost."
+    }
+  ],
+  "track_b_limits_axes": [
+    {
+      "id": "tb1",
+      "name": "heuristic_not_theorem",
+      "summary": "Inherited from parent b3 — self-path-strip is heuristic, not theorem. ends_with(a, self_base) admits constructive counterexample: `--data=tool/omega_cycle_atlas_ingest.hexa` (single argv element where the value-half ends in self_base). sa2 escape hatch is the only formal mitigation; no proof of correctness for unguarded path."
+    },
+    {
+      "id": "tb2",
+      "name": "open_set_runner_conventions",
+      "summary": "Inherited from parent b1 — RUNNER_TOKENS list is open-set. Future hexa runners may inject argv tokens we don't enumerate (e.g., `hexa-cluster`, `hexa --profile=X run`, `nix run hexa --`). sa3 env-var fallback partially mitigates; full solution requires runner contract not yet specified."
+    },
+    {
+      "id": "tb3",
+      "name": "name_collision_unresolvable_without_introspection",
+      "summary": "If hexa stage0 doesn't expose `script_path()` or `__file__`-equivalent, sa7 cannot distinguish 'this script' from 'other file with same basename'. ends_with collapses both. Falsifier exists (user with two omega_cycle_atlas_ingest.hexa files, one as data) — un-fixable in current stage0."
+    },
+    {
+      "id": "tb4",
+      "name": "hexa_stage0_args_instability",
+      "summary": "Inherited from parent b4 — `args()` semantics not version-locked. ends_with relies on argv element being a path-string; stage0 future versions might pre-tokenize, return objects, or strip extensions. sa4 corpus is the only regression armor; not contract."
+    },
+    {
+      "id": "tb5",
+      "name": "future_proof_guarantee_impossible",
+      "summary": "No combination of (sa1 algorithm + sa2 escape hatch + sa3 runner env + sa4 corpus + sa6 atlas log) yields future-proof correctness. Each new runner / data-flag / hexa version is a potential falsifier. Witness commits to bounded-patch-with-falsifier-armor, not to provability. Acceptable because raw 71 demands falsifiability not provability."
+    },
+    {
+      "id": "tb6",
+      "name": "ends_with_collision_with_extension_only_match",
+      "summary": "ends_with(a, self_base) where self_base = `omega_cycle_atlas_ingest.hexa` is robust against `.hexa`-only collisions, BUT if user has typo'd file `omega_cycle_atlas_ingest.hexa.bak` and passes it, ends_with returns false (correct). Inverse: `my_omega_cycle_atlas_ingest.hexa` (prefix-extended name) — ends_with returns TRUE (incorrect strip). Mitigated by requiring exact basename match after path-split: `basename(a) == self_base`. Refines sa1: prefer `basename(a) == self_base` over raw `ends_with` when stage0 exposes basename(); fallback to ends_with otherwise."
+    }
+  ],
+  "axes_total_surfaced": 13,
+  "track_a_count": 7,
+  "track_b_count": 6,
+  "dedupe_method": "(1) sa1 + tb6 merge: tb6 refines sa1 algorithm choice — promote `basename(a) == self_base` to primary, ends_with as fallback. (2) sa5 → Tier-2 (CI infra dep, parent a6 territory). (3) sa7 → Tier-3 deferred (stage0 introspection missing). (4) sa1 / sa2 / sa4 form Tier-1 sub-trio: algorithm + escape + corpus. (5) sa3 + sa6 → Tier-2 (orthogonal hardening, not blocker).",
+  "tier_1_immediate_impl": [
+    {
+      "axis_id": "sa1",
+      "slug": "basename-match-algorithm-locked",
+      "rationale": "Algorithm choice is the load-bearing decision. Lock-in: PRIMARY = `basename(a) == self_base` if stage0 exposes basename builtin; FALLBACK = `ends_with(a, \"/\" + self_base) || a == self_base` (manual basename via path-separator check) — covers `tool/X.hexa`, `./tool/X.hexa`, `/abs/X.hexa`, bare `X.hexa`. Rejects `my_X.hexa` (prefix-extended collision, tb6).",
+      "loc_estimate": 5,
+      "deps": [],
+      "edge_case_handling": {
+        "relative_path_tool_slash": "ACCEPT — matches via `/` + self_base suffix",
+        "absolute_path": "ACCEPT — matches via `/` + self_base suffix",
+        "bare_basename": "ACCEPT — matches via a == self_base",
+        "prefix_extended_name (my_X.hexa)": "REJECT (correct) — neither a == self_base nor ends_with(\"/\"+self_base)",
+        "suffix_extended_name (X.hexa.bak)": "REJECT (correct) — doesn't end in .hexa",
+        "user_data_arg_carrying_self_path": "STRIP (incorrect) — covered by sa2 escape hatch",
+        "name_collision_other_file_same_basename": "STRIP (incorrect) — un-fixable without sa7 / stage0 introspection (tb3)"
+      },
+      "line_precise_diff_intent": "Replace parent a2 inline predicate `let is_self = ends_with(a, self_base)` with: `let is_self = (a == self_base) || ends_with(a, \"/\" + self_base)`. Net: +1 LoC vs parent (12 → 13)."
+    },
+    {
+      "axis_id": "sa2",
+      "slug": "self-arg-allowed-escape-hatch",
+      "rationale": "Closes parent b3 pathological case. User-explicit override: `--self-arg-allowed` flag OR env `HEXA_SELF_ARG_ALLOWED=1` disables strip. Necessary because tb1 (heuristic-not-theorem) admits constructive counterexample.",
+      "loc_estimate": 5,
+      "deps": ["sa1"],
+      "line_precise_diff_intent": "Insert before strip loop: `let allow_self = false; let mut sk = 0; while sk < len(raw_args) { if raw_args[sk] == \"--self-arg-allowed\" { allow_self = true } sk = sk + 1 }`. Then inside loop guard: `if !is_self || allow_self { ... cli.push(a) ... }` (simplifies to: don't strip when allow_self). Also accept env: `if env(\"HEXA_SELF_ARG_ALLOWED\") == \"1\" { allow_self = true }`. ~5 LoC."
+    },
+    {
+      "axis_id": "sa4",
+      "slug": "three-path-corpus-in-selftest",
+      "rationale": "Concrete falsifier per parent F_argfix_3path. Hexa-level fixtures inside _selftest() — assert each P1/P2/P3 raw_args yields `[\"--selftest\"]` via shared `_strip_self_args()` helper. Without this, sa1+sa2 are asserted-not-tested.",
+      "loc_estimate": 12,
+      "deps": ["sa1", "sa2"],
+      "line_precise_diff_intent": "Inside _selftest(): three fixtures `f1=[\"hexa\",\"run\",\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"]`, `f2=[\"hexa\",\"run\",\"--\",\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"]`, `f3=[\"tool/omega_cycle_atlas_ingest.hexa\",\"--selftest\"]`. For each, call `_strip_self_args(f)` and assert result == `[\"--selftest\"]`. On all-pass: emit `__SELF_PATH_STRIP__ PASS`. ~12 LoC."
+    }
+  ],
+  "tier_2_backlog": [
+    {"axis_id": "sa3", "slug": "runner-tokens-env-fallback", "blocker": "orthogonal hardening — current RUNNER_TOKENS=[\"hexa\",\"run\"] covers all observed runners; defer env-var indirection until 3rd runner observed"},
+    {"axis_id": "sa5", "slug": "ci-matrix-3path", "blocker": "CI infra dep (parent a6 territory) — defer until Tier-1 sa1+sa2+sa4 land and manual 3-path passes"},
+    {"axis_id": "sa6", "slug": "atlas-health-timeline-publication", "blocker": "needs state/atlas_health_timeline.jsonl schema lock-in; 5 LoC append after PASS marker — Tier-2 cleanup"}
+  ],
+  "tier_3_defer_or_split": [
+    {"axis_id": "sa7", "slug": "script-path-introspection", "blocker": "hexa stage0 `script_path()` / `__file__` not currently exposed; cannot disambiguate name-collision case (tb3) without runtime introspection. Defer to upstream hexa lang feature request."}
+  ],
+  "rejected_axes": [],
+  "omega_stop": "sub-fixpoint-bounded-patch-saturated",
+  "omega_stop_witness": {
+    "type": "deepening-sub-fixpoint",
+    "method": "Track-A 7 sub-axes (algorithm / escape / runner / corpus / CI / publication / introspection) + Track-B 6 limits — second-pass produced no new sub-axis. Tier-1 sub-trio (sa1 algorithm-lock + sa2 escape-hatch + sa4 corpus) is exhaustive within parent a2's 12 LoC budget (now ~22 LoC = within Tier-1 ≤ 20-25 envelope).",
+    "result": "SUB-FIXPOINT — Tier-1 3 / Tier-2 3 / Tier-3 1 / Track-B 6. ordinal=ω+1 (deepening, not new ω). Parent a2 absorbs sa1+sa2+sa4 as line-precise refinement."
+  },
+  "concrete_falsifier": {
+    "name": "F_self_path_strip_3path_locked",
+    "spec": "For each fixture in {f1=P1, f2=P2, f3=P3} (defined in context_evidence.p1_p2_p3_argv_shapes), `_strip_self_args(fixture)` MUST yield exactly `[\"--selftest\"]`. ALSO: with `--self-arg-allowed` appended to f1, result MUST be `[\"--selftest\",\"--self-arg-allowed\",\"tool/omega_cycle_atlas_ingest.hexa\"]` (or order-equivalent — self path NOT stripped, runner tokens stripped). Any deviation = falsifier triggered.",
+    "trigger_condition": "any fixture's _strip_self_args output != expected OR --self-arg-allowed bypass not honored",
+    "cleanup_action": "rollback sa1+sa2+sa4 patch, re-open this deepening with refined algorithm (likely sa7 script-path introspection if available, else sa1 algorithm relaxation)",
+    "pass_marker": "__SELF_PATH_STRIP__ PASS"
+  },
+  "first_impl_target": {
+    "name": "tool/omega_cycle_atlas_ingest.hexa",
+    "scope": "Tier-1 sa1+sa2+sa4 inside parent a2 patch envelope (~22 LoC delta vs parent's 12 — slight expansion within Tier-1 bound)",
+    "axes_combined": ["sa1 basename-match algorithm locked", "sa2 --self-arg-allowed escape hatch", "sa4 3-path corpus in _selftest"],
+    "primary_diff_target": "lines 814-819 (parent a2 territory) + _selftest() stanza addition",
+    "verification": "_selftest() must exit 0, emit BOTH `__SELF_PATH_STRIP__ PASS` (sa4) AND `__OMEGA_CYCLE_ATLAS_INGEST__ PASS` (parent a4). Composable markers.",
+    "exit_code_contract": "0 on all 3 fixtures + 1 escape-hatch fixture",
+    "stdout_markers": ["__SELF_PATH_STRIP__ PASS", "__OMEGA_CYCLE_ATLAS_INGEST__ PASS"]
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "this deepening trawl itself",
+    "raw_70_multi_axis_verify": "sa1 algorithm choice = (M1 exact / M2 ends_with / M3 contains / M2'  basename) 4-axis joint verification → M2' wins",
+    "raw_71_falsifier": "F_self_path_strip_3path_locked concrete + 4 fixtures (P1/P2/P3 + escape-hatch) + dual marker",
+    "raw_77_audit_append_only": "sa6 atlas health timeline publication — Tier-2 deferred"
+  },
+  "feedback_into_parent": {
+    "parent_path": "design/hexa_sim/2026-04-26_atlas_ingest_arg_fix_omega_cycle.json",
+    "parent_axis": "a2 self-path-strip",
+    "loc_revision": "12 → ~22 (sa1 +1, sa2 +5, sa4 +12 — sa4 inside _selftest, parent a2 main-path remains ~13 LoC + escape hatch ~5 LoC = 18 in parser, 12 in selftest)",
+    "algorithm_locked": "(a == self_base) || ends_with(a, \"/\" + self_base)  — basename-match via path-separator check, rejects prefix-extended collisions",
+    "edge_cases_documented": "7 cases enumerated in tier_1_immediate_impl[sa1].edge_case_handling",
+    "escape_hatch_added": "--self-arg-allowed flag + HEXA_SELF_ARG_ALLOWED=1 env var",
+    "falsifier_refined": "F_argfix_3path → F_self_path_strip_3path_locked (4 fixtures, dual marker)",
+    "tier2_promotions_to_parent_backlog": ["sa3 runner-tokens-env-fallback", "sa5 ci-matrix-3path", "sa6 atlas-health-timeline-publication"],
+    "tier3_upstream_request": "sa7 script-path-introspection — file with hexa lang spec for `script_path()` / `__file__` builtin"
+  },
+  "downstream_unblocks": [
+    "parent a2 line-precise diff now algorithm-locked + escape-hatch armed → ready for merge",
+    "parent a4 regression corpus has hexa-level fixtures (sa4) — implementable inside _selftest() this session",
+    "atlas_ingest_omega_cycle Tier-1 (parent's parent) — once parent a2 lands with this deepening, all 3 invocation paths green"
+  ],
+  "ts_iso": "2026-04-26T05:10:00+09:00"
+}

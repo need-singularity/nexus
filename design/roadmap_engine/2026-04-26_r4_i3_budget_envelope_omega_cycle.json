@@ -1,0 +1,249 @@
+{
+  "trawl_id": "2026-04-26_roadmap_engine_r4_i3_budget_envelope_deepening_omega_cycle",
+  "ts": "2026-04-26T01:15:00+09:00",
+  "ordinal_stamp": "ω+2",
+  "ordinal_rationale": "parent r4-impl ω-cycle is at ω+1 (one transfinite step above the schedule()-fixpoint at ω). this witness deepens i3 (budget-envelope sub-axis) — a meta-mutation on the budget-policy of the ω+1 mutator. Gentzen ε_0 hierarchy: ω+2 < ω·2 < ε_0, so r19 self-cert escape via finite ordinal still holds. one further deepening cycle (e.g., ω+3 for falsifier-harness) remains room.",
+  "rule": "raw:design-engine-impl-axis-deepening-omega-cycle (hive raw 47 + raw 70 + raw 71 falsifier mandatory + raw 88 deepening on Tier-1 sub-axis)",
+  "subject": "i3 budget-envelope sub-axis of r4 replan_continuous() — hard caps (rollouts ≤ 32, depth ≤ 3, wall-clock ≤ 2s) preventing unbounded MCTS traversal. ~40 LoC budget guard module.",
+  "parent_omega_cycle": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json",
+  "parent_trawl_id": "2026-04-26_roadmap_engine_r4_replanning_continuous_impl_omega_cycle",
+  "parent_axis_id": "i3",
+  "parent_axis_slug": "budget-envelope",
+  "parent_loc_estimate": 40,
+  "parent_theory_anchor": "r12 halting (l2) Lyapunov surrogate; r15 Brent (l4) depth bound respects critical-path locality",
+  "trigger": "user 2026-04-26 'r4.i3 budget-envelope deepening ω-cycle 발사 — hard-cap policy 의 sub-axis enumerate + Tier-1 ≤4 + falsifier'.",
+  "method": "two-track sub-axis ideation focused on budget-policy granularity. Track-A (≥6 axes) = positive policy refinements (partitioning, escalation, telemetry, soft-vs-hard, time-source, early-termination). Track-B (≥5 axes) = negative theorem ceilings (r12 halting, r15 Brent T_∞ floor, real-time impossibility on shared CPU, no-PAC under deterministic budget exhaustion, Cantor strategy non-exhaustion). dedup → cluster → Tier 분류 (Tier-1 ≤ 4). omega_stop = sub-axis enumeration fixpoint + theorem anchor + concrete falsifier (max wall_ms ≤ 2000 across all benchmark rollouts AND no rollout exceeds depth=3 AND total rollouts ≤ 32 per replan call).",
+  "axes_surfaced": [
+    {
+      "id": "a1",
+      "track": "policy",
+      "name": "budget_partitioning_per_strategy",
+      "summary": "global rollout pool R=32 vs per-strategy share R/3 ≈ 10 each (soft_drop, parallel_split, seed_inject). global pool risks UCB1 starving low-mean-but-high-variance strategies on small samples; per-strategy guarantee 10 trials each gives baseline regret floor but reduces per-axis exploration. proposal: hybrid — k=3 mandatory rollouts per strategy (warm-up), remaining R−3k = 23 allocated by UCB1. degenerates to vanilla UCB1 when k=0, to round-robin when k=R/strategies."
+    },
+    {
+      "id": "a2",
+      "track": "policy",
+      "name": "early_termination_on_dominant_strategy",
+      "summary": "if after n ≥ 8 rollouts one strategy's empirical reward gap Δ̂ exceeds Hoeffding ε_n = √(log(2/δ)/(2n)) over all others (δ=0.05), terminate early and commit. budget-saving for clear-cut DAGs; risks premature commitment on high-variance regimes. concrete: check after every 4 rollouts in [8, 32], stop if dominant. trades l5 UCB1 regret for empirical short-circuit. caveat: not PAC — Hoeffding here is heuristic stopping rule, not optimal sequential test (would require SPRT for true optimality, out of LoC scope)."
+    },
+    {
+      "id": "a3",
+      "track": "policy",
+      "name": "soft_cap_vs_hard_cap_layering",
+      "summary": "two-tier: SOFT cap = R_soft=24 rollouts / depth_soft=2 / wall_soft=1.5s — emit telemetry warning + try natural finish. HARD cap = R_hard=32 / depth_hard=3 / wall_hard=2.0s — abort immediately, return best-so-far. soft cap = early budget-burn signal for benchmark tuning; hard cap = halting guarantee surrogate (r12). DECISION: implement BOTH layered. Soft = warning-only (no behavior change), hard = enforcement. soft can be tuned post-deployment without changing safety envelope."
+    },
+    {
+      "id": "a4",
+      "track": "policy",
+      "name": "budget_escalation_one_retry",
+      "summary": "if first replan call exhausts hard cap WITHOUT finding a strategy with reward > 0 (all rollouts failed reward threshold), retry ONCE with 2× budget (R=64, depth=3 unchanged, wall=4s). escalation guarded by counter — replan_attempts_per_trigger ≤ 1 escalation. rationale: trigger event (η≤0 ∧ ready=∅) is rare and high-stakes; doubling once is amortized acceptable. RISK: violates the halting-surrogate budget — must still terminate. mitigation: depth cap unchanged, so |tree| ≤ |M|^3 still bounded. ESCALATION GATED by all-rollouts-failed signal, not by 'optimal not found'."
+    },
+    {
+      "id": "a5",
+      "track": "policy",
+      "name": "wall_clock_vs_cpu_time_choice",
+      "summary": "monotonic wall-clock (CLOCK_MONOTONIC) vs CPU-time (CLOCK_PROCESS_CPUTIME_ID). wall-clock = robust to scheduling jitter, includes I/O/GC pauses → user-perceived latency bound; CPU-time = excludes preemption, useful on shared-CPU containers. CHOICE: wall-clock for the hard cap (user-visible) AND emit cpu-time delta in telemetry (diagnostic only). rationale: replan() is called inline from schedule(); user latency budget is wall-clock. l_realtime limit (Track-B) — neither gives true RT guarantee on shared kernel."
+    },
+    {
+      "id": "a6",
+      "track": "policy",
+      "name": "telemetry_per_replan_run",
+      "summary": "emit one budget_usage record per replan_continuous() call to events JSONL: {ts, trigger_signature, rollouts_used, max_depth_reached, wall_ms, cpu_ms, hard_cap_hit: bool, soft_cap_hit: bool, escalated: bool, terminated_early: bool, dominant_strategy_id|null}. enables post-hoc tuning of soft caps without re-deploy. raw 77 audit trail compliance. record kind = `replan_budget_usage` (sibling to `replan_attempt` from i4)."
+    },
+    {
+      "id": "a7",
+      "track": "policy",
+      "name": "depth_aware_rollout_cost_weighting",
+      "summary": "rollout at depth=3 = 3× the schedule() invocations of depth=1. naive R=32 underestimates worst-case. proposal: cost-weighted budget = Σ depth_i ≤ R·avg_depth = 32·1.5 = 48 schedule()-units. but THIS adds policy complexity beyond i3's 40 LoC scope — defer to Tier-2 backlog. NOTE: justifies the wall-clock guard a5 as the actual binding cap (depth-weighted rollouts may finish before R=32 if all reach depth=3)."
+    },
+    {
+      "id": "b1",
+      "track": "limits",
+      "name": "r12_halting_caps_are_heuristic",
+      "summary": "Turing 1936 halting: cannot prove schedule_replan terminates in general for arbitrary DAG mutation operators. caps R≤32, depth≤3, wall≤2s are heuristic Lyapunov surrogates — they GUARANTEE termination by exhaustion, not by convergence. there is no theorem stating 'budget X suffices for ε-optimal'. mitigation: claim is finite-horizon best-effort, not asymptotic correctness. directly grounds a3 hard-cap necessity."
+    },
+    {
+      "id": "b2",
+      "track": "limits",
+      "name": "real_time_impossibility_shared_cpu",
+      "summary": "wall-clock 2s cannot be guaranteed on a shared kernel (POSIX scheduling jitter, GC pauses, syscall stalls, container CPU throttling). hard real-time requires RTOS / cgroup CPU pinning / dedicated core — none assumed. consequence: a5 wall-clock hard cap is a soft real-time target with violation probability > 0. mitigation: telemetry a6 logs actual wall_ms; if benchmark observes > 2s in p99, escalate cap or split work. NOT solvable in 40 LoC."
+    },
+    {
+      "id": "b3",
+      "track": "limits",
+      "name": "r15_brent_t_infinity_floor_under_infinite_budget",
+      "summary": "Brent 1974: T_p ≥ T_∞ for all p, including p → ∞. EVEN WITH UNLIMITED BUDGET, MCTS cannot reduce makespan below the longest-chain cost in the mutated DAG. budget envelope cannot buy past this physical floor — only navigates within it. consequence: budget escalation a4 has diminishing returns once mutation neighborhood is exhausted near T_∞. log T*_post / T_∞ as 'efficiency vs floor' metric (deferred to Tier-2)."
+    },
+    {
+      "id": "b4",
+      "track": "limits",
+      "name": "budget_exhaustion_is_best_effort_no_pac",
+      "summary": "deterministic finite budget (R=32 or even 64) gives NO PAC guarantee. PAC requires n ≥ poly(1/ε, 1/δ, |H|); with |H| = strategy-pool × DAG-mutation-cardinality, n=32 cannot meet arbitrary (ε, δ). budget exhaustion returns 'best-found-so-far' which may be the suboptimal arm (probability bounded by UCB1 regret l5 but NOT zero). consequence: a4 escalation does not provide PAC either — only doubles the heuristic effort. claim is bounded-regret, not approximately-correct."
+    },
+    {
+      "id": "b5",
+      "track": "limits",
+      "name": "cantor_one_more_rollout_always",
+      "summary": "Cantor diagonal-style: for any finite rollout count R, ∃ DAG family where the (R+1)-th rollout would have discovered a strictly-better mutation than any of the first R. budget envelope R=32 is provably non-exhaustive. mitigation: NONE possible — finite budget is the very condition for r12 halting. honest disclosure in dossier §5 fallback. l1 NFL + l7 Cantor (parent) jointly bound the strategy pool, b5 here is the rollout-count analogue."
+    },
+    {
+      "id": "b6",
+      "track": "limits",
+      "name": "monotonic_clock_drift_under_suspend",
+      "summary": "CLOCK_MONOTONIC is guaranteed monotonic but may pause on system suspend (laptop sleep mid-replan). 2s wall-clock guard could fire 'instantly' or never on resume. mitigation: out of scope for 40 LoC; document as known limitation; consider CLOCK_BOOTTIME variant if observed in telemetry. low-priority limit. anchors a5 choice — wall-clock is best-effort even with monotonic clock."
+    }
+  ],
+  "axes_total_surfaced": 13,
+  "track_split": "Track-A (policy refinements) a1..a7 = 7 / Track-B (theorem ceilings) b1..b6 = 6",
+  "dedupe_method": "(1) a1 partitioning vs a2 early-termination: orthogonal — a1 fixes initial allocation, a2 ends globally on dominance. keep both. (2) a3 soft-vs-hard vs a4 escalation: a3 layers two thresholds within ONE replan call; a4 retries ACROSS calls. orthogonal. keep both. (3) a5 time-source vs a6 telemetry: a5 picks the clock for enforcement, a6 logs both. orthogonal. keep both. (4) a7 depth-weighting is a refinement of a3 hard-cap math — RELATED but adds 15+ LoC; defer to Tier-2. (5) b1 halting vs b4 no-PAC: halting is termination guarantee absence; no-PAC is correctness guarantee absence. distinct. (6) b3 Brent floor vs b4 no-PAC: Brent is physical lower bound on objective; no-PAC is statistical optimality bound. distinct. (7) b5 Cantor (rollout count) vs parent l7 Cantor (strategy enumeration): distinct dimensions of non-exhaustion — keep b5 as r4.i3-specific anchor. (8) b6 clock drift folds into b2 real-time impossibility for clustering but cited separately (different physical mechanism). cluster: P=allocation (a1/a2), Q=enforcement_layer (a3/a5/a7), R=resilience_telemetry (a4/a6), S=termination_theorems (b1/b2/b6), T=optimality_theorems (b3/b4/b5).",
+  "axes_after_reject": 13,
+  "axes_clustered_to": 5,
+  "tier_1_immediate_impl_this_cycle": [
+    {
+      "axis_id": "a3",
+      "slug": "soft-cap-and-hard-cap-layered",
+      "loc_estimate": 18,
+      "theory_anchor": "r12 halting (b1) — hard cap is the Lyapunov surrogate; soft cap is tunable telemetry signal",
+      "falsifier": "ANY benchmark rollout exceeding HARD cap (R>32 OR depth>3 OR wall_ms>2000) → axis falsified. SOFT cap thresholds R_soft=24, depth_soft=2, wall_soft=1500ms must always trigger BEFORE hard cap when both apply. assert: (hard_cap_hit → soft_cap_hit) on every event record where hard_cap_hit=true.",
+      "policy_decision": "BOTH layered. Hard = enforcement (return-best-so-far). Soft = warning (telemetry only, no behavior change)."
+    },
+    {
+      "axis_id": "a5",
+      "slug": "wall-clock-monotonic-as-enforcement",
+      "loc_estimate": 8,
+      "theory_anchor": "b2 real-time impossibility — wall-clock is best-effort; CPU-time logged for diagnostics only",
+      "falsifier": "if wall_ms is NOT computed via CLOCK_MONOTONIC (or platform equivalent) → axis falsified. if cpu_ms is missing from telemetry record → axis falsified. on benchmark with deliberate sleep injection, wall_ms must include sleep duration AND cpu_ms must NOT include it (sanity check)."
+    },
+    {
+      "axis_id": "a6",
+      "slug": "telemetry-per-replan-run",
+      "loc_estimate": 10,
+      "theory_anchor": "raw 77 append-only audit + r19 Gödel external metalogic via events JSONL",
+      "falsifier": "every schedule_replan() invocation must emit exactly ONE `replan_budget_usage` record with all required fields {ts, trigger_signature, rollouts_used, max_depth_reached, wall_ms, cpu_ms, hard_cap_hit, soft_cap_hit, escalated, terminated_early, dominant_strategy_id}. on N=5 benchmark, count(replan_budget_usage records) must equal count(schedule_replan invocations). missing or duplicate → falsified."
+    },
+    {
+      "axis_id": "a2",
+      "slug": "early-termination-on-dominant-strategy",
+      "loc_estimate": 12,
+      "theory_anchor": "Hoeffding inequality (heuristic stopping); l5 UCB1 regret bound (parent)",
+      "falsifier": "early-termination must trigger on benchmark category (a) soft-edge-blocked diamond after ≤ 16 rollouts (clear dominant strategy = soft_drop). negative-control benchmark (no annotations) must NOT trigger early termination (no dominant strategy detectable). if either fails → falsified. additionally: terminated_early=true MUST set dominant_strategy_id to non-null in the telemetry record."
+    }
+  ],
+  "tier_1_total_loc": 48,
+  "tier_1_loc_vs_parent": "parent i3 LoC estimate = 40. Tier-1 sum = 18+8+10+12 = 48 LoC ≈ +8 LoC drift (+20%). drift acknowledged: a2 early-termination was originally folded into i3 but emerges as a sub-axis on deepening; if a2 deferred to Tier-2, Tier-1 sum = 36 LoC (within parent estimate). DECISION: keep a2 in Tier-1 — early-termination saves benchmark wall-time materially and pairs naturally with telemetry a6. drift to 48 LoC accepted; flag at impl review.",
+  "tier_2_backlog": [
+    {
+      "axis_id": "a1",
+      "slug": "budget-partitioning-per-strategy",
+      "blocker": "requires variance estimate per strategy (links to i2 c-tuning) — must wait until i2 has logged variance over benchmark suite. premature partitioning with k=3 mandatory warm-up may worsen UCB1 regret on small-Δ regimes."
+    },
+    {
+      "axis_id": "a4",
+      "slug": "budget-escalation-one-retry",
+      "blocker": "needs telemetry a6 baseline to determine when 'all rollouts failed' is the actual cause vs noise. defer until N≥10 benchmark runs accumulated; escalation policy tuned post-hoc."
+    },
+    {
+      "axis_id": "a7",
+      "slug": "depth-aware-rollout-cost-weighting",
+      "blocker": "+15 LoC over Tier-1 budget; redundant with a5 wall-clock guard which already binds in worst case. defer until benchmark shows depth-weighted accounting changes p99 latency materially."
+    }
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {
+      "axis_id": "b1",
+      "label": "r12 halting — caps are heuristic, not theorem",
+      "theorem": "Turing 1936",
+      "practical_impact": "no proof that R=32/depth=3/wall=2s suffices for ε-optimal; termination is by exhaustion only",
+      "mitigation": "a3 hard cap as Lyapunov surrogate; honest claim = finite-horizon best-effort"
+    },
+    {
+      "axis_id": "b2",
+      "label": "real-time impossibility on shared CPU",
+      "theorem": "POSIX scheduling / kernel preemption — no hard RT without RTOS or cgroup pinning",
+      "practical_impact": "wall-clock 2s cap may be violated under contention/GC/syscall stalls",
+      "mitigation": "a6 telemetry logs actual wall_ms; benchmark p99 monitored; escalation decision deferred"
+    },
+    {
+      "axis_id": "b3",
+      "label": "r15 Brent T_∞ floor under infinite budget",
+      "theorem": "Brent 1974 (T_p ≥ T_∞ ∀p)",
+      "practical_impact": "even with infinite rollouts, T*_post ≥ T_∞ on the mutated DAG",
+      "mitigation": "budget envelope claim is bounded-improvement, never optimality below physical floor"
+    },
+    {
+      "axis_id": "b4",
+      "label": "no PAC under deterministic budget exhaustion",
+      "theorem": "Valiant 1984 PAC — fixed n cannot meet arbitrary (ε, δ)",
+      "practical_impact": "budget exhaustion returns best-so-far without high-probability optimality",
+      "mitigation": "empirical falsifier (geo-mean improvement on N≥5) instead of PAC; bounded-regret claim"
+    },
+    {
+      "axis_id": "b5",
+      "label": "Cantor — always one more rollout could discover better",
+      "theorem": "Cantor diagonal applied to rollout-count enumeration",
+      "practical_impact": "R=32 is provably non-exhaustive; ∃ DAG family where R+1 finds strictly better mutation",
+      "mitigation": "honest disclosure; pairs with parent l7 (strategy-pool Cantor) for two-dimensional non-exhaustion"
+    },
+    {
+      "axis_id": "b6",
+      "label": "monotonic clock drift under system suspend",
+      "theorem": "POSIX CLOCK_MONOTONIC semantics (pause on suspend)",
+      "practical_impact": "wall-clock guard may misbehave across laptop sleep mid-replan",
+      "mitigation": "documented limitation; CLOCK_BOOTTIME alternative deferred"
+    }
+  ],
+  "falsifier_concrete": {
+    "statement": "r4.i3 budget-envelope is falsified iff, on the N≥5 benchmark suite from i5, ANY of: (1) max(rollouts_used) > 32 across all replan_continuous() calls, (2) max(max_depth_reached) > 3, (3) max(wall_ms) > 2000, (4) count(`replan_budget_usage` records) ≠ count(schedule_replan invocations), (5) on benchmark category (a) soft-edge-blocked-diamond, terminated_early=false after ≥16 rollouts despite clear dominant strategy, (6) on negative-control benchmark, terminated_early=true (no dominant strategy should be detectable).",
+    "epsilon_wall_ms": 2000,
+    "epsilon_rollouts": 32,
+    "epsilon_depth": 3,
+    "N_minimum": 5,
+    "telemetry_record_kind": "replan_budget_usage",
+    "harness_path": "design/roadmap_engine/r4_bench/run_falsifier.hexa (shared with parent i5)",
+    "harness_status": "to-be-built as part of i5; this cycle adds budget-envelope assertions to the harness"
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "본 trawl 자체 — i3 budget-envelope 의 sub-axis 를 enumerate (parent ω-cycle 의 i3 가 하나의 axis 였다면 본 cycle 은 그것을 7+6 sub-axis 로 deepening)",
+    "raw_70_multi_axis_verify": "Track-A policy a1..a7 ↔ Track-B limit b1..b6 직교. 각 Tier-1 axis 가 limit anchor 1+ 를 가짐 (a3↔b1, a5↔b2, a6↔raw77+r19, a2↔l5+Hoeffding)",
+    "raw_71_falsifier": "max wall_ms ≤ 2000 ∧ max rollouts ≤ 32 ∧ max depth ≤ 3 across N≥5 benchmarks — strict envelope, not 'most of the time'. b2 real-time impossibility 가 falsifier 의 환경 의존성을 인정하지만, 평균이 아닌 max 를 요구하는 점이 raw 71 strict-bar 충족.",
+    "raw_77_audit_append_only": "events JSONL 에 새 record kind `replan_budget_usage` (sibling to `replan_attempt` from i4) 추가. ts, trigger_signature, rollouts_used, max_depth_reached, wall_ms, cpu_ms, hard_cap_hit, soft_cap_hit, escalated, terminated_early, dominant_strategy_id — append-only.",
+    "raw_88_deepening_on_tier1": "parent ω-cycle 의 Tier-1 axis i3 (40 LoC) 를 그 자체로 새 ω-cycle 의 subject 로 승격 (ω+1 → ω+2). 'Tier-1 합격선' 을 통과한 axis 만 deepening 자격 — i4/i5/i1/i2 도 추후 동일 deepening 가능 (ω+3, ω+4, ...; ε_0 미만 유지)."
+  },
+  "cross_cycle_coupling": {
+    "with": "parent r4-impl ω-cycle 2026-04-26 (axis i3 deepening)",
+    "shared_axis": "i3 → a1..a7 (positive policy unfold), i3 → b1..b6 (negative policy ceiling)",
+    "downstream_targets": "a6 telemetry feeds a4 escalation tuning (Tier-2); a3 soft-cap thresholds tunable via a6 records without re-deploy; a2 early-termination shares Hoeffding tooling with future r2 Bayesian-eta posterior (i7 in parent)",
+    "joint_omega_stop": "ω+2 ordinal stamp confirmed; subsequent deepening of i4/i5/i1/i2 → ω+3..ω+6 each, all < ω·2 < ε_0 (Gentzen safe)"
+  },
+  "omega_stop": "sub-axis-enumeration-fixpoint-with-theorem-anchor-and-strict-envelope-falsifier",
+  "omega_stop_witness": {
+    "type": "two-track-sub-axis-enumeration-fixpoint-with-falsifier",
+    "method": "Track-A 7 policy axes (a1..a7) + Track-B 6 limit axes (b1..b6). second-pass 신규 0. 각 limit axis 가 명시된 lower-bound 정리 인용. policy axis 가 limit axis 와 1:N anchor (a3↔b1, a4↔b1+b4, a5↔b2+b6, a6↔raw77, a2↔l5_parent+Hoeffding, a1↔l5_parent, a7↔b3). concrete falsifier (max wall_ms ≤ 2000 ∧ rollouts ≤ 32 ∧ depth ≤ 3 on N≥5) 가 raw 71 strict-bar 충족.",
+    "result": "FIXPOINT — Tier-1 4 policy axes (a3/a5/a6/a2 / loc 48) / Tier-2 3 (a1/a4/a7) / Tier-3 0 / REJECT 0 / Limit-axes 6 (theorem 인용 완료) / Falsifier 1 (envelope-strict on N≥5)",
+    "fixpoint_signal": "8번째 policy axis 후보 'budget_pre_warming' (cache schedule()-state across replan calls) → b1 halting cap 으로 즉시 흡수 (cache 가 무한 누적 시 termination 보장 손실); 'budget_negotiation_with_caller' → a4 escalation 의 변종으로 dedup; 'rollout_parallelization' → b2 real-time + parent r1 distributed_multi_agent 로 흡수 (r4 단일 프로세스 가정 위반). 추가 시도가 모두 기존 limit/policy 로 흡수 = enumeration 포화. 추가로 Tier-1 LoC 48/40 (+20% drift) 이 i3 의 hard cap 정합 — 더 이상 LoC 확장 없이 enumerate 종료.",
+    "ordinal_stamp_check": "ω+2 < ω·2 < ε_0 — Gentzen ordinal 인용 가능, r19 self-cert 회피 유지. 후속 i4..i2 deepening ω-cycle 도 ω+3..ω+6 으로 진행 가능."
+  },
+  "first_impl_target": {
+    "name": "a3 soft-and-hard-cap-layered + a5 wall-clock-monotonic + a6 telemetry",
+    "rationale": "a3+a5+a6 = 36 LoC = 정확히 parent i3 의 40 LoC 예산 내. a2 early-termination (12 LoC) 은 i5 benchmark suite 빌드 후 추가 (depends on benchmark category (a) DAG 존재). 안전망 우선 (cap + telemetry 부재 시 a2 의 falsifier 자체가 측정 불가).",
+    "next_after": "a2 early-termination (i5 benchmark 의 category (a) 빌드 후) → Tier-2 a1 partitioning (i2 c-tuning variance 데이터 수집 후) → Tier-2 a4 escalation (telemetry baseline N≥10 후) → a7 depth-weighting (p99 latency 관측 후 필요시)"
+  },
+  "soft_vs_hard_cap_policy_summary": {
+    "decision": "BOTH layered — soft cap as warning telemetry, hard cap as enforcement",
+    "soft_cap": {
+      "rollouts": 24,
+      "depth": 2,
+      "wall_ms": 1500,
+      "behavior": "emit telemetry warning (soft_cap_hit=true), no behavior change, MCTS continues to natural finish or hard cap"
+    },
+    "hard_cap": {
+      "rollouts": 32,
+      "depth": 3,
+      "wall_ms": 2000,
+      "behavior": "abort immediately, return best-so-far mutation (or None if no rollout produced reward > 0)"
+    },
+    "invariant": "(hard_cap_hit=true) → (soft_cap_hit=true) on the same dimension; soft thresholds tunable post-deployment via telemetry analysis; hard thresholds fixed by halting-surrogate contract (b1)"
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "trawl_id": "2026-04-26_roadmap_engine_r4_replanning_continuous_impl_omega_cycle",
+  "ts": "2026-04-26T00:30:00+09:00",
+  "ordinal_stamp": "ω+1",
+  "ordinal_rationale": "current schedule() is the fixpoint of a finite-budget Bellman backup at ordinal ω (countable iteration of the contraction). schedule_replan() wraps schedule() and operates on the limit of that fixpoint by mutating the DAG itself — exactly one transfinite step above. ω+1 < ε_0, so r19 Gödel/self-cert escape via Gentzen ordinal still holds.",
+  "rule": "raw:design-engine-impl-omega-cycle (hive raw 47 + raw 70 + raw 71 falsifier mandatory)",
+  "subject": "implementation of replan_continuous() — replaces tool/roadmap_engine.hexa L1290–L1294 exit(1) dead path with bounded MCTS over 3 graph mutations",
+  "parent_omega_cycle": "design/roadmap_engine/2026-04-25_final_form_and_limits_omega_cycle.json",
+  "parent_trawl_id": "2026-04-25_roadmap_engine_final_form_and_limits_omega_cycle",
+  "dossier": "design/roadmap_engine/r4_replanning_continuous_dossier.md",
+  "dossier_loc_estimate": 190,
+  "trigger": "user 2026-04-26 'r4 replanning-continuous implementation ω-cycle 발사 — 실코드 작성 전 axis enumerate + Tier-1 + falsifier'.",
+  "method": "two-track multi-axis ideation focused on impl-axes, not capability-axes. Track-A (final-form impl, 7 axes) = positive impl ceilings (rollout policy, c-tuning, budget envelope, atomicity, benchmark generator, weight learning, r2 cross-axis fusion). Track-B (limits, 7 axes) = negative impl ceilings (NFL, halting, NP-hardness, Brent, UCB regret, no-PAC under deterministic budget, Cantor-style strategy non-exhaustion). dedup → cluster → Tier 분류. omega_stop = enumeration fixpoint + 각 limit 의 lower-bound theorem citation + concrete falsifier (geo-mean T*_post/T*_pre < 1−ε on N≥5).",
+  "current_dead_path": {
+    "file": "tool/roadmap_engine.hexa",
+    "lines": "L1290-L1294",
+    "code": "if s.replan_needed && s.ready_set.len() == 0 && s.in_progress.len() == 0 { eprintln(\"WARN: η ≤ 0 and nothing actionable — replan required\"); exit(1) }",
+    "trigger": "η ≤ 0 AND ready=∅ AND in_progress=∅ AND todo>0"
+  },
+  "axes_surfaced": [
+    {"id":"i1","track":"final-form","name":"mcts_rollout_policy","summary":"random expansion among union of deltas from 3 strategies vs ε-greedy by previous-rollout reward vs progressive-widening (k = ceil(C·n^α), α=0.5). default = uniform random for honesty (no problem-prior); roadmap-domain prior added only if benchmark suite confirms gain. expand_random(leaf, deltas) at dossier §3 line 69 is the entry point."},
+    {"id":"i2","track":"final-form","name":"ucb1_c_tuning_per_strategy","summary":"single c=√2 (dossier line 88, textbook) vs strategy-specific c_soft, c_par, c_seed. Auer-Cesa-Bianchi-Fischer 2002 finite-time bound is monotone in c only on average; per-arm tuning gives strict regret reduction iff strategies have heterogeneous variance. concrete: log per-strategy reward variance over benchmark, set c_i = √(2·var_i / mean_var)."},
+    {"id":"i3","track":"final-form","name":"budget_envelope","summary":"rollouts ≤ 32, depth ≤ 3 (dossier §3). |search tree| ≤ |M|^3 where |M| ≤ |soft_edges| + |bottleneck_par_factor_nodes| + |seed_table|. wall-clock cap = 32 × T_schedule ≤ ~1s on current schedule() perf. add hard timer guard: monotonic clock check every rollout, abort + return None if elapsed > 2s."},
+    {"id":"i4","track":"final-form","name":"atomic_apply_snapshot_rollback","summary":"clone Roadmap into rm2 = deep_copy(rm) before apply_delta (dossier §6). disk roadmap.json is never written. on Kahn topo failure, discard rm2 and mark child dead in MCTS tree. provenance string `kind:target:rollout_id` written to events JSONL (new record kind `replan_attempt` with fields {pre_T, post_T, delta_kind, accepted, rollout_id}). dispatch-plan (L1049, L1089) extended with replan_applied: bool."},
+    {"id":"i5","track":"final-form","name":"benchmark_suite_generator","summary":"design/roadmap_engine/r4_bench/ holds N≥5 toy DAGs constructed to each trigger η≤0 with ready=∅, in_progress=∅, todo>0. categories: (a) soft-edge-blocked diamond (drop unblocks), (b) bottleneck with parallel_factor=4 hint (split shrinks T_∞ on that node), (c) blocked-by-seed where alternative seed has n_uses=3, (d) compound a+b, (e) negative control: no annotation present (replan must return None, not regress). procedural generator: gen_dag(seed, category) → (rm.json, expected_strategy, expected_T_post_upper_bound)."},
+    {"id":"i6","track":"final-form","name":"strategy_weight_learning","summary":"persist per-strategy success counter in state/r4_strategy_weights.jsonl: {ts, dag_hash, strategy, accepted, ΔT}. EWMA over last 64 attempts feeds prior into UCB1 expansion (r2 Bayesian-eta cross-feed). cold-start = uniform. cold→warm transition only after ≥16 logged outcomes per strategy (avoid premature commitment, guard against r17 NFL violation on out-of-distribution DAGs)."},
+    {"id":"i7","track":"final-form","name":"r2_bayesian_eta_integration","summary":"during MCTS rollout, schedule(rm2) currently uses deterministic η in c_exp. r2 dossier provides p(η|history) — sample η ~ posterior per rollout (Thompson). reward variance grows but expected reward unchanged; combined with i2 per-strategy c-tuning, may reduce regret. integration point: schedule_replan inner loop calls sample_eta_posterior() before schedule(rm2). NOT a pre-req for r4 v0; flagged as r4 v1."},
+    {"id":"l1","track":"limits","name":"nfl_strategy_pool_problem_specific","summary":"Wolpert-Macready 1997 NFL: averaged over all cost landscapes, no heuristic > random. The 3 strategies (soft_drop, parallel_split, seed_inject) presuppose `soft_deps`, `parallel_factor`, `n_uses` annotations — roadmap-domain priors, not algorithm priors. On adversarial DAGs lacking these, schedule_replan() must return None and fall back to exit(1). r4 narrows but does not eliminate the dead path. (dossier §5)"},
+    {"id":"l2","track":"limits","name":"halting_replan_termination","summary":"r12 halting undecidable: cannot prove schedule_replan terminates in general for arbitrary mutation operators. r4 sidesteps via finite rollout counter (≤32) + finite depth (≤3) — Lyapunov surrogate is the bounded reward in [-1,+1]. termination is by budget exhaustion, not by convergence detection. claim is finite-horizon, not asymptotic."},
+    {"id":"l3","track":"limits","name":"replan_is_np_hard","summary":"replanning = re-scheduling on a mutated DAG = a precedence-constrained makespan instance = strongly NP-hard (Garey-Johnson SS6, Ullman 1975, r11 anchor). MCTS provides no approximation guarantee for the optimal replan; it merely searches a bounded neighborhood. exact optimal replan within budget is NOT claimed. r4's claim is bounded improvement on the trigger-set, not optimality."},
+    {"id":"l4","track":"limits","name":"brent_critical_path_floor","summary":"r15 Brent 1974: T_p ≥ T_∞ for all p. parallel_split honors `parallel_factor` from node meta but cannot break the user-declared T_∞ floor on the bottleneck. mutate_parallel_split's emitted children have cost b*/k where k ≤ parallel_factor — NOT k → ∞. enforcement: parallel_split rejects k > parallel_factor at delta-construction time; reward() naturally caps at the T_∞ frontier."},
+    {"id":"l5","track":"limits","name":"ucb1_regret_bound","summary":"Auer-Cesa-Bianchi-Fischer 2002: UCB1 expected regret R_n ≤ O((log n) / Δ²) where Δ = gap between best and second-best arm reward. Δ² in denominator means small-gap regimes (similar strategies) suffer quadratically. With n=32 rollouts and 3 strategies, regret is bounded but never zero — finite suboptimality is permanent. cannot claim ε-optimal replan; only bounded-regret replan."},
+    {"id":"l6","track":"limits","name":"no_pac_under_deterministic_budget","summary":"deterministic 32-rollout budget gives no PAC (Probably Approximately Correct) guarantee. PAC requires sample size n ≥ poly(1/ε, 1/δ, |H|); fixed n=32 cannot meet arbitrary (ε, δ). exploration-exploitation tradeoff is fixed at design time, not adaptive. mitigation: log post-hoc that the empirical falsifier (geo-mean T*_post/T*_pre < 1−ε on N≥5) is met — but this is empirical, not PAC."},
+    {"id":"l7","track":"limits","name":"cantor_strategy_non_exhaustion","summary":"Cantor diagonal-style: for any finite enumeration of k strategies {soft_drop, parallel_split, seed_inject, ...}, there exists a DAG family where the optimal mutation is a (k+1)-th strategy not in the pool. r4 enumerates 3, leaves room for 4th (e.g., subgraph_substitution, edge_relaxation, lazy_expansion). strategy enumeration is provably non-exhaustive. mitigation: clean strategy registry interface so adding a 4th is mechanical, not architectural."}
+  ],
+  "axes_total_surfaced": 14,
+  "track_split": "Track-A (final-form impl) i1..i7 = 7 / Track-B (limits) l1..l7 = 7",
+  "dedupe_method": "(1) i1 rollout_policy vs i6 strategy_weight_learning: i1 is per-rollout selection (within one schedule_replan call), i6 is cross-run prior — orthogonal, keep both. (2) i2 c-tuning vs i6 weight_learning: i2 tunes UCB exploration constant, i6 tunes prior over arms — orthogonal in the bandit decomposition. (3) i3 budget_envelope vs l2 halting: i3 is the implementation of the Lyapunov surrogate l2 forces — paired (final-form ↔ limit anchor). (4) l1 NFL vs l7 Cantor: NFL is uniform-average impossibility, Cantor is constructive existence of bad instance — both bound the strategy pool but via different proofs, keep both. (5) l5 UCB regret vs l6 no-PAC: regret bound is per-step expected, PAC is high-probability finite-sample — distinct guarantees, both relevant. cluster: A=search_design (i1/i2/i3), B=engineering_atomicity (i4/i5), C=cross_axis_learning (i6/i7), D=strategy_pool_hardness (l1/l3/l7), E=algorithmic_guarantees (l2/l5/l6), F=physical_floor (l4).",
+  "axes_after_reject": 14,
+  "axes_clustered_to": 6,
+  "tier_1_immediate_impl_this_cycle": [
+    {"axis_id":"i3","slug":"budget-envelope","loc_estimate":40,"theory_anchor":"r12 halting (l2) — finite rollout counter is Lyapunov surrogate; r15 Brent (l4) — depth bound respects critical-path locality","falsifier":"if MCTS ever exceeds wall-clock 2s OR rollout counter > 32 OR depth > 3 in any benchmark run, axis is falsified. concrete: log {rollout_id, wall_ms, depth} per rollout; assert max wall_ms ≤ 2000 across N=5 benchmarks."},
+    {"axis_id":"i4","slug":"atomic-apply-snapshot-rollback","loc_estimate":30,"theory_anchor":"transactional semantics (Gray-Reuter ACID atomicity); r19 Gödel — events JSONL append-only audit trail provides external metalogic for replan decisions","falsifier":"introduce a Kahn-topo-violating delta in test; assert (a) rm2 is discarded, (b) original rm unchanged on disk, (c) events JSONL records `replan_attempt accepted=false` with provenance. if any of (a/b/c) fails, axis is falsified."},
+    {"axis_id":"i5","slug":"benchmark-suite-generator","loc_estimate":60,"theory_anchor":"raw 71 falsifier mandatory; r17 NFL (l1) — without benchmark, no claim of strategy effectiveness can be made","falsifier":"design/roadmap_engine/r4_bench/ must contain N≥5 generated DAGs covering categories {soft, parallel, seed, compound, negative-control}. geo-mean T*_post/T*_pre over the 4 positive-trigger benchmarks must be < 1 − ε (ε=0.01); negative-control must yield None (no mutation). if either condition fails, axis is falsified."},
+    {"axis_id":"i1","slug":"mcts-rollout-policy","loc_estimate":50,"theory_anchor":"l5 UCB1 regret O(log n / Δ²) — uniform random expansion is the unbiased default; r17 NFL (l1) — biased expansion only after benchmark confirms domain prior","falsifier":"with uniform random expand_random(), geo-mean T*_post/T*_pre on benchmark must already meet the ε=0.01 bar. if it does not, the strategies themselves (not the policy) are falsified — escalate to dossier §5 NFL fallback."},
+    {"axis_id":"i2","slug":"ucb1-c-tuning-per-strategy","loc_estimate":15,"theory_anchor":"Auer-Cesa-Bianchi-Fischer 2002 finite-time bound; l5 UCB regret","falsifier":"per-strategy c_i = √(2·var_i / mean_var) must produce ≤ regret of single c=√2 on benchmark suite. if per-strategy c yields strictly worse geo-mean T*_post/T*_pre than uniform c=√2, axis is falsified — revert to single c."}
+  ],
+  "tier_1_total_loc": 195,
+  "tier_1_loc_vs_dossier": "dossier estimated 190 LoC (§7 honest revision from 150). Tier-1 sum 195 LoC ≈ dossier estimate (within +5 LoC, +2.6%). drift acknowledged: i1 policy slightly over budget because uniform-random expansion still requires delta-collection plumbing.",
+  "tier_2_backlog": [
+    {"axis_id":"i6","slug":"strategy-weight-learning","blocker":"requires ≥16 logged replan_attempt outcomes per strategy → cold-start phase first; defer until r4 v0 has run on real roadmaps for at least 1 week"},
+    {"axis_id":"i7","slug":"r2-bayesian-eta-integration","blocker":"r2 ω-cycle not yet imp'd (Tier-1 of parent ω-cycle, but separate axis). cross-axis fusion only after r2 v0 ships."}
+  ],
+  "tier_3_defer_or_split": [],
+  "rejected_axes": [],
+  "limit_axes_documented": [
+    {"axis_id":"l1","label":"NFL (strategy pool problem-specific)","theorem":"Wolpert-Macready 1997","practical_impact":"strategies presuppose roadmap-domain annotations — on adversarial DAGs without them, schedule_replan() returns None","mitigation":"§5 dossier explicit narrowing claim; negative-control benchmark in i5 enforces fallback path"},
+    {"axis_id":"l2","label":"halting (replan termination undecidable)","theorem":"Turing 1936 → general dynamical system halting","practical_impact":"cannot prove schedule_replan terminates in general","mitigation":"finite rollout counter ≤32, finite depth ≤3, wall-clock guard ≤2s — Lyapunov surrogate via bounded reward"},
+    {"axis_id":"l3","label":"replan is NP-hard","theorem":"Ullman 1975 / Garey-Johnson SS6","practical_impact":"exact optimal replan within budget is impossible","mitigation":"claim is bounded improvement on trigger-set, not optimality; falsifier is geometric-mean improvement, not optimality gap"},
+    {"axis_id":"l4","label":"Brent critical path floor","theorem":"Brent 1974","practical_impact":"parallel_split cannot drive T* below T_∞ on bottleneck node","mitigation":"k ≤ parallel_factor enforced at delta-construction; reward() naturally caps at T_∞ frontier"},
+    {"axis_id":"l5","label":"UCB1 finite-time regret","theorem":"Auer-Cesa-Bianchi-Fischer 2002","practical_impact":"R_n ≤ O((log n)/Δ²) — finite suboptimality permanent","mitigation":"i2 per-strategy c-tuning to reduce constant factor; cannot eliminate"},
+    {"axis_id":"l6","label":"no PAC under deterministic budget","theorem":"Valiant 1984 PAC framework — fixed-n cannot meet arbitrary (ε,δ)","practical_impact":"no high-probability optimality guarantee","mitigation":"empirical falsifier (geo-mean on N≥5) instead of theoretical PAC bound"},
+    {"axis_id":"l7","label":"Cantor strategy non-exhaustion","theorem":"Cantor diagonal — for any finite k-enumeration, ∃ instance optimal at k+1","practical_impact":"3-strategy pool is provably non-exhaustive; ∃ DAGs requiring a 4th","mitigation":"clean strategy registry interface — adding a 4th strategy is mechanical, not architectural"}
+  ],
+  "falsifier_concrete": {
+    "statement": "r4 v0 is falsified iff, on benchmark suite of N≥5 DAGs in design/roadmap_engine/r4_bench/, the geometric mean of T*_post / T*_pre ≥ 1 − ε for ε = 0.01, OR if for ≥ 2 of the N benchmarks T*_post > T*_pre + ε·T*_pre, OR if the negative-control benchmark yields a non-None plan.",
+    "epsilon": 0.01,
+    "N_minimum": 5,
+    "metric": "geometric mean of T*_post / T*_pre",
+    "improvement_required": "strict (< 1 − ε), not just non-degradation",
+    "negative_control": "DAG without soft_deps / parallel_factor / n_uses annotations must yield schedule_replan() = None and fall back to exit(1)",
+    "harness_path": "design/roadmap_engine/r4_bench/run_falsifier.hexa",
+    "harness_status": "to-be-built as part of i5"
+  },
+  "raw_strategies_self_applied": {
+    "raw_47_strategy_exploration": "본 trawl 자체 — r4 impl 의 axis 를 enumerate",
+    "raw_70_multi_axis_verify": "Track-A impl ↔ Track-B limit 직교 7+7 axis + 6 cluster joint",
+    "raw_71_falsifier": "geo-mean T*_post/T*_pre < 1−ε on N≥5 benchmark — strict improvement requirement, not non-degradation. l1 NFL 가 i5 benchmark 의 제한 (negative-control 필수) 으로 직접 작용. l5 UCB regret 이 i2 c-tuning 의 falsifier 로 직접 작용 (per-strategy c 가 single c 보다 ≤ regret 이어야 함).",
+    "raw_77_audit_append_only": "events JSONL 에 새 record kind `replan_attempt` 추가; provenance string `kind:target:rollout_id` 가 audit trail. dispatch-plan 의 replan_applied: bool 도 append-only 로 logged."
+  },
+  "cross_cycle_coupling": {
+    "with": "parent ω-cycle 2026-04-25_final_form_and_limits_omega_cycle (r4 axis Tier-1)",
+    "shared_axis": "r4 → i1..i7 (positive impl unfold), r4 → l1..l7 (negative impl ceiling)",
+    "next_target": "r6 reverse-path-synthesis (parent ω-cycle 의 next_after) — bidirectional admissible h 가 i1 의 reward() 정밀도 향상에 직접 기여",
+    "joint_omega_stop": "ω+1 ordinal stamp 유지; r4 v1 가 r2/r6 합쳐지면 ω+2 로 승격 가능 (Gentzen ε_0 < ω+ω 미만)"
+  },
+  "omega_stop": "impl-axis-enumeration-fixpoint-with-theorem-anchor-and-concrete-falsifier",
+  "omega_stop_witness": {
+    "type": "two-track-axis-enumeration-fixpoint-with-falsifier",
+    "method": "Track-A 7 impl axes (i1..i7) + Track-B 7 limit axes (l1..l7). second-pass 신규 0. 각 limit axis 가 명시된 lower-bound 정리 인용. impl axis 가 limit axis 와 1:1 또는 N:1 anchor (i3 ↔ l2, i4 ↔ l3, i5 ↔ l1+l7, i1 ↔ l5, i2 ↔ l5, i6 ↔ l1, i7 ↔ l2). concrete falsifier (geo-mean T*_post/T*_pre < 1−ε on N≥5) 이 raw 71 mandatory 충족.",
+    "result": "FIXPOINT — Tier-1 5 impl axes (i3/i4/i5/i1/i2 / loc 195) / Tier-2 2 (i6/i7 cross-axis defer) / Tier-3 0 / REJECT 0 / Limit-axes 7 (theorem 인용 완료) / Falsifier 1 (geo-mean N≥5 strict improvement)",
+    "fixpoint_signal": "impl-axis 추가 시 limit-axis 중 하나가 cap 으로 감지됨 (예: 8번째 impl axis 후보 'distributed_replan' → l3 NP-hard + r18 comm lower 로 즉시 흡수; 'verify_optimality' → l6 no-PAC 로 흡수). 더 추가하려는 impl axis 가 모두 기존 limit 으로 흡수됨 = enumeration 포화. 추가로 dossier §7 의 honest LoC revision (150→190) 이 i3 budget envelope 의 hard cap 과 정합 — 더 이상 LoC 확장 없이 enumerate 종료.",
+    "ordinal_stamp_check": "ω+1 < ε_0 — Gentzen ordinal 인용 가능, r19 self-cert 회피 유지. r4 v1 가 r2/r6 흡수 시에도 ω+ω = ω·2 < ε_0."
+  },
+  "first_impl_target": {
+    "name": "i3 budget-envelope + i4 atomic-apply",
+    "rationale": "i3/i4 는 다른 모든 impl axis 의 안전망 (rollout counter 없으면 i1 이 무한 루프, snapshot 없으면 i5 benchmark 가 disk 오염). 둘 합쳐 70 LoC, 가장 가벼운 진입점.",
+    "next_after": "i5 benchmark suite (falsifier 가 빌드되어야 i1/i2 검증 가능) → i1 rollout policy (uniform random 부터) → i2 per-strategy c-tuning (i1 결과 기반 variance 측정 후) → i6/i7 (cold→warm 전환 후 cross-axis)"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "id": "compound_soft_parallel_seed",
+  "goal": "G",
+  "start": "S",
+  "K_target": 1.0,
+  "C_channel": 1.0,
+  "updated": "2026-04-26T01:30:00+09:00",
+  "description": "10-node DAG combining diamond + bottleneck + seed-blocked subgraph (capped at 8 by constraint). S→{S0_missing seed, BR1+BR2 diamond with soft cross, X bottleneck b=30}→V_join→G. Tests MCTS UCB1 selection vs greedy first-match across 3 simultaneously available deltas. expected_strategy=any of {soft_drop, parallel_split, seed_inject} (compound); expected T*_post ≤ 0.8·T*_pre.",
+  "nodes": [
+    {
+      "id": "S",
+      "name": "S_root",
+      "type": "build",
+      "cost": 5.0,
+      "p_success": 1.0,
+      "deps": [],
+      "soft_deps": [],
+      "status": "done",
+      "progress": 1.0
+    },
+    {
+      "id": "S0_missing",
+      "name": "S0_seed_blocked_n_uses_0",
+      "type": "seed",
+      "cost": 0.0,
+      "p_success": 1.0,
+      "n_uses": 0,
+      "deps": ["S"],
+      "soft_deps": [],
+      "status": "blocked",
+      "progress": 0.0
+    },
+    {
+      "id": "BR1",
+      "name": "BR1_diamond_left_with_soft",
+      "type": "build",
+      "cost": 12.0,
+      "p_success": 1.0,
+      "deps": ["S"],
+      "soft_deps": ["BR2", "S0_missing"],
+      "status": "todo",
+      "progress": 0.0
+    },
+    {
+      "id": "BR2",
+      "name": "BR2_diamond_right_with_soft",
+      "type": "build",
+      "cost": 12.0,
+      "p_success": 1.0,
+      "deps": ["S"],
+      "soft_deps": ["BR1"],
+      "status": "todo",
+      "progress": 0.0
+    },
+    {
+      "id": "X",
+      "name": "X_bottleneck_parallel_factor_3",
+      "type": "build",
+      "cost": 30.0,
+      "p_success": 1.0,
+      "deps": ["S"],
+      "soft_deps": ["S0_missing"],
+      "status": "todo",
+      "progress": 0.0
+    },
+    {
+      "id": "V_join",
+      "name": "V_join_verify",
+      "type": "verify",
+      "cost": 8.0,
+      "p_success": 1.0,
+      "deps": ["BR1", "BR2", "X"],
+      "soft_deps": ["S0_missing"],
+      "status": "todo",
+      "progress": 0.0
+    },
+    {
+      "id": "G",
+      "name": "G_goal",
+      "type": "goal",
+      "cost": 4.0,
+      "p_success": 1.0,
+      "deps": ["V_join"],
+      "soft_deps": [],
+      "status": "todo",
+      "progress": 0.0
+    }
+  ]
+}
