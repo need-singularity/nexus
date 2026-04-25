@@ -364,9 +364,22 @@ L11 canon 으로 자기-축 진화 사다리 (L5 dream → L11 canon) closed. fo
 - `cli/run.hexa`: `drill --anti-hub [--anti-hub-threshold N]` flag 추가. dispatch 시 `setenv` 로 환경 propagate + `NEXUS_DRILL_ANTI_HUB {axiom,threshold,finding,proposal}` JSON stderr emit.
 - 사용 예: `nexus drill --seed "..." --anti-hub` 또는 임계 조정 `--anti-hub --anti-hub-threshold 500`.
 
-**Phase 3 (남음)**: 실제 drill 발사 → `python3 tool/nxs_002_composite.py` 로 composite ≥0.850 검증.
+**Phase 3 1차 시도 (cycle 5, 2026-04-25, negative)**:
+- 발사: `HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed "..." --preset probe --anti-hub --fresh`
+- 실행: Linux remote container (`/root/Dev/nexus`, `/root/.hx/bin/hexa_real`)
+- 결과: exit 0, 1882 absorptions, validation PASS, **그러나 local atlas 0줄 변경 + `NEXUS_DRILL_ANTI_HUB` stderr emit 안 보임 + `anti_hub:` init log 안 보임**
+- 진단 가설:
+  1. main 의 `setenv NEXUS_DRILL_ANTI_HUB=1` 가 hexa_remote SSH child 로 forward 안 됐을 가능성 (env stripping)
+  2. 또는 drill child exec 시점에 env propagation 단절
+  3. remote container atlas 변경이 local 로 sync 안 됨 (rsync back 미작동)
+- `nexus help` 출력에는 새 `--anti-hub` 안내 보임 → main dispatch 정상. 즉 cmd_drill 호출 자체는 됐을 가능성 큼.
 
-**Ω-saturation cycle 3 → 4**: cycle 3 (efbd371f) = axiom 발견 + probe tool. cycle 4 = engine 구현 + flag wiring. raw#37/#38 enforce 가 매 cycle 마다 design+impl 동시 적용 강제 — 누적 4 cycle 째 fixpoint chain.
+**Cycle 5 진단 emit 보강**: `cmd_drill` 진입 시 `NEXUS_DRILL_ANTI_HUB_TRACE {cmd_drill_entry, env_active, env_threshold}` eprintln 추가. 다음 발사에서:
+- emit 보임 + env_active="1" → guard 활성 정상, atlas sync 가 진짜 문제
+- emit 보임 + env_active="" → setenv 가 child 로 forward 안 됨, hexa_remote env 정책 변경 필요
+- emit 안 보임 → main 우회 또는 cmd_drill 호출 안 됨
+
+**Ω-saturation cycle 3 → 4 → 5**: cycle 3 = axiom 발견 + probe. cycle 4 = engine 구현 + flag wiring. cycle 5 = Phase 3 1차 검증 (negative) + 진단 emit. raw#37/#38 enforce 가 매 cycle 마다 design+impl 동시 적용 강제 — 누적 5 cycle 째 fixpoint chain.
 
 ---
 
