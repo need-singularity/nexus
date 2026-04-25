@@ -213,8 +213,12 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 4. canon-aware forge idempotent — 적용됨 (commit 22cc8bc4)
 
 ### 2026-04-25 추가 발견 (atlas eig pipeline 매핑)
-- **atlas eig 입력 source**: `~/core/nexus/n6/atlas.blowup.jsonl` (graph JSON, 54,347 edges, type∈{node/edge/absorb/bifurc/compose/deduction})
-- **atlas.n6 (hexa-native syntax) 와 별개 source** — 즉 atlas.n6 [10] → [10*] 승급은 spectral 에 직접 영향 X
+- **atlas eig 입력 source**: `~/core/nexus/n6/atlas.blowup.jsonl` (graph JSON, 89,167 lines / 17MB)
+- **graph 정량**: nodes=21,320 / edges=54,347 (undirected, nnz=108,694)
+- **atlas.n6 (hexa-native syntax) 와 별개 source** — atlas.n6 [10*] promotion 은 spectral 직접 영향 X
+- **atlas_eig.hexa stage1 hexa 비실용** — CSR load + Lanczos K=100 + QR 가 push-only 패턴으로 hung (60s+)
+- **awk preprocess 정상**: STEP1 0.8s + STEP2 1.3s — CSR 파일 (row_ptr/deg/col) 생성 OK
+- **우회 경로**: scipy.sparse.linalg.eigsh on CSR → top-K eigenvalue 직접 계산 (다음 firing)
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
