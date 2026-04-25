@@ -96,6 +96,18 @@ fi
 PRECOMMIT_STAGED=$(echo "$PRECOMMIT_OUT" | grep -oE "added=[0-9]+" | cut -d= -f2)
 [ -z "$PRECOMMIT_STAGED" ] && PRECOMMIT_STAGED=0
 
+# ─── 6. cross-shard collision (dedup audit followup) ─────────
+echo ""
+echo "▶ 6. cross-shard collision watchdog"
+COLLISION_OUT=$(bash "$TOOL_DIR/atlas_cross_shard_collision.sh" 2>&1 || true)
+if [ "$MODE" = "full" ]; then echo "$COLLISION_OUT"; else
+    echo "$COLLISION_OUT" | grep -E "HARMLESS_DUP|CONFLICT|__ATLAS_CROSS_SHARD_COLLISION__" | head -4
+fi
+COLLISION_DUP=$(echo "$COLLISION_OUT" | grep -oE "dup=[0-9]+" | head -1 | cut -d= -f2)
+[ -z "$COLLISION_DUP" ] && COLLISION_DUP=0
+COLLISION_CONF=$(echo "$COLLISION_OUT" | grep -oE "conflict=[0-9]+" | head -1 | cut -d= -f2)
+[ -z "$COLLISION_CONF" ] && COLLISION_CONF=0
+
 # ─── aggregate sentinel ──────────────────────────────────────
 echo ""
 echo "═════════════════════════════════════════════════════════════"
@@ -107,9 +119,11 @@ printf "  4-repo Honesty:    %s REPO_INVARIANT\n" "$DASHBOARD_HONESTY"
 printf "  4-repo cum facts:  %s\n" "$DASHBOARD_FACTS"
 printf "  recent commits:    %s atlas-touching, +%s additions\n" "$DIFF_COMMITS" "$DIFF_ADD"
 printf "  staged atlas:      %s entries pending\n" "$PRECOMMIT_STAGED"
+printf "  cross-shard:       %s HARMLESS_DUP, %s CONFLICT\n" "$COLLISION_DUP" "$COLLISION_CONF"
 echo "═════════════════════════════════════════════════════════════"
 
 EXIT_CODE=0
 [ "$RUNTIME_HEALTHY" = "0" ] && EXIT_CODE=2
-echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED"
+[ "$COLLISION_CONF" -gt 0 ] && EXIT_CODE=2
+echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED collision_dup=$COLLISION_DUP collision_conflict=$COLLISION_CONF"
 exit $EXIT_CODE
