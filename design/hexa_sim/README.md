@@ -237,6 +237,29 @@ nexus hexa-sim doc                                         # 본 README 출력
 **CLI integration:**
 - ✅ nexus hexa-sim {verify|falsifier|ci|atlas-ingest|omega-ingest|supercycle|bridge|doc}
 
+### 2026-04-26 cross-repo historical absorption (4-repo 병렬)
+
+추가 4 atlas append shards (모두 nexus n6/ 에 snapshot — anima/n6 + n6-architecture/atlas 는 자체 SSOT 보유, hexa-lang 은 SSOT 부재 → nexus 측 단일 origin):
+
+| repo | shard | facts | grade highlights |
+|------|-------|-------|------------------|
+| **anima** | `atlas.append.anima-historical-from-nexus-2026-04-26.n6` | 75 facts / 434 lines | `[11!]` x4 — learning-free paradigm (raw 73 origin), CPGD closed-form, L_IX raw#30, P_S=V_PCA_top16 |
+| **nexus** | `atlas.append.nexus-historical-absorption-2026-04-26.n6` | 95 facts / 456 lines | `[11*]` x29 — MASTER σ·φ=n·τ 4-method, Mersenne R closed form, cross-bridge resonance @M, ER giant+singletons universal |
+| **hexa-lang** | `atlas.append.hexa-lang-historical-from-nexus-2026-04-26.n6` | 88 facts / 419 lines | 80 raw rules (`raw_<N>_<slug>`) atlas 1:1 매핑, canonical `.raw` SSOT 가 `~/core/hive/.raw` (228KB) |
+| **n6-architecture** | `atlas.append.n6-architecture-historical-from-nexus-2026-04-26.n6` | 51 entries / 524 lines | `[11*REPO_INVARIANT]` x8 + `[10*PASS_LITERATURE]` x19 — BT-541~547 millennium prizes (RH Lead-B SLE_6×GUE / NS R5+axis-B / BSD CRT+28-stratum / Perelman composite) |
+
+**4-repo 합계: 309 historical facts** (atlas DSL v1+v2, 9 type 모두 활성 @P/@C/@F/@L/@R/@S/@X/@M/@T).
+
+**Honesty triad cross-repo 재확인 (Phase 3 supercycle 재실행 시):**
+- nexus 5/5 REPO_INVARIANT
+- n6-architecture 5/5 REPO_INVARIANT (`scripts/quality/honesty_triad_linter.py` SSOT 확인)
+- anima 4/5 PARTIAL (precondition-e: CLAUDE.md/AGENT.md/.claude/agents/ 부재 — dropfile spec emit)
+- hexa-lang 5/5 (4-gate audit G1/G3/G4 PASS, G2 PARTIAL 35/80 raw sample 만)
+
+**dedup Tier-1 patch 상태:**
+- 2026-04-26 dedup_strategy_evolution_omega_cycle 의 4 axes (d1+d2+d5+d15) 구현 시도 — agent 가 hexa_sim_atlas_ingest.hexa 만 patch + selftest SIGKILL → revert + defer
+- next session: hexa runtime 회복 후 prompt 보완 (line cap + 양 도구 동시 patch)
+
 ### Phase 5+ 후보 (별도 ω-cycle 발사 대기)
 
 **lens-runner integration**: lens_atlas_orchestrator 의 base=0.5 placeholder → 실 lens score 캐치 (lens 실행 후 score= grep). 현 mean_delta -0.1177 은 base 부재 인공물.
