@@ -829,6 +829,28 @@ case "$CWD_LC" in
         --exclude=build/
     )
     ;;
+  "$HOME_LC/core/hive"|"$HOME_LC/core/hive"/*)
+    # 2026-04-25: hive cwd mapping — raw 40/42 enforcement. hive 의 gate/lint/tool
+    # 호출이 external host 에서 실행돼야 ~/.hx/bin/hexa resolver 가 cwd_unmappable
+    # fallback (mac local-flock) 을 회피. SIGKILL 5건 jetsam 사고 (2026-04-25)
+    # 직접 원인 — gate hexa_v2 가 mac 에서 누적 RSS 폭주.
+    for candidate in "$HOME/core/hive"; do
+        [ -d "$candidate" ] && LOCAL_ROOT="$candidate" && break
+    done
+    REMOTE_ROOT='$HOME/core/hive'
+    SYNC_EXCLUDES=(
+        --exclude=.git/
+        --exclude='*.log'
+        --exclude=.DS_Store
+        --exclude=__pycache__/
+        --exclude=node_modules/
+        --exclude=exports/
+        --exclude=build/
+        --exclude=.hexa-cache/
+        --exclude=.claude/
+        --exclude=.growth/
+    )
+    ;;
   *)
     # 2026-04-25: unmapped cwd fallback for self-contained binaries.
     # heavy-compute 가 ~ 또는 repo 밖에서 호출돼도 drill/smash/free 는 실행돼야 함.
@@ -996,6 +1018,74 @@ _run_ssh_once() {
     ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
         -o ControlMaster=no -o ControlPath=none "$_host" "$REMOTE_CMD"
 }
+
+# raw 41 (external-resource-roaming) auto-reconnect retry.
+# 2026-04-25: ssh failures with network-class root cause (ConnectTimeout, Network
+# unreachable, No route to host, transient TCP reset) are silently fatal in the
+# parallel-dispatch path — they immediately fall through to the next host or
+# trigger exit 64. raw 41 demands network-blip resilience: retry the *same* host
+# with exponential backoff before declaring it unreachable.
+#
+# Heuristic: only retry on stderr patterns that match transient network faults.
+# SSH success (rc=0), remote-side rc!=0, or auth failures are NOT retried (they
+# would not improve and waste time / mask real errors).
+#
+# Backoff: 1s → 2s → 4s, max 3 retries. Total worst case ≈ 7s + ssh setup.
+# Disable: HEXA_REMOTE_NO_RECONNECT=1 (debug, or when caller has its own retry).
+# Tunable: HEXA_REMOTE_RECONNECT_MAX=N (default 3).
+_run_ssh_with_reconnect() {
+    local _host="$1"
+    local _max="${HEXA_REMOTE_RECONNECT_MAX:-3}"
+    local _attempt=0 _backoff=1 _rc _err_tmp
+
+    if [ "${HEXA_REMOTE_NO_RECONNECT:-0}" = "1" ]; then
+        _run_ssh_once "$_host"
+        return $?
+    fi
+
+    while :; do
+        _err_tmp="$(mktemp -t hexa_remote_recon.XXXXXX 2>/dev/null || echo "/tmp/hexa_remote_recon.$$.$_attempt")"
+        # tee preserves stderr to caller and captures for pattern match.
+        ssh -T -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ExitOnForwardFailure=yes \
+            -o ControlMaster=no -o ControlPath=none "$_host" "$REMOTE_CMD" \
+            2> >(tee -- "$_err_tmp" >&2)
+        _rc=$?
+        wait 2>/dev/null || true
+
+        # Success or already exhausted retries → done.
+        if [ "$_rc" = "0" ] || [ "$_attempt" -ge "$_max" ]; then
+            rm -f "$_err_tmp" 2>/dev/null || true
+            return "$_rc"
+        fi
+
+        # Inspect stderr for network-class signatures. Anything else (auth,
+        # remote rc!=0, SIGKILL on remote) is NOT a reconnect candidate.
+        local _is_net=0 _err_tail
+        _err_tail="$(tail -n 5 "$_err_tmp" 2>/dev/null)"
+        case "$_err_tail" in
+            *"Connection timed out"*|*"Operation timed out"*|*"timed out"*) _is_net=1 ;;
+            *"Network is unreachable"*|*"No route to host"*) _is_net=1 ;;
+            *"Connection reset by peer"*|*"Connection closed by"*) _is_net=1 ;;
+            *"kex_exchange_identification"*|*"banner exchange"*) _is_net=1 ;;
+            *"Could not resolve hostname"*|*"Name or service not known"*) _is_net=1 ;;
+        esac
+
+        # ssh exit 255 = ssh-side failure (transport/protocol); often network.
+        # Combined with stderr signature gives high confidence.
+        if [ "$_is_net" = "0" ] && [ "$_rc" != "255" ]; then
+            rm -f "$_err_tmp" 2>/dev/null || true
+            return "$_rc"
+        fi
+
+        _attempt=$((_attempt + 1))
+        local _err_short
+        _err_short="$(printf '%s' "$_err_tail" | tr '\n' '|' | cut -c 1-120)"
+        echo "hexa_remote: auto-reconnect retry $_attempt/$_max after rc=$_rc (${_err_short}) — sleeping ${_backoff}s" >&2
+        rm -f "$_err_tmp" 2>/dev/null || true
+        sleep "$_backoff"
+        _backoff=$((_backoff * 2))
+    done
+}
 _next_host_in_chain() {
     local _cur="$1"
     local _seen=0 _h
@@ -1009,7 +1099,7 @@ _next_host_in_chain() {
 }
 
 echo "hexa_remote: $HOST 에서 원격 실행 중" >&2
-_run_ssh_once "$HOST"
+_run_ssh_with_reconnect "$HOST"
 ssh_rc=$?
 if [ $ssh_rc -eq 137 ] || [ $ssh_rc -eq 143 ]; then
     _uname="$(uname -s 2>/dev/null)"
@@ -1024,7 +1114,7 @@ if [ $ssh_rc -eq 137 ] || [ $ssh_rc -eq 143 ]; then
         if _probe_host "$_retry_host"; then
             HOST="$_retry_host"
             echo "hexa_remote: retry host=$HOST" >&2
-            _run_ssh_once "$HOST"
+            _run_ssh_with_reconnect "$HOST"
             ssh_rc=$?
         else
             echo "hexa_remote: retry 후보 $_retry_host unreachable — 재시도 skip" >&2
