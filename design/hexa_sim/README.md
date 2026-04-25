@@ -174,11 +174,14 @@ COUNTER    | 선언된 반례 (e, h, π) 가 우연히 안 들어맞음
 ### nexus CLI 진입점
 
 ```
-nexus hexa-sim verify [--axis NAME] [--json]   # 10-axis VERIFY
-nexus hexa-sim falsifier [--id F#] [--json]    # 10 falsifier 평가
-nexus hexa-sim ci                               # 8 도구 일괄 selftest
-nexus hexa-sim bridge {codata|oeis|gw|horizons|arxiv|cmb|nanograv|simbad}
-nexus hexa-sim doc                              # 본 README 출력
+nexus hexa-sim verify [--axis NAME] [--json]              # 10-axis VERIFY
+nexus hexa-sim falsifier [--id F#] [--json]               # 12 falsifier 평가
+nexus hexa-sim ci                                          # 19 도구 일괄 selftest
+nexus hexa-sim atlas-ingest [--absorb] [--diff]           # Phase 1 (37 facts hexa_sim shard)
+nexus hexa-sim omega-ingest [--repo-only NAME]            # Phase 2 (6 cycles 302 facts auto-glob)
+nexus hexa-sim supercycle [--honesty-only]                # Phase 3 (3-repo + Honesty triad)
+nexus hexa-sim bridge {16종 — codata/oeis/gw/horizons/arxiv/cmb/nanograv/simbad/icecube/nist_atomic/wikipedia/openalex/gaia/lhc/pubchem/uniprot}
+nexus hexa-sim doc                                         # 본 README 출력
 ```
 
 ### 핵심 발견 (2026-04-25 ω-cycle 발사 산출)
@@ -208,27 +211,59 @@ nexus hexa-sim doc                              # 본 README 출력
 
 ## 다음 단계 (open / deferred)
 
-### 완료 (2026-04-25 ω-cycle iterations)
-- ✅ Tier-1 5 bridges (codata/oeis/gw/horizons/arxiv) + CLI dispatch
-- ✅ Tier-2 cycle 1: cmb/nanograv/simbad + CI runner + F9/F10 falsifiers
-- ✅ ANU QRNG stub fix (audit gap #1) — hexa-native parser, R37/AN13/L3-PY 충족
-- ✅ vqe_h2_demo Qiskit→hexa native (audit gap #2)
-- ✅ CI/test pipeline (audit gap #3) — hexa_sim_ci.hexa
-- ✅ CLI dispatch full integration (`nexus hexa-sim {verify|falsifier|ci|bridge|doc}`)
+### 완료 (2026-04-25~26 ω-cycle iterations 전체)
 
-### Tier-2 backlog 잔여 (8 axes from bridge_tool_jackpot ω-cycle)
-- **inflight (2026-04-25 cycle 2)**: b8 icecube_neutrino, b10 nist_atomic
-- **next batch**: b7 lhc_opendata, b11 pubchem, b12 uniprot, b15 wikipedia_summary, b20 gaia, b26 openalex
+**Bridge tools 16/16 (Tier-1 + Tier-2 100%):**
+- ✅ Tier-1 (5): codata, oeis_live, gw_observatory, horizons, arxiv_realtime
+- ✅ Tier-2 (11): cmb, nanograv, simbad, icecube, nist_atomic, wikipedia, openalex, gaia, lhc_opendata, pubchem, uniprot
 
-### Tier-1 잔여
-- axis_2 (raw 45 cross-repo blocker autofire) — DEFERRED, hive→nexus dispatch open question
+**Atlas ingest 4-Phase + sub-cycles (전체 완료):**
+- ✅ **Phase 1**: hexa_sim_atlas_ingest.hexa (491 LoC, 7 Tier-1 + 3 Tier-2 partial)
+- ✅ **Phase 1.5**: BT-544 R5 + axis-B + Cross-BT 6/6 + Honesty triad facts (+11 entries, total 37)
+- ✅ **Phase 2**: omega_cycle_atlas_ingest.hexa (858 LoC, 5 evolution axes, 6 cycles 302 facts auto-glob)
+- ✅ **Phase 3**: atlas_omega_supercycle.hexa (745 LoC, 3-repo cross-aggregator + Honesty triad 5/5 nexus, 5/5 n6, 4/5 anima)
+- ✅ **Phase 4a**: atlas_dsl_v2_serializer.hexa (966 LoC, v3 compound + v8 JSON, byte-eq fixpoint)
+- ✅ **Phase 4b**: lens_atlas_orchestrator.hexa (475 LoC, l1+l4+l8, 5-pilot bench mean_delta=-0.1177)
+- ✅ **Phase 4c**: design/atlas_v2_grammar.md (504 LoC, 9 sections + EBNF + 5 falsifier conditions)
 
-### Tier-3 / REJECT
-- Tier-3: 1588-lens score gate (시범 5-10 lens 만 우선)
-- REJECT: Bayesian soft-retire (raw 71 + raw 53 위배), huggingface_dataset (heavy dep), cgroup_v2/sandbox_exec (이미 구현), anthropic_api (redundant + 보안)
+**Audit gaps closed:**
+- ✅ Gap #1 ANU QRNG stub fix — hexa-native parser, R37/AN13/L3-PY 충족
+- ✅ Gap #2 vqe_h2_demo.py → hexa native (Qiskit 의존 제거)
+- ✅ Gap #3 CI/test pipeline — hexa_sim_ci.hexa (19/19 PASS)
 
-### Cross-repo follow-ups (별도 ω-cycle 후속)
+**Falsifier registry 12/12 CLEAN:**
+- F1-F5 self-seal + F6-F8 nxs-002 cycle 10 + F9 TP-8 framework limit + F10 cross-bridge resonance + F11 Hubble tension + F12 3-source corroboration
+
+**CLI integration:**
+- ✅ nexus hexa-sim {verify|falsifier|ci|atlas-ingest|omega-ingest|supercycle|bridge|doc}
+
+### Phase 5+ 후보 (별도 ω-cycle 발사 대기)
+
+**lens-runner integration**: lens_atlas_orchestrator 의 base=0.5 placeholder → 실 lens score 캐치 (lens 실행 후 score= grep). 현 mean_delta -0.1177 은 base 부재 인공물.
+
+**atlas v2 absorption**: Phase 4a serializer 로 v2 entry shard emit + v2 reader patch (atlas_guard) 후 main 통합. 현 v1 reader 가 @M/@T/compound grade reject 으로 별도 shard 분리.
+
+**1588 lens scaling**: Phase 4b 의 l3 central orchestrator 확장 (5 → 1588). domain-keyword metadata 자동 추출 또는 lens 첫줄 `// 도메인:` 파서.
+
+**falsifier auto-spawn (Phase 4 axis l_unused)**: 새 atlas fact 등록 시 대응 F# falsifier 자동 생성.
+
+**Cross-repo @X auto-detect**: Phase 3 supercycle 이 기본 3 crossings 만. 더 정밀한 @X auto-emit (cross-repo identical fact detection).
+
+**Score formula tuning**: l1 의 atlas_corroboration_factor — 현 normalized 1.0 + 0.1 × ratio 가 거의 1.0 plateau. logarithmic scale 또는 bridge-source weighted 등.
+
+### Cross-repo follow-ups
 - hive raw 71 lint Tier 3 stub fill (Phase B target 2026-05-09)
 - paper-DOI hook (raw 76 선행 필요)
-- cron full-scan (axis_2 와 cadence 중복 평가)
-- TP-N binding (TP-1/4/7/8 부분 mapping 가능, TP-10 미수행)
+- TP-N binding (TP-1/4/7/8 부분, TP-10 미수행)
+- hive raw 87+ 후보: external-api-bridge meta-rule (16-bridge pattern abstraction)
+- anima precondition-e fix (4/5 → 5/5 REPO_INVARIANT 도달)
+
+### REJECT (이번 cycle 들에서 명시적 폐기)
+- Bayesian soft-retire (raw 71 + 53 위배)
+- huggingface_dataset bridge (heavy dep)
+- cgroup_v2 / sandbox_exec bridge (이미 구현)
+- anthropic_api bridge (redundant + 보안)
+- atlas-ingest absorption default-on (안전상 explicit 만)
+- conflict resolution last-write-wins (data loss 위험)
+- @M/@T eager full-protobuf serialization (canonical JSON 으로 충분)
+- l2 lens shim per-file (1588 lens 일괄 refactor, l3 orchestrator 가 더 합리적)
