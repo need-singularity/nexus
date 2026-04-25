@@ -1,0 +1,657 @@
+#!hexa strict
+// tool/pubchem_bridge.hexa — PubChem REST PUG ↔ HEXA-SIM bridge: molecular formula + MW + SMILES + n=6 carbon-ring anchor.
+//
+// @tool(slug="pubchem_bridge", desc="PubChem PUG REST live fetch (MolecularFormula, MolecularWeight, SMILES) + 6-compound reference table; benzene/hexane/glucose/graphene n=6 carbon anchor binding to composition_balance / chemistry lenses")
+// @usage(hexa run tool/pubchem_bridge.hexa [--selftest] [--json] [--no-fetch] [--compound <name>])
+// @exit_codes(0=PASS, 1=usage/io error, 2=parse failure / sanity sentinel fail)
+// @sentinel(__PUBCHEM_BRIDGE__ PASS|FAIL compound=<NAME> formula=<F> mw=<MW> n6_carbon_anchor=<bool>)
+// @origin(hive raw 70 design-multi-axis-verify-grid + raw 73 structural-admissibility — molecular-scale empirical anchor for chemistry axis)
+// @abstraction(hive raw 77 cross-repo audit-ledger — sister of nist_atomic_bridge; nist=Z=1..6 atomic, this=C-rich molecular)
+// @paradigm(structural-admissibility — string parse, no floats; MW kept as raw string; carbon count via formula tokenize)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoint:
+//   https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/<NAME>/property/MolecularFormula,MolecularWeight,CanonicalSMILES,InChI/JSON
+// Response (live, 2026-04):
+//   {"PropertyTable":{"Properties":[{"CID":962,"MolecularFormula":"H2O","MolecularWeight":"18.015","ConnectivitySMILES":"O"}]}}
+//   NB: PubChem migrated CanonicalSMILES → ConnectivitySMILES in 2025; we accept both keys.
+//
+// Hardcoded fallback (n=6 framework reference set):
+//   water     CID  962  H2O      MW 18.015   SMILES O                    (anchor: solvent baseline)
+//   methane   CID  297  CH4      MW 16.043   SMILES C                    (sp3 tetrahedral, 1 carbon)
+//   benzene   CID  241  C6H6     MW 78.114   SMILES C1=CC=CC=C1          (n=6 aromatic ring) ← n6 anchor
+//   glucose   CID 5793  C6H12O6  MW 180.156  SMILES C(C1C(C(C(C(O1)O)O)O)O)O   (n=6 sugar ring) ← n6 anchor
+//   hexane    CID 8058  C6H14    MW 86.178   SMILES CCCCCC               (n=6 alkane chain) ← n6 anchor
+//   graphene  CID -    C        MW 12.011   SMILES c1ccc2ccccc2c1       (sp2 hexagonal lattice — periodic) ← n6 anchor
+//
+// n=6 carbon anchor (the hexa-sim Y9 binding):
+//   Carbon Z=6 (NIST atomic) ↔ 4× n=6 molecular references (benzene, glucose, hexane, graphene).
+//   The hexagonal ring motif is THE most prevalent ring system in organic chemistry —
+//   structurally encodes the n6 architecture at the molecular scale.
+//
+// Bound axes (nexus lens / axis):
+//   - lenses/accel_composition_balance.hexa  ← formula stoichiometry feeds composition balance
+//   - lenses/frontier_analytical_chemistry.hexa ← MW / formula are analytical-chemistry primitives
+//   - lenses/battery_chemistry_lens.hexa    ← reference compounds (graphene electrode!) feed battery chem
+//   - axis_carbon_count                     ← ties to nist_atomic_bridge Z=6 row
+
+// ─── reference table (6 compounds) ───
+
+fn REF_NAMES() -> array { return ["water", "methane", "benzene", "glucose", "hexane", "graphene"] }
+fn REF_CIDS() -> array  { return [962, 297, 241, 5793, 8058, -1] }   // graphene has no single PubChem CID (periodic)
+fn REF_FORMULAS() -> array { return ["H2O", "CH4", "C6H6", "C6H12O6", "C6H14", "C"] }
+// MW kept as integer in milli-grams-per-mole (×1000) for scaled-int arithmetic
+fn REF_MW_MILLI() -> array { return [18015, 16043, 78114, 180156, 86178, 12011] }
+fn REF_SMILES() -> array { return ["O", "C", "C1=CC=CC=C1", "C(C1C(C(C(C(O1)O)O)O)O)O", "CCCCCC", "c1ccc2ccccc2c1"] }
+// per-compound carbon count (parsed from formula): water=0, methane=1, benzene=6, glucose=6, hexane=6, graphene=1 (unit cell)
+// graphene's "1" is the formula unit — but it tiles into hexagonal n=6 rings, so we mark it via separate n6_anchor flag
+fn REF_CARBON_COUNT() -> array { return [0, 1, 6, 6, 6, 1] }
+fn REF_N6_ANCHOR() -> array { return [false, false, true, true, true, true] }   // 4 of 6 → C6 carbon-ring anchor
+
+fn N6_ANCHOR_COUNT() -> i64 { return 4 }     // expected n6_anchor=true entries
+fn REF_TABLE_SIZE() -> i64 { return 6 }      // table size (n=6 framework, self-referential)
+
+// ─── string helpers ───
+
+fn _abs_i(x: i64) -> i64 { if x < 0 { return 0 - x } return x }
+
+fn _is_digit(c: string) -> bool {
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn _is_upper(c: string) -> bool {
+    return c == "A" || c == "B" || c == "C" || c == "D" || c == "E" || c == "F" || c == "G" || c == "H" || c == "I" || c == "J" || c == "K" || c == "L" || c == "M" || c == "N" || c == "O" || c == "P" || c == "Q" || c == "R" || c == "S" || c == "T" || c == "U" || c == "V" || c == "W" || c == "X" || c == "Y" || c == "Z"
+}
+
+fn _is_lower(c: string) -> bool {
+    return c == "a" || c == "b" || c == "c" || c == "d" || c == "e" || c == "f" || c == "g" || c == "h" || c == "i" || c == "j" || c == "k" || c == "l" || c == "m" || c == "n" || c == "o" || c == "p" || c == "q" || c == "r" || c == "s" || c == "t" || c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z"
+}
+
+fn _str_to_i(s: string) -> i64 {
+    if len(s) == 0 { return 0 }
+    let mut neg = false
+    let mut i = 0
+    if s.substring(0, 1) == "-" { neg = true; i = 1 }
+    let mut acc: i64 = 0
+    while i < len(s) {
+        let c = s.substring(i, i + 1)
+        if c == "0" { acc = acc * 10 }
+        else if c == "1" { acc = acc * 10 + 1 }
+        else if c == "2" { acc = acc * 10 + 2 }
+        else if c == "3" { acc = acc * 10 + 3 }
+        else if c == "4" { acc = acc * 10 + 4 }
+        else if c == "5" { acc = acc * 10 + 5 }
+        else if c == "6" { acc = acc * 10 + 6 }
+        else if c == "7" { acc = acc * 10 + 7 }
+        else if c == "8" { acc = acc * 10 + 8 }
+        else if c == "9" { acc = acc * 10 + 9 }
+        i = i + 1
+    }
+    if neg { return 0 - acc }
+    return acc
+}
+
+// MW string "18.015" → milli units (×1000) = 18015. Truncate or pad to 3 frac digits.
+fn _mw_str_to_milli(s: string) -> i64 {
+    if len(s) == 0 { return 0 }
+    let dot = s.index_of(".")
+    if dot < 0 {
+        return _str_to_i(s) * 1000
+    }
+    let int_part = s.substring(0, dot)
+    let frac_raw = s.substring(dot + 1, len(s))
+    let mut clean_frac = ""
+    let mut i = 0
+    while i < len(frac_raw) {
+        let c = frac_raw.substring(i, i + 1)
+        if _is_digit(c) { clean_frac = clean_frac + c }
+        else { i = len(frac_raw) }
+        i = i + 1
+    }
+    if len(clean_frac) > 3 { clean_frac = clean_frac.substring(0, 3) }
+    while len(clean_frac) < 3 { clean_frac = clean_frac + "0" }
+    return _str_to_i(int_part) * 1000 + _str_to_i(clean_frac)
+}
+
+fn _fmt_mw_milli(milli: i64) -> string {
+    let v = _abs_i(milli)
+    let int_part = v / 1000
+    let frac_part = v % 1000
+    let mut frac_str = to_string(frac_part)
+    while len(frac_str) < 3 { frac_str = "0" + frac_str }
+    let core = to_string(int_part) + "." + frac_str
+    if milli < 0 { return "-" + core }
+    return core
+}
+
+// ─── carbon counter (formula tokenizer) ───
+//
+// Parse a chemical formula like "C6H12O6" or "CH4" or "H2O" → return count of C atoms.
+// Tokens are: Element symbol (1 uppercase + optional 1 lowercase) followed by optional digit run (count, default 1).
+// Parens with multiplier (e.g. "Fe(CN)6") are handled in two passes:
+//   pass A: tokenize top-level letters (counts each C as count_inside)
+//   pass B: detect "(...)k" groups and multiply C-count inside by k
+// We only ever want the C count.
+//
+// Implementation strategy: walk char-by-char with explicit "stop_digit" flag.
+fn _count_c_top(formula: string) -> i64 {
+    let n = len(formula)
+    let mut i = 0
+    let mut total: i64 = 0
+    while i < n {
+        let c = formula.substring(i, i + 1)
+        if _is_upper(c) {
+            let mut sym = c
+            let mut j = i + 1
+            if j < n {
+                let nx = formula.substring(j, j + 1)
+                if _is_lower(nx) { sym = sym + nx; j = j + 1 }
+            }
+            // walk digit run
+            let mut num_str = ""
+            let mut stop = false
+            while j < n && !stop {
+                let d = formula.substring(j, j + 1)
+                if _is_digit(d) { num_str = num_str + d; j = j + 1 }
+                else { stop = true }
+            }
+            let mut count: i64 = 1
+            if len(num_str) > 0 { count = _str_to_i(num_str) }
+            if sym == "C" { total = total + count }
+            i = j
+        } else {
+            i = i + 1
+        }
+    }
+    return total
+}
+
+// Add contributions from parenthesized groups: for each "(SUB)k" multiply count_carbons(SUB) by k.
+// Note: _count_c_top counts top-level Cs (including those inside parens, since it ignores parens chars).
+// To handle "Fe(CN)6", the "C" inside parens already counts as 1 in _count_c_top, but we want it to count as 6.
+// So the correction is: for each "(SUB)k" with k>1, add (k-1) * count_inside_SUB to the total.
+fn count_carbons(formula: string) -> i64 {
+    let mut total = _count_c_top(formula)
+    let n = len(formula)
+    let mut i = 0
+    while i < n {
+        let c = formula.substring(i, i + 1)
+        if c == "(" {
+            // find matching )
+            let mut depth = 1
+            let mut j = i + 1
+            let start = j
+            while j < n && depth > 0 {
+                let cc = formula.substring(j, j + 1)
+                if cc == "(" { depth = depth + 1 }
+                else if cc == ")" { depth = depth - 1 }
+                if depth > 0 { j = j + 1 }
+            }
+            if depth == 0 && j < n {
+                let inside = formula.substring(start, j)
+                // read multiplier after )
+                let mut k = j + 1
+                let mut num_str = ""
+                let mut stop = false
+                while k < n && !stop {
+                    let d = formula.substring(k, k + 1)
+                    if _is_digit(d) { num_str = num_str + d; k = k + 1 }
+                    else { stop = true }
+                }
+                let mult = if len(num_str) > 0 { _str_to_i(num_str) } else { 1 }
+                if mult > 1 {
+                    let inside_c = _count_c_top(inside)
+                    total = total + (mult - 1) * inside_c
+                }
+                i = k
+            } else {
+                i = i + 1
+            }
+        } else {
+            i = i + 1
+        }
+    }
+    return total
+}
+
+// ─── PubChem JSON parse ───
+//
+// Input shape (single Properties entry):
+//   {"PropertyTable":{"Properties":[{"CID":962,"MolecularFormula":"H2O","MolecularWeight":"18.015","ConnectivitySMILES":"O"}]}}
+//
+// We don't have a JSON lib — substring-extract the four scalar fields by key.
+//
+// Returns array: [cid_str, formula, mw_str, smiles, ok_flags]
+// ok_flags bit0=cid bit1=formula bit2=mw bit3=smiles
+fn _extract_value(json: string, key: string) -> string {
+    // search for "<key>" then ":" then either a quoted string or a bare number/literal
+    let pat = "\"" + key + "\""
+    let idx = json.index_of(pat)
+    if idx < 0 { return "" }
+    let after = idx + len(pat)
+    let n = len(json)
+    // walk to ":"
+    let mut i = after
+    while i < n {
+        let c = json.substring(i, i + 1)
+        if c == ":" { i = i + 1; break }
+        if c != " " && c != "\t" && c != "\n" && c != "\r" { i = i + 1 }
+        else { i = i + 1 }
+    }
+    // skip whitespace
+    while i < n {
+        let c = json.substring(i, i + 1)
+        if c == " " || c == "\t" || c == "\n" || c == "\r" { i = i + 1 }
+        else { break }
+    }
+    if i >= n { return "" }
+    let first = json.substring(i, i + 1)
+    if first == "\"" {
+        // quoted string: walk until closing quote (no escape handling — PubChem fields are alphanum/punct)
+        let start = i + 1
+        let mut j = start
+        while j < n {
+            let c = json.substring(j, j + 1)
+            if c == "\"" { break }
+            j = j + 1
+        }
+        return json.substring(start, j)
+    } else {
+        // bare scalar (number, bool, null) — read until comma / brace / bracket / whitespace
+        let start = i
+        let mut j = start
+        while j < n {
+            let c = json.substring(j, j + 1)
+            if c == "," || c == "}" || c == "]" || c == " " || c == "\n" || c == "\t" || c == "\r" { break }
+            j = j + 1
+        }
+        return json.substring(start, j)
+    }
+}
+
+fn parse_pubchem_json(json: string) -> array {
+    if len(json) == 0 { return ["", "", "", "", 0] }
+    let cid = _extract_value(json, "CID")
+    let formula = _extract_value(json, "MolecularFormula")
+    let mw = _extract_value(json, "MolecularWeight")
+    // try ConnectivitySMILES first (current PubChem field), fall back to CanonicalSMILES (legacy)
+    let mut smiles = _extract_value(json, "ConnectivitySMILES")
+    if len(smiles) == 0 { smiles = _extract_value(json, "CanonicalSMILES") }
+    if len(smiles) == 0 { smiles = _extract_value(json, "SMILES") }
+    let mut flags: i64 = 0
+    if len(cid) > 0 { flags = flags + 1 }
+    if len(formula) > 0 { flags = flags + 2 }
+    if len(mw) > 0 { flags = flags + 4 }
+    if len(smiles) > 0 { flags = flags + 8 }
+    return [cid, formula, mw, smiles, flags]
+}
+
+// ─── PubChem fetch ───
+
+fn fetch_pubchem(name: string) -> string {
+    let safe = name.replace(" ", "%20")
+    let url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/" + safe + "/property/MolecularFormula,MolecularWeight,CanonicalSMILES,InChI/JSON"
+    let cmd = "HEXA_RESOLVER_NO_REROUTE=1 curl -s --max-time 12 '" + url + "' 2>/dev/null"
+    let raw = exec(cmd)  // @allow-bare-exec
+    return to_string(raw)
+}
+
+// ─── reference table lookup ───
+
+fn _find_ref(name: string) -> i64 {
+    let names = REF_NAMES()
+    let mut i = 0
+    while i < len(names) {
+        let s: string = names[i]
+        if s == name { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+// ─── selftest ───
+
+fn _selftest() {
+    let mut bad = []
+
+    // 1. table size
+    if len(REF_NAMES()) != 6 { bad.push("REF_NAMES expected 6 got " + to_string(len(REF_NAMES()))) }
+    if len(REF_FORMULAS()) != 6 { bad.push("REF_FORMULAS expected 6") }
+    if len(REF_MW_MILLI()) != 6 { bad.push("REF_MW_MILLI expected 6") }
+    if len(REF_SMILES()) != 6 { bad.push("REF_SMILES expected 6") }
+    if len(REF_CARBON_COUNT()) != 6 { bad.push("REF_CARBON_COUNT expected 6") }
+    if len(REF_N6_ANCHOR()) != 6 { bad.push("REF_N6_ANCHOR expected 6") }
+
+    // 2. carbon counter on all 6 formulas
+    let formulas = REF_FORMULAS()
+    let expected_c = REF_CARBON_COUNT()
+    let mut i = 0
+    while i < len(formulas) {
+        let f: string = formulas[i]
+        let want: i64 = expected_c[i]
+        let got = count_carbons(f)
+        if got != want { bad.push("count_carbons('" + f + "') expected " + to_string(want) + " got " + to_string(got)) }
+        i = i + 1
+    }
+
+    // 3. carbon counter on tricky cases
+    if count_carbons("Fe(CN)6") != 6 { bad.push("count_carbons('Fe(CN)6') expected 6 got " + to_string(count_carbons("Fe(CN)6"))) }
+    if count_carbons("CaCO3") != 1 { bad.push("count_carbons('CaCO3') expected 1 got " + to_string(count_carbons("CaCO3"))) }
+    if count_carbons("CCl4") != 1 { bad.push("count_carbons('CCl4') expected 1 got " + to_string(count_carbons("CCl4"))) }
+    if count_carbons("H2SO4") != 0 { bad.push("count_carbons('H2SO4') expected 0 got " + to_string(count_carbons("H2SO4"))) }
+
+    // 4. n6_anchor consistency: anchor ↔ carbon_count==6 (graphene is exception: count=1 unit cell, anchor=true)
+    let anchors = REF_N6_ANCHOR()
+    let carbons = REF_CARBON_COUNT()
+    let names_t = REF_NAMES()
+    let mut anchor_total: i64 = 0
+    let mut j = 0
+    while j < len(anchors) {
+        let a: bool = anchors[j]
+        if a { anchor_total = anchor_total + 1 }
+        let c: i64 = carbons[j]
+        let nm: string = names_t[j]
+        if a && c != 6 && nm != "graphene" {
+            bad.push("anchor=true requires carbon_count==6 (or graphene): " + nm + " has c=" + to_string(c))
+        }
+        if !a && c == 6 {
+            bad.push("anchor=false but carbon_count==6: " + nm)
+        }
+        j = j + 1
+    }
+    if anchor_total != N6_ANCHOR_COUNT() {
+        bad.push("anchor_total expected " + to_string(N6_ANCHOR_COUNT()) + " got " + to_string(anchor_total))
+    }
+
+    // 5. MW parser roundtrip
+    let mw_p = _mw_str_to_milli("18.015")
+    if mw_p != 18015 { bad.push("_mw_str_to_milli('18.015') expected 18015 got " + to_string(mw_p)) }
+    let mw_p2 = _mw_str_to_milli("180.16")
+    if mw_p2 != 180160 { bad.push("_mw_str_to_milli('180.16') expected 180160 got " + to_string(mw_p2)) }
+    let mw_p3 = _mw_str_to_milli("78")
+    if mw_p3 != 78000 { bad.push("_mw_str_to_milli('78') expected 78000 got " + to_string(mw_p3)) }
+    let mw_f = _fmt_mw_milli(78114)
+    if mw_f != "78.114" { bad.push("_fmt_mw_milli(78114) expected '78.114' got '" + mw_f + "'") }
+    let mw_f2 = _fmt_mw_milli(18015)
+    if mw_f2 != "18.015" { bad.push("_fmt_mw_milli(18015) expected '18.015' got '" + mw_f2 + "'") }
+
+    // 6. JSON extractor on synthetic PubChem response
+    let synth = "{\"PropertyTable\":{\"Properties\":[{\"CID\":962,\"MolecularFormula\":\"H2O\",\"MolecularWeight\":\"18.015\",\"ConnectivitySMILES\":\"O\"}]}}"
+    let p = parse_pubchem_json(synth)
+    let cid_s: string = p[0]
+    let formula_s: string = p[1]
+    let mw_s: string = p[2]
+    let smiles_s: string = p[3]
+    let flags: i64 = p[4]
+    if cid_s != "962" { bad.push("parse cid expected '962' got '" + cid_s + "'") }
+    if formula_s != "H2O" { bad.push("parse formula expected 'H2O' got '" + formula_s + "'") }
+    if mw_s != "18.015" { bad.push("parse mw expected '18.015' got '" + mw_s + "'") }
+    if smiles_s != "O" { bad.push("parse smiles expected 'O' got '" + smiles_s + "'") }
+    if flags != 15 { bad.push("parse flags expected 15 got " + to_string(flags)) }
+
+    // 7. JSON extractor with legacy CanonicalSMILES key
+    let synth2 = "{\"PropertyTable\":{\"Properties\":[{\"CID\":241,\"MolecularFormula\":\"C6H6\",\"MolecularWeight\":\"78.11\",\"CanonicalSMILES\":\"C1=CC=CC=C1\"}]}}"
+    let p2 = parse_pubchem_json(synth2)
+    let s2: string = p2[3]
+    if s2 != "C1=CC=CC=C1" { bad.push("parse legacy SMILES expected 'C1=CC=CC=C1' got '" + s2 + "'") }
+    let f2: string = p2[1]
+    if f2 != "C6H6" { bad.push("parse benzene formula expected 'C6H6' got '" + f2 + "'") }
+
+    // 8. all 6 reference compounds satisfy n6 framework (size==6, ≥4 carbon-anchors)
+    if REF_TABLE_SIZE() != 6 { bad.push("REF_TABLE_SIZE expected 6") }
+    if anchor_total < 4 { bad.push("expected ≥4 n6 carbon anchors, got " + to_string(anchor_total)) }
+
+    // 9. lookup
+    let idx = _find_ref("benzene")
+    if idx != 2 { bad.push("_find_ref('benzene') expected 2 got " + to_string(idx)) }
+    let idx2 = _find_ref("nonexistent")
+    if idx2 != -1 { bad.push("_find_ref('nonexistent') expected -1 got " + to_string(idx2)) }
+
+    if len(bad) > 0 {
+        eprintln("[pubchem_bridge selftest] FAIL: " + bad.join(", "))
+        exit(1)
+    }
+    println("[pubchem_bridge selftest] OK — table + carbon-counter + MW + JSON parse + n6 anchor (9 checks, " + to_string(REF_TABLE_SIZE()) + " compounds, " + to_string(anchor_total) + " n6 carbon anchors)")
+    exit(0)
+}
+
+// ─── emit ───
+
+fn _emit_text_compound(name: string, cid: string, formula: string, mw_milli: i64, smiles: string, carbon_count: i64, n6_anchor: bool, source: string) {
+    let anchor_mark = if n6_anchor { "  ← n6 carbon-ring anchor" } else { "" }
+    println("PUBCHEM_SOURCE   : " + source)
+    println("compound         : " + name)
+    println("cid              : " + cid)
+    println("formula          : " + formula + anchor_mark)
+    println("mw_g_per_mol     : " + _fmt_mw_milli(mw_milli))
+    println("smiles           : " + smiles)
+    println("carbon_count     : " + to_string(carbon_count))
+    println("n6_carbon_anchor : " + to_string(n6_anchor))
+}
+
+fn _emit_text_table(source: string) {
+    println("PUBCHEM_SOURCE   : " + source)
+    println("--- 6 reference compounds (n=6 framework) ---")
+    let names = REF_NAMES()
+    let cids = REF_CIDS()
+    let formulas = REF_FORMULAS()
+    let mws = REF_MW_MILLI()
+    let smiles_a = REF_SMILES()
+    let carbons = REF_CARBON_COUNT()
+    let anchors = REF_N6_ANCHOR()
+    let mut i = 0
+    while i < len(names) {
+        let nm: string = names[i]
+        let cid_v: i64 = cids[i]
+        let f: string = formulas[i]
+        let mw: i64 = mws[i]
+        let sm: string = smiles_a[i]
+        let cc: i64 = carbons[i]
+        let an: bool = anchors[i]
+        let mark = if an { "  ← n6 anchor" } else { "" }
+        println("  " + nm + " CID=" + to_string(cid_v) + " " + f + " MW=" + _fmt_mw_milli(mw) + " SMILES=" + sm + " C=" + to_string(cc) + mark)
+        i = i + 1
+    }
+    println("---")
+}
+
+fn _emit_json_compound(name: string, cid: string, formula: string, mw_milli: i64, smiles: string, carbon_count: i64, n6_anchor: bool, source: string) {
+    let anchor_str = if n6_anchor { "true" } else { "false" }
+    let cid_emit = if len(cid) == 0 { "null" } else { cid }
+    println("{")
+    println("  \"tool\": \"pubchem_bridge\",")
+    println("  \"origin\": \"hive raw 70 design-multi-axis-verify-grid + raw 73 structural-admissibility\",")
+    println("  \"paradigm\": \"structural-admissibility (string-parse, scaled-int MW)\",")
+    println("  \"source\": \"" + source + "\",")
+    println("  \"compound\": \"" + name + "\",")
+    println("  \"cid\": " + cid_emit + ",")
+    println("  \"formula\": \"" + formula + "\",")
+    println("  \"mw\": " + _fmt_mw_milli(mw_milli) + ",")
+    println("  \"smiles\": \"" + smiles + "\",")
+    println("  \"carbon_count\": " + to_string(carbon_count) + ",")
+    println("  \"n6_anchor\": " + anchor_str + ",")
+    println("  \"axis_bindings\": [\"lenses/accel_composition_balance\", \"lenses/frontier_analytical_chemistry\", \"lenses/battery_chemistry_lens\", \"axis_carbon_count\"]")
+    println("}")
+}
+
+fn _emit_json_table(source: string) {
+    println("{")
+    println("  \"tool\": \"pubchem_bridge\",")
+    println("  \"origin\": \"hive raw 70/73/77 — chemistry axis bridge\",")
+    println("  \"source\": \"" + source + "\",")
+    println("  \"reference_compounds\": [")
+    let names = REF_NAMES()
+    let cids = REF_CIDS()
+    let formulas = REF_FORMULAS()
+    let mws = REF_MW_MILLI()
+    let smiles_a = REF_SMILES()
+    let carbons = REF_CARBON_COUNT()
+    let anchors = REF_N6_ANCHOR()
+    let mut anchor_total: i64 = 0
+    let mut i = 0
+    while i < len(names) {
+        let nm: string = names[i]
+        let cid_v: i64 = cids[i]
+        let f: string = formulas[i]
+        let mw: i64 = mws[i]
+        let sm: string = smiles_a[i]
+        let cc: i64 = carbons[i]
+        let an: bool = anchors[i]
+        if an { anchor_total = anchor_total + 1 }
+        let an_str = if an { "true" } else { "false" }
+        let cid_str = if cid_v < 0 { "null" } else { to_string(cid_v) }
+        let comma = if i < len(names) - 1 { "," } else { "" }
+        println("    {\"name\": \"" + nm + "\", \"cid\": " + cid_str + ", \"formula\": \"" + f + "\", \"mw\": " + _fmt_mw_milli(mw) + ", \"smiles\": \"" + sm + "\", \"carbon_count\": " + to_string(cc) + ", \"n6_anchor\": " + an_str + "}" + comma)
+        i = i + 1
+    }
+    println("  ],")
+    println("  \"n6_anchor_count\": " + to_string(anchor_total) + ",")
+    println("  \"n6_anchor_meaning\": \"4-of-6 reference molecules carry the C6 hexagonal-ring motif (benzene, glucose, hexane, graphene); ties to NIST atomic Z=6 carbon row\",")
+    println("  \"axis_bindings\": [\"lenses/accel_composition_balance\", \"lenses/frontier_analytical_chemistry\", \"lenses/battery_chemistry_lens\", \"axis_carbon_count\"]")
+    println("}")
+}
+
+// ─── main ───
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut json_mode = false
+    let mut no_fetch = false
+    let mut compound_query = ""
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { _selftest() }
+        else if a == "--json" { json_mode = true }
+        else if a == "--no-fetch" { no_fetch = true }
+        else if a == "--compound" {
+            if i + 1 >= len(cli) {
+                eprintln("pubchem_bridge: --compound requires a name")
+                eprintln("  reason: missing value")
+                eprintln("  fix: hexa run tool/pubchem_bridge.hexa --compound water")
+                exit(1)
+            }
+            compound_query = cli[i + 1]
+            i = i + 1
+        }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/pubchem_bridge.hexa [--selftest] [--json] [--no-fetch] [--compound <name>]")
+            println("  --selftest          : 9-check internal verification, exit 0/1")
+            println("  --json              : emit JSON object on stdout")
+            println("  --no-fetch          : skip PubChem curl, use hardcoded reference table")
+            println("  --compound <name>   : fetch single compound (or table lookup if no-fetch)")
+            println("origin: hive raw 70/73/77 — chemistry axis bridge: formula + MW + SMILES + n6 carbon anchor")
+            println("binding: composition_balance / analytical_chemistry / battery_chemistry lenses; nist Z=6 row")
+            exit(0)
+        }
+        else {
+            eprintln("pubchem_bridge: unknown arg `" + a + "`")
+            eprintln("  reason: not in {--selftest, --json, --no-fetch, --compound, --help}")
+            eprintln("  fix: hexa run tool/pubchem_bridge.hexa --help")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    // table-mode (no compound specified): emit all 6 references + sentinel for the n6_anchor count
+    if len(compound_query) == 0 {
+        let source = "fallback:hardcoded-n6-reference-table"
+        if json_mode { _emit_json_table(source) }
+        else { _emit_text_table(source) }
+        let anchors = REF_N6_ANCHOR()
+        let mut anchor_total: i64 = 0
+        let mut k = 0
+        while k < len(anchors) {
+            let a: bool = anchors[k]
+            if a { anchor_total = anchor_total + 1 }
+            k = k + 1
+        }
+        let ok = anchor_total == N6_ANCHOR_COUNT() && len(REF_NAMES()) == REF_TABLE_SIZE()
+        if !ok {
+            println("__PUBCHEM_BRIDGE__ FAIL compound=table formula=multi mw=multi n6_carbon_anchor=" + to_string(anchor_total) + "/4")
+            exit(2)
+        }
+        println("__PUBCHEM_BRIDGE__ PASS compound=table formula=6-refs mw=6-refs n6_carbon_anchor=" + to_string(anchor_total) + "/" + to_string(REF_TABLE_SIZE()))
+        exit(0)
+    }
+
+    // single-compound mode
+    let mut cid: string = ""
+    let mut formula: string = ""
+    let mut mw_str: string = ""
+    let mut smiles: string = ""
+    let mut mw_milli: i64 = 0
+    let mut source: string = "fallback:hardcoded-reference-table"
+
+    let ref_idx = _find_ref(compound_query)
+
+    let mut got_live = false
+    if !no_fetch {
+        let json_text = fetch_pubchem(compound_query)
+        if len(json_text) > 0 {
+            let p = parse_pubchem_json(json_text)
+            let flags: i64 = p[4]
+            if flags >= 14 {       // formula + mw + smiles all present (CID optional)
+                cid = p[0]
+                formula = p[1]
+                mw_str = p[2]
+                smiles = p[3]
+                mw_milli = _mw_str_to_milli(mw_str)
+                source = "live:pubchem.ncbi.nlm.nih.gov/rest/pug"
+                got_live = true
+            }
+        }
+    }
+
+    if !got_live {
+        if ref_idx < 0 {
+            eprintln("pubchem_bridge: compound '" + compound_query + "' not in reference table and live fetch failed")
+            eprintln("  reason: no fallback entry; reference table = " + REF_NAMES().join(","))
+            eprintln("  fix: drop --no-fetch, check network, or pick a reference compound (water/methane/benzene/glucose/hexane/graphene)")
+            println("__PUBCHEM_BRIDGE__ FAIL compound=" + compound_query + " formula=? mw=? n6_carbon_anchor=false")
+            exit(2)
+        }
+        let cids = REF_CIDS()
+        let formulas = REF_FORMULAS()
+        let mws = REF_MW_MILLI()
+        let smiles_a = REF_SMILES()
+        let cid_v: i64 = cids[ref_idx]
+        cid = if cid_v < 0 { "" } else { to_string(cid_v) }
+        formula = formulas[ref_idx]
+        mw_milli = mws[ref_idx]
+        mw_str = _fmt_mw_milli(mw_milli)
+        smiles = smiles_a[ref_idx]
+        if no_fetch { source = "no-fetch:hardcoded-reference-table" }
+        else { source = "fallback:hardcoded-reference-table (fetch failed or partial)" }
+    }
+
+    let carbon_count = count_carbons(formula)
+    // n6 anchor: carbon_count == 6, OR known graphene-like sp2 lattice (handled via reference table override)
+    let mut n6_anchor = carbon_count == 6
+    if ref_idx >= 0 {
+        let ref_anchors = REF_N6_ANCHOR()
+        let ra: bool = ref_anchors[ref_idx]
+        if ra { n6_anchor = true }   // reference table is authoritative for known lattice cases (graphene)
+    }
+
+    if json_mode { _emit_json_compound(compound_query, cid, formula, mw_milli, smiles, carbon_count, n6_anchor, source) }
+    else { _emit_text_compound(compound_query, cid, formula, mw_milli, smiles, carbon_count, n6_anchor, source) }
+
+    // sanity sentinel: formula non-empty and MW > 0
+    let sane = len(formula) > 0 && mw_milli > 0
+    let anchor_str = if n6_anchor { "true" } else { "false" }
+    if !sane {
+        println("__PUBCHEM_BRIDGE__ FAIL compound=" + compound_query + " formula=" + formula + " mw=" + _fmt_mw_milli(mw_milli) + " n6_carbon_anchor=" + anchor_str)
+        exit(2)
+    }
+    println("__PUBCHEM_BRIDGE__ PASS compound=" + compound_query + " formula=" + formula + " mw=" + _fmt_mw_milli(mw_milli) + " n6_carbon_anchor=" + anchor_str)
+    exit(0)
+}
