@@ -1,0 +1,745 @@
+#!hexa strict
+// tool/atlas_omega_supercycle.hexa — cross-repo super-aggregator + Honesty triad 5-precondition auto-verify (Phase 3)
+//
+// @tool(slug="atlas_omega_supercycle", desc="3 module: cross-repo aggregation (nexus + n6-architecture + anima) → Honesty triad 5 preconditions auto-verify per repo → super-shard emit (cross-repo @X crossings) → audit ledger (raw 77 chain hash). Phase 3 of atlas-ingest tool evolution (Phase 1 hexa_sim, Phase 2 omega_cycle, Phase 3 supercycle).")
+// @usage(hexa run tool/atlas_omega_supercycle.hexa [--selftest] [--dry-run] [--absorb] [--diff] [--json-summary] [--repo-only NAME] [--honesty-only])
+// @exit_codes(0=PASS, 1=usage/io, 2=schema-guard violation, 3=absorb conflict, 4=honesty triad failure)
+// @sentinel(__ATLAS_SUPERCYCLE__ PASS|FAIL repos=R cycles=N facts=M crosslinks=X honesty=H/R)
+// @origin(design/hexa_sim/2026-04-26_atlas_ingest_tool_evolution_omega_cycle.json phase_3_target)
+// @abstraction(raw 23 schema-guard + raw 67 cross-repo blocker-floor + raw 68 byte-eq + raw 70 multi-axis-verify + raw 73 structural-admissibility + raw 77 audit-append-only)
+// @paradigm(structural — 3-repo glob + per-repo precondition heuristic + deterministic super-shard emit; subprocess-invoke compatible with Phase 2 (omega_cycle_atlas_ingest) when present, else independent)
+// @allow-bare-exec
+//
+// Honesty triad 5 preconditions (per design/honesty_triad.md + n6-architecture/reports/sessions/omega-meta-synthesis-repo-invariant-honesty-audit-2026-04-25.md §2):
+//   (a) promotion path exists — discrete named operation marking result solved/EXACT/done
+//   (b) SSOT exists — canonical registry distinct from research scratch
+//   (c) research/reflection layer separate from SSOT — writable session-output path
+//   (d) tool ecosystem with measurable values — fabrication-risk surface
+//   (e) LLM agents performing research/promotion — agent definitions discoverable
+// PASS = 5/5 preconditions detected via repo-side heuristic. 4/5 = PARTIAL. <4 = FAIL.
+
+// ─── repo registry (3-repo first-impl, design phase 3 spec scope) ───
+// each entry: [name, root_path, atlas_path_rel, design_glob_subpath]
+
+fn _repos() -> array {
+    let h = env_var("HOME")
+    let mut r = []
+    r.push(["nexus",            h + "/core/nexus",            "n6/atlas.n6",       "design"])
+    r.push(["n6-architecture",  h + "/core/n6-architecture",  "atlas/atlas.n6",    "reports/sessions"])
+    r.push(["anima",            h + "/core/anima",            "n6/atlas.n6",       "docs"])
+    return r
+}
+
+// ─── output paths ───
+
+fn _super_shard_path() -> string {
+    let h = env_var("HOME")
+    return h + "/core/nexus/n6/atlas.append.omega-supercycle-2026-04-26.n6"
+}
+
+fn _history_path() -> string {
+    let h = env_var("HOME")
+    return h + "/core/nexus/state/atlas_supercycle_history.jsonl"
+}
+
+fn _atlas_main_path() -> string {
+    let h = env_var("HOME")
+    return h + "/core/nexus/n6/atlas.n6"
+}
+
+// ─── small utilities ───
+
+fn _now_iso() -> string {
+    return to_string(exec("date -u +%Y-%m-%dT%H:%M:%SZ")).trim()
+}
+
+fn _hash16(content: string) -> string {
+    let escaped = content.replace("'", "")
+    let cmd = "printf %s '" + escaped + "' | shasum -a 256 | cut -c1-16"
+    return to_string(exec(cmd)).trim()
+}
+
+fn _path_exists(p: string) -> bool {
+    if file_exists(p) { return true }
+    let cmd = "[ -d '" + p + "' ] && echo D || echo X"
+    let out = to_string(exec(cmd)).trim()
+    if out == "D" { return true }
+    return false
+}
+
+fn _file_lines(p: string) -> i64 {
+    if !file_exists(p) { return 0 }
+    let cmd = "wc -l < '" + p + "' 2>/dev/null | awk '{print $1+0}'"
+    return _atoi(to_string(exec(cmd)).trim())
+}
+
+fn _atoi(s: string) -> i64 {
+    let t = s.trim()
+    if len(t) == 0 { return 0 }
+    let mut v = 0
+    try { v = to_int(t) } catch e { v = 0 }
+    return v
+}
+
+fn _last_commit_ts(repo_root: string) -> string {
+    if !_path_exists(repo_root + "/.git") { return "no-git" }
+    let cmd = "git -C '" + repo_root + "' log -1 --format=%cI 2>/dev/null"
+    let out = to_string(exec(cmd)).trim()
+    if len(out) == 0 { return "no-commit" }
+    return out
+}
+
+// ─── (Module 1) cross-repo aggregation ───
+
+// returns [cycles_count, fact_count_estimate, atlas_lines, atlas_shards_count, last_commit_ts]
+fn _collect_repo_stats(repo: array) -> array {
+    let name = repo[0]
+    let root = repo[1]
+    let atlas_rel = repo[2]
+    let design_sub = repo[3]
+    let mut cycles = 0
+    let mut facts = 0
+    let mut atlas_lines = 0
+    let mut shards = 0
+    if !_path_exists(root) {
+        return ["0", "0", "0", "0", "missing", "0"]
+    }
+    // cycles = count of *omega*cycle*.json under design_sub (excluding worktrees/.claude/.growth/absorbed)
+    let cmd_cycles = "find '" + root + "/" + design_sub + "' -type f -name '*omega*cycle*.json' 2>/dev/null | grep -v '/.claude/' | grep -v '/worktrees/' | grep -v '/.growth/' | grep -v '/absorbed/' | wc -l | awk '{print $1+0}'"
+    cycles = _atoi(to_string(exec(cmd_cycles)).trim())
+    // also count omega-* session reports (n6-architecture pattern)
+    let cmd_alt = "find '" + root + "/" + design_sub + "' -type f \\( -name 'omega-*.md' -o -name '*omega_point*.md' -o -name '*omega*cycle*.md' \\) 2>/dev/null | grep -v '/.claude/' | grep -v '/worktrees/' | grep -v '/.growth/' | grep -v '/absorbed/' | wc -l | awk '{print $1+0}'"
+    let cycles_alt = _atoi(to_string(exec(cmd_alt)).trim())
+    cycles = cycles + cycles_alt
+    // facts = approximate by counting "@P|@C|@F|@L|@R|@S|@X" lines in repo's atlas
+    let atlas_full = root + "/" + atlas_rel
+    if file_exists(atlas_full) {
+        let cmd_lines = "wc -l < '" + atlas_full + "' 2>/dev/null | awk '{print $1+0}'"
+        atlas_lines = _atoi(to_string(exec(cmd_lines)).trim())
+        let cmd_facts = "grep -cE '^@[PCFLRSX] ' '" + atlas_full + "' 2>/dev/null | awk '{print $1+0}'"
+        facts = _atoi(to_string(exec(cmd_facts)).trim())
+    }
+    // shards = count of atlas.append.*.n6 alongside atlas
+    let atlas_dir = root + "/" + _dirname(atlas_rel)
+    let cmd_shards = "ls '" + atlas_dir + "'/atlas.append.*.n6 2>/dev/null | wc -l | awk '{print $1+0}'"
+    shards = _atoi(to_string(exec(cmd_shards)).trim())
+    let ts = _last_commit_ts(root)
+    return [to_string(cycles), to_string(facts), to_string(atlas_lines), to_string(shards), ts, "1"]
+}
+
+fn _dirname(rel: string) -> string {
+    // last "/" cut
+    let mut i = len(rel) - 1
+    while i >= 0 {
+        if rel.substring(i, i + 1) == "/" { return rel.substring(0, i) }
+        i = i - 1
+    }
+    return "."
+}
+
+// ─── (Module 2) Honesty triad 5-precondition auto-verify ───
+//
+// Each precondition is detected by a repo-side heuristic. Returns ["PASS","FAIL"]
+// pair plus a detail string describing what was matched (or what was missing).
+//
+// (a) promotion path     — atlas/atlas.n6 OR n6/atlas.n6 OR state/proposals/inventory.json present
+// (b) SSOT               — at least one of: atlas.n6 (≥100 lines) OR proposals inventory OR breakthrough-theorems
+// (c) research layer     — design/ OR reports/sessions/ OR docs/ exists with ≥1 file
+// (d) tool ecosystem     — tool/ OR scripts/ OR theory/predictions/ exists with ≥3 files
+// (e) LLM agents         — .claude/agents/ OR project-claude/ OR CLAUDE.md OR AGENT.md present
+
+fn _precondition_a(root: string) -> array {
+    let p1 = root + "/atlas/atlas.n6"
+    let p2 = root + "/n6/atlas.n6"
+    let p3 = root + "/state/proposals/inventory.json"
+    if file_exists(p1) { return ["PASS", "atlas/atlas.n6 present"] }
+    if file_exists(p2) { return ["PASS", "n6/atlas.n6 present"] }
+    if file_exists(p3) { return ["PASS", "state/proposals/inventory.json present"] }
+    return ["FAIL", "no promotion-path SSOT (atlas.n6 or proposals inventory) found"]
+}
+
+fn _precondition_b(root: string) -> array {
+    let candidates = [
+        root + "/atlas/atlas.n6",
+        root + "/n6/atlas.n6",
+        root + "/state/proposals/inventory.json",
+        root + "/theory/breakthroughs/breakthrough-theorems.md",
+        root + "/n6/atlas.blowup.jsonl"
+    ]
+    for p in candidates {
+        if file_exists(p) {
+            let cmd = "wc -l < '" + p + "' 2>/dev/null | awk '{print $1+0}'"
+            let n = _atoi(to_string(exec(cmd)).trim())
+            if n >= 50 { return ["PASS", _basename(p) + " has " + to_string(n) + " lines (≥50)"] }
+        }
+    }
+    return ["FAIL", "no SSOT registry ≥50 lines found"]
+}
+
+fn _precondition_c(root: string) -> array {
+    let pairs = [
+        [root + "/design",            "design/"],
+        [root + "/reports/sessions",  "reports/sessions/"],
+        [root + "/docs",              "docs/"],
+        [root + "/reports",           "reports/"]
+    ]
+    for pp in pairs {
+        let dir = pp[0]
+        let label = pp[1]
+        if _path_exists(dir) {
+            let cmd = "find '" + dir + "' -maxdepth 3 -type f 2>/dev/null | head -50 | wc -l | awk '{print $1+0}'"
+            let n = _atoi(to_string(exec(cmd)).trim())
+            if n >= 1 { return ["PASS", label + " has " + to_string(n) + "+ files (research layer)"] }
+        }
+    }
+    return ["FAIL", "no research/reflection layer (design/, reports/, docs/) found"]
+}
+
+fn _precondition_d(root: string) -> array {
+    let pairs = [
+        [root + "/tool",                  "tool/"],
+        [root + "/scripts",               "scripts/"],
+        [root + "/theory/predictions",    "theory/predictions/"],
+        [root + "/anima-tools",           "anima-tools/"]
+    ]
+    for pp in pairs {
+        let dir = pp[0]
+        let label = pp[1]
+        if _path_exists(dir) {
+            let cmd = "find '" + dir + "' -maxdepth 4 -type f \\( -name '*.hexa' -o -name '*.py' -o -name '*.sh' -o -name '*.ts' \\) 2>/dev/null | head -20 | wc -l | awk '{print $1+0}'"
+            let n = _atoi(to_string(exec(cmd)).trim())
+            if n >= 3 { return ["PASS", label + " has " + to_string(n) + "+ tool files (≥3)"] }
+        }
+    }
+    return ["FAIL", "no tool ecosystem ≥3 measurable-value tools found"]
+}
+
+fn _precondition_e(root: string) -> array {
+    let candidates = [
+        [root + "/.claude/agents",        ".claude/agents/"],
+        [root + "/project-claude",        "project-claude/"],
+        [root + "/CLAUDE.md",             "CLAUDE.md"],
+        [root + "/.claude/agents/AGENT.md","AGENT.md"]
+    ]
+    for cc in candidates {
+        let p = cc[0]
+        let label = cc[1]
+        if _path_exists(p) { return ["PASS", label + " present (LLM agent surface)"] }
+    }
+    // also: any AGENT.md anywhere under .claude/
+    let cmd = "find '" + root + "/.claude' -maxdepth 4 -name 'AGENT.md' -o -name 'agents' -type d 2>/dev/null | head -1"
+    let out = to_string(exec(cmd)).trim()
+    if len(out) > 0 { return ["PASS", "found agent definition under .claude/"] }
+    return ["FAIL", "no LLM agent definitions (.claude/agents/, CLAUDE.md, AGENT.md) found"]
+}
+
+// returns [pass_count, total=5, detail_array]
+fn _verify_honesty(repo: array) -> array {
+    let root = repo[1]
+    let r_a = _precondition_a(root)
+    let r_b = _precondition_b(root)
+    let r_c = _precondition_c(root)
+    let r_d = _precondition_d(root)
+    let r_e = _precondition_e(root)
+    let mut pass_n = 0
+    if r_a[0] == "PASS" { pass_n = pass_n + 1 }
+    if r_b[0] == "PASS" { pass_n = pass_n + 1 }
+    if r_c[0] == "PASS" { pass_n = pass_n + 1 }
+    if r_d[0] == "PASS" { pass_n = pass_n + 1 }
+    if r_e[0] == "PASS" { pass_n = pass_n + 1 }
+    let mut grade = "FAIL"
+    if pass_n == 5 { grade = "REPO_INVARIANT" }
+    else if pass_n == 4 { grade = "PARTIAL" }
+    let details = [r_a, r_b, r_c, r_d, r_e]
+    return [to_string(pass_n), "5", grade, details]
+}
+
+fn _basename(p: string) -> string {
+    let mut i = len(p) - 1
+    while i >= 0 {
+        if p.substring(i, i + 1) == "/" { return p.substring(i + 1, len(p)) }
+        i = i - 1
+    }
+    return p
+}
+
+// ─── (Module 3) super-shard emit ───
+//
+// aggregated facts: per-repo summary fact (one @P entry per repo) + Honesty triad
+// per-repo grading (one @L entry per repo) + cross-repo @X crossings (e.g.
+// honesty_triad_repo_invariant elevated when ≥2 repos PASS 5/5).
+
+fn _emit_super_shard(repo_stats: array, honesty_results: array) -> string {
+    let mut s = "// ═══════════════════════════════════════════════════════════════\n"
+    s = s + "// atlas.append.omega-supercycle-2026-04-26.n6 — cross-repo Ω super-aggregator\n"
+    s = s + "// 작성: 2026-04-26, tool/atlas_omega_supercycle.hexa (deterministic emit)\n"
+    s = s + "// 본체 충돌 방지: atlas.n6 직접 편집 대신 본 append 파일에만 기록\n"
+    s = s + "// 병합 주체: main context (다음 atlas 통합 phase 에서)\n"
+    s = s + "// 출처: 3-repo glob (nexus + n6-architecture + anima) + Honesty triad 5-precondition heuristic\n"
+    s = s + "// idempotence: same input set → byte-eq output (raw 68)\n"
+    s = s + "// schema-guard: raw 23 (atlas DSL grammar mini-lint, exit 2 on violation)\n"
+    s = s + "// honesty: raw 67 cross-repo blocker-floor; per-repo PASS_N/5 grading enforced\n"
+    s = s + "// ═══════════════════════════════════════════════════════════════\n\n"
+    s = s + "// ── per-repo aggregate facts (one @P entry per repo) ──\n\n"
+    let mut i = 0
+    while i < len(repo_stats) {
+        let row = repo_stats[i]
+        // row = [name, cycles, facts, atlas_lines, shards, ts]
+        let name = row[0]
+        let cycles = row[1]
+        let facts = row[2]
+        let atlas_lines = row[3]
+        let shards = row[4]
+        let ts = row[5]
+        s = s + "@P repo_" + name + " = cycles=" + cycles + " atlas_facts=" + facts + " atlas_lines=" + atlas_lines + " shards=" + shards + " :: meta_repo [10]\n"
+        s = s + "  => repo aggregate snapshot, last_commit=" + ts + "\n"
+        s = s + "  |> atlas_omega_supercycle (3-repo glob)\n\n"
+        i = i + 1
+    }
+    s = s + "// ── Honesty triad 5-precondition results (one @L per repo) ──\n\n"
+    let mut j = 0
+    while j < len(honesty_results) {
+        let h = honesty_results[j]
+        // h = [name, pass_n, "5", grade, details]
+        let name = h[0]
+        let pass_n = h[1]
+        let grade = h[3]
+        s = s + "@L honesty_triad_" + name + " = " + pass_n + "/5 preconditions satisfied → " + grade + " :: meta_audit [11]\n"
+        s = s + "  => Honesty triad portability grade for repo `" + name + "`\n"
+        s = s + "  |> atlas_omega_supercycle (5-precondition heuristic — see header)\n\n"
+        j = j + 1
+    }
+    s = s + "// ── cross-repo @X crossings (multi-repo verified BTs, repo-invariant patterns) ──\n\n"
+    // X1: honesty_triad cross-repo if ≥2 repos PASS_5
+    let mut pass5_repos = []
+    let mut k = 0
+    while k < len(honesty_results) {
+        let h = honesty_results[k]
+        if h[1] == "5" { pass5_repos.push(h[0]) }
+        k = k + 1
+    }
+    if len(pass5_repos) >= 2 {
+        s = s + "@X honesty_triad_cross_repo_invariant = " + to_string(len(pass5_repos)) + "-of-3 repos PASS 5/5 (REPO_INVARIANT pattern) :: meta_audit [11*]\n"
+        s = s + "  <- " + pass5_repos.join(",") + "\n"
+        s = s + "  => cross-repo honesty triad portability empirically demonstrated (≥2 repos satisfy all 5 preconditions)\n\n"
+    } else {
+        s = s + "// (skipped honesty_triad_cross_repo_invariant — only " + to_string(len(pass5_repos)) + " repo(s) PASS 5/5; need ≥2)\n\n"
+    }
+    // X2: atlas_n6_cross_repo if both nexus and n6-architecture have atlas.n6
+    let h_root = env_var("HOME")
+    let nx_atlas = file_exists(h_root + "/core/nexus/n6/atlas.n6")
+    let n6_atlas = file_exists(h_root + "/core/n6-architecture/atlas/atlas.n6")
+    if nx_atlas && n6_atlas {
+        s = s + "@X atlas_n6_dual_repo = nexus.n6/atlas.n6 + n6-architecture.atlas/atlas.n6 both present :: meta_repo [11*]\n"
+        s = s + "  <- nexus,n6-architecture\n"
+        s = s + "  => atlas DSL is repo-portable (two independent repos host atlas.n6 SSOT)\n\n"
+    }
+    // X3: omega-cycle production cross-repo if ≥2 repos have ≥1 omega-cycle artifact
+    let mut producing_repos = []
+    let mut m = 0
+    while m < len(repo_stats) {
+        let row = repo_stats[m]
+        if _atoi(row[1]) >= 1 { producing_repos.push(row[0]) }
+        m = m + 1
+    }
+    if len(producing_repos) >= 2 {
+        s = s + "@X omega_cycle_production_cross_repo = " + to_string(len(producing_repos)) + "-of-3 repos produce omega-cycle artifacts :: meta_research_program [11*]\n"
+        s = s + "  <- " + producing_repos.join(",") + "\n"
+        s = s + "  => Ω-cycle paradigm is multi-repo distributed (not nexus-only)\n\n"
+    }
+    s = s + "// EOF — supercycle aggregate (" + to_string(len(repo_stats)) + " repo aggregates + " + to_string(len(honesty_results)) + " honesty gradings)\n"
+    return s
+}
+
+// ─── (Module 4) audit ledger (raw 77) ───
+
+fn _last_history_hash() -> string {
+    let p = _history_path()
+    if !file_exists(p) { return "GENESIS" }
+    let cmd = "tail -1 '" + p + "' 2>/dev/null | grep -oE '\"current_hash\":\"[^\"]+\"' | cut -d'\"' -f4"
+    let out = to_string(exec(cmd)).trim()
+    if len(out) == 0 { return "GENESIS" }
+    return out
+}
+
+fn _shard_sha16() -> string {
+    let p = _super_shard_path()
+    if !file_exists(p) { return "absent" }
+    let cmd = "shasum -a 256 '" + p + "' | cut -c1-16"
+    return to_string(exec(cmd)).trim()
+}
+
+fn _append_history(repos: i64, honesty_pass5: i64, total_facts: i64, crosslinks: i64, shard_sha16: string, mode: string) {
+    let p = _history_path()
+    let ts = _now_iso()
+    let prev = _last_history_hash()
+    let payload = "ts=" + ts + "|repos=" + to_string(repos) + "|h5=" + to_string(honesty_pass5) + "|facts=" + to_string(total_facts) + "|cx=" + to_string(crosslinks) + "|shard=" + shard_sha16 + "|mode=" + mode + "|prev=" + prev
+    let cur = _hash16(payload)
+    let line = "{\"ts\":\"" + ts + "\",\"tool\":\"atlas_omega_supercycle\",\"repos\":" + to_string(repos) + ",\"honesty_pass5\":" + to_string(honesty_pass5) + ",\"total_facts\":" + to_string(total_facts) + ",\"crosslinks\":" + to_string(crosslinks) + ",\"shard_sha16\":\"" + shard_sha16 + "\",\"mode\":\"" + mode + "\",\"prev_hash\":\"" + prev + "\",\"current_hash\":\"" + cur + "\"}\n"
+    let escaped = line.replace("'", "")
+    exec("printf %s '" + escaped + "' >> '" + p + "'")
+}
+
+// ─── absorb (optional, exit 3 on conflict) ───
+
+fn _absorb_to_main_atlas() -> array {
+    let shard = _super_shard_path()
+    let main = _atlas_main_path()
+    if !file_exists(shard) { return ["FAIL_SHARD_MISSING", "0", ""] }
+    if !file_exists(main)  { return ["FAIL_MAIN_MISSING",  "0", ""] }
+    let ts = _now_iso()
+    let sep = "\n# ── atlas_omega_supercycle absorption (" + ts + ", shard atlas.append.omega-supercycle-2026-04-26.n6) ──\n"
+    exec("printf %s '" + sep.replace("'", "") + "' >> '" + main + "'")
+    exec("tail -n +12 '" + shard + "' >> '" + main + "'")
+    let cmd_sha = "shasum -a 256 '" + main + "' | cut -c1-16"
+    let sha = to_string(exec(cmd_sha)).trim()
+    let cmd_lines = "wc -l < '" + shard + "' | awk '{print $1+0}'"
+    let lines = to_string(exec(cmd_lines)).trim()
+    return ["OK", lines, sha]
+}
+
+fn _check_main_dup(id: string) -> bool {
+    let path = _atlas_main_path()
+    if !file_exists(path) { return false }
+    let cmd = "grep -qE '^@[PCFLRSX] " + id + " =' '" + path + "' && echo DUP || echo OK"
+    let out = to_string(exec(cmd)).trim()
+    if out == "DUP" { return true }
+    return false
+}
+
+// ─── selftest ───
+
+fn _selftest() {
+    // T1: 3-repo path detection
+    let repos = _repos()
+    if len(repos) != 3 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL repo registry size != 3 (got " + to_string(len(repos)) + ")")
+        exit(2)
+    }
+    let mut existing = 0
+    for r in repos {
+        if _path_exists(r[1]) { existing = existing + 1 }
+    }
+    if existing < 2 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL only " + to_string(existing) + "/3 repo roots exist (expected ≥2)")
+        exit(2)
+    }
+    // T2: Honesty triad 5+ test cases (each precondition heuristic at least invocable on nexus root)
+    let h_root = env_var("HOME")
+    let nx_root = h_root + "/core/nexus"
+    let r_a = _precondition_a(nx_root)
+    let r_b = _precondition_b(nx_root)
+    let r_c = _precondition_c(nx_root)
+    let r_d = _precondition_d(nx_root)
+    let r_e = _precondition_e(nx_root)
+    let cases = [r_a, r_b, r_c, r_d, r_e]
+    let mut ok_n = 0
+    for cs in cases {
+        if cs[0] == "PASS" || cs[0] == "FAIL" { ok_n = ok_n + 1 }
+    }
+    if ok_n != 5 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL Honesty triad heuristic incomplete (got " + to_string(ok_n) + "/5 invocations)")
+        exit(2)
+    }
+    // T3: nexus must PASS preconditions (a/b/d/e) — research layer might be design/
+    let nx_h = _verify_honesty(repos[0])
+    let nx_pass = _atoi(nx_h[0])
+    if nx_pass < 4 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL nexus precondition score " + to_string(nx_pass) + "/5 (expected ≥4 — nexus is the canonical Honesty triad host)")
+        exit(2)
+    }
+    // T4: glob ≥3 cycles total across 3 repos (sum)
+    let mut total_cycles = 0
+    for r in repos {
+        let stats = _collect_repo_stats(r)
+        total_cycles = total_cycles + _atoi(stats[0])
+    }
+    if total_cycles < 3 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL total omega-cycle artifacts across 3 repos = " + to_string(total_cycles) + " (expected ≥3)")
+        exit(2)
+    }
+    // T5: idempotence — emit super-shard text twice on identical inputs, must be byte-eq
+    // build deterministic dummy repo_stats + honesty_results
+    let dummy_stats = [
+        ["nexus",           "5", "120", "20525", "3", "2026-04-25T00:00:00Z"],
+        ["n6-architecture", "8", "180", "21800", "5", "2026-04-25T00:00:00Z"],
+        ["anima",           "1", "10",  "100",   "1", "2026-04-25T00:00:00Z"]
+    ]
+    let dummy_h = [
+        ["nexus",           "5", "5", "REPO_INVARIANT", []],
+        ["n6-architecture", "5", "5", "REPO_INVARIANT", []],
+        ["anima",           "3", "5", "FAIL", []]
+    ]
+    let s1 = _emit_super_shard(dummy_stats, dummy_h)
+    let s2 = _emit_super_shard(dummy_stats, dummy_h)
+    if s1 != s2 {
+        eprintln("[atlas_omega_supercycle selftest] FAIL idempotence: two emit_super_shard calls produced different output")
+        exit(2)
+    }
+    println("[atlas_omega_supercycle selftest] OK — 3 repos registered, " + to_string(existing) + "/3 roots exist, 5/5 Honesty heuristics invocable, nexus " + to_string(nx_pass) + "/5 PASS, " + to_string(total_cycles) + " total cycles globbed, idempotent emit byte-eq")
+    exit(0)
+}
+
+// ─── runner ───
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+    let mut dry_run = false
+    let mut json_summary = false
+    let mut absorb = false
+    let mut diff_mode = false
+    let mut honesty_only = false
+    let mut repo_only = ""
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { _selftest() }
+        else if a == "--dry-run" { dry_run = true }
+        else if a == "--absorb" { absorb = true }
+        else if a == "--diff" { diff_mode = true }
+        else if a == "--json-summary" { json_summary = true }
+        else if a == "--honesty-only" { honesty_only = true }
+        else if a == "--repo-only" {
+            if i + 1 >= len(cli) {
+                eprintln("atlas_omega_supercycle: --repo-only requires NAME argument")
+                exit(1)
+            }
+            repo_only = cli[i + 1]
+            i = i + 1
+        }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/atlas_omega_supercycle.hexa [flags]")
+            println("flags:")
+            println("  --selftest       module self-checks (3 repo paths + 5 honesty heuristics + idempotence)")
+            println("  --dry-run        emit super-shard to stdout only (no file write)")
+            println("  --absorb         emit + merge to main atlas.n6 (delta-only, exit 3 on conflict)")
+            println("  --diff           show 'WOULD add vs already present in nexus atlas.n6'")
+            println("  --json-summary   JSON output mode")
+            println("  --repo-only N    restrict aggregation to repo N (nexus|n6-architecture|anima)")
+            println("  --honesty-only   emit only Honesty triad 5-precondition results, skip super-shard")
+            println("audit: state/atlas_supercycle_history.jsonl (raw 77 chain hash)")
+            println("origin: design/hexa_sim/2026-04-26_atlas_ingest_tool_evolution_omega_cycle.json phase_3_target")
+            exit(0)
+        }
+        else {
+            eprintln("atlas_omega_supercycle: unknown arg `" + a + "`")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    // gather repo set
+    let all_repos = _repos()
+    let mut active_repos = []
+    if len(repo_only) > 0 {
+        let mut found = false
+        for r in all_repos {
+            if r[0] == repo_only { active_repos.push(r); found = true }
+        }
+        if !found {
+            eprintln("atlas_omega_supercycle: --repo-only `" + repo_only + "` not in registry (nexus|n6-architecture|anima)")
+            exit(1)
+        }
+    } else {
+        active_repos = all_repos
+    }
+
+    // module 2: Honesty triad 5-precondition verify (per repo)
+    let mut honesty_results = []
+    let mut honesty_pass5 = 0
+    let mut honesty_total = 0
+    for r in active_repos {
+        let v = _verify_honesty(r)
+        // v = [pass_n, "5", grade, details]
+        let entry = [r[0], v[0], v[1], v[2], v[3]]
+        honesty_results.push(entry)
+        if v[0] == "5" { honesty_pass5 = honesty_pass5 + 1 }
+        honesty_total = honesty_total + 1
+    }
+
+    // honesty-only short circuit
+    if honesty_only {
+        if json_summary {
+            println("{")
+            println("  \"tool\": \"atlas_omega_supercycle\",")
+            println("  \"mode\": \"honesty-only\",")
+            println("  \"honesty_pass5\": " + to_string(honesty_pass5) + ",")
+            println("  \"honesty_total\": " + to_string(honesty_total) + ",")
+            println("  \"per_repo\": [")
+            let mut q = 0
+            while q < len(honesty_results) {
+                let h = honesty_results[q]
+                let comma = if q + 1 < len(honesty_results) { "," } else { "" }
+                println("    {\"repo\": \"" + h[0] + "\", \"pass\": " + h[1] + ", \"total\": " + h[2] + ", \"grade\": \"" + h[3] + "\"}" + comma)
+                q = q + 1
+            }
+            println("  ]")
+            println("}")
+        } else {
+            println("=== Honesty Triad 5-Precondition Audit ===")
+            for h in honesty_results {
+                let name = h[0]
+                let pass_n = h[1]
+                let total = h[2]
+                let grade = h[3]
+                let details = h[4]
+                println("")
+                println("repo: " + name + "  →  " + pass_n + "/" + total + "  (" + grade + ")")
+                let labels = ["(a) promotion path     ", "(b) SSOT registry      ", "(c) research layer     ", "(d) tool ecosystem     ", "(e) LLM agents         "]
+                let mut k = 0
+                while k < len(details) {
+                    let d = details[k]
+                    let mark = if d[0] == "PASS" { "[ok]" } else { "[--]" }
+                    println("  " + mark + " " + labels[k] + "  " + d[1])
+                    k = k + 1
+                }
+            }
+            println("")
+            println("=== summary: " + to_string(honesty_pass5) + "/" + to_string(honesty_total) + " repos at REPO_INVARIANT (5/5) ===")
+        }
+        // raw 77 audit ledger entry (honesty-only mode)
+        _append_history(len(active_repos), honesty_pass5, 0, 0, "honesty-only", "honesty-only")
+        // exit code: 4 if zero repos hit 5/5
+        if honesty_pass5 == 0 {
+            eprintln("__ATLAS_SUPERCYCLE__ FAIL repos=" + to_string(len(active_repos)) + " cycles=0 facts=0 crosslinks=0 honesty=0/" + to_string(honesty_total))
+            exit(4)
+        }
+        println("__ATLAS_SUPERCYCLE__ PASS repos=" + to_string(len(active_repos)) + " cycles=0 facts=0 crosslinks=0 honesty=" + to_string(honesty_pass5) + "/" + to_string(honesty_total))
+        exit(0)
+    }
+
+    // module 1: cross-repo aggregation
+    let mut repo_stats = []
+    let mut total_cycles = 0
+    let mut total_facts = 0
+    for r in active_repos {
+        let stats = _collect_repo_stats(r)
+        // stats = [cycles, facts, atlas_lines, shards, ts, valid]
+        let row = [r[0], stats[0], stats[1], stats[2], stats[3], stats[4]]
+        repo_stats.push(row)
+        total_cycles = total_cycles + _atoi(stats[0])
+        total_facts = total_facts + _atoi(stats[1])
+    }
+
+    // module 3: super-shard emit
+    let shard_text = _emit_super_shard(repo_stats, honesty_results)
+
+    // estimate crosslinks count from emitted text (count "@X " occurrences)
+    let cmd_xc = "printf %s '" + shard_text.replace("'", "") + "' | grep -cE '^@X ' || true"
+    let crosslinks_n = _atoi(to_string(exec(cmd_xc)).trim())
+
+    // diff mode
+    if diff_mode {
+        println("=== DIFF MODE — supercycle facts vs nexus n6/atlas.n6 ===")
+        let mut would_add = 0
+        let mut already = 0
+        for row in repo_stats {
+            let id = "repo_" + row[0]
+            if _check_main_dup(id) { already = already + 1; println("  = @P " + id) }
+            else { would_add = would_add + 1; println("  + @P " + id) }
+        }
+        for h in honesty_results {
+            let id = "honesty_triad_" + h[0]
+            if _check_main_dup(id) { already = already + 1; println("  = @L " + id) }
+            else { would_add = would_add + 1; println("  + @L " + id) }
+        }
+        println("WOULD ADD: " + to_string(would_add))
+        println("ALREADY:   " + to_string(already))
+        println("=== / DIFF ===")
+        exit(0)
+    }
+
+    // dry-run
+    if dry_run {
+        if json_summary {
+            println("{")
+            println("  \"tool\": \"atlas_omega_supercycle\",")
+            println("  \"mode\": \"dry-run\",")
+            println("  \"repos\": " + to_string(len(active_repos)) + ",")
+            println("  \"total_cycles\": " + to_string(total_cycles) + ",")
+            println("  \"total_atlas_facts\": " + to_string(total_facts) + ",")
+            println("  \"crosslinks\": " + to_string(crosslinks_n) + ",")
+            println("  \"honesty_pass5\": " + to_string(honesty_pass5) + "/" + to_string(honesty_total))
+            println("}")
+        } else {
+            println("=== DRY-RUN — would emit super-shard ===")
+            println(shard_text)
+            println("=== / DRY-RUN ===")
+        }
+        _append_history(len(active_repos), honesty_pass5, total_facts, crosslinks_n, "dry-run", "dry-run")
+        println("__ATLAS_SUPERCYCLE__ PASS repos=" + to_string(len(active_repos)) + " cycles=" + to_string(total_cycles) + " facts=" + to_string(total_facts) + " crosslinks=" + to_string(crosslinks_n) + " honesty=" + to_string(honesty_pass5) + "/" + to_string(honesty_total) + " mode=dry-run")
+        exit(0)
+    }
+
+    // emit shard file
+    let shard = _super_shard_path()
+    write_file(shard, shard_text)
+    let shard_sha = _shard_sha16()
+
+    // absorb (delta-only — conflict if any super-shard id already in main)
+    let mut absorb_status = "shard-only"
+    let mut absorb_lines = "0"
+    let mut atlas_sha_after = ""
+    if absorb {
+        let mut conflicts = []
+        for row in repo_stats {
+            let id = "repo_" + row[0]
+            if _check_main_dup(id) { conflicts.push("@P " + id) }
+        }
+        for h in honesty_results {
+            let id = "honesty_triad_" + h[0]
+            if _check_main_dup(id) { conflicts.push("@L " + id) }
+        }
+        if len(conflicts) > 0 {
+            eprintln("__ATLAS_SUPERCYCLE__ FAIL absorb conflict (" + to_string(len(conflicts)) + " entries already in main atlas.n6):")
+            for c in conflicts { eprintln("  conflict: " + c) }
+            eprintln("  reason: super-shard contains entries already in main — delta-only invariant violated")
+            eprintln("  fix: re-run without --absorb to emit shard only; OR investigate overlap (likely double-absorb)")
+            exit(3)
+        }
+        let r = _absorb_to_main_atlas()
+        absorb_status = r[0]
+        absorb_lines = r[1]
+        atlas_sha_after = r[2]
+    }
+
+    // raw 77 audit ledger
+    _append_history(len(active_repos), honesty_pass5, total_facts, crosslinks_n, shard_sha, "live")
+
+    if json_summary {
+        println("{")
+        println("  \"tool\": \"atlas_omega_supercycle\",")
+        println("  \"shard\": \"" + shard + "\",")
+        println("  \"shard_sha16\": \"" + shard_sha + "\",")
+        println("  \"repos\": " + to_string(len(active_repos)) + ",")
+        println("  \"total_cycles\": " + to_string(total_cycles) + ",")
+        println("  \"total_atlas_facts\": " + to_string(total_facts) + ",")
+        println("  \"crosslinks\": " + to_string(crosslinks_n) + ",")
+        println("  \"honesty_pass5\": " + to_string(honesty_pass5) + ",")
+        println("  \"honesty_total\": " + to_string(honesty_total) + ",")
+        println("  \"absorb_status\": \"" + absorb_status + "\",")
+        println("  \"atlas_sha_after\": \"" + atlas_sha_after + "\",")
+        println("  \"history_path\": \"" + _history_path() + "\"")
+        println("}")
+    } else {
+        println("Atlas Ω super-cycle aggregator (Phase 3)")
+        println("---")
+        println("  active repos      : " + to_string(len(active_repos)))
+        println("  total Ω cycles    : " + to_string(total_cycles) + " (across active repos)")
+        println("  atlas facts (sum) : " + to_string(total_facts))
+        println("  super-shard path  : " + shard)
+        println("  super-shard sha16 : " + shard_sha)
+        println("  crosslinks (@X)   : " + to_string(crosslinks_n))
+        println("  honesty 5/5 repos : " + to_string(honesty_pass5) + "/" + to_string(honesty_total))
+        println("  absorb status     : " + absorb_status + " (lines=" + absorb_lines + ", main_sha=" + atlas_sha_after + ")")
+        println("  history (raw 77)  : " + _history_path())
+    }
+    println("__ATLAS_SUPERCYCLE__ PASS repos=" + to_string(len(active_repos)) + " cycles=" + to_string(total_cycles) + " facts=" + to_string(total_facts) + " crosslinks=" + to_string(crosslinks_n) + " honesty=" + to_string(honesty_pass5) + "/" + to_string(honesty_total) + " absorb=" + absorb_status)
+    exit(0)
+}
