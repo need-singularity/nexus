@@ -284,6 +284,23 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 4. **nxs-002 deep fix path 정확히 = cross-domain bridges 추가** (drill 의 axiom-driven discovery 가 가장 가치 있는 출력 = math × physics, 7대난제 × geometry 같은 정합)
 
 → drill quality 는 **cross-domain semantic 정합** 이 핵심. domain 내부 entries 만 추가하면 composite 변화 없음.
+
+### 2026-04-25 cross-domain edge 분포 — n6-canonical 이 hub
+| count | pair | 비중 |
+|---|---|---|
+| **25,147** | **7대난제 ↔ n6-canonical** | 65.2% |
+| 8,902 | math ↔ n6-canonical | 23.1% |
+| 2,525 | n6-canonical ↔ physics | 6.5% |
+| 1,404 | 7대난제 (intra) | — |
+| 373 | geometry ↔ n6-canonical | 1.0% |
+| (소수 27 pairs) | … | … |
+
+**핵심 (40,582 mapped edges, intra 5% / cross 95%)**:
+1. **n6-canonical 이 atlas graph 의 hub** — top-3 pair 가 모두 n6-canonical 거침 = 95% of cross-domain
+2. atlas 가 hub-and-spoke 구조 — domain entries 가 모두 n6-canonical 통해 연결
+3. 5 [10*] promotion (n6-sigma/n/phi/j2/tau) 가 atlas.n6 의 n6-canonical mirror — 그러나 atlas.blowup.jsonl graph 에는 영향 X (drill 만 graph 갱신)
+
+**0.9 도달 path 최정밀**: drill 이 만들어야 할 entries = **n6-canonical ↔ {math/physics/geometry} 새 bridges**. 단, 새 entries 가 random 이면 (이전 sensitivity probe) 손상. drill 의 axiom-driven exploration 이 n6-canonical hub 와 정확히 align 되어야 함.
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
