@@ -1,0 +1,90 @@
+{
+  "cycle": "R5_ssh_activation_runbook",
+  "date": "2026-04-26",
+  "raw_anchors": ["raw 71 report-only", "raw 73 admissibility", "raw 66 reason+fix"],
+  "source_audit": "design/hexa_sim/SECURITY_AUDIT.md §8 (commit 0ea84fd3)",
+  "axes": {
+    "pre_flight": {
+      "ssh_keys_existing": ["~/.ssh/id_ed25519", "~/.ssh/id_ed25519.pub", "~/.ssh/id_hetzner_ax102"],
+      "git_signingkey_set": false,
+      "registry_sign_status": "__REGISTRY_SIGN__ SKIPPED reason=no_signing_key_configured",
+      "ledger_verify_status": "__LEDGER_VERIFY__ EMPTY entries=0 broken_at=none",
+      "path_decision": "Path A (reuse ~/.ssh/id_ed25519) — no key generation needed",
+      "verdict": "ready"
+    },
+    "runbook_structure": {
+      "path": "design/hexa_sim/R5_SSH_ACTIVATION_RUNBOOK.md",
+      "line_count": 207,
+      "section_count": 8,
+      "sections": [
+        "1. Decision (trade-offs + threat model + recommendation)",
+        "2. Pre-flight check (concrete commands + expected baseline)",
+        "3. Path A reuse existing key",
+        "4. Path B generate dedicated key",
+        "5. CI integration (5a launchd / 5b GitHub Actions / 5c pre-receive)",
+        "6. Rollback",
+        "7. Verification post-activation (4 tamper/no-op tests)",
+        "8. Test record (synthetic key validation 2026-04-26)"
+      ],
+      "under_cap_250_lines": true,
+      "verdict": "complete"
+    },
+    "templates": {
+      "launchd": {
+        "path": "state/com.nexus.health_check.plist.template",
+        "lines": 61,
+        "schedule": "daily 06:30 local",
+        "installed_live": false,
+        "verdict": "template_only"
+      },
+      "github_actions": {
+        "path": ".github/workflows/health_check.yml.template",
+        "lines": 74,
+        "trigger": "PR + workflow_dispatch + daily 06:17 UTC cron",
+        "secrets_required_for_verify": ["R5_PUBLIC_KEY", "R5_SIGNING_IDENTITY"],
+        "installed_live": false,
+        "verdict": "template_only"
+      },
+      "pre_receive": {
+        "documented_in_section": "5c",
+        "templated": false,
+        "reason": "out_of_scope_until_shared_remote_exists",
+        "verdict": "documented_only"
+      }
+    },
+    "synthetic_key_test": {
+      "tmpdir_pattern": "/tmp/r5_synth.XXXX/",
+      "key_type": "ed25519_no_passphrase",
+      "sign_sentinel": "__REGISTRY_SIGN__ SIGNED reason=key=<tmpdir>/synth_key",
+      "sign_rc": 0,
+      "verify_sentinel": "__REGISTRY_SIGN__ VERIFIED reason=identity=synth@local",
+      "verify_rc": 0,
+      "sig_file_created": "design/hexa_sim/falsifiers.jsonl.sig (294 bytes)",
+      "cleanup": "tmpdir removed + .sig removed; user ~/.ssh/ and git config untouched",
+      "verdict": "PASS"
+    },
+    "security_audit_update": {
+      "file": "design/hexa_sim/SECURITY_AUDIT.md §8",
+      "appended_runbook_pointer": true,
+      "appended_test_record": true,
+      "verdict": "back-reference_only"
+    }
+  },
+  "tier_1_artifacts": [
+    "design/hexa_sim/R5_SSH_ACTIVATION_RUNBOOK.md",
+    "state/com.nexus.health_check.plist.template",
+    ".github/workflows/health_check.yml.template",
+    "synthetic_key_e2e_test_PASS"
+  ],
+  "constraints_honored": {
+    "no_user_ssh_dir_modified": true,
+    "no_git_config_modified": true,
+    "templates_not_installed_live": true,
+    "no_commits_made_by_subagent": true,
+    "raw_71_option_presented_not_auto_activated": true,
+    "raw_73_concrete_steps": true,
+    "runbook_under_250_lines": true
+  },
+  "meta_roi_recommendation": "WAIT — current threat profile (solo-operator single-machine) is sufficiently covered by OPT-D forensic chain. Activate OPT-B opportunistically when first cross-host or CI-publishing event occurs. Runbook is now zero-friction to execute.",
+  "fixpoint_marker": "RUNBOOK_BYTE_EQ_CLOSED — Section 3 + Section 4 are deterministic command sequences; rerun against same starting state produces same end state (idempotent activation)."
+}

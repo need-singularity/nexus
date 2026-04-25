@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# ledger_verify.sh — verify hash-chain integrity of falsifier_registry rotation ledger (R5 OPT-D)
+# ledger_verify.sh — verify hash-chain integrity of an R5 rotation ledger (OPT-D)
 #
-# Walks state/falsifier_registry_rotation_log.jsonl top-to-bottom, recomputing
-# prev_hash for each entry and comparing against the value embedded in the next.
+# Walks the chosen JSONL ledger top-to-bottom, recomputing prev_hash for each
+# entry and comparing against the value embedded in the next.
+#
+# Default ledger: state/falsifier_registry_rotation_log.jsonl
+# Other ledgers (R5 chain extension, 2026-04-26 OPT-B generalization):
+#   --ledger bridge   → state/bridge_sha256_rotation_log.jsonl
+#   --ledger PATH     → arbitrary path (absolute or relative to NEXUS_ROOT)
 #
 # Modes:
 #   default   — human-readable lines + sentinel
 #   --quiet   — sentinel only
 #   --json    — single-line JSON summary
 #
-# Sentinel:
-#   __LEDGER_VERIFY__ <PASS|FAIL|EMPTY|PRE_R5> entries=N broken_at=<line_or_none>
+# Sentinel (raw 80 — backward-compat additive `ledger=<basename>` field):
+#   __LEDGER_VERIFY__ <PASS|FAIL|EMPTY|PRE_R5> entries=N broken_at=<line_or_none> ledger=<basename>
 #
 # Back-compat (PRE_R5):
 #   - If NO entries have prev_hash field, treat as PRE_R5_LEDGER (grandfathered, exit 0)
 #   - If entries are mixed (some with, some without), the first entry with prev_hash
 #     is treated as the chain root; everything before is grandfathered.
 #
-# raw 73: minimal; raw 66: reason+fix trailers; raw 71: report-only.
+# raw 73: minimal; raw 66: reason+fix trailers; raw 71: report-only; raw 77: additive.
 
 set -uo pipefail
 
@@ -26,20 +31,40 @@ if [ -z "${NEXUS_ROOT}" ] || [ ! -d "${NEXUS_ROOT}" ]; then
     NEXUS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fi
 
+# Default — overridable by env (back-compat) and by --ledger flag (OPT-B generalization).
 LOG="${LOG:-${NEXUS_ROOT}/state/falsifier_registry_rotation_log.jsonl}"
 
 MODE="default"
-case "${1:-}" in
-    --quiet) MODE="quiet" ;;
-    --json)  MODE="json" ;;
-    "")      ;;
-    *)
-        echo "ledger_verify.sh: unknown arg '${1}'" >&2
-        echo "  reason: only --quiet|--json|(none) supported" >&2
-        echo "  fix: re-run without arg or with one of --quiet/--json" >&2
-        exit 2
-        ;;
-esac
+# Parse args — supports legacy single-flag form AND new --ledger PATH form.
+while [ "$#" -gt 0 ]; do
+    case "${1:-}" in
+        --quiet) MODE="quiet"; shift ;;
+        --json)  MODE="json"; shift ;;
+        --ledger)
+            shift
+            if [ "$#" -eq 0 ]; then
+                echo "ledger_verify.sh: --ledger requires an argument" >&2
+                echo "  reason: missing PATH after --ledger" >&2
+                echo "  fix: --ledger bridge | --ledger falsifier | --ledger /abs/path.jsonl" >&2
+                exit 2
+            fi
+            case "${1}" in
+                bridge)    LOG="${NEXUS_ROOT}/state/bridge_sha256_rotation_log.jsonl" ;;
+                falsifier) LOG="${NEXUS_ROOT}/state/falsifier_registry_rotation_log.jsonl" ;;
+                /*)        LOG="${1}" ;;
+                *)         LOG="${NEXUS_ROOT}/${1}" ;;
+            esac
+            shift
+            ;;
+        "") shift ;;
+        *)
+            echo "ledger_verify.sh: unknown arg '${1}'" >&2
+            echo "  reason: only --quiet|--json|--ledger PATH|(none) supported" >&2
+            echo "  fix: re-run with one of --quiet/--json/--ledger {bridge|falsifier|PATH}" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Pick sha tool
 sha_tool=""
@@ -56,13 +81,15 @@ fi
 
 emit_sentinel() {
     local status="$1" entries="$2" broken_at="$3"
+    local lbase
+    lbase=$(basename "${LOG}")
     case "${MODE}" in
         json)
             printf '{"sentinel":"__LEDGER_VERIFY__","status":"%s","entries":%d,"broken_at":"%s","ledger":"%s"}\n' \
                 "${status}" "${entries}" "${broken_at}" "${LOG}"
             ;;
         *)
-            echo "__LEDGER_VERIFY__ ${status} entries=${entries} broken_at=${broken_at}"
+            echo "__LEDGER_VERIFY__ ${status} entries=${entries} broken_at=${broken_at} ledger=${lbase}"
             ;;
     esac
 }
@@ -162,7 +189,9 @@ if mode == "json":
         "pre_r5_count": pre_r5_count,
     }))
 else:
-    print(f"__LEDGER_VERIFY__ {final_status} entries={n} broken_at={broken_at}")
+    import os
+    lbase = os.path.basename(log_path)
+    print(f"__LEDGER_VERIFY__ {final_status} entries={n} broken_at={broken_at} ledger={lbase}")
 
 # Exit code: 0 for PASS/EMPTY/PRE_R5, 1 for FAIL
 sys.exit(0 if final_status in ("PASS", "EMPTY", "PRE_R5") else 1)

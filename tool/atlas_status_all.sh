@@ -152,12 +152,25 @@ if [ -f "$TOOL_DIR/registry_sign.sh" ]; then
     DEF_R5_SIGN_REASON=$(printf '%s' "$RS_LINE" | sed -nE 's/.*reason=([^ ]+).*/\1/p')
     [ -z "$DEF_R5_SIGN_REASON" ] && DEF_R5_SIGN_REASON="-"
 fi
+# R5 bridge_ledger (chain extension to bridge_sha256 — Ω-cycle 2026-04-26)
+DEF_R5_BRIDGE_LEDGER="missing"; DEF_R5_BRIDGE_LEDGER_ENTRIES=0; DEF_R5_BRIDGE_LEDGER_BROKEN="none"
+if [ -x "$TOOL_DIR/ledger_verify.sh" ] || [ -f "$TOOL_DIR/ledger_verify.sh" ]; then
+    BL_OUT=$(bash "$TOOL_DIR/ledger_verify.sh" --ledger bridge --quiet 2>&1 || true)
+    BL_LINE=$(printf '%s\n' "$BL_OUT" | grep '__LEDGER_VERIFY__' | tail -1)
+    DEF_R5_BRIDGE_LEDGER=$(printf '%s' "$BL_LINE" | awk '{print $2}')
+    [ -z "$DEF_R5_BRIDGE_LEDGER" ] && DEF_R5_BRIDGE_LEDGER="unknown"
+    DEF_R5_BRIDGE_LEDGER_ENTRIES=$(printf '%s' "$BL_LINE" | sed -nE 's/.*entries=([0-9]+).*/\1/p')
+    [ -z "$DEF_R5_BRIDGE_LEDGER_ENTRIES" ] && DEF_R5_BRIDGE_LEDGER_ENTRIES=0
+    DEF_R5_BRIDGE_LEDGER_BROKEN=$(printf '%s' "$BL_LINE" | sed -nE 's/.*broken_at=([^ ]+).*/\1/p')
+    [ -z "$DEF_R5_BRIDGE_LEDGER_BROKEN" ] && DEF_R5_BRIDGE_LEDGER_BROKEN="none"
+fi
 echo "  R1 falsifier baseline sha:  $DEF_FAL_SHA"
 echo "  R1 bridge sha entries:      $DEF_BRIDGE_COUNT (oldest=$DEF_BRIDGE_OLDEST)"
 echo "  R3-full pre-commit hook:    $DEF_R3_HOOK"
 echo "  R4 rotation log entries:    $DEF_R4_ROT"
 echo "  R5 ledger_verify:           $DEF_R5_LEDGER (entries=$DEF_R5_LEDGER_ENTRIES broken_at=$DEF_R5_LEDGER_BROKEN)"
 echo "  R5 registry_sign:           $DEF_R5_SIGN (reason=$DEF_R5_SIGN_REASON)"
+echo "  R5 bridge_ledger:           $DEF_R5_BRIDGE_LEDGER (entries=$DEF_R5_BRIDGE_LEDGER_ENTRIES broken_at=$DEF_R5_BRIDGE_LEDGER_BROKEN)"
 
 # ─── 8. timeline status (atlas_health_timeline rotation watch) ───
 echo ""
@@ -194,5 +207,6 @@ EXIT_CODE=0
 [ "$RUNTIME_HEALTHY" = "0" ] && EXIT_CODE=2
 [ "$COLLISION_CONF" -gt 0 ] && EXIT_CODE=2
 [ "$DEF_R5_LEDGER" = "FAIL" ] && EXIT_CODE=2
-echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED collision_dup=$COLLISION_DUP collision_conflict=$COLLISION_CONF defense_r1_falsifier=$DEF_FAL_SHA defense_r1_bridge=$DEF_BRIDGE_COUNT defense_r3_full=$DEF_R3_HOOK defense_r4_rotations=$DEF_R4_ROT defense_r5_ledger=$DEF_R5_LEDGER defense_r5_ledger_entries=$DEF_R5_LEDGER_ENTRIES defense_r5_ledger_broken_at=$DEF_R5_LEDGER_BROKEN defense_r5_sign=$DEF_R5_SIGN defense_r5_sign_reason=$DEF_R5_SIGN_REASON timeline_lines=$TL_LINES timeline_last_rot=$TL_LAST_ROT"
+[ "$DEF_R5_BRIDGE_LEDGER" = "FAIL" ] && EXIT_CODE=2
+echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED collision_dup=$COLLISION_DUP collision_conflict=$COLLISION_CONF defense_r1_falsifier=$DEF_FAL_SHA defense_r1_bridge=$DEF_BRIDGE_COUNT defense_r3_full=$DEF_R3_HOOK defense_r4_rotations=$DEF_R4_ROT defense_r5_ledger=$DEF_R5_LEDGER defense_r5_ledger_entries=$DEF_R5_LEDGER_ENTRIES defense_r5_ledger_broken_at=$DEF_R5_LEDGER_BROKEN defense_r5_sign=$DEF_R5_SIGN defense_r5_sign_reason=$DEF_R5_SIGN_REASON defense_r5_bridge_ledger=$DEF_R5_BRIDGE_LEDGER($DEF_R5_BRIDGE_LEDGER_ENTRIES) defense_r5_bridge_ledger_broken_at=$DEF_R5_BRIDGE_LEDGER_BROKEN timeline_lines=$TL_LINES timeline_last_rot=$TL_LAST_ROT"
 exit $EXIT_CODE

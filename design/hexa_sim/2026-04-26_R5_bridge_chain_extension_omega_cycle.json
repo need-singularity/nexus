@@ -1,0 +1,61 @@
+{
+  "ts": "2026-04-26T08:32:00Z",
+  "cycle": "R5_bridge_chain_extension",
+  "kind": "omega_cycle",
+  "axes": [
+    "design — extend R5 OPT-D hash-chained ledger pattern from falsifier_registry to bridge_sha256",
+    "OPT-B generalization — ledger_verify.sh accepts --ledger {bridge|falsifier|PATH}; sentinel additively gains ledger=<basename> (raw 80 backward-compat)",
+    "rotation tool — bridge_sha256_rotate.sh standalone (NOT pre-commit hook; .githooks/ retired in commit e3137be2 per user decision)",
+    "mutation cycle test — 2-rotation chain on codata bridge; prev_hash chain integrity cross-validated",
+    "SECURITY_AUDIT §8.1 amendment — closes §6 R5+ candidate 'extend chain to bridge baselines'",
+    "aggregator weave — atlas_status_all + health_check_all both enriched (additive sentinel fields per raw 80)"
+  ],
+  "tier_1": [
+    "ledger_verify.sh patched (+~35 lines) — generalized via --ledger flag; back-compat preserved",
+    "bridge_sha256_rotate.sh new (~180 lines, bash 3.2 portable, no python)",
+    "pre-commit extension SKIPPED — .githooks/ retired by user (commit e3137be2); tool is standalone instead",
+    "mutation cycle 2-rotation chain test PASS (entry-1 prev_hash=genesis, entry-2 prev_hash=sha256(line1) cross-validated)",
+    "atlas_status_all.sh enriched — defense_r5_bridge_ledger field added",
+    "health_check_all.sh enriched — 5th subcheck (BL) added, bridge_ledger=<status>(<N>) sentinel field added",
+    "SECURITY_AUDIT §8.1 amendment shipped"
+  ],
+  "tier_2": [
+    "bash 3.2 portable: pure shell + awk for TSV rewrite (no python required for rotation; verifier still uses python for JSON walk)",
+    "raw 71 honoured — REPORTS+ROTATES baseline only; never modifies bridge .hexa contents",
+    "raw 73 honoured — minimal additive surface; no new dependencies",
+    "raw 77 honoured — TSV comment+blank lines preserved verbatim through awk pass",
+    "raw 80 honoured — every sentinel change is additive (new fields appended, existing fields preserved)",
+    "ledger entry schema includes 'bridge' field for per-bridge audit trail (extension over falsifier ledger schema)"
+  ],
+  "test_results": {
+    "ledger_verify_absent_bridge_log": {"expected": "EMPTY rc=0", "actual": "__LEDGER_VERIFY__ EMPTY entries=0 broken_at=none ledger=bridge_sha256_rotation_log.jsonl rc=0", "status": "PASS"},
+    "mutation_1_rotate": {"expected": "TSV rotated, entry 1 prev_hash=genesis", "actual": "sha 3f9992f3d5893c59 → 1e0c072ba7ac8443; entry 1 prev_hash=genesis", "status": "PASS"},
+    "ledger_verify_after_m1": {"expected": "PASS entries=1", "actual": "__LEDGER_VERIFY__ PASS entries=1 broken_at=none ledger=bridge_sha256_rotation_log.jsonl", "status": "PASS"},
+    "mutation_2_rotate": {"expected": "TSV rotated, entry 2 prev_hash=sha256(line1_no_newline)", "actual": "sha 1e0c072ba7ac8443 → 06236b5c5d629de1; entry 2 prev_hash=5bf4fdfafd5033e78276073f07294d1faefac7f646875b1fbcf8d0c2293ca86a (manually verified equal to sha256(line1 with trailing \\n stripped))", "status": "PASS"},
+    "ledger_verify_after_m2": {"expected": "PASS entries=2", "actual": "__LEDGER_VERIFY__ PASS entries=2 broken_at=none ledger=bridge_sha256_rotation_log.jsonl", "status": "PASS"},
+    "atlas_status_all_smoke": {"expected": "new R5 bridge_ledger line; sentinel includes defense_r5_bridge_ledger field", "actual": "section 7 prints 'R5 bridge_ledger: EMPTY (entries=0 broken_at=none)'; sentinel ends with 'defense_r5_bridge_ledger=EMPTY(0) defense_r5_bridge_ledger_broken_at=none'", "status": "PASS"},
+    "health_check_all_smoke": {"expected": "BL field in compact line and sentinel", "actual": "compact: '... | BL: EMPTY(0)'; sentinel: '... bridge_ledger=EMPTY(0)'", "status": "PASS"},
+    "restoration": {"expected": "codata bridge baseline 3f9992f3d5893c59 restored, ledger removed", "actual": "shasum confirms 3f9992f3d5893c59; ledger absent (EMPTY)", "status": "PASS"}
+  },
+  "files_touched": [
+    "tool/ledger_verify.sh (modified, +~35 lines)",
+    "tool/bridge_sha256_rotate.sh (new, ~180 lines)",
+    "tool/atlas_status_all.sh (modified, +~14 lines)",
+    "tool/health_check_all.sh (modified, +~22 lines)",
+    "design/hexa_sim/SECURITY_AUDIT.md (amended §8.1, +~30 lines)"
+  ],
+  "deviation_from_brief": {
+    "pre_commit_hook_extension": "SKIPPED — .githooks/ directory was deliberately retired by user in commit e3137be2 ('R5 pre-commit hook deletion is now intentional'). Resurrecting the hook would contradict that explicit decision. Substituted with standalone tool/bridge_sha256_rotate.sh which is invokable manually, by cron, or by future automation. Mutation cycle test was performed via direct tool invocation rather than 'bash .githooks/pre-commit' to honour the same user decision while still validating the chain extension semantics."
+  },
+  "fixpoint": {
+    "marker": true,
+    "reason": "ledger_verify.sh DRY across both ledger types; bridge_sha256_rotate.sh end-to-end mutation cycle PASS with chain integrity cross-validated; aggregators emit additive sentinel fields; SECURITY_AUDIT amended; restoration verified. Further iteration would only enable OPT-B SSH signing on the bridge ledger (gated by user authorization, identical pattern to falsifier ledger §8 OPT-B stub)."
+  },
+  "compliance": {
+    "raw_66": "reason+fix trailers on every error path of bridge_sha256_rotate.sh and ledger_verify.sh --ledger arg validation",
+    "raw_71": "REPORTS+ROTATES baseline TSV + ledger only; bridge .hexa contents never modified",
+    "raw_73": "minimal additive surface; bash 3.2 portable; no new external deps",
+    "raw_77": "additive — TSV comment lines + non-target rows preserved verbatim",
+    "raw_80": "all sentinel changes additive (new fields appended)"
+  }
+}

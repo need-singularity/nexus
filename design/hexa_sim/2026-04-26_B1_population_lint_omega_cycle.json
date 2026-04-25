@@ -1,0 +1,87 @@
+{
+  "ts": "2026-04-26T00:00:00Z",
+  "ordinal": "omega+1",
+  "cycle": "B1_population_lint_prevention",
+  "parent": "B1_population_sweep_yesterday",
+  "intent": "Prevent regression of B1 nested-if-continue copy-paste pattern (17 files / 19 sites). Single point-fix should auto-trigger population sweep; lint enforces it.",
+  "axes": [
+    {
+      "axis": "lint_script",
+      "path": "/Users/ghost/core/nexus/tool/lint_nested_if_continue.sh",
+      "loc": 79,
+      "loc_cap": 80,
+      "sha256": "bc40659ea64ad33b79b2612b5384374f0707ad8c4572d17a00307310e0b690bd",
+      "approach": "regex+indent heuristic (no full hexa parser)",
+      "rule_id": "B1-nested-if-continue",
+      "output_format": "file:line:col:rule:desc",
+      "exit_codes": {"0": "clean", "1": "bug found", "2": "scan error"}
+    },
+    {
+      "axis": "fixtures_and_selftest",
+      "bad_fixture": {
+        "path": "/Users/ghost/core/nexus/tool/lint_test_fixtures/nested_if_continue_BAD.hexa",
+        "sha256": "9116c44c190bb0c0a1f82d1e95ba1bbe816a63e7728e7738087d9f69be64ed1c",
+        "expected_exit": 1,
+        "actual_exit": 1,
+        "caught": true
+      },
+      "good_fixture": {
+        "path": "/Users/ghost/core/nexus/tool/lint_test_fixtures/nested_if_continue_GOOD.hexa",
+        "sha256": "821d54452ebd375e6cb42f3476806ef0efbaf09d954f48f46673adedae02a520",
+        "expected_exit": 0,
+        "actual_exit": 0,
+        "accepted": true
+      },
+      "selftest": {
+        "path": "/Users/ghost/core/nexus/tool/lint_test_fixtures/run_selftest.sh",
+        "sha256": "b71edd4ed9e3a8a99f164b5e398f480cb7124a4e7015e262b66cf610b3001413",
+        "result": "ALL PASS (BAD=1, GOOD=0, repo=0)"
+      }
+    },
+    {
+      "axis": "current_repo_scan",
+      "scope": "tool/ + shared/ (.hexa)",
+      "exit_code": 0,
+      "wall_time_sec": 0.13,
+      "interpretation": "post-sweep clean — no remaining instances of the bad pattern detected by this lint",
+      "iteration_history": [
+        {"version": "v1", "false_positives": 3, "cause": "outer-if of file_exists() flagged when inner while had its own flat-guard"},
+        {"version": "v2", "false_positives": 22, "cause": "loop-tail anchored on while/for, but `i = i + 2` and `i = nxt` not recognized as safe inner update"},
+        {"version": "v3", "false_positives": 14, "cause": "i = j + 1 reassign accepted but continue inside nested while still attributed to outer loop"},
+        {"version": "v4 (final)", "false_positives": 0, "cause": "skip continues inside nested while/for blocks"}
+      ]
+    },
+    {
+      "axis": "false_positive_negative_analysis",
+      "false_positives_known": 0,
+      "false_negatives_acknowledged": [
+        "single-line nested forms `if c { if d { continue } }` not detected (rare in codebase)",
+        "non-`i` counter names (e.g. `idx`, `pos`) — lint is hardcoded to `i = i + 1` tail",
+        "loops with multi-statement tails or counters incremented at top of body",
+        "tab-indented files (codebase is space-indented; spot-checked)",
+        "continue inside switch-like or match-like nested blocks if hexa adds them"
+      ],
+      "scope_intentional_limit": "Lint targets the specific B1 idiom (`while i < n`-style index loop with `i = i + 1` tail). Broader detector would require AST/full hexa parser.",
+      "precommit_hook": {
+        "status": "not-found-skipped",
+        "reason": "no .githooks/ directory and no active .git/hooks/pre-commit (only stock samples)",
+        "next_cycle_action": "after one bake cycle, create .githooks/pre-commit calling `tool/lint_nested_if_continue.sh` filtered to staged .hexa files; user opts in via `git config core.hooksPath .githooks`",
+        "rationale": "spec requires opt-in only; do not silently install hooks"
+      },
+      "falsifier_results": {
+        "bad_fixture_caught": true,
+        "good_fixture_accepted": true,
+        "current_tool_clean": true,
+        "all_pass": true
+      }
+    }
+  ],
+  "method_gap_addressed": "Yesterday a single point-fix was applied without the implicit population-sweep step. This lint encodes the population invariant: any future re-introduction of the pattern fails the lint; CI/hook adoption (next cycle) makes the sweep automatic instead of memory-dependent.",
+  "deliverables": [
+    "tool/lint_nested_if_continue.sh (79 LoC, exec)",
+    "tool/lint_test_fixtures/nested_if_continue_BAD.hexa",
+    "tool/lint_test_fixtures/nested_if_continue_GOOD.hexa",
+    "tool/lint_test_fixtures/run_selftest.sh",
+    "design/hexa_sim/2026-04-26_B1_population_lint_omega_cycle.json (this witness)"
+  ]
+}

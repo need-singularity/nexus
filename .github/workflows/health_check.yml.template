@@ -1,0 +1,74 @@
+# health_check.yml.template — GitHub Actions PR health-check for falsifier registry
+#
+# R5 SSH activation runbook — Section 5 (CI integration / GitHub Actions path)
+#
+# Install:
+#   cp .github/workflows/health_check.yml.template .github/workflows/health_check.yml
+#   git add .github/workflows/health_check.yml && git commit -m "ci: add health_check workflow"
+#
+# Uninstall:
+#   git rm .github/workflows/health_check.yml && git commit -m "ci: remove health_check workflow"
+#
+# What it runs:
+#   - tool/ledger_verify.sh          (always — no key needed; PASS/EMPTY/PRE_R5/FAIL)
+#   - tool/registry_sign.sh verify   (only if R5_PUBLIC_KEY secret is set)
+#
+# Notes:
+#   - SSH signing keys are NEVER required in CI (verify only needs the public key
+#     + allowed_signers; sign is operator-side only).
+#   - To activate CI verification: add repo secret R5_PUBLIC_KEY = contents of
+#     ~/.ssh/<your_signing_key>.pub  AND  R5_SIGNING_IDENTITY = "nexus@local".
+#
+# raw 71: report-only on the verify step (continue-on-error: true) — chain integrity
+# is the only blocking gate; signature verification is advisory until ecosystem-wide.
+
+name: Falsifier Registry Health Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'design/hexa_sim/falsifiers.jsonl'
+      - 'state/falsifier_registry.sha256'
+      - 'state/falsifier_registry_rotation_log.jsonl'
+      - 'tool/ledger_verify.sh'
+      - 'tool/registry_sign.sh'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * *'  # daily 06:17 UTC
+
+jobs:
+  registry-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so the rotation log walk is meaningful
+
+      - name: Ledger chain verify (BLOCKING)
+        run: |
+          bash tool/ledger_verify.sh
+          # Exits non-zero on FAIL — that's the gate.
+
+      - name: Registry signature verify (advisory)
+        if: ${{ secrets.R5_PUBLIC_KEY != '' }}
+        continue-on-error: true
+        env:
+          R5_PUBLIC_KEY: ${{ secrets.R5_PUBLIC_KEY }}
+          R5_SIGNING_IDENTITY: ${{ secrets.R5_SIGNING_IDENTITY || 'nexus@local' }}
+        run: |
+          # Build allowed_signers from the secret
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${R5_SIGNING_IDENTITY} namespaces=\"file\" ${R5_PUBLIC_KEY}" > ~/.ssh/allowed_signers
+          # Verify (signature file expected at design/hexa_sim/falsifiers.jsonl.sig)
+          SIGNING_IDENTITY="${R5_SIGNING_IDENTITY}" \
+            ALLOWED_SIGNERS=~/.ssh/allowed_signers \
+            bash tool/registry_sign.sh verify
+
+      - name: Status sentinel summary
+        if: always()
+        run: |
+          echo '::group::sentinels'
+          bash tool/ledger_verify.sh --json || true
+          bash tool/registry_sign.sh status || true
+          echo '::endgroup::'

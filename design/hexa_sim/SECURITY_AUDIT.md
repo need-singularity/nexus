@@ -89,3 +89,42 @@ Five-layer defense chain validated end-to-end. R1 (cmd/bridge SHA256) catches si
 - `tool/registry_sign.sh` (new, ~140 lines, sign/verify/status modes, skip-by-default)
 
 **Witness**: `design/hexa_sim/2026-04-26_R5_detached_signature_omega_cycle.json`
+
+**Activation runbook (2026-04-26)**: `design/hexa_sim/R5_SSH_ACTIVATION_RUNBOOK.md` (207 lines, 8 sections; Path A `~/.ssh/id_ed25519` reuse + Path B dedicated-key + launchd/GitHub-Actions/pre-receive CI templates + rollback + post-activation verification). Synthetic-key end-to-end test (sign + verify on tmpdir Ed25519 key) — PASS. User has not yet authorized activation; tooling is execute-ready. META_ROI verdict: WAIT until first cross-host or CI-publishing event. Witness: `design/hexa_sim/2026-04-26_R5_ssh_activation_runbook_omega_cycle.json`.
+
+### 8.1 R5 chain extension to bridge_sha256 (Ω-cycle 2026-04-26)
+
+**Closes**: §6 R5+ candidate "extend chain to bridge baselines" — bridges previously had per-file SHA in `state/bridge_sha256.tsv` but no audit trail when a `tool/*_bridge.hexa` legitimately rotates (new feature, fallback retune). Tampering vs. legitimate change was indistinguishable.
+
+**Implementation (OPT-B generalization, primary)**:
+- `tool/ledger_verify.sh` patched (+~35 lines) to accept `--ledger {bridge|falsifier|PATH}` selector. Default behaviour unchanged (falsifier registry rotation log). Sentinel additively gains `ledger=<basename>` field — backward-compat per raw 80.
+- `tool/bridge_sha256_rotate.sh` (new, ~180 lines, bash 3.2 portable, no python) — scans `state/bridge_sha256.tsv`, computes live SHA per declared bridge file, rotates drifted rows in-place (col-3 sha + col-4 ts), and appends hash-chained ledger entry to `state/bridge_sha256_rotation_log.jsonl` using identical R5 OPT-D pattern (`prev_hash` = sha256(prev_line) | "genesis"). Modes: default | `--dry-run` | `--quiet` | `--json` | `--bridge NAME`. Emits `__BRIDGE_ROTATE__ <PASS|FAIL|EMPTY> scanned=N rotated=K dry_run=<0|1>`.
+- Ledger entry schema: `{"ts","bridge","old_sha","new_sha","trigger":"manual","prev_hash"}` — same chain semantics as falsifier ledger; `bridge` field added for per-bridge audit trail.
+
+**Why standalone tool (not pre-commit hook)**: `.githooks/` was retired by user in commit `e3137be2` ("R5 pre-commit hook deletion is now intentional"). Resurrecting the hook would contradict that decision. The standalone tool is invokable manually, by cron, or by future automation, and honours raw 71 (REPORTS+ROTATES — never modifies bridge contents).
+
+**Test results (mutation cycle, 2026-04-26)**:
+
+| Test                                              | Expected                              | Actual                                                              | Status |
+|---------------------------------------------------|---------------------------------------|---------------------------------------------------------------------|--------|
+| ledger_verify --ledger bridge on absent log       | EMPTY rc=0                            | `__LEDGER_VERIFY__ EMPTY entries=0 broken_at=none ledger=bridge_sha256_rotation_log.jsonl` rc=0 | PASS |
+| Mutation 1: codata bridge + benign comment        | TSV rotated; ledger entry 1, prev_hash=genesis | sha 3f9992f3d5893c59 → 1e0c072ba7ac8443; ledger entry 1 prev_hash="genesis" | PASS |
+| ledger_verify --ledger bridge after mutation 1    | PASS entries=1                        | `__LEDGER_VERIFY__ PASS entries=1 broken_at=none ledger=bridge_sha256_rotation_log.jsonl` | PASS |
+| Mutation 2: codata bridge + 2nd benign comment    | TSV rotated; entry 2 prev_hash=sha256(line1) | 1e0c072ba7ac8443 → 06236b5c5d629de1; entry 2 prev_hash=`5bf4fdfafd5033e7…` ≡ sha256(line1\NL-stripped) | PASS |
+| ledger_verify --ledger bridge after mutation 2    | PASS entries=2                        | `__LEDGER_VERIFY__ PASS entries=2 broken_at=none …`                 | PASS |
+
+All mutations restored to pristine state post-test (codata baseline 3f9992f3d5893c59, ledger removed).
+
+**Aggregator weave**:
+- `tool/atlas_status_all.sh` enriched (+~14 lines): new "R5 bridge_ledger" line in §7 + sentinel field `defense_r5_bridge_ledger=<status>(<N>) defense_r5_bridge_ledger_broken_at=<line_or_none>`. Exit code now also =2 on bridge ledger FAIL.
+- `tool/health_check_all.sh` enriched (+~22 lines): 5th subcheck (`BL`) using `ledger_verify --ledger bridge`; sentinel additively gains `bridge_ledger=<status>(<N>)`. Verdict propagates BL_EC into FAIL.
+
+**Forgery cost**: identical to §8 falsifier ledger — O(N) re-hash per mid-chain rewrite + write access to ledger. Coordinated bridge rewrite now requires (a) bridge .hexa write, (b) `bridge_sha256.tsv` write, (c) `bridge_sha256_rotation_log.jsonl` write + complete chain re-hash. Without OPT-B SSH signature this is forensic-only, but R5 chain extension closes the audit-trail gap.
+
+**Files shipped**:
+- `tool/ledger_verify.sh` (modified — +~35 lines for `--ledger` flag + additive sentinel `ledger=` field)
+- `tool/bridge_sha256_rotate.sh` (new, ~180 lines, bash 3.2 portable)
+- `tool/atlas_status_all.sh` (modified — +~14 lines aggregator weave)
+- `tool/health_check_all.sh` (modified — +~22 lines, 5th subcheck)
+
+**Witness**: `design/hexa_sim/2026-04-26_R5_bridge_chain_extension_omega_cycle.json`
