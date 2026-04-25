@@ -1,0 +1,86 @@
+{
+  "cycle_id": "F113 grade fix + F125 doc-hash-seal MASTER + F23 keep — registry quality_audit_v2 cleanup",
+  "date": "2026-04-26",
+  "trigger": "design/hexa_sim/2026-04-26_registry_quality_audit_v2.md flagged 3 weak/cleanup candidates",
+  "scope": "surgical cleanup per raw 71 (manual escalate, no auto-retire) + raw 73 (admissibility — non-trivial doc-hash master) + raw 77 (audit-append-only)",
+  "axes": [
+    {
+      "id": "a1",
+      "name": "F113 grade-token fix",
+      "claim": "atlas entry proof_theoretic_ordinal_ladder = L2:omega < ... < L_ω :: foundations [11*PASS_LITERATURE]",
+      "before": "regex truncated at `Feferman-Schutte\\)` — Levels L10/L11/L_ω AND `:: foundations [11*PASS_LITERATURE]` grade token never validated",
+      "after": "regex extended through `L10:psi(Omega_omega) (Bachmann-Howard) < L11:omega_1^CK (Church-Kleene) < L_. :: foundations [11*PASS_LITERATURE]` — full 8-level ladder + grade token now anchored",
+      "cmd_sha256_before": "65e88cf6f930b469",
+      "cmd_sha256_after": "a02e1d13bc4f6cd9",
+      "verification": "PASS — replayed cmd → ORDINAL_LADDER_INTACT (matches o['pass'])",
+      "rationale": "raw 73 admissibility — without grade-token anchor, atlas could downgrade [11*PASS_LITERATURE] → [10*PRESUMED] silently and F113 would still GREEN. Fix closes the semantic gap noted in quality_audit_v2.",
+      "tier": "Tier-1 fix shipped"
+    },
+    {
+      "id": "a2",
+      "name": "F6/F7/F8 NXS-002 trio — F125 MASTER doc-hash-seal added (raw 73 OPT-C)",
+      "trio_state": {
+        "F6": "grep 'QRNG/quantum-simulation axiom' + 'NULL' → PRESENT_NULL_VERDICT",
+        "F7": "grep 'Quantum topology hurts' → PRESENT_TOPOLOGY_HURTS",
+        "F8": "grep 'LSR ⊥ composite' → PRESENT_LSR_ORTHOGONAL"
+      },
+      "decision": "OPT-C — ADD F125 MASTER doc-hash-seal, KEEP F6/F7/F8 facet anchors (orthogonal coverage, no replacement)",
+      "alternatives_considered": {
+        "OPT-A_keep_3": "defense-in-depth via marker overlap, but cannot detect non-marker edits (footer, methodology, citations)",
+        "OPT-B_consolidate": "would lose facet-specific anchor semantics — drift in just QRNG paragraph would only show as 'doc changed' without pointing at WHICH marker",
+        "OPT-C_master_plus_facets": "PICKED — F125 sha256-seals byte stream; F6/F7/F8 retain marker-specific failure semantics (raw 73 + raw 77 audit-append-only friendly)"
+      },
+      "F125_entry": {
+        "id": "F125",
+        "slug": "abstraction-ceiling-doc-hash-seal",
+        "claim": "design/abstraction_ceiling.md sha256 unchanged at 6e6f0bde32f35adc50c1400237e31aaa18a7e8f25f0cccc2cb66ea4856934182",
+        "cmd": "[ \"$(shasum -a 256 /Users/ghost/core/nexus/design/abstraction_ceiling.md | awk '{print $1}')\" = \"6e6f0bde32f35adc50c1400237e31aaa18a7e8f25f0cccc2cb66ea4856934182\" ] && echo ABSTRACTION_CEILING_HASH_INTACT",
+        "pass": "ABSTRACTION_CEILING_HASH_INTACT",
+        "cmd_sha256": "d360c2a1d733b574"
+      },
+      "verification": "PASS — replayed F125 cmd → ABSTRACTION_CEILING_HASH_INTACT (matches doc current hash)",
+      "non_trivial_proof": "byte-stream sha256 detects edits invisible to all 3 marker greps (e.g. citation update, footer revision, paragraph reordering that preserves the 3 markers); raw 73 admissibility satisfied",
+      "tier": "Tier-1 add"
+    },
+    {
+      "id": "a3",
+      "name": "F23 atlas-DSL Layer4 vacuous regression — KEEP decision",
+      "current_status": "NON_EMPTY (PASS — Layer 4 still vacuous, but regression detector remains green; sha != e3b0c44298fc1c14 of empty string check evaluates to NON_EMPTY branch)",
+      "decision": "OPT-A — KEEP F23 active (per raw 71 conservative default, no auto-retire)",
+      "rationale": "the regression F23 guards against (Layer 4 reverting to vacuous PASS via empty-sha) is real: if the v2 serializer or shard subset implementation regresses, F23 fires. Quality_audit_v2 flagged it as 'narrow once-fixed catch, low value' but raw 71 mandates manual escalate — automatic retire would shed regression coverage with zero replacement.",
+      "alternatives_considered": {
+        "OPT-A_keep": "PICKED — preserves regression coverage; cost = 1 entry in registry runs",
+        "OPT-B_soft_retire": "would add `retired: true`, exclude from active runs; rejected because raw 71 prefers status-quo when in doubt",
+        "OPT-C_generalize": "Layer 4 vacuous-PASS for ANY shard (not just chip-p5-2); deferred to future hardening ω-cycle — adding scope now mixes concerns"
+      },
+      "tier": "Tier-1 keep"
+    }
+  ],
+  "registry_delta": {
+    "before": {"active": 104, "sentinel_F999": 1, "total_lines": 105},
+    "after": {"active": 105, "sentinel_F999": 1, "total_lines": 106},
+    "added": ["F125"],
+    "modified": ["F113 (cmd extended; cmd_sha256: 65e88cf6f930b469 → a02e1d13bc4f6cd9)"],
+    "removed": [],
+    "retired": []
+  },
+  "registry_baseline_sha256": "b593f9ae47fdbce2f5f62ec57af357dc31bb36977ed382f677a0895c5697ecaf",
+  "raw_compliance": {
+    "raw_71_manual_escalate": "F23 keep + F113 patch + F125 add all manually applied; no auto-retire",
+    "raw_73_structural_admissibility": "F125 doc-hash check is non-trivial (catches non-marker edits invisible to F6/F7/F8); F113 grade-token anchor closes downgrade-silent gap",
+    "raw_77_audit_append_only": "F125 appended after F114 (registry order preserved); F113 in-place mutation tracked via cmd_sha256 delta + this witness",
+    "raw_66_ai_native_error": "F125 reason+fix trailer documents recompute path (sha256 + cmd hex constant + cmd_sha256) for intentional edits"
+  },
+  "verifications_run": [
+    "F113 cmd → ORDINAL_LADDER_INTACT (PASS)",
+    "F125 cmd → ABSTRACTION_CEILING_HASH_INTACT (PASS)",
+    "F23 cmd → NON_EMPTY (PASS, retained)",
+    "registry baseline refreshed: state/falsifier_registry.sha256 = b593f9ae47fdbce2f5f62ec57af357dc31bb36977ed382f677a0895c5697ecaf"
+  ],
+  "next_cycles": [
+    "F23 OPT-C generalization: rewrite as 'Layer 4 vacuous-PASS detector for ANY shard' — broaden coverage scope",
+    "atlas_dsl_v2_serializer ascii-type-alphabet extension (root-cause fix for F23's HIT condition; would convert F23 from regression-guard to redundant)",
+    "auto-spawn cmd template hardening: include grade-token anchor by default (F113 manual fix shows the pattern; eliminate PRESENCE-only weakness ecosystem-wide)"
+  ],
+  "fixpoint_marker": "F113 grade-anchored, F125 master doc-hash-seal added with orthogonal coverage to F6/F7/F8 trio, F23 conservatively kept per raw 71. Registry 104→105 active (+1 F125, 0 retired). All 3 cleanup_v2 axes resolved with raw 71/73/77 compliance."
+}
