@@ -1,0 +1,89 @@
+// ═══════════════════════════════════════════════════════════
+// nxs_002_axiom_decision.hexa — composite_v3 SSOT 기반 axiom redesign 결정
+//
+// 통합 #4 (cycle 13/14): bisociation/spectra/g_atlas_composite_v3.json 을
+// metric SSOT 로 읽고 다음 axiom 액션을 자동 결정.
+//
+// 결정 매트릭스:
+//   composite_v3_prime ≥ 0.95    → CLOSURE (action_none) — 안정 통과
+//   composite_v3_prime ∈ [0.9, 0.95) → MAINTAIN — paper_trigger 통과 단 margin 작음
+//   composite_v3_prime ∈ [0.85, 0.9) → AXIOM_TUNE — 가까이 있음, fine-tune
+//   composite_v3_prime < 0.85    → AXIOM_REDESIGN — 새 axiom branch 필요
+//
+// 출력: stderr JSON (NEXUS_AXIOM_DECISION) + stdout decision string
+// 사용:
+//   hexa run tool/nxs_002_axiom_decision.hexa [--snapshot PATH]
+// ═══════════════════════════════════════════════════════════
+
+let _argv = args()
+let _HOME = env("HOME")
+let mut SNAPSHOT = _HOME + "/core/nexus/bisociation/spectra/g_atlas_composite_v3.json"
+
+let mut ai: i64 = 2
+while ai < len(_argv) {
+    let tok = _argv[ai]
+    if tok == "--snapshot" && ai + 1 < len(_argv) { ai = ai + 1; SNAPSHOT = _argv[ai] }
+    ai = ai + 1
+}
+
+if !file_exists(SNAPSHOT) {
+    eprintln("NEXUS_AXIOM_DECISION {\"error\":\"snapshot_missing\",\"path\":\"" + SNAPSHOT + "\"}")
+    println("error: snapshot not found — run nxs_002_omega_metrics.hexa first")
+    exit(1) // @allow-silent-exit
+}
+
+let raw = read_file(SNAPSHOT).trim()
+
+fn extract_field(raw: string, key: string) -> string {
+    let p = raw.index_of(key)
+    if p < 0 { return "" }
+    let rest = raw.substring(p + len(key), len(raw))
+    let mut buf: string = ""
+    let mut i: i64 = 0
+    while i < len(rest) {
+        let c = rest.substring(i, i + 1)
+        if c == "," || c == "}" { break }
+        buf = buf + c
+        i = i + 1
+    }
+    return buf.trim()
+}
+
+let v3p_str = extract_field(raw, "\"composite_v3_prime\":")
+let v3_str  = extract_field(raw, "\"composite_v3\":")
+let sff_str = extract_field(raw, "\"sff_align\":")
+let pass_str = extract_field(raw, "\"paper_trigger_passed_v3_prime\":")
+
+if v3p_str == "" {
+    eprintln("NEXUS_AXIOM_DECISION {\"error\":\"composite_v3_prime_missing\"}")
+    exit(1) // @allow-silent-exit
+}
+
+let v3p = to_float(v3p_str)
+let mut decision: string = ""
+let mut rationale: string = ""
+
+if v3p >= 0.95 {
+    decision = "CLOSURE"
+    rationale = "stable_pass_margin_high"
+} else if v3p >= 0.9 {
+    decision = "MAINTAIN"
+    rationale = "paper_trigger_passed_margin_thin"
+} else if v3p >= 0.85 {
+    decision = "AXIOM_TUNE"
+    rationale = "near_threshold_finetune_axiom"
+} else {
+    decision = "AXIOM_REDESIGN"
+    rationale = "below_threshold_new_branch_needed"
+}
+
+let json = "{\"decision\":\"" + decision + "\""
+    + ",\"rationale\":\"" + rationale + "\""
+    + ",\"composite_v3_prime\":" + v3p_str
+    + ",\"composite_v3\":" + v3_str
+    + ",\"sff_align\":" + sff_str
+    + ",\"paper_trigger_passed_v3_prime\":" + pass_str
+    + ",\"snapshot\":\"" + SNAPSHOT + "\"}"
+
+eprintln("NEXUS_AXIOM_DECISION " + json)
+println(decision)

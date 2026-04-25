@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.nexus.omega-metrics — Ω-saturation cycle 13/14 daily ceiling tracker.
+  Pairs with /Users/ghost/core/nexus/tool/nxs_002_omega_metrics.hexa.
+
+  Cadence: every 12h. Reads g_atlas_eig.jsonl (latest atlas_eig.hexa output) +
+  constants_spectrum.jsonl, computes composite_v1 + SFF + IPR + composite_v3/v3_prime,
+  writes bisociation/spectra/g_atlas_composite_v3.json.
+
+  Pipeline order recommendation (chain externally if both desired):
+    1. com.nexus.atlas-meta-scan (12h) — atlas health timeline
+    2. com.nexus.omega-metrics    (12h, offset) — ceiling tracker
+
+  Manual install:
+    cp /Users/ghost/core/nexus/tool/com.nexus.omega-metrics.plist \
+       ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.nexus.omega-metrics.plist
+    launchctl enable     gui/$UID/com.nexus.omega-metrics
+    # first-run manual:
+    /Users/ghost/core/hexa-lang/build/hexa.real run \
+       /Users/ghost/core/nexus/tool/nxs_002_omega_metrics.hexa
+    # kickstart:
+    launchctl kickstart -k gui/$UID/com.nexus.omega-metrics
+
+  Status / logs:
+    launchctl print gui/$UID/com.nexus.omega-metrics
+    tail -F /tmp/nexus_omega_metrics.out.log /tmp/nexus_omega_metrics.err.log
+    cat /Users/ghost/core/nexus/bisociation/spectra/g_atlas_composite_v3.json
+
+  Uninstall:
+    launchctl bootout gui/$UID/com.nexus.omega-metrics
+    rm ~/Library/LaunchAgents/com.nexus.omega-metrics.plist
+
+  Notes:
+    - Uses build/hexa.real DIRECTLY (bypasses hexa resolver — no remote routing,
+      no docker landing). Metric is local CPU-only, <1s.
+    - StartInterval 43200 = 12h. Offset by ~6h from atlas-meta-scan if both run.
+    - RunAtLoad=false: avoid surprise at install. First run via kickstart.
+    - bypass: NEXUS_OMEGA_METRICS_OFF=1 disables drill/omega in-process hook,
+      but does not affect this independent plist tracker.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexus.omega-metrics</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ghost/core/hexa-lang/build/hexa.real</string>
+    <string>run</string>
+    <string>/Users/ghost/core/nexus/tool/nxs_002_omega_metrics.hexa</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>43200</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>Nice</key>
+  <integer>10</integer>
+
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/nexus_omega_metrics.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/nexus_omega_metrics.err.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ghost/core/nexus</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/ghost</string>
+  </dict>
+</dict>
+</plist>

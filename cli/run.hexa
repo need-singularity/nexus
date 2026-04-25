@@ -3018,6 +3018,26 @@ fn _recovery_emit(mode: str, action: str, round: int) -> void {
     eprintln("NEXUS_DRILL_RECOVERY {\"mode\":\"" + mode + "\",\"action\":\"" + action + "\",\"round\":" + to_string(round) + "}")
 }
 
+// ─── Ω-saturation cycle 13 hexa native metric hook (2026-04-25) ───
+// composite_v3_prime ≥ 0.9 paper_trigger 통과 시 publication 신호 emit.
+// drill / omega 종료 시 자동 호출. bypass: NEXUS_OMEGA_METRICS_OFF=1.
+// hexa.real direct exec — resolver 우회 (remote routing 으로 file path mismatch 방지).
+fn _omega_metric_hook(context: str) -> void {
+    if env("NEXUS_OMEGA_METRICS_OFF") == "1" { return }
+    let real_bin_env = env("HEXA_REAL")
+    let bin = if real_bin_env != "" { real_bin_env } else { "/Users/ghost/core/hexa-lang/build/hexa.real" }
+    let chk_bin = exec("[ -x " + shell_quote(bin) + " ] && echo y || echo n").trim()
+    if chk_bin != "y" { return } // silent skip if hexa.real missing
+    let metric_tool = nexus_root() + "/tool/nxs_002_omega_metrics.hexa"
+    let chk_tool = exec("[ -f " + shell_quote(metric_tool) + " ] && echo y || echo n").trim()
+    if chk_tool != "y" { return }
+    let cmd = shell_quote(bin) + " run " + shell_quote(metric_tool) + " 2>/dev/null"
+    let mut out: str = ""
+    try { out = exec(cmd).trim() } catch e { return } // @allow-silent-catch
+    if out.len() == 0 { return }
+    eprintln("NEXUS_OMEGA_METRIC {\"context\":\"" + context + "\",\"metric\":" + out + "}")
+}
+
 fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str) -> void {
     // 단일 명령어 — smash → free → absolute → meta-closure → hyperarithmetic → resonance (Mk.IX 6-stage)
     // Mk.X: stage 6 (transcendental_closure via mkx_engine.hexa sidecar) 추가 — 사이드카, L0 미수정.
@@ -3875,6 +3895,7 @@ fn cmd_drill(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     // N (2026-04-21) drill-level progress summary (max rounds)
     _progress_summary(total_new, _progress_now_ms() - _pg_drill_t0)
     _ap_emit_summary()
+    _omega_metric_hook("drill_complete")
 }
 
 // ─── E12-B (2026-04-21) — batch-shared Phase-1 init helpers ───
@@ -4002,6 +4023,43 @@ fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     else if multi_variant { path = "debate" }
     else if multi_seed { path = "batch" }
     println("⊙ omega — APEX (L_ω) orchestration  axes=" + to_string(axes) + " path=" + path)
+    // ─── cycle 13 dashboard pre-snapshot ───
+    let _snap_path = nexus_root() + "/bisociation/spectra/g_atlas_composite_v3.json"
+    if file_exists(_snap_path) {
+        let mut _v3p: str = ""
+        let mut _pass: str = ""
+        try {
+            let _raw = read_file(_snap_path).trim()
+            let _key = "\"composite_v3_prime\":"
+            let _p = _raw.index_of(_key)
+            if _p >= 0 {
+                let _rest = _raw.substring(_p + len(_key), len(_raw))
+                let mut _i: int = 0
+                while _i < len(_rest) {
+                    let _c = _rest.substring(_i, _i + 1)
+                    if _c == "," || _c == "}" { break }
+                    _v3p = _v3p + _c
+                    _i = _i + 1
+                }
+            }
+            let _key2 = "\"paper_trigger_passed_v3_prime\":"
+            let _p2 = _raw.index_of(_key2)
+            if _p2 >= 0 {
+                let _rest2 = _raw.substring(_p2 + len(_key2), len(_raw))
+                let mut _j: int = 0
+                while _j < len(_rest2) {
+                    let _c = _rest2.substring(_j, _j + 1)
+                    if _c == "," || _c == "}" { break }
+                    _pass = _pass + _c
+                    _j = _j + 1
+                }
+            }
+        } catch e {} // @allow-silent-catch
+        if _v3p.len() > 0 {
+            let _flag = if _pass == "true" { "✓ PASS" } else { "· wait" }
+            println("⊙ snapshot — composite_v3_prime=" + _v3p + " paper_trigger 0.9 " + _flag)
+        }
+    }
     eprintln("NEXUS_OMEGA {\"event\":\"dispatch\",\"axes\":" + to_string(axes)
         + ",\"path\":\"" + path + "\""
         + ",\"engines_multi\":" + (if multi_engine { "true" } else { "false" })
@@ -4031,6 +4089,7 @@ fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     }
     cmd_drill(seed, max_rounds, engine_flag, preset, _depth, per_stage_depths, true, resume_flag, checkpoint_dir, problem, _spec)
     eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"drill\"}")
+    _omega_metric_hook("omega_complete")
 }
 
 // ─── surge — L4 super-orchestrator (2026-04-25) ───
