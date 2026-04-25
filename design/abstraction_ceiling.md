@@ -202,7 +202,7 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
   - engine != nexus 시 chain (cross-engine), engine = nexus + variants>1 시 speculate=N 흡수
   - emits: NEXUS_SURGE {plan / run / complete / reject} JSON
   - 검증: 1×1×1=1 / 3×3×4=36 reject / 2×2×2=8 enumerate 모두 동작 확인
-- ✓ **L5 dream 구현** (이 commit) — self-seed loop
+- ✓ **L5 dream 구현** (commit 23559111) — self-seed loop
   - `cmd_dream()` — N iteration, 각 iteration 종료 후 출력에서 신호 추출 → 다음 seed 합성
   - omega/surge 와 차별: reflexive (자기-축) — 직전 출력이 다음 입력 결정
   - signal extraction (`_dream_extract_signal`):
@@ -212,6 +212,15 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
   - next seed = `trunc(orig, 200-len) + " #dream-iter=N <signal>"`, [30, 200] 범위 강제
   - CAP: iterations 기본 3, NEXUS_DREAM_MAX env 으로 override (안전 cap=10)
   - emits: NEXUS_DREAM {plan / iter / complete} JSON
+- ✓ **L6 reign 구현** (이 commit) — autonomous saturation-stop
+  - `cmd_reign()` — max_cycles 는 cap, 실제 종료는 「signal stagnation」 자동 판정
+  - dream 과 차별: dream 은 fixed iter, reign 은 자기 종료 결정 (자율)
+  - stagnation 판정: 최근 K (기본 2) cycle 동안 signal 동일 → saturation
+  - CAP: max_cycles 기본 10, NEXUS_REIGN_MAX env override (안전 ceiling=20)
+  - K override: NEXUS_REIGN_K (기본 2, 범위 [2,5])
+  - signal extraction: `_dream_extract_signal` 재사용
+  - 신규 helper: `_reign_max_cycles`, `_reign_stagnation_k`, `_reign_signal_stagnant`
+  - emits: NEXUS_REIGN {plan / iter / saturation / complete} JSON
 
 ---
 

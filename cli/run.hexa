@@ -182,6 +182,8 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
+    println("  reign --seed \"...\" [--max-cycles N]    L6 autonomous — signal stagnation K=2 시 자동 STOP. cap=NEXUS_REIGN_MAX (기본 10, 최대 20)")
+    println("        emits: NEXUS_REIGN JSON (plan/iter/saturation/complete) — dream 과 차별 = 자기 종료 결정")
     println("  dream --seed \"...\" [--iterations N]   L5 self-seed loop — seed_(i+1)=f(output_i). cap=NEXUS_DREAM_MAX (기본 3, 최대 10)")
     println("        emits: NEXUS_DREAM JSON (plan/iter/complete) + signal extraction (abs_total/exact/near)")
     println("  surge --seed \"...\" [--engines csv] [--variants N] [--seeds csv]")
@@ -4158,6 +4160,106 @@ fn cmd_dream(seed: str, iterations_flag: str, max_rounds: str, engine_flag: str,
     println("◇ dream complete — iterations=" + to_string(iters))
 }
 
+// ─── reign — L6 autonomous orchestrator (2026-04-25) ───
+// 사다리 위치: L6 (dream 위 자율층). dream 은 fixed iter count, reign 은 자율 종료
+//   판정 — 직전 K cycle 동안 signal 이 stagnant 하면 saturation 으로 자동 STOP.
+// 명명: design/abstraction_ceiling.md — 「휴면-각성 자율」, 사람 개입 없이 자기 결정.
+//
+// 차별:
+//   - dream  (L5): iterations=N 명시 필요, N 회 고정 반복
+//   - reign  (L6): max_cycles 는 cap, 실제 종료는 「signal stagnation」 으로 자동 판정
+//
+// stagnation 판정: 최근 K 개 signal 이 동일 → saturation. K 는 고정 2 (NEXUS_REIGN_K env override).
+// CAP: max_cycles 기본 10, NEXUS_REIGN_MAX env override (안전 ceiling=20).
+//
+// emits:
+//   NEXUS_REIGN {"event":"plan","max_cycles":N,"stagnation_k":K}
+//   NEXUS_REIGN {"event":"iter","cycle":i/N,"signal":"...","history_len":n}
+//   NEXUS_REIGN {"event":"saturation","cycle":i,"reason":"signal_stagnant","k":K}
+//   NEXUS_REIGN {"event":"complete","cycles_run":n,"saturated":bool}
+fn _reign_max_cycles() -> int {
+    let v = env("NEXUS_REIGN_MAX")
+    if v.len() == 0 { return 10 }
+    let mut n = 10
+    try { n = to_int(v) } catch e { n = 10 }
+    if n < 1 { return 1 }
+    if n > 20 { return 20 }
+    return n
+}
+
+fn _reign_stagnation_k() -> int {
+    let v = env("NEXUS_REIGN_K")
+    if v.len() == 0 { return 2 }
+    let mut n = 2
+    try { n = to_int(v) } catch e { n = 2 }
+    if n < 2 { return 2 }
+    if n > 5 { return 5 }
+    return n
+}
+
+fn _reign_signal_stagnant(history: [str], k: int) -> bool {
+    let n = len(history)
+    if n < k { return false }
+    let last = history[n - 1]
+    let mut i = n - k
+    while i < n - 1 {
+        if history[i] != last { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn cmd_reign(seed: str, max_cycles_flag: str) -> void {
+    let _seed_t = seed.trim()
+    if _seed_t.len() == 0 {
+        eprintln("nexus reign: --seed required — initial seed 필수")
+        return
+    }
+    let cap = _reign_max_cycles()
+    let stagnation_k = _reign_stagnation_k()
+    let mut max_cycles = cap
+    if max_cycles_flag.len() > 0 {
+        try { max_cycles = to_int(max_cycles_flag) } catch e { max_cycles = cap }
+        if max_cycles < 1 { max_cycles = 1 }
+        if max_cycles > cap { max_cycles = cap }
+    }
+    println("⊚ reign — L6 autonomous orchestration (max_cycles=" + to_string(max_cycles) + ", stagnation_k=" + to_string(stagnation_k) + ")")
+    eprintln("NEXUS_REIGN {\"event\":\"plan\",\"max_cycles\":" + to_string(max_cycles) + ",\"stagnation_k\":" + to_string(stagnation_k) + ",\"cap\":" + to_string(cap) + "}")
+    let core = nexus_root() + "/cli/blowup/core/blowup.hexa"
+    let mut current = _seed_t
+    let mut history: [str] = []
+    let mut cycles_run: i64 = 0
+    let mut saturated = false
+    let mut cycle: i64 = 0
+    while cycle < max_cycles {
+        cycle = cycle + 1
+        cycles_run = cycle
+        println("─── reign cycle " + to_string(cycle) + "/" + to_string(max_cycles) + " — seed_len=" + to_string(current.len()) + " ───")
+        let qs = shell_quote(current)
+        let cmd = shell_quote(hexa_bin()) + " run " + shell_quote(core) + " " + qs + " 1 --fast 2>&1"
+        let out = exec(cmd)
+        print(out)
+        let signal = _dream_extract_signal(out)
+        history = history + [signal]
+        eprintln("NEXUS_REIGN {\"event\":\"iter\",\"cycle\":" + to_string(cycle)
+            + ",\"of\":" + to_string(max_cycles)
+            + ",\"signal\":\"" + signal + "\""
+            + ",\"history_len\":" + to_string(len(history)) + "}")
+        if _reign_signal_stagnant(history, stagnation_k) {
+            saturated = true
+            eprintln("NEXUS_REIGN {\"event\":\"saturation\",\"cycle\":" + to_string(cycle)
+                + ",\"reason\":\"signal_stagnant\",\"k\":" + to_string(stagnation_k)
+                + ",\"signal\":\"" + signal + "\"}")
+            println("⊚ reign — autonomous STOP (signal stagnant " + to_string(stagnation_k) + " cycles): " + signal)
+            cycle = max_cycles  // break
+            continue
+        }
+        current = _dream_next_seed(_seed_t, cycle + 1, signal)
+    }
+    eprintln("NEXUS_REIGN {\"event\":\"complete\",\"cycles_run\":" + to_string(cycles_run) + ",\"saturated\":" + (if saturated { "true" } else { "false" }) + "}")
+    println("⊚ reign complete — cycles=" + to_string(cycles_run) + " saturated=" + (if saturated { "true" } else { "false" }))
+}
+
 // ─── E12 batch drill wrapper (2026-04-21) ───
 // SSOT: shared/config/drill.json .seed_batch
 // Sequential iterate — seed N 개를 순차 cmd_drill 호출. engine_daemon 미구현 시 naive 반복.
@@ -4753,6 +4855,14 @@ fn main() -> void {
     }
     if sub == "absolute" {
         cmd_absolute(find_flag(a, "--seed", ""))
+        return
+    }
+    if sub == "reign" {
+        // L6 autonomous — max_cycles cap + signal stagnation 자동 STOP.
+        cmd_reign(
+            find_flag(a, "--seed", ""),
+            find_flag(a, "--max-cycles", "")
+        )
         return
     }
     if sub == "dream" {
