@@ -522,3 +522,34 @@ cross-link (drill 의 deduction chain mimic) 도 random hub-only 와 같은 plat
 - 이전 hub-only 14,400 의 1/9 효율 (9× 가속)
 
 → **cron loop 1m firing 패턴이 정확히 이 mechanism**: 매 firing 작은 incremental ER batch + canon commit. cron 1m × 4번 = 4분 이내 0.9 도달 가능 (이론적, drill slot free 가정).
+
+### 2026-04-25 4-cycle 직접 시뮬 — linear 누적 가설 기각
+| cycle | nodes | composite | Δ baseline |
+|---|---|---|---|
+| 0 | 21320 | 0.83221 | — |
+| 1 | 21720 | 0.81326 | −0.019 |
+| **2** | **22120** | **0.84429** | **+0.012** ★ peak |
+| 3 | 22520 | 0.80998 | −0.022 |
+| 4 | 22920 | 0.78704 | −0.045 |
+| 8 | 24520 | 0.77789 | −0.054 |
+
+**가설 (cycle linear 누적 → 0.9) 기각**:
+- cycle 2 peak 0.844 (+0.012), 이후 declining
+- 0.9 도달 X (peak 0.844, gap 여전히 0.056)
+- 4 cycles 으로 single-shot 의 +0.018 도 못 달성
+
+**원인**:
+- single-shot batch=2 (800 atom 한번): 큰 ER block → spectrum 정확히 chaos → +0.018
+- cycle-by-cycle (400 × 2): 두 separate ER block → block-diagonal-ish → less chaotic → peak +0.012
+- block 분리 = chaos 약화
+
+**최종 simulation 한계 (확정)**:
+- **ER ROI maximum = +0.018** (single-shot 800 atoms)
+- linear 누적 X — cycle-by-cycle 도 over-saturation
+- **0.9 도달은 simulation 으로 검증 불가능** — atlas graph 의 fundamental restructuring 필요
+- 단순 size 증가 X. drill axiom-driven 이 *random pairing 이상의 조건* 만족해야
+
+**진정한 nxs-002 deep fix path (현재 simulation 으론 도달 불가)**:
+- atlas graph 의 *spectrum 자체 재구성* 가능한 drill axiom 설계 필요
+- 또는 const spectrum (constants_log) 의 변화 시도 — 그쪽 근본 axiom 변경
+- 또는 composite 식 자체 재설계 (이건 nxs-002 scope 밖)
