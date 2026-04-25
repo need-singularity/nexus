@@ -378,6 +378,71 @@ fn _selftest() {
         failures.push("atlas corroboration: simulation_lens expected >=1 match, got " + to_string(matched))
     }
 
+    // (e) backup → restore round-trip (uses isolated fixture, never touches pilots)
+    let fix_dir = "/tmp/lens_atlas_orch_selftest"
+    let fix_path = fix_dir + "/fixture_lens.hexa"
+    let fix_setup = "mkdir -p '" + fix_dir + "' && printf '%s\\n' '// fixture' 'let SCORE = 0.5' 'println(\"ok\")' > '" + fix_path + "'"
+    exec(fix_setup)
+    let ts = _now_backup_ts()
+    let bak = _backup_file(fix_path, ts)
+    if len(bak) == 0 || !file_exists(bak) {
+        failures.push("backup round-trip: backup not created for fixture")
+    }
+    let line = _find_score_line(fix_path)
+    if len(line) == 0 {
+        failures.push("score-line detect: fixture should have `let SCORE = 0.5`")
+    }
+    let lineno = _line_number_of(line)
+    if lineno != 2 {
+        failures.push("line-number-extract: expected 2, got " + to_string(lineno))
+    }
+    let repl = _build_replacement(line, 0.42)
+    if repl != "let SCORE = 0.4200" {
+        failures.push("replacement build: expected `let SCORE = 0.4200`, got `" + repl + "`")
+    }
+    let ok = _replace_line_in_file(fix_path, lineno, repl)
+    if !ok {
+        failures.push("replace_line: in-place mutation failed on fixture")
+    }
+    let after = _find_score_line(fix_path)
+    if after.index_of("0.4200") < 0 {
+        failures.push("post-mutation read-back: expected 0.4200 in fixture, got `" + after + "`")
+    }
+    let restored = _restore_backup(fix_path, bak)
+    if !restored {
+        failures.push("restore: backup restore failed")
+    }
+    let after2 = _find_score_line(fix_path)
+    if after2.index_of("0.5") < 0 {
+        failures.push("post-restore read-back: expected 0.5 in fixture, got `" + after2 + "`")
+    }
+    // cleanup fixture + backup
+    exec("rm -rf '" + fix_dir + "'")
+
+    // (f) auto-rollback on parse FAIL — simulate by writing intentionally broken
+    // replacement (a malformed line). Verify _parse_verify returns false on broken
+    // file and that _restore_backup() reverts it.
+    let fix2_dir = "/tmp/lens_atlas_orch_selftest_rollback"
+    let fix2_path = fix2_dir + "/broken_lens.hexa"
+    let fix2_setup = "mkdir -p '" + fix2_dir + "' && printf '%s\\n' '// fixture' 'let SCORE = 0.5' 'println(\"ok\")' > '" + fix2_path + "'"
+    exec(fix2_setup)
+    let bak2 = _backup_file(fix2_path, ts)
+    if len(bak2) == 0 { failures.push("rollback test: backup-2 missing") }
+    // write broken content (no `let SCORE = <num>` line — fallback shape check fails)
+    let broken_ok = _replace_line_in_file(fix2_path, 2, "let SCORE = NOT_A_NUMBER (((")
+    if !broken_ok { failures.push("rollback test: broken-write failed") }
+    let parse_after_break = _parse_verify(fix2_path)
+    if parse_after_break {
+        failures.push("rollback test: _parse_verify should reject malformed SCORE line")
+    }
+    let rollback_ok = _restore_backup(fix2_path, bak2)
+    if !rollback_ok { failures.push("rollback test: restore failed") }
+    let parse_after_restore = _parse_verify(fix2_path)
+    if !parse_after_restore {
+        failures.push("rollback test: post-restore _parse_verify should pass shape check")
+    }
+    exec("rm -rf '" + fix2_dir + "'")
+
     if len(failures) > 0 {
         eprintln("[lens_atlas_orchestrator selftest] FAIL")
         for f in failures {
@@ -386,7 +451,7 @@ fn _selftest() {
         eprintln("__LENS_ATLAS_ORCH_SELFTEST__ FAIL count=" + to_string(len(failures)))
         exit(2)
     }
-    println("[lens_atlas_orchestrator selftest] OK — l1 (3 cases) / l4 (5 pilot file_exists) / falsifier_total=" + to_string(total) + " / atlas keyword match=" + to_string(matched))
+    println("[lens_atlas_orchestrator selftest] OK — l1 (3 cases) / l4 (5 pilot file_exists) / falsifier_total=" + to_string(total) + " / atlas keyword match=" + to_string(matched) + " / apply round-trip OK / auto-rollback OK")
     println("__LENS_ATLAS_ORCH_SELFTEST__ PASS")
     exit(0)
 }
@@ -671,6 +736,9 @@ fn main() -> void {
     let mut json_mode = false
     let mut bench_emit = false
     let mut apply_mode = false
+    let mut apply_confirm = false
+    let mut diff_only = false
+    let mut rollback_mode = false
     let mut pilot_only = false
     let mut i = 0
     while i < len(cli) {
@@ -679,15 +747,21 @@ fn main() -> void {
         else if a == "--json" { json_mode = true }
         else if a == "--bench-emit" { bench_emit = true }
         else if a == "--apply" { apply_mode = true }
+        else if a == "--apply-confirm" { apply_confirm = true }
+        else if a == "--diff-only" { diff_only = true }
+        else if a == "--rollback" { rollback_mode = true }
         else if a == "--pilot-only" { pilot_only = true }
         else if a == "--help" || a == "-h" {
-            println("usage: hexa run tool/lens_atlas_orchestrator.hexa [--selftest] [--pilot-only] [--json] [--bench-emit] [--apply]")
+            println("usage: hexa run tool/lens_atlas_orchestrator.hexa [--selftest] [--pilot-only] [--json] [--bench-emit] [--diff-only] [--apply --apply-confirm] [--rollback]")
             println("modes:")
-            println("  --selftest    run l1 formula + l4 pilot + falsifier + atlas-keyword sanity (exit 0/2)")
-            println("  --pilot-only  print pilot lens registry only (no recompute)")
-            println("  --bench-emit  emit per-lens (base, new, delta) table + snapshot to state/")
-            println("  --json        switch emit to JSON (combine with --bench-emit)")
-            println("  --apply       SAFETY-BLOCKED in first-impl (exit 3)")
+            println("  --selftest        run l1 formula + l4 pilot + falsifier + atlas-keyword + apply round-trip + auto-rollback (exit 0/2)")
+            println("  --pilot-only      print pilot lens registry only (no recompute)")
+            println("  --bench-emit      emit per-lens (base, new, delta) table + snapshot to state/")
+            println("  --json            switch emit to JSON (combine with --bench-emit)")
+            println("  --diff-only       show planned mutations (no file writes); skip lenses lacking `let SCORE = <num>`")
+            println("  --apply           start mutation pass — REQUIRES --apply-confirm (exit 3 otherwise)")
+            println("  --apply-confirm   second-confirmation flag for --apply (mutation w/ .bak.<ts> + parse-verify + auto-rollback)")
+            println("  --rollback        restore most recent .bak.<ts> for each pilot lens")
             exit(0)
         }
         else {
@@ -697,7 +771,11 @@ fn main() -> void {
         i = i + 1
     }
 
-    if apply_mode { _apply_blocked() }
+    // rollback short path (no recompute needed)
+    if rollback_mode { _emit_rollback() }
+
+    // gate: --apply without --apply-confirm = explicit witness exit 3
+    if apply_mode && !apply_confirm { _apply_needs_confirm() }
 
     // pilot-only short path
     if pilot_only {
@@ -719,6 +797,16 @@ fn main() -> void {
     let mean = agg[0]
     let max_pos = agg[1]
     let max_neg = agg[2]
+
+    // diff-only / apply paths short-circuit emit
+    if diff_only {
+        let plan = _build_apply_plan(rows)
+        _emit_diff_only(plan)
+    }
+    if apply_mode && apply_confirm {
+        let plan = _build_apply_plan(rows)
+        _emit_apply(plan)
+    }
 
     if json_mode { _baseline_emit_json(rows, falsifier_ratio, fr_hits, fr_total) }
     else { _baseline_emit_text(rows, falsifier_ratio, fr_hits, fr_total) }
