@@ -322,12 +322,10 @@ fn split_nodes(body: string) -> [string] {
     let mut in_str: bool = false
     while i < body.len() {
         let c = body.substring(i, i + 1)
-        if in_str {
-            if c == "\\" { i = i + 2; continue }
-            if c == "\"" { in_str = false; i = i + 1; continue }
-            i = i + 1
-            continue
-        }
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk)
+        if in_str && c == "\\" { i = i + 2; continue }
+        if in_str && c == "\"" { in_str = false; i = i + 1; continue }
+        if in_str { i = i + 1; continue }
         if c == "\"" { in_str = true; i = i + 1; continue }
         if c == "{" {
             if depth == 0 { start = i }
@@ -807,8 +805,9 @@ fn _replace_or_insert_array(node_raw: string, key: string, items: [string]) -> s
     let mut in_str: bool = false
     while j < node_raw.len() && depth > 0 {
         let c = node_raw.substring(j, j + 1)
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk)
+        if in_str && c == "\\" { j = j + 2; continue }
         if in_str {
-            if c == "\\" { j = j + 2; continue }
             if c == "\"" { in_str = false }
             j = j + 1
             continue

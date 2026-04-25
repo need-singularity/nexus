@@ -433,6 +433,8 @@ fn cmd_promote(dry_run: bool) {
             + " val=" + to_string(ev.value) + " score=" + to_string(ev.score)
             + " consensus=" + consensus)
 
+        // B1-fix sweep: replace nested-if + continue with if/else (interpreter quirk) — cmd_promote
+        let mut promoted_this = false
         if !dry_run {
             let rej = _guarded_append_atlas(ATLAS_PATH, atlas_line)
             if rej > 0 {
@@ -440,12 +442,15 @@ fn cmd_promote(dry_run: bool) {
                 log_pipe_event(ev.candidate_id, ev.domain, ev.name, ev.value,
                     ev.score, ev.tier, "rejected", "schema_guard")
                 skipped = skipped + 1
-                continue
+            } else {
+                log_pipe_event(ev.candidate_id, ev.domain, ev.name, ev.value,
+                    ev.score, ev.tier, "promoted", "auto_exact_consensus=" + consensus)
+                promoted_this = true
             }
-            log_pipe_event(ev.candidate_id, ev.domain, ev.name, ev.value,
-                ev.score, ev.tier, "promoted", "auto_exact_consensus=" + consensus)
+        } else {
+            promoted_this = true
         }
-        promoted = promoted + 1
+        if promoted_this { promoted = promoted + 1 }
     }
 
     println("")

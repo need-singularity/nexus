@@ -316,17 +316,17 @@ fn _read_n6_to_entries(path: string) -> array {
             continue
         }
         // header line begins with @
+        // B1-fix sweep: replace nested-if + continue with if/else (interpreter quirk) — _read_n6_to_entries
         if t.substring(0, 1) == "@" {
             // flush previous
             if len(cur) > 0 { entries.push(cur); cur = [] }
             let h = _parse_header_line(raw)
-            if h[0] != "OK" {
-                // schema-guard: surface to caller via FAIL marker entry
+            if h[0] == "OK" {
+                cur = [h[1], h[2], h[3], h[4], h[5], "", ""]
+            } else {
+                // schema-guard: surface FAIL via marker entry
                 entries.push(["__FAIL__", h[1], raw, "", "", "", ""])
-                i = i + 1
-                continue
             }
-            cur = [h[1], h[2], h[3], h[4], h[5], "", ""]
             i = i + 1
             continue
         }
@@ -510,8 +510,9 @@ fn _find_array_field(obj: string, key: string) -> string {
     let mut k = 0
     while k < nb {
         let c = body.substring(k, k + 1)
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk) — _find_array_field
+        if in_str && c == "\\" { k = k + 2; continue }
         if in_str {
-            if c == "\\" { k = k + 2; continue }
             if c == "\"" { in_str = false }
             k = k + 1
             continue
@@ -539,8 +540,9 @@ fn _split_array_elems(body: string) -> array {
     let mut i = 0
     while i < n {
         let c = body.substring(i, i + 1)
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk) — _split_array_elems
+        if in_str && c == "\\" { i = i + 2; continue }
         if in_str {
-            if c == "\\" { i = i + 2; continue }
             if c == "\"" { in_str = false }
             i = i + 1
             continue
@@ -595,8 +597,9 @@ fn _extract_one_object(body: string, start: i64) -> array {
     let mut k = start + 1
     while k < n {
         let c = body.substring(k, k + 1)
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk)
+        if in_str && c == "\\" { k = k + 2; continue }
         if in_str {
-            if c == "\\" { k = k + 2; continue }
             if c == "\"" { in_str = false }
             k = k + 1
             continue

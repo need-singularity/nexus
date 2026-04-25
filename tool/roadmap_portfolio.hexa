@@ -208,12 +208,10 @@ fn split_nodes(body: string) -> [string] {
     let mut in_str: bool = false
     while i < body.len() {
         let c = body.substring(i, i + 1)
-        if in_str {
-            if c == "\\" { i = i + 2; continue }
-            if c == "\"" { in_str = false; i = i + 1; continue }
-            i = i + 1
-            continue
-        }
+        // B1-fix sweep: flatten nested-if + continue (interpreter quirk)
+        if in_str && c == "\\" { i = i + 2; continue }
+        if in_str && c == "\"" { in_str = false; i = i + 1; continue }
+        if in_str { i = i + 1; continue }
         if c == "\"" { in_str = true; i = i + 1; continue }
         if c == "{" {
             if depth == 0 { start = i }
@@ -314,8 +312,9 @@ fn load_roadmap(path: string) -> Roadmap {
             let mut end = mi
             while end < body.len() {
                 let c = body.substring(end, end + 1)
+                // B1-fix sweep: flatten nested-if + continue (interpreter quirk)
+                if in_str && c == "\\" { end = end + 2; continue }
                 if in_str {
-                    if c == "\\" { end = end + 2; continue }
                     if c == "\"" { in_str = false }
                     end = end + 1
                     continue
