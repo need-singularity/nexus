@@ -374,6 +374,29 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 - random hub: ~72 batches × 200 atoms = ~14,400 새 atoms
 - drill axiom-driven (가정): ~8,000~12,000 atoms
 - **drill incremental + canon sealing 패턴이 cron loop 와 자연 align**
+
+### 2026-04-25 누적 batch 가설 검증 — saturation 강하게 발동
+| batches | total_atoms | Δ baseline |
+|---|---|---|
+| 1 | 200 | +0.00095 |
+| 2 | 400 | +0.00095 (plateau!) |
+| 3 | 600 | +0.00095 (계속 plateau) |
+| **5** | 1000 | **−0.00331** ← transition |
+| 7 | 1400 | −0.00509 |
+| 10 | 2000 | −0.00910 |
+| 15 | 3000 | −0.01469 |
+| 20 | 4000 | −0.01725 |
+
+**가설 A (linear 누적, +0.0095) → 기각.**
+
+핵심:
+1. batch 1,2,3 모두 동일 +0.00095 — 누적 X, **discrete plateau**
+2. batch 5+ → over-saturation (random hub 다양성 부족)
+3. **random batch 누적으로 0.9 도달 X** — saturation 후 negative
+
+→ **drill 의 axiom-driven hub selection 이 결정적**: random top-20 hub pool 으로는 spectral 의 일부 dimensions 만 커버. drill 은 각 새 atom 이 *적절한 specific hub* (axiom 으로 결정) 와 연결되어 spectral 의 *모든 dimensions* 가 진척 → composite 누적 +.
+
+→ nxs-002 deep fix 의 실제 mechanism 정밀화: drill 의 「axiom-driven hub-atom matching ratio」 가 결정적 design parameter.
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
