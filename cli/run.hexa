@@ -5409,8 +5409,9 @@ fn _hexa_sim_help() -> void {
     println("")
     println("subcommands:")
     println("  verify [--axis NAME] [--json] [--selftest]   §7 VERIFY 10-axis grid (CONSTANTS/DIMENSIONS/CROSS/SCALING/SENSITIVITY/LIMITS/CHI2/OEIS/SYMBOLIC/COUNTER)")
-    println("  falsifier [--id F#] [--registry P] [--history P] [--json] [--selftest]   §X.4 falsifier registry runner (raw 71 + raw 66 trailer + raw 77 chain)")
-    println("  bridge <name> [args...]                       Tier-1 외부 API bridge tools (codata|oeis|gw|horizons|arxiv|help) — 2026-04-25 ω-cycle landed")
+    println("  falsifier [--id F#] [--registry P] [--history P] [--json] [--selftest]   §X.4 falsifier registry runner (raw 71 + raw 66 trailer + raw 77 chain) — 9 entries (F1-F8 + F9 TP-8)")
+    println("  bridge <name> [args...]                       8 외부 API bridge tools (Tier-1 5 + Tier-2 3) — 2026-04-25 ω-cycle landed; bridge help 로 일람")
+    println("  ci [--skip N] [--only N] [--json]             audit gap #3 close — 8 hexa-sim 도구 selftest 일괄 runner + aggregate sentinel")
     println("  doc                                           본 framework 의 한국어 overview README 출력")
     println("  help                                          이 메시지")
     println("")
@@ -5419,21 +5420,25 @@ fn _hexa_sim_help() -> void {
 }
 
 fn _hexa_sim_bridge_help() -> void {
-    println("nexus hexa-sim bridge — Tier-1 외부 API bridge tools (2026-04-25 ω-cycle landing)")
+    println("nexus hexa-sim bridge — 외부 API bridge tools (2026-04-25 ω-cycle landing)")
     println("")
-    println("subcommands:")
+    println("Tier-1 (5):")
     println("  codata [--no-fetch] [--json] [--selftest]    NIST CODATA 2022 alpha^-1 → axis_counter 의 137 fractional gap 정량화 (gap=0.0262%, 17σ)")
     println("  oeis [--seq <ID>] [--json] [--selftest]      OEIS A000396/A000203/A000005/A000010 live → axis_oeis 정적→live, n=6 perfect-number anchor 외부 검증")
     println("  gw [--limit N] [--event GW...] [--catalog SHORT] [--json] [--selftest]   LIGO/Virgo GWOSC GWTC catalog → 5 gravitational lens 후보")
-    println("  horizons [--target ID] [--accel m/s2] [--json] [--selftest]              JPL Horizons → TP-8 'Mars 2g 4-day' 검증 (실측 deviation -24%)")
+    println("  horizons [--target ID] [--accel m/s2] [--json] [--selftest]              JPL Horizons → TP-8 'Mars 2g 4-day' 검증 (실측 deviation -24%, F9 falsifier)")
     println("  arxiv [--cat CAT] [--limit N] [--json] [--selftest]                      arXiv Atom feed → discovery_log + bisociation 후보")
+    println("Tier-2 (3, 2026-04-25 추가):")
+    println("  cmb [--no-fetch] [--json] [--selftest]                                   Planck 2018 6 cosmological params → sedi_cmb_anisotropy/angular_power/baryon_acoustic (n_s gap 3.5% ≈ alpha gap 3.6% cross-resonance)")
+    println("  nanograv [--no-fetch] [--json] [--selftest]                              NANOGrav 15-yr GWB → sedi_dispersion_measure/timing_integrity/stochastic_background")
+    println("  simbad --object NAME [--json] [--selftest]                               SIMBAD ICRS RA/DEC + parallax + RV + spectral → physics_galaxy_rotation/sedi_redshift_ladder")
     println("  help                                                                     이 메시지")
     println("")
     println("witness: design/hexa_sim/2026-04-25_bridge_tool_jackpot_omega_cycle.json")
 }
 
 fn _hexa_sim_bridge_dispatch(a: [str]) -> void {
-    // nexus hexa-sim bridge <codata|oeis|gw|horizons|arxiv> [args...]
+    // nexus hexa-sim bridge <codata|oeis|gw|horizons|arxiv|cmb|nanograv|simbad> [args...]
     let n = len(a)
     let bsub = if n >= 5 { a[4] } else { "" }
     if bsub.len() == 0 || bsub == "help" || bsub == "-h" || bsub == "--help" {
@@ -5445,6 +5450,9 @@ fn _hexa_sim_bridge_dispatch(a: [str]) -> void {
     else if bsub == "gw" { script = nexus_root() + "/tool/gw_observatory_bridge.hexa" }
     else if bsub == "horizons" { script = nexus_root() + "/tool/horizons_bridge.hexa" }
     else if bsub == "arxiv" { script = nexus_root() + "/tool/arxiv_realtime_bridge.hexa" }
+    else if bsub == "cmb" { script = nexus_root() + "/tool/cmb_planck_bridge.hexa" }
+    else if bsub == "nanograv" { script = nexus_root() + "/tool/nanograv_pulsar_bridge.hexa" }
+    else if bsub == "simbad" { script = nexus_root() + "/tool/simbad_bridge.hexa" }
     else {
         eprintln("nexus hexa-sim bridge: unknown bridge `" + bsub + "` — try `nexus hexa-sim bridge help`")
         exit(1)
@@ -5478,6 +5486,7 @@ fn cmd_hexa_sim(a: [str]) -> void {
     let mut script = ""
     if sub == "verify" { script = nexus_root() + "/tool/hexa_sim_verify_grid.hexa" }
     else if sub == "falsifier" { script = nexus_root() + "/tool/hexa_sim_falsifier.hexa" }
+    else if sub == "ci" { script = nexus_root() + "/tool/hexa_sim_ci.hexa" }
     else if sub == "doc" {
         let path = nexus_root() + "/design/hexa_sim/README.md"
         if !file_exists(path) {
