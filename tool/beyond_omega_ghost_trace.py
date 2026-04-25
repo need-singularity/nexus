@@ -46,6 +46,12 @@ EXTRA_GLOBS = [
 ]
 SCAN_EXTS = {".log", ".jsonl", ".json", ".txt", ".out", ".err"}
 SKIP_NAMES = {".git", "node_modules", "__pycache__"}
+# cycle 5 (2026-04-25): self-feedback loop 차단. trace.jsonl 가 NEXUS_OMEGA payload 를
+# 그대로 박아넣으므로, scan 이 자기 출력을 다시 emit 으로 인식 → 매 호출 +N 누적.
+SELF_OUTPUTS = {
+    "state/ghost_ceiling_trace.jsonl",
+    "state/ghost_ceiling_summary.json",
+}
 MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB cap per file
 
 
@@ -59,6 +65,10 @@ def iter_files():
             for fn in filenames:
                 p = Path(dirpath) / fn
                 if p.suffix.lower() not in SCAN_EXTS and not p.name.endswith((".log.gz",)):
+                    continue
+                # daily snapshot 도 self-output (ghost_ceiling_summary.daily.YYYY-MM-DD.json)
+                if p.name.startswith("ghost_ceiling_summary.daily.") or \
+                   p.name in {"ghost_ceiling_trace.jsonl", "ghost_ceiling_summary.json"}:
                     continue
                 try:
                     if p.stat().st_size > MAX_FILE_BYTES:
@@ -172,6 +182,13 @@ def summarize(rows):
 
 
 def main(argv):
+    # cycle 5 (2026-04-25): --append + --cron mode 추가.
+    # default = overwrite (cycle 1-4 호환). --append = incremental 누적 (file:lineno
+    # 기준 dedup, 기존 trace 에 새 emit 만 추가). --cron = append + summary 시계열
+    # snapshot (state/ghost_ceiling_summary.daily.YYYY-MM-DD.json).
+    append_mode = "--append" in argv or "--cron" in argv
+    cron_mode = "--cron" in argv
+
     out_dir = REPO / "state"
     out_dir.mkdir(exist_ok=True)
     trace_path = out_dir / "ghost_ceiling_trace.jsonl"
@@ -184,26 +201,53 @@ def main(argv):
         files_scanned += 1
         rows.extend(scan_one(fp))
 
-    with open(trace_path, "w") as fh:
-        for r in rows:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    new_rows_count = 0
+    if append_mode and trace_path.exists():
+        existing_keys: set[tuple[str, int]] = set()
+        try:
+            with open(trace_path, "r") as fh:
+                for line in fh:
+                    try:
+                        obj = json.loads(line)
+                        existing_keys.add((obj.get("file", ""), int(obj.get("lineno", -1))))
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except OSError:
+            pass
+        new_rows = [r for r in rows if (r["file"], r["lineno"]) not in existing_keys]
+        new_rows_count = len(new_rows)
+        with open(trace_path, "a") as fh:
+            for r in new_rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    else:
+        with open(trace_path, "w") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     summary = {
-        "schema": "nexus.beyond_omega.ghost_trace.v3",
+        "schema": "nexus.beyond_omega.ghost_trace.v4",
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "repo": str(REPO),
         "scan_dirs_existing": [str(d.relative_to(REPO)) for d in SCAN_DIRS if d.exists()],
         "extra_globs": EXTRA_GLOBS,
         "files_scanned": files_scanned,
         "elapsed_s": round(time.time() - t0, 3),
+        "mode": "cron" if cron_mode else ("append" if append_mode else "overwrite"),
+        "new_rows_appended": new_rows_count,
         **summarize(rows),
         "interpretation": _interpret(rows),
     }
     with open(summary_path, "w") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2)
 
+    if cron_mode:
+        daily_path = out_dir / f"ghost_ceiling_summary.daily.{time.strftime('%Y-%m-%d', time.gmtime())}.json"
+        with open(daily_path, "w") as fh:
+            json.dump(summary, fh, ensure_ascii=False, indent=2)
+
     print(f"⊙ ghost_trace files_scanned={files_scanned} emits={len(rows)} "
           f"approach={summary['ghost_ceiling_approach_count']} "
+          f"mode={summary['mode']} new={new_rows_count} "
           f"elapsed={summary['elapsed_s']}s")
     print(f"  trace   → {trace_path.relative_to(REPO)}")
     print(f"  summary → {summary_path.relative_to(REPO)}")
