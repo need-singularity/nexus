@@ -1,0 +1,552 @@
+#!hexa strict
+// tool/openalex_bridge.hexa — OpenAlex (open citations / scholarly metadata) → arXiv supplement + raw 76 paper-DOI lineage prep
+//
+// @tool(slug="openalex_bridge", desc="OpenAlex /works search (open citations + cited_by_count + DOI extraction) — arXiv complement, raw 76 paper-doi lineage feeder")
+// @usage(hexa run tool/openalex_bridge.hexa [--query <STR>] [--doi <DOI>] [--limit N] [--json] [--selftest])
+// @exit_codes(0=PASS, 1=usage/io error, 2=parse/validation failure)
+// @sentinel(__OPENALEX_BRIDGE__ PASS query="<Q>" results=N top_cited_count=M top_doi=10.XXXX/...)
+// @origin(hive raw 70-73 deep-universe-sim — external evidence ingest, arXiv supplement)
+// @abstraction(hive raw 76 paper-doi-lineage — DOI extraction primitive, downstream Zenodo immutable-cite binding)
+// @paradigm(streaming-ingest — curl exec + substring/index_of JSON parse, no JSON DOM dep)
+// @allow-bare-exec
+// @no-sandbox
+//
+// Endpoints:
+//   /works?search=<QUERY>&per-page=N      — full-text search
+//   /works/doi:<DOI>                       — DOI lookup (single work)
+//   /works/W<ID>                           — single OpenAlex work id
+// Polite-pool: append &mailto=<email> per OpenAlex docs.
+// API key NOT required.
+//
+// Response shape (search):
+//   { "meta": {"count": N, "page": 1, ...},
+//     "results": [ {"id": "https://openalex.org/W..", "doi": "https://doi.org/10.XXXX/...",
+//                   "title": "...", "publication_year": YYYY, "cited_by_count": K,
+//                   "primary_topic": {"display_name": "..."}, ...}, ... ] }
+//
+// HEXA_RESOLVER_NO_REROUTE=1 honoured by exec wrapper (curl is bare).
+
+// ─── void-safe / string helpers ───
+
+fn _str(x) -> string {
+    let t = type_of(x)
+    if t == "str" || t == "string" { return x }
+    return ""
+}
+
+fn json_escape(s: string) -> string {
+    let mut r = s
+    r = r.replace("\\", "\\\\")
+    r = r.replace("\"", "\\\"")
+    r = r.replace("\n", " ")
+    r = r.replace("\r", " ")
+    r = r.replace("\t", " ")
+    return r
+}
+
+// Minimal JSON string-value de-escape (handles \" \\ \n \t \/ — sufficient for OpenAlex titles)
+fn json_unescape(s: string) -> string {
+    let mut r = s
+    r = r.replace("\\\"", "\"")
+    r = r.replace("\\/", "/")
+    r = r.replace("\\n", " ")
+    r = r.replace("\\t", " ")
+    r = r.replace("\\r", " ")
+    r = r.replace("\\\\", "\\")
+    return r
+}
+
+fn truncate(s: string, n: i64) -> string {
+    if s.len() <= n { return s }
+    return s.substring(0, n) + "..."
+}
+
+fn is_digit(ch: string) -> bool {
+    if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" { return true }
+    if ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" { return true }
+    return false
+}
+
+// URL-encode minimal (space → +, & → %26) — sufficient for OpenAlex search queries
+fn url_encode_q(q: string) -> string {
+    let mut r = q
+    r = r.replace(" ", "+")
+    r = r.replace("&", "%26")
+    r = r.replace("?", "%3F")
+    r = r.replace("#", "%23")
+    return r
+}
+
+// ─── JSON substring parsing (no DOM — index_of + substring) ───
+
+// Find first occurrence of "<key>": and return start index of the value (after colon + spaces)
+// Returns -1 on miss.
+fn _find_key_value_start(blob: string, key: string) -> i64 {
+    let needle = "\"" + key + "\":"
+    let i = blob.index_of(needle)
+    if i < 0 { return -1 }
+    let mut j = i + needle.len()
+    // skip whitespace
+    while j < blob.len() {
+        let c = blob.substring(j, j + 1)
+        if c == " " || c == "\n" || c == "\t" || c == "\r" { j = j + 1 } else { break }
+    }
+    return j
+}
+
+// Extract a string-value for `key` from `blob` (starting at first occurrence).
+// Walks past opening quote, finds matching closing quote (skipping \"). Returns "" on miss.
+fn parse_str_field(blob: string, key: string) -> string {
+    let s = _find_key_value_start(blob, key)
+    if s < 0 { return "" }
+    if blob.substring(s, s + 1) != "\"" { return "" }
+    let mut k = s + 1
+    let n = blob.len()
+    while k < n {
+        let c = blob.substring(k, k + 1)
+        if c == "\\" { k = k + 2 }
+        else if c == "\"" {
+            return json_unescape(blob.substring(s + 1, k))
+        }
+        else { k = k + 1 }
+    }
+    return ""
+}
+
+// Extract an integer-value for `key`. Returns -1 on miss / non-numeric.
+fn parse_int_field(blob: string, key: string) -> i64 {
+    let s = _find_key_value_start(blob, key)
+    if s < 0 { return -1 }
+    let n = blob.len()
+    let mut k = s
+    let mut neg = false
+    if k < n && blob.substring(k, k + 1) == "-" { neg = true; k = k + 1 }
+    if k >= n || !is_digit(blob.substring(k, k + 1)) { return -1 }
+    let mut acc: i64 = 0
+    while k < n {
+        let c = blob.substring(k, k + 1)
+        if !is_digit(c) { break }
+        if c == "0" { acc = acc * 10 }
+        else if c == "1" { acc = acc * 10 + 1 }
+        else if c == "2" { acc = acc * 10 + 2 }
+        else if c == "3" { acc = acc * 10 + 3 }
+        else if c == "4" { acc = acc * 10 + 4 }
+        else if c == "5" { acc = acc * 10 + 5 }
+        else if c == "6" { acc = acc * 10 + 6 }
+        else if c == "7" { acc = acc * 10 + 7 }
+        else if c == "8" { acc = acc * 10 + 8 }
+        else if c == "9" { acc = acc * 10 + 9 }
+        k = k + 1
+    }
+    if neg { return 0 - acc }
+    return acc
+}
+
+// Extract OpenAlex W-id from "https://openalex.org/W2164731628" → "W2164731628"
+fn extract_openalex_id(url: string) -> string {
+    let marker = "openalex.org/"
+    let i = url.index_of(marker)
+    if i < 0 { return url }
+    return url.substring(i + marker.len(), url.len()).trim()
+}
+
+// Extract bare DOI from "https://doi.org/10.1017/s1446788700028251" → "10.1017/s1446788700028251"
+// Returns "" if input empty or "null". Returns input unchanged if no doi.org marker.
+fn extract_doi(doi_url: string) -> string {
+    if doi_url.len() == 0 { return "" }
+    if doi_url == "null" { return "" }
+    let marker = "doi.org/"
+    let i = doi_url.index_of(marker)
+    if i < 0 {
+        // already bare (or some other URL form) — return as-is if it begins with "10."
+        if doi_url.substring(0, 3) == "10." { return doi_url }
+        return doi_url
+    }
+    return doi_url.substring(i + marker.len(), doi_url.len()).trim()
+}
+
+// Validate DOI shape: starts with "10." then digits, then "/", then suffix with len ≥ 1
+fn is_valid_doi(d: string) -> bool {
+    if d.len() < 6 { return false }      // min "10.X/Y"
+    if d.substring(0, 3) != "10." { return false }
+    let slash = d.index_of("/")
+    if slash < 4 { return false }        // "10." + at least 1 digit
+    if slash >= d.len() - 1 { return false }  // suffix must be non-empty
+    // chars between "10." and "/" must be digits
+    let mut k = 3
+    while k < slash {
+        if !is_digit(d.substring(k, k + 1)) { return false }
+        k = k + 1
+    }
+    return true
+}
+
+// Extract primary_topic.display_name (nested object — find "primary_topic":{ then look for display_name within ~500 chars)
+fn parse_primary_topic(blob: string) -> string {
+    let needle = "\"primary_topic\":"
+    let i = blob.index_of(needle)
+    if i < 0 { return "" }
+    let after = blob.substring(i, blob.len())
+    // limit search window to next 800 chars (primary_topic object ≈ 200-500 chars)
+    let win_end: i64 = 800
+    let win = if after.len() < win_end { after } else { after.substring(0, win_end) }
+    return parse_str_field(win, "display_name")
+}
+
+// ─── split top-level results array into per-work blocks ───
+//
+// Strategy: locate "results":[, then walk the array, tracking brace depth.
+// At depth 1 (inside the array), each top-level { ... } starting at depth 1 → 2 → 1 is one work.
+// Strings are skipped (so braces inside titles don't break depth counting).
+fn extract_works(json: string) -> array {
+    let mut out = []
+    let marker = "\"results\":"
+    let mi = json.index_of(marker)
+    if mi < 0 { return out }
+    let mut p = mi + marker.len()
+    let n = json.len()
+    // skip whitespace
+    while p < n {
+        let c = json.substring(p, p + 1)
+        if c == " " || c == "\n" || c == "\t" || c == "\r" { p = p + 1 } else { break }
+    }
+    if p >= n || json.substring(p, p + 1) != "[" { return out }
+    p = p + 1   // move past '['
+
+    let mut depth: i64 = 0
+    let mut start: i64 = -1
+    let mut in_str = false
+    while p < n {
+        let c = json.substring(p, p + 1)
+        if in_str {
+            if c == "\\" { p = p + 2; continue }
+            if c == "\"" { in_str = false }
+            p = p + 1
+            continue
+        }
+        if c == "\"" { in_str = true; p = p + 1; continue }
+        if c == "{" {
+            if depth == 0 { start = p }
+            depth = depth + 1
+        } else if c == "}" {
+            depth = depth - 1
+            if depth == 0 && start >= 0 {
+                out.push(json.substring(start, p + 1))
+                start = -1
+            }
+        } else if c == "]" && depth == 0 {
+            break
+        }
+        p = p + 1
+    }
+    return out
+}
+
+// Build a structured entry from a single work-block:
+//   [openalex_id, title, doi(bare), year, cited_by_count, primary_topic]
+fn parse_work(block: string) -> array {
+    let id_url = parse_str_field(block, "id")
+    let oa_id = extract_openalex_id(id_url)
+    let title = parse_str_field(block, "title")
+    let doi_url = parse_str_field(block, "doi")
+    let doi = extract_doi(doi_url)
+    let year = parse_int_field(block, "publication_year")
+    let cited = parse_int_field(block, "cited_by_count")
+    let topic = parse_primary_topic(block)
+    return [oa_id, truncate(title, 120), doi, year, cited, truncate(topic, 60)]
+}
+
+// ─── core fetch ───
+
+fn search_url(q: string, limit: i64) -> string {
+    return "https://api.openalex.org/works?search=" + url_encode_q(q) + "&per-page=" + to_string(limit) + "&mailto=noreply@local"
+}
+
+fn doi_url(doi: string) -> string {
+    return "https://api.openalex.org/works/doi:" + doi + "?mailto=noreply@local"
+}
+
+fn fetch_url(url: string) -> string {
+    // -L follow redirects, polite UA
+    let cmd = "curl -sL --max-time 30 -A 'nexus-openalex-bridge/1.0 (mailto:noreply@local)' '" + url + "'"
+    let raw = _str(exec(cmd))   // @allow-bare-exec
+    return raw
+}
+
+fn fetch_search(q: string, limit: i64) -> string { return fetch_url(search_url(q, limit)) }
+
+fn fetch_doi(doi: string) -> string { return fetch_url(doi_url(doi)) }
+
+// total result count from "meta":{"count":N}
+fn parse_total_count(json: string) -> i64 {
+    // "meta":{ ... "count": N ... } — find "count": within first 200 chars after "meta":
+    let mi = json.index_of("\"meta\":")
+    if mi < 0 { return -1 }
+    let after = json.substring(mi, json.len())
+    let win_end: i64 = 400
+    let win = if after.len() < win_end { after } else { after.substring(0, win_end) }
+    return parse_int_field(win, "count")
+}
+
+fn build_search_entries(q: string, limit: i64) -> array {
+    let json = fetch_search(q, limit)
+    if json.len() == 0 { return [] }
+    let blocks = extract_works(json)
+    let mut out = []
+    let mut i = 0
+    while i < len(blocks) {
+        out.push(parse_work(blocks[i]))
+        i = i + 1
+    }
+    return out
+}
+
+// ─── emitters ───
+
+fn emit_text(q: string, total: i64, entries: array) {
+    println("query           : " + q)
+    println("total_results   : " + to_string(total))
+    println("returned        : " + to_string(len(entries)))
+    let mut i = 0
+    while i < len(entries) {
+        let e = entries[i]
+        println("---")
+        println("openalex_id     : " + _str(e[0]))
+        println("title           : " + _str(e[1]))
+        println("doi             : " + _str(e[2]))
+        println("year            : " + to_string(e[3]))
+        println("cited_by_count  : " + to_string(e[4]))
+        println("primary_topic   : " + _str(e[5]))
+        i = i + 1
+    }
+    println("---")
+}
+
+fn emit_json(q: string, total: i64, entries: array) {
+    println("{")
+    println("  \"tool\": \"openalex_bridge\",")
+    println("  \"origin\": \"hive raw 70-73 deep-universe-sim + raw 76 paper-doi-lineage\",")
+    println("  \"query\": \"" + json_escape(q) + "\",")
+    println("  \"total_results\": " + to_string(total) + ",")
+    println("  \"count\": " + to_string(len(entries)) + ",")
+    println("  \"items\": [")
+    let mut k = 0
+    while k < len(entries) {
+        let e = entries[k]
+        let trail = if k + 1 < len(entries) { "," } else { "" }
+        println("    {\"id\": \"" + json_escape(_str(e[0])) + "\", \"title\": \"" + json_escape(_str(e[1])) + "\", \"doi\": \"" + json_escape(_str(e[2])) + "\", \"year\": " + to_string(e[3]) + ", \"cited_by\": " + to_string(e[4]) + ", \"primary_topic\": \"" + json_escape(_str(e[5])) + "\"}" + trail)
+        k = k + 1
+    }
+    println("  ]")
+    println("}")
+}
+
+// ─── selftest ───
+
+fn _selftest() {
+    let mut bad = []
+
+    // 1. URL encoding
+    let u = url_encode_q("perfect number")
+    if u != "perfect+number" { bad.push("url_encode_q('perfect number') expected 'perfect+number' got '" + u + "'") }
+
+    // 2. DOI extraction
+    let d1 = extract_doi("https://doi.org/10.1017/s1446788700028251")
+    if d1 != "10.1017/s1446788700028251" { bad.push("extract_doi expected '10.1017/...' got '" + d1 + "'") }
+    let d2 = extract_doi("")
+    if d2 != "" { bad.push("extract_doi('') expected '' got '" + d2 + "'") }
+    let d3 = extract_doi("null")
+    if d3 != "" { bad.push("extract_doi('null') expected '' got '" + d3 + "'") }
+
+    // 3. DOI shape validation
+    if !is_valid_doi("10.1017/s1446788700028251") { bad.push("is_valid_doi('10.1017/...') expected true") }
+    if !is_valid_doi("10.5281/zenodo.1234567") { bad.push("is_valid_doi('10.5281/zenodo.1234567') expected true") }
+    if is_valid_doi("not-a-doi") { bad.push("is_valid_doi('not-a-doi') expected false") }
+    if is_valid_doi("10.abc/def") { bad.push("is_valid_doi('10.abc/def') expected false (non-digit prefix)") }
+    if is_valid_doi("10.1017/") { bad.push("is_valid_doi('10.1017/') expected false (empty suffix)") }
+
+    // 4. OpenAlex id extraction
+    let oa = extract_openalex_id("https://openalex.org/W2164731628")
+    if oa != "W2164731628" { bad.push("extract_openalex_id expected 'W2164731628' got '" + oa + "'") }
+
+    // 5. Mini JSON parse smoke-test
+    let mini = "{\"id\":\"https://openalex.org/W123\",\"title\":\"test paper\",\"doi\":\"https://doi.org/10.99/abc\",\"publication_year\":2024,\"cited_by_count\":42}"
+    let id_v = parse_str_field(mini, "id")
+    if id_v != "https://openalex.org/W123" { bad.push("parse_str_field id expected '...W123' got '" + id_v + "'") }
+    let yr = parse_int_field(mini, "publication_year")
+    if yr != 2024 { bad.push("parse_int_field publication_year expected 2024 got " + to_string(yr)) }
+    let cb = parse_int_field(mini, "cited_by_count")
+    if cb != 42 { bad.push("parse_int_field cited_by_count expected 42 got " + to_string(cb)) }
+
+    // 6. extract_works on mini results array
+    let mini_arr = "{\"meta\":{\"count\":2},\"results\":[{\"id\":\"https://openalex.org/W1\",\"title\":\"a\",\"doi\":\"https://doi.org/10.1/x\",\"publication_year\":2020,\"cited_by_count\":5},{\"id\":\"https://openalex.org/W2\",\"title\":\"b\",\"doi\":null,\"publication_year\":2021,\"cited_by_count\":3}]}"
+    let blocks = extract_works(mini_arr)
+    if len(blocks) != 2 { bad.push("extract_works mini expected 2 blocks got " + to_string(len(blocks))) }
+    let total = parse_total_count(mini_arr)
+    if total != 2 { bad.push("parse_total_count mini expected 2 got " + to_string(total)) }
+
+    if len(bad) > 0 {
+        eprintln("[openalex_bridge selftest] FAIL: " + bad.join("; "))
+        eprintln("  reason: unit checks (url-encode + doi extract/validate + json parse + extract_works) failed")
+        eprintln("  fix: inspect the listed failures — JSON-parse helpers most likely candidate")
+        exit(1)
+    }
+
+    // Live fetch — 'perfect number' must yield ≥ 1 result with a valid DOI
+    let entries = build_search_entries("perfect number", 3)
+    if len(entries) < 1 {
+        eprintln("[openalex_bridge selftest] FAIL: live fetch 'perfect number' returned 0 entries")
+        eprintln("  reason: curl exec returned empty body OR results-array parse missed all blocks")
+        eprintln("  fix: verify connectivity (curl -sL 'https://api.openalex.org/works?search=perfect+number&per-page=1') and re-run")
+        exit(2)
+    }
+    let top = entries[0]
+    let top_doi = _str(top[2])
+    if !is_valid_doi(top_doi) {
+        // not strictly fatal (some OpenAlex works lack DOI) — but for 'perfect number' top result we expect one
+        eprintln("[openalex_bridge selftest] WARN: top result DOI '" + top_doi + "' does not match 10.XXXX/... shape")
+        // don't fail — search results may rotate; continue
+    }
+    println("[openalex_bridge selftest] OK — 14 unit checks + live fetch (" + to_string(len(entries)) + " entries, top_id=" + _str(top[0]) + ", top_doi=" + top_doi + ")")
+    exit(0)
+}
+
+// ─── main ───
+
+fn main() -> void {
+    let raw_args = args()
+    let mut cli = []
+    let mut ai = 2
+    while ai < len(raw_args) {
+        cli.push(raw_args[ai])
+        ai = ai + 1
+    }
+
+    let mut query: string = "perfect number"
+    let mut doi_lookup: string = ""
+    let mut limit: i64 = 5
+    let mut json_mode = false
+    let mut i = 0
+    while i < len(cli) {
+        let a = cli[i]
+        if a == "--selftest" || a == "selftest" { _selftest() }
+        else if a == "--query" {
+            if i + 1 < len(cli) { i = i + 1; query = cli[i] }
+            else {
+                eprintln("openalex_bridge: --query needs an argument")
+                eprintln("  reason: flag consumed without value")
+                eprintln("  fix: pass --query <STR>, e.g. --query 'perfect number'")
+                exit(1)
+            }
+        }
+        else if a == "--doi" {
+            if i + 1 < len(cli) { i = i + 1; doi_lookup = cli[i] }
+            else {
+                eprintln("openalex_bridge: --doi needs an argument")
+                eprintln("  reason: flag consumed without value")
+                eprintln("  fix: pass --doi 10.XXXX/...")
+                exit(1)
+            }
+        }
+        else if a == "--limit" {
+            if i + 1 < len(cli) {
+                i = i + 1
+                try { limit = to_int(cli[i]) } catch e {
+                    eprintln("openalex_bridge: --limit `" + cli[i] + "` not int")
+                    eprintln("  reason: to_int parse failure")
+                    eprintln("  fix: pass a positive integer (e.g. --limit 5)")
+                    exit(1)
+                }
+            }
+        }
+        else if a == "--json" { json_mode = true }
+        else if a == "--help" || a == "-h" {
+            println("usage: hexa run tool/openalex_bridge.hexa [--query <STR>] [--doi <DOI>] [--limit N] [--json] [--selftest]")
+            println("  --query <STR>  : full-text search (default: 'perfect number')")
+            println("  --doi <DOI>    : direct DOI lookup, e.g. 10.1017/s1446788700028251")
+            println("  --limit N      : max results (1..50, default 5)")
+            println("  --json         : emit single JSON object on stdout")
+            println("  --selftest     : 14 unit checks + live fetch sanity, exit 0/1/2")
+            println("origin: hive raw 70-73 (arxiv supplement) + raw 76 (paper-doi lineage feeder)")
+            exit(0)
+        }
+        else {
+            eprintln("openalex_bridge: unknown arg `" + a + "`")
+            eprintln("  reason: unrecognised CLI flag")
+            eprintln("  fix: see --help for valid flags (--query / --doi / --limit / --json / --selftest)")
+            exit(1)
+        }
+        i = i + 1
+    }
+
+    if limit < 1 || limit > 50 {
+        eprintln("openalex_bridge: --limit " + to_string(limit) + " out of range [1..50]")
+        eprintln("  reason: this tool clamps below OpenAlex per-page max (200) for sanity")
+        eprintln("  fix: pass --limit between 1 and 50")
+        exit(1)
+    }
+
+    // DOI lookup mode → single work, format as 1-entry list
+    let mut entries = []
+    let mut total: i64 = 0
+    let mut effective_q: string = query
+
+    if doi_lookup.len() > 0 {
+        if !is_valid_doi(doi_lookup) {
+            eprintln("openalex_bridge: --doi `" + doi_lookup + "` not valid DOI shape (expected 10.XXXX/...)")
+            eprintln("  reason: is_valid_doi rejected — must start with `10.` then digits, then `/`, then non-empty suffix")
+            eprintln("  fix: pass a real DOI, e.g. --doi 10.5281/zenodo.1234567")
+            exit(1)
+        }
+        let json = fetch_doi(doi_lookup)
+        if json.len() == 0 {
+            eprintln("openalex_bridge: DOI lookup empty body for " + doi_lookup)
+            eprintln("  reason: curl returned empty (network or 404)")
+            eprintln("  fix: verify DOI exists (curl -sL 'https://api.openalex.org/works/doi:" + doi_lookup + "')")
+            exit(2)
+        }
+        // DOI lookup returns single object (no results array) — wrap as 1-block list
+        let parsed = parse_work(json)
+        // sanity: openalex_id must be non-empty (W...)
+        if _str(parsed[0]).len() == 0 {
+            eprintln("openalex_bridge: DOI lookup parse failed (no `id` field in response)")
+            eprintln("  reason: response shape unexpected — possibly an error envelope { \"error\": ... }")
+            eprintln("  fix: re-run with raw curl to inspect")
+            exit(2)
+        }
+        entries.push(parsed)
+        total = 1
+        effective_q = "doi:" + doi_lookup
+    } else {
+        let json = fetch_search(query, limit)
+        if json.len() == 0 {
+            eprintln("openalex_bridge: search returned empty body for query='" + query + "'")
+            eprintln("  reason: curl returned empty (network or rate limit)")
+            eprintln("  fix: retry after 5s, or check network: curl -sL 'https://api.openalex.org/works?search=" + url_encode_q(query) + "&per-page=1'")
+            exit(2)
+        }
+        total = parse_total_count(json)
+        let blocks = extract_works(json)
+        let mut bi = 0
+        while bi < len(blocks) {
+            entries.push(parse_work(blocks[bi]))
+            bi = bi + 1
+        }
+        if len(entries) < 1 {
+            eprintln("openalex_bridge: 0 entries parsed from query='" + query + "'")
+            eprintln("  reason: results array empty OR extract_works failed to find blocks")
+            eprintln("  fix: try a broader query, or inspect raw response")
+            exit(2)
+        }
+    }
+
+    if json_mode { emit_json(effective_q, total, entries) }
+    else { emit_text(effective_q, total, entries) }
+
+    let top = entries[0]
+    let top_doi = _str(top[2])
+    let top_doi_show = if top_doi.len() > 0 { top_doi } else { "none" }
+    let top_cited: i64 = top[4]
+    println("__OPENALEX_BRIDGE__ PASS query=\"" + effective_q + "\" results=" + to_string(len(entries)) + " top_cited_count=" + to_string(top_cited) + " top_doi=" + top_doi_show)
+    exit(0)
+}
