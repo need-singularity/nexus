@@ -72,7 +72,8 @@ _probe_host() {
             echo "hexa_remote: host=$cand blacklisted ${bl_age}s ago (<${bl_ttl}s TTL) — skipping probe" >&2
             return 1
         fi
-        # stale — remove and re-probe.
+        # stale — remove and re-probe (Wave 22: expiry log for observability).
+        echo "hexa_remote: blacklist for $cand expired (${bl_age}s old), retrying" >&2
         rm -f "$bl_file" 2>/dev/null || true
     fi
     # raw#36 problem-solving-triad — fixpoint(stable host) + bracket(RAM headroom).
@@ -182,17 +183,39 @@ fi
 # slot taken). 비-heavy (probe/helpers) 경로는 영향 없음.
 # Override: HEXA_REMOTE_CONCURRENCY=N, HEXA_REMOTE_NO_CONCURRENCY=1 bypass,
 # HEXA_REMOTE_CONCURRENCY_WAIT=S wait seconds (default 300).
+# Wave 22 (2026-04-25): per-host concurrency. 글로벌 single-slot 은 1/3 호스트만
+# 활용 (33%) → drill 1개가 hetzner 잡으면 ubu1/ubu2 의 24GB free RAM 도 idle.
+# 호스트별 슬롯으로 분리해 활용도 100% (호스트 단위) 회복. PREFERRED 가 아닌
+# *실제 picked HOST* 를 prefix 에 사용해야 load-aware (Wave 12) 가 다른 호스트로
+# 보낸 케이스도 정확히 격리됨 → 실제 acquire 호출은 HOST 결정 직후 (line ~327 이후).
+# Override:
+#   HEXA_REMOTE_CONCURRENCY=N            모든 호스트 default (default 1)
+#   HEXA_REMOTE_CONCURRENCY_HETZNER=N    hetzner 전용 (default = HEXA_REMOTE_CONCURRENCY)
+#   HEXA_REMOTE_CONCURRENCY_UBU1=N       ubu1 전용
+#   HEXA_REMOTE_CONCURRENCY_UBU2=N       ubu2 전용
+#   HEXA_REMOTE_NO_CONCURRENCY=1         bypass (전체 게이트 비활성)
+#   HEXA_REMOTE_CONCURRENCY_WAIT=S       wait 초 (default 300)
+#   HEXA_REMOTE_SLOT_MAX_HOLD=S          stale slot max hold (default 3600s, #C)
 if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_CONCURRENCY:-0}" != "1" ]; then
-    # Wave 19 (2026-04-25): default 2 → 1. 병렬 drill 2개가 hetzner 128GB 합쳐서 소진 →
-    # kernel OOM-killer → rc=143/137. 1 concurrent 이 hetzner 의 80G MemoryMax cap 과
-    # 맞물려 안전. 사용자가 override 원하면 HEXA_REMOTE_CONCURRENCY=N.
-    _N_MAX="${HEXA_REMOTE_CONCURRENCY:-1}"
     _WAIT_S="${HEXA_REMOTE_CONCURRENCY_WAIT:-300}"
-    _LOCK_DIR_PREFIX="/tmp/nexus_heavy_dispatch.slot"
+    _SLOT_MAX_HOLD="${HEXA_REMOTE_SLOT_MAX_HOLD:-3600}"
     _ACQUIRED=""
+    # _per_host_max <host> → echo per-host slot limit (env override else default).
+    _per_host_max() {
+        case "$1" in
+            hetzner|htz) printf '%s' "${HEXA_REMOTE_CONCURRENCY_HETZNER:-${HEXA_REMOTE_CONCURRENCY:-1}}" ;;
+            ubu1)        printf '%s' "${HEXA_REMOTE_CONCURRENCY_UBU1:-${HEXA_REMOTE_CONCURRENCY:-1}}" ;;
+            ubu2)        printf '%s' "${HEXA_REMOTE_CONCURRENCY_UBU2:-${HEXA_REMOTE_CONCURRENCY:-1}}" ;;
+            *)           printf '%s' "${HEXA_REMOTE_CONCURRENCY:-1}" ;;
+        esac
+    }
     _acquire_slot() {
+        # Args: $1 = host (e.g. hetzner). Sets _ACQUIRED on success.
+        _h="$1"
+        _N_MAX_H="$(_per_host_max "$_h")"
+        _LOCK_DIR_PREFIX="/tmp/nexus_heavy_dispatch.${_h}.slot"
         _i=1
-        while [ "$_i" -le "$_N_MAX" ]; do
+        while [ "$_i" -le "$_N_MAX_H" ]; do
             _ld="${_LOCK_DIR_PREFIX}${_i}.lock"
             if mkdir "$_ld" 2>/dev/null; then
                 echo "$$" > "$_ld/pid" 2>/dev/null || true
@@ -201,9 +224,18 @@ if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_CONCURRENCY:-0}" != "1"
                 trap 'rm -rf "$_ACQUIRED" 2>/dev/null || true' EXIT INT TERM
                 return 0
             else
-                # stale detection: pid 파일이 있고 해당 pid 가 죽었으면 회수.
+                # #C stale detection (Wave 22):
+                #   1) pid 파일이 죽은 pid → 회수
+                #   2) slot mtime 이 _SLOT_MAX_HOLD (default 3600s) 초과 → 강제 회수
+                #      (사유: /loop 무한 drill 이 살아있어도 영구 점유 차단)
                 _pid="$(cat "$_ld/pid" 2>/dev/null || echo "")"
                 if [ -n "$_pid" ] && ! kill -0 "$_pid" 2>/dev/null; then
+                    rm -rf "$_ld" 2>/dev/null || true
+                    continue  # same slot 재시도
+                fi
+                _slot_age="$(( $(date +%s) - $(stat -f %m "$_ld" 2>/dev/null || stat -c %Y "$_ld" 2>/dev/null || date +%s) ))"
+                if [ "$_slot_age" -ge "$_SLOT_MAX_HOLD" ] 2>/dev/null; then
+                    echo "hexa_remote: stale slot reclaimed (held ${_slot_age}s, pid ${_pid:-?} alive)" >&2
                     rm -rf "$_ld" 2>/dev/null || true
                     continue  # same slot 재시도
                 fi
@@ -212,22 +244,28 @@ if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_CONCURRENCY:-0}" != "1"
         done
         return 1
     }
-    if ! _acquire_slot; then
-        echo "hexa_remote: Wave 9 concurrency gate — all $_N_MAX slots busy, waiting up to ${_WAIT_S}s" >&2
-        _t=0
-        while [ "$_t" -lt "$_WAIT_S" ]; do
-            sleep 1
-            _t=$((_t + 1))
-            if _acquire_slot; then
-                echo "hexa_remote: slot acquired after ${_t}s" >&2
-                break
+    # 실제 acquire 호출은 host 결정 후 (line ~327 이후) `_gate_acquire_for_host` 에서.
+    # 여기선 함수만 정의 — host pick 전에는 어느 슬롯에 속할지 알 수 없음.
+    _gate_acquire_for_host() {
+        _gh="$1"
+        if ! _acquire_slot "$_gh"; then
+            _gn="$(_per_host_max "$_gh")"
+            echo "hexa_remote: Wave 22 per-host gate — host=$_gh all $_gn slots busy, waiting up to ${_WAIT_S}s" >&2
+            _t=0
+            while [ "$_t" -lt "$_WAIT_S" ]; do
+                sleep 1
+                _t=$((_t + 1))
+                if _acquire_slot "$_gh"; then
+                    echo "hexa_remote: slot acquired on $_gh after ${_t}s" >&2
+                    break
+                fi
+            done
+            if [ -z "$_ACQUIRED" ]; then
+                printf 'NEXUS_REMOTE_ERROR {"reason":"heavy_concurrency_exceeded","host":"%s","limit":%s,"wait_s":%s,"exit_code":64}\n' "$_gh" "$_gn" "$_WAIT_S" >&2
+                exit 64
             fi
-        done
-        if [ -z "$_ACQUIRED" ]; then
-            printf 'NEXUS_REMOTE_ERROR {"reason":"heavy_concurrency_exceeded","limit":%s,"wait_s":%s,"exit_code":64}\n' "$_N_MAX" "$_WAIT_S" >&2
-            exit 64
         fi
-    fi
+    }
 fi
 
 # Build fallback chain — preferred 먼저, 그 다음 ubu1/ubu2/htz (compute host).
@@ -339,6 +377,14 @@ if [ -z "$HOST" ]; then
     done
     printf 'NEXUS_REMOTE_ERROR {"hosts_tried":[%s],"reason":"all_unreachable","exit_code":64}\n' "$_hosts_json" >&2
     exit 64
+fi
+
+# Wave 22 (2026-04-25): per-host slot acquire — 실제 picked HOST 가 결정된 후
+# 호출. 호스트별 슬롯 디렉토리 (`/tmp/nexus_heavy_dispatch.<host>.slot<i>.lock`)
+# 를 사용하므로 hetzner busy 여도 ubu1/ubu2 는 독립 슬롯으로 즉시 진입.
+# Skip: heavy-compute 가 아니거나 NO_CONCURRENCY=1 (게이트 함수 미정의).
+if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_CONCURRENCY:-0}" != "1" ] && command -v _gate_acquire_for_host >/dev/null 2>&1; then
+    _gate_acquire_for_host "$HOST"
 fi
 
 # 2026-04-22: 구 default ($HOME/Dev/hexa-lang/hexa) 는 4월14 빌드 — `^` / `&` 비트연산자 파서 미지원.
