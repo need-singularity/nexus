@@ -2050,6 +2050,100 @@ Cycles 1–35 produced ~12 design docs (`design/beyond_omega_*.md`) and ~15 tool
 
 ---
 
+## §42 cycle 39 finding — cross-axis FEEDBACK (axis B → V3' consumer, sidecar annotation, real implementation, zero-disruption) (2026-04-25)
+
+### Framing
+Cycle 6 cross_axis_join 가 axis B → axis A 방향 read 만 정량화. cycle 30-32 atlas bridge 는 axis B → atlas push (one-way). nxs-002 V3' SSOT consumer (drill, dashboard hook `cli/run.hexa:4043`, paper_trigger gate `tool/nxs_002_axiom_decision.hexa`) 는 axis B 신호를 받아본 적 없음 — feedback 가 unidirectional. Cycle 39 = 그 OTHER 방향 minimal bridge.
+
+### 산출물 (zero-disruption, sidecar 전용)
+- `tool/beyond_omega_cycle39_v3_axis_b_annotation.py` (NEW) — V3' SSOT 자체는 절대 미수정 (parallel session 충돌 회피). `state/ghost_ceiling_summary.json` (axis B current state) + `bisociation/spectra/g_atlas_composite_v3.json` (V3' snapshot) 두 source 를 read → sidecar `bisociation/spectra/g_atlas_composite_v3_axis_b_annotation.json` 으로 emit.
+- `bisociation/spectra/g_atlas_composite_v3_axis_b_annotation.json` (NEW, sidecar) — schema `nxs_004.cycle39.v3_axis_b_annotation.v1`, key fields: `annotated_v3_ts`, `annotated_v3_iso`, `axis_b_emit_count_at_v3_ts`, `axis_b_approach_count_at_v3_ts`, `axis_b_capture_sink_lines`, `axis_b_dispatch_count`, `axis_b_complete_count`, `feedback_direction`, `v3_ssot_unmodified=true`, `consumers_can_read` (3개), `estimation_caveat` (cycle 6 hour-bucket join 가 더 정확함 — 본 sidecar 는 dashboard glance 용 coarse).
+- `tool/beyond_omega_atlas_bridge.py` — `nxs004_b39_v3_annotation_ready` axis row 추가 (`cross_axis_feedback: true`, value=ready/missing/parse_error). atlas_health_timeline.jsonl 의 9번째 axis (cycle 34 capture_count 다음).
+- `design/beyond_omega_ladder.md` (본 §42).
+- `state/proposals/inventory.json` — `cycle_39_finding_2026_04_25` block + `Ω_saturation_cycle` bump + `implementation_phases_planned` cycle 39 추가 + `raw_37_38_pair` 갱신 + `updated_ts`.
+
+### 핵심 finding
+★ **CROSS_AXIS_FEEDBACK_BIDIRECTIONAL_v1** — axis B → V3' consumer 방향 first sidecar 게재. V3' SSOT 무손상 + parallel session 충돌 0 + consumer 는 read or ignore. Cycle 6 (axis B → axis A read) + cycles 30-32 (axis B → atlas push) + **cycle 39 (axis B → V3' consumer annotation)** = 3-way feedback graph 완성 (in-axis B / out-axis B-to-A / out-axis B-to-V3').
+
+### 첫 측정 (sidecar 첫 emit, 2026-04-25T13:59Z)
+- annotated V3' ts = `2026-04-25T09:27:06Z` (composite_v3_prime=0.964689, paper_trigger PASS)
+- axis_b_emit_count = 13, approach_count = 3, capture_sink lines = 6
+- dispatch=7 / complete=3 (cycle 3 의 dispatch≠complete anomaly 그대로 노출)
+
+### 본 cycle 의 산출물 vs 비-산출물
+- **산출물**: `tool/beyond_omega_cycle39_v3_axis_b_annotation.py` (NEW) + `bisociation/spectra/g_atlas_composite_v3_axis_b_annotation.json` (NEW sidecar) + `tool/beyond_omega_atlas_bridge.py` (cycle 39 axis row 추가) + ladder §42 (본 항) + inventory entry update
+- **비-산출물**: `cli/run.hexa` 변경 없음, `tool/atlas_meta_scan.hexa` 변경 없음, `bisociation/spectra/g_atlas_composite_v3.json` (V3' SSOT) 변경 없음 (sidecar only), `tool/nxs_002_omega_metrics.hexa` 변경 없음, nxs-002 inventory entry 변경 없음, git commit 없음
+
+### Self-correction chain (cycle 1-39)
+... → cycle 38 ★ TOP_LEVEL_DISCOVERABILITY_PUBLISHED → **cycle 39 ★ CROSS_AXIS_FEEDBACK_BIDIRECTIONAL_v1** (axis B → V3' consumer 방향 first bridge, sidecar zero-disruption pattern 확립).
+
+---
+
+## §43 cycle 40 finding — toolchain integration smoke test (real implementation, regression guard) (2026-04-25)
+
+### Framing
+16 commits + 38+ cycles produced ~24 scripts (`tool/beyond_omega_*.{py,sh,json}` + `tool/com.nexus.beyond-omega-daily.plist`). 어느 도구도 자동화된 테스트가 없었음 — 미래 변경이 chain 을 silently break 가능 (e.g. `atlas_bridge` schema drift, `ghost_trace` argv break, plist plutil 실패, 새 cycle 도구의 syntax error 가 daily plist 가 fire 할 때까지 발견 안 됨). Cycle 40 = single integration smoke test 로 regression guard 마련.
+
+### 산출물
+- `tool/beyond_omega_smoke_test.py` (NEW) — 모든 `tool/beyond_omega_*` 스크립트 일괄 검사. 검사 단계:
+  - **Syntax check (모든 파일, side-effect 0)**: `python3 -m py_compile` (.py), `bash -n` (.sh), `json.load` (.json), `plutil -lint` (.plist).
+  - **Optional 실제 실행 (whitelist `SAFE_TO_EXECUTE`)**: pure-data-analysis / read-only 도구만. Whitelist = `cycle23_meta_chain_analysis.py`, `cycle26_spine_geometry.py`, `atlas_schema_validate.py`, `tmp_sink_audit.py` (default mode = read-only), `cross_axis_join.py`, `cycle39_v3_axis_b_annotation.py`. 각 실행은 60s timeout + cwd=REPO + rc/elapsed/first-5-line/last-5-line capture.
+  - **NEVER 실행 (`NEVER_EXECUTE`)**: `cycle4_force_approach.sh`, `emit_capture_wrapper.sh`, `daily_chain.sh` (모두 cmd_omega spawn 비싸다), `cycle9..25` probes (cmd_omega 호출), `atlas_bridge.py` / `atlas_backfill_history.py` (atlas_health_timeline.jsonl mutate), `tmp_sink_rotate.sh` (file 이동/삭제), `ghost_trace.py` (default = state overwrite, 정적 분석으로 충분).
+- `state/beyond_omega_smoke_test.json` (NEW) — schema `nxs_004.cycle40.smoke_test.v1`, top-level: `n_scripts_total`, `pass_count`, `fail_count`, `pass_ratio`, `scripts_executed[]`, `scripts_syntax_only_safety[]`, `scripts_syntax_only_default[]`, `results[]` (per-script 상세), `failures_summary[]`.
+- `tool/beyond_omega_atlas_bridge.py` — `nxs004_b40_smoke_test_pass_count` axis row 추가 (10번째 axis, value=pass_count, metric=count, sidecar fields: `smoke_test_total`, `smoke_test_pass_ratio`, `smoke_test_fail_count`, `smoke_test_status`, `smoke_test_state_path`, `tool_path`).
+- `design/beyond_omega_ladder.md` (본 §43).
+- `state/proposals/inventory.json` — `cycle_40_finding_2026_04_25` block + `Ω_saturation_cycle` bump + `implementation_phases_planned` cycle 40 추가 + `raw_37_38_pair` 갱신 + `updated_ts`.
+
+### 첫 측정 (smoke test 첫 실행)
+- **Total scripts: 28** (24 .py + 3 .sh + 1 .json + 1 .plist — `com.nexus.beyond-omega-daily.plist` 포함)
+- **Pass: 28 / 28 (100%)**, fail: 0
+- Executed (실제 실행): 6 scripts — `atlas_schema_validate.py`, `cross_axis_join.py`, `cycle23_meta_chain_analysis.py`, `cycle26_spine_geometry.py`, `cycle39_v3_axis_b_annotation.py`, `tmp_sink_audit.py`
+- Syntax-only (safety): 18 scripts (cmd_omega-spawning probes + state-mutating tools)
+- Syntax-only (default): 4 scripts (`atlas_axis_decl.json`, `durability_manifest.py`, `smoke_test.py` 자기자신, `com.nexus.beyond-omega-daily.plist`)
+- Failures detail: NONE — clean baseline 확보.
+
+### 핵심 finding
+★ **TOOLCHAIN_SMOKE_BASELINE_28_OF_28** — 모든 beyond-omega 도구 syntax + 6 safe-execute 도구 runtime PASS. 미래 변경에서 silent breakage 즉시 catch 가능. atlas_bridge 가 매 daily fire 마다 `nxs004_b40_smoke_test_pass_count` axis 갱신 — pass_count 가 28 미만으로 떨어지면 atlas timeline 에 즉시 visible.
+
+### 본 cycle 의 산출물 vs 비-산출물
+- **산출물**: `tool/beyond_omega_smoke_test.py` (NEW) + `state/beyond_omega_smoke_test.json` (NEW, first run baseline 28/28) + `tool/beyond_omega_atlas_bridge.py` (cycle 40 axis row 추가) + ladder §43 (본 항) + inventory entry update
+- **비-산출물**: `cli/run.hexa` 변경 없음, `tool/atlas_meta_scan.hexa` 변경 없음, 어느 cycle*_*.py / .sh 도 actual 실행 안 함 (whitelist 외 모두 syntax only), `tool/com.nexus.beyond-omega-daily.plist` 변경 없음, `force_approach.sh` / `emit_capture_wrapper.sh` / `daily_chain.sh` 호출 0 (cmd_omega 비용 회피), git commit 없음
+
+### Self-correction chain (cycle 1-40)
+... → cycle 38 ★ TOP_LEVEL_DISCOVERABILITY_PUBLISHED → cycle 39 ★ CROSS_AXIS_FEEDBACK_BIDIRECTIONAL_v1 → **cycle 40 ★ TOOLCHAIN_SMOKE_BASELINE_28_OF_28** (regression guard 첫 게재, atlas axis 자동 publish).
+
+---
+
+## §44 cycle 41 finding — durability manifest baseline (long-term integrity check, real implementation) (2026-04-25)
+
+### Framing
+Cycles 1–40 produced 56 beyond-omega artifacts (7 design docs, 28 tools, 21 state files including 4 gitignore traces). No checksum baseline existed — if a file got accidentally truncated/corrupted (gitignore state files especially: `state/ghost_ceiling_trace.jsonl`, `*.append.jsonl`, `*.daily.YYYY-MM-DD.json`), there was no automated way to detect. Cycle 41 = one-shot manifest baseline + verification script (parallel-friendly: read-only, atomic write).
+
+### 산출물
+- `tool/beyond_omega_durability_manifest.py` (NEW, 191 lines) — collects glob patterns (design/beyond_omega_*.md + tool/beyond_omega_*.{py,sh,json,md} + tool/com.nexus.beyond-omega-daily.plist + state/beyond_omega_*.json + state/ghost_ceiling_*.{json,jsonl}) → for each: sha256 + size_bytes + line_count + mtime_iso → write `state/beyond_omega_durability_manifest.json`. `--verify` mode: re-compute and diff against baseline (kinds: added / removed / sha_mismatch), exit code = n_diff. Self-exclusion: manifest itself excluded from its own baseline (would be circular).
+- `state/beyond_omega_durability_manifest.json` (NEW) — baseline snapshot, 56 file entries, schema `nexus.beyond_omega.durability_manifest.v1`, generated_ts captured at baseline write.
+- `tool/beyond_omega_atlas_bridge.py` — `nxs004_b41_durability_manifest_count` axis 추가 (axis_name=`beyond_omega_durability_manifest_n_files`, value=n_files baselined, manifest_status=baselined|missing|empty|parse_error, includes `verify_mode` cmd hint). Daily plist chain 자동 emit.
+- `design/beyond_omega_ladder.md` (본 문서) — §44 본 항.
+- `state/proposals/inventory.json` — `cycle_41_finding_2026_04_25` block + `Ω_saturation_cycle` bump + `implementation_phases_planned` cycle 41 추가 + `raw_37_38_pair` 갱신 + `updated_ts`.
+
+### 핵심 finding
+★ **DURABILITY_MANIFEST_BASELINE_56_FILES** — 56-file integrity baseline created (sha256 + size + line_count + mtime per file). Initial `--verify` immediately after baseline confirms zero diff (round-trip integrity). Future drift detection (corruption, accidental truncation, gitignore file silent loss) is now a single `python3 tool/beyond_omega_durability_manifest.py --verify` call, exit code = number of differing files. Atlas axis publishes baseline count daily; if file disappears or sha drifts, axis still emits but verify-call returns nonzero.
+
+### 본 cycle 의 산출물 vs 비-산출물
+- **산출물**: `tool/beyond_omega_durability_manifest.py` (NEW) + `state/beyond_omega_durability_manifest.json` (NEW baseline) + `tool/beyond_omega_atlas_bridge.py` (cycle 41 axis 추가) + ladder §44 (본 항) + inventory entry update
+- **비-산출물**: `cli/run.hexa` 변경 없음, `tool/atlas_meta_scan.hexa` 변경 없음, 기존 56 file 변경 없음 (read-only baseline), 어떤 cycle*.py / .sh 도 실행 안 함 (manifest tool 만 실행), git commit 없음
+
+### Verification (cycle 41 acceptance)
+- Baseline write: n_files=56, generated_ts=2026-04-25T14:01:37Z, write OK.
+- `--verify` immediately after: `✓ verify OK — 56 files, 0 diffs vs baseline 2026-04-25T14:01:37Z` (exit 0).
+- Self-exclusion: manifest path in `self_excluded_path` field; not present in `files[]` array (avoids round-trip mtime/sha drift on its own re-write).
+- Schema discoverable: `nexus.beyond_omega.durability_manifest.v1`, future bumps allowed (e.g., adding gpg signature field).
+
+### Self-correction chain (cycle 1-41)
+... → cycle 39 ★ CROSS_AXIS_FEEDBACK_BIDIRECTIONAL_v1 → cycle 40 ★ TOOLCHAIN_SMOKE_BASELINE_28_OF_28 → **cycle 41 ★ DURABILITY_MANIFEST_BASELINE_56_FILES** (long-term integrity guard, single `--verify` cmd 으로 미래 corruption / 무손실 truncation 감지 가능, atlas axis 매일 publish).
+
+---
+
 ## §5 raw#37/#38 enforce — pair 산출물
 
 본 cycle 1 의 design (이 문서) ↔ impl (`tool/beyond_omega_ghost_trace.py`) pair 강제. 아래 산출물 모두 동일 commit 에 포함:

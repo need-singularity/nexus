@@ -28,6 +28,17 @@ PLIST = REPO / "tool" / "com.nexus.beyond-omega-daily.plist"
 # cycle 34 (2026-04-25): emit_capture_wrapper.sh 의 host-side append sink.
 # nxs004_b34 axis = wc -l (NEXUS_OMEGA emit captured to permanent sink).
 EMIT_CAPTURE_SINK = REPO / "state" / "ghost_ceiling_trace.append.jsonl"
+# cycle 39 (2026-04-25): cross-axis FEEDBACK sidecar (axis B → V3' consumer).
+# Sidecar to bisociation/spectra/g_atlas_composite_v3.json (V3' SSOT 미수정).
+V3_AXIS_B_ANNOTATION = (
+    REPO / "bisociation" / "spectra" / "g_atlas_composite_v3_axis_b_annotation.json"
+)
+# cycle 40 (2026-04-25): toolchain integration smoke test result sink.
+# nxs004_b40 axis = pass_count / total ratio of beyond_omega_smoke_test.py.
+SMOKE_TEST_STATE = REPO / "state" / "beyond_omega_smoke_test.json"
+# cycle 41 (2026-04-25): durability manifest baseline (sha256 + size + lines + mtime).
+# nxs004_b41 axis = n_files baselined for long-term integrity check.
+DURABILITY_MANIFEST = REPO / "state" / "beyond_omega_durability_manifest.json"
 
 # REAL cycle findings only (cycles 7-26 synthetic excluded by design — see
 # design/beyond_omega_HONEST_INDEX.md / 사용자 직접 framing 2026-04-25).
@@ -167,6 +178,104 @@ def main():
         "cycle_anchor": [34],
         "sink_path": str(EMIT_CAPTURE_SINK.relative_to(REPO)),
         "wrapper_path": "tool/beyond_omega_emit_capture_wrapper.sh",
+    })
+
+    # cycle 39: cross-axis FEEDBACK sidecar status (axis B → V3' consumer).
+    # value = "ready" if sidecar exists with feedback_direction set, else "missing".
+    annotation_status = "missing"
+    annotation_v3_ts = None
+    annotation_emit = None
+    if V3_AXIS_B_ANNOTATION.exists():
+        try:
+            with open(V3_AXIS_B_ANNOTATION) as fh:
+                _ann = json.load(fh)
+            if (_ann.get("feedback_direction", "").startswith("axis_b → v3_consumer")
+                    and _ann.get("v3_ssot_unmodified") is True):
+                annotation_status = "ready"
+                annotation_v3_ts = _ann.get("annotated_v3_iso")
+                annotation_emit = _ann.get("axis_b_emit_count_at_v3_ts")
+        except (OSError, json.JSONDecodeError):
+            annotation_status = "parse_error"
+    rows.append({
+        "ts": ts,
+        "axis_id": "nxs004_b39_v3_annotation_ready",
+        "axis_name": "v3_axis_b_annotation_sidecar_status",
+        "value": annotation_status,
+        "metric": "status",
+        "source": "nxs-20260425-004",
+        "real_implementation": True,
+        "cross_axis_feedback": True,
+        "cycle_anchor": [39],
+        "sidecar_path": str(V3_AXIS_B_ANNOTATION.relative_to(REPO)),
+        "annotated_v3_iso": annotation_v3_ts,
+        "axis_b_emit_at_annotation": annotation_emit,
+        "v3_ssot_unmodified": True,
+        "feedback_direction": "axis_b → v3_consumer (read-only)",
+    })
+
+    # cycle 40: toolchain smoke test pass count.
+    # value = pass_count (int); also expose total + ratio + tool_path.
+    smoke_pass = None
+    smoke_total = None
+    smoke_ratio = None
+    smoke_status = "missing"
+    smoke_failures_n = None
+    if SMOKE_TEST_STATE.exists():
+        try:
+            with open(SMOKE_TEST_STATE) as fh:
+                _smoke = json.load(fh)
+            smoke_pass = _smoke.get("pass_count")
+            smoke_total = _smoke.get("n_scripts_total")
+            smoke_ratio = _smoke.get("pass_ratio")
+            smoke_failures_n = _smoke.get("fail_count")
+            smoke_status = "all_pass" if smoke_failures_n == 0 else "partial_fail"
+        except (OSError, json.JSONDecodeError):
+            smoke_status = "parse_error"
+    rows.append({
+        "ts": ts,
+        "axis_id": "nxs004_b40_smoke_test_pass_count",
+        "axis_name": "beyond_omega_toolchain_smoke_pass_count",
+        "value": smoke_pass,
+        "metric": "count",
+        "source": "nxs-20260425-004",
+        "real_implementation": True,
+        "cycle_anchor": [40],
+        "smoke_test_total": smoke_total,
+        "smoke_test_pass_ratio": smoke_ratio,
+        "smoke_test_fail_count": smoke_failures_n,
+        "smoke_test_status": smoke_status,
+        "smoke_test_state_path": str(SMOKE_TEST_STATE.relative_to(REPO)),
+        "tool_path": "tool/beyond_omega_smoke_test.py",
+    })
+
+    # cycle 41: durability manifest count (long-term integrity baseline).
+    # value = n_files baselined (sha256 + size + line_count + mtime each).
+    manifest_n_files = None
+    manifest_generated_ts = None
+    manifest_status = "missing"
+    if DURABILITY_MANIFEST.exists():
+        try:
+            with open(DURABILITY_MANIFEST) as fh:
+                _man = json.load(fh)
+            manifest_n_files = _man.get("n_files")
+            manifest_generated_ts = _man.get("generated_ts")
+            manifest_status = "baselined" if manifest_n_files else "empty"
+        except (OSError, json.JSONDecodeError):
+            manifest_status = "parse_error"
+    rows.append({
+        "ts": ts,
+        "axis_id": "nxs004_b41_durability_manifest_count",
+        "axis_name": "beyond_omega_durability_manifest_n_files",
+        "value": manifest_n_files,
+        "metric": "count",
+        "source": "nxs-20260425-004",
+        "real_implementation": True,
+        "cycle_anchor": [41],
+        "manifest_path": str(DURABILITY_MANIFEST.relative_to(REPO)),
+        "manifest_generated_ts": manifest_generated_ts,
+        "manifest_status": manifest_status,
+        "tool_path": "tool/beyond_omega_durability_manifest.py",
+        "verify_mode": "python3 tool/beyond_omega_durability_manifest.py --verify",
     })
 
     # excluded synthetic — record explicit exclusion (one row, not per-cycle)
