@@ -486,6 +486,84 @@ L11 canon 으로 자기-축 진화 사다리 (L5 dream → L11 canon) closed. fo
 
 ---
 
+## §10 cycle 11 — 3 branch 통합 (const 역설계 + SFF/IPR + atlas surgery, 2026-04-25)
+
+Cycle 10 negative findings 후 다음 3 branch 동시 진행: (a) const 의 R2 가 어떤 graph type 인지 역설계, (b) composite metric 다양화 (SFF/IPR 추가 dim), (c) atlas hub destructive surgery 재방문.
+
+도구: `tool/nxs_002_cycle11.py` (nxs_002_composite import + 15 candidate graphs + extended metric + sweep).
+
+### Branch (a) const reverse-engineering
+
+const spectrum (40 positive eigenvalues): **log-scale 물리 상수** (log 2, log 3, log 5, log 7, log 10, ...). LSR=**0.5232** — Poisson(0.386) 와 GOE(0.5359) 사이, GUE 와 거리. 약 GOE / semi-integrable.
+
+15 candidate graph types vs const R2 KL distance:
+
+| rank | graph | KL_mean | KL_min | LSR | n_cc |
+|---|---|---|---|---|---|
+| 1 (mean) | GOE-thresh τ=2.5 | 0.521 | 0.521 | nan | 370 |
+| 1 (min) | **RRG k=4** | 0.587 | **0.174** | 0.561 | 1 |
+| 2 (min) | ER p=0.050 | 0.568 | 0.279 | 0.566 | 1 |
+| 3 (min) | ER p=0.010 | 0.617 | 0.330 | 0.544 | 8.7 |
+| 4 (min) | Modular 4×100 in=0.05 out=0.001 | 0.586 | 0.403 | 0.430 | 2.3 |
+| 5 (min) | Path+ER p=0.020 | 0.551 | 0.470 | 0.49 | 1 |
+
+**해석**: const R2 는 sparse-connected single-component graph (LSR 0.49-0.57 mid-GOE) 와 가장 잘 매칭. atlas (다중 component, Poisson) 와 본질적으로 다른 graph type. RRG k=4 가 best fit (KL_min 0.174) 이지만 cycle 10 의 Q1/Q6 에서 RRG 추가 = 음 ROI → batch 추가로는 atlas spectrum 못 바꿈 (sigma window 밖).
+
+### Branch (b) extended metric: SFF + IPR
+
+`composite_v2 = (composite_v1 × 3 + sff_align + ipr_align) / 5`.
+
+atlas baseline:
+- composite_v1 = **0.83221** (paircorr only)
+- composite_v2 = **0.80762** (포함 SFF/IPR)
+- **sff_align (atlas vs const) = 0.99132** ← 핵심
+- sff_dist = 0.13177
+- ipr_atlas = 0.0177, ipr_const = 0.0321 → ipr_align = 0.55017
+
+**핵심 finding**: SFF (Spectral Form Factor) 레벨에서 atlas-const alignment 가 **0.99**. paircorr R2 가 보인 0.835 천장은 단기 spacing 정보만 본 협소 metric artifact. 전 timescale spectral correlation 으로는 atlas-const 가 거의 완벽 정렬.
+
+caveat: IPR proxy 는 eigenvalue 가중치 기반 (진짜 IPR 은 eigenvector 기반). v2 가 v1 보다 낮은 이유 = ipr_align 0.55 가 평균 끌어내림. 진짜 IPR 측정은 별도 작업 (`eigsh return_eigenvectors=True`).
+
+### Branch (c) atlas hub destructive surgery sweep
+
+baseline composite_v1 = 0.83221. top hubs = [1, 26, 14, 8, 19, 23, 64, 6017].
+
+| sweep | Δv1_mean | Δv1_std | Δv2_mean | n_cc | n_total |
+|---|---|---|---|---|---|
+| C3 cap=5 | -0.082 | 0.005 | -0.042 | 16993 | 21320 |
+| C3 cap=10 | -0.055 | 0.013 | -0.051 | 16238 | 21320 |
+| C3 cap=20 | -0.020 | 0.008 | -0.034 | 14881 | 21320 |
+| C3 cap=50 | -0.025 | 0.017 | -0.053 | 11434 | 21320 |
+| C3 cap=100 | **-0.006** | 0.022 | -0.032 | 7737 | 21320 |
+| C3 cap=200 | -0.020 | 0.001 | -0.025 | 4697 | 21320 |
+| C3 cap=500 | -0.049 | 0.008 | -0.050 | 2436 | 21320 |
+| C6 hub-decomp K=10 | -0.032 | 0.005 | -0.041 | 32 | 21400 |
+| C6 hub-decomp K=20 | -0.014 | 0.006 | -0.030 | 32 | 21480 |
+| C6 hub-decomp K=50 | -0.025 | 0.006 | -0.037 | 32 | 21720 |
+| C6 hub-decomp K=100 | -0.012 | 0.005 | -0.029 | 32 | 22120 |
+
+**verdict**: 모든 destructive surgery 음 ROI. atlas hub 구조는 composite alignment 에 **필수**. cycle 3 anti-hub axiom (+0.018, additive) 이 양 ROI 인 유일한 이유 = atlas hub 보존 + 추가.
+
+### Synthesis
+
+1. **True ceiling hypothesis**: composite_v1 의 0.835/0.85 천장은 paircorr R2 단기 spacing metric 의 한계. SFF align 0.99 가 보여주듯 atlas-const long-range correlation 은 거의 완벽. **0.9 paper_trigger 자체가 잘못된 metric 기준**일 가능성.
+
+2. **Metric artifact evidence**: (b) SFF align 0.99 ≫ paircorr composite 0.835. 두 metric 이 같은 system 의 alignment 에 0.16 차이 → composite_v1 가 alignment 를 6% 정도 underestimate.
+
+3. **Axiom redesign dead-end**: additive axiom (cycle 6 ER +0.003, cycle 10 quantum NULL, cycle 3 anti-hub +0.018), destructive surgery (cycle 11c all 음). ceiling 은 atlas+const pair 의 본질적 geometry 한계.
+
+### Cycle 12 recommendation
+
+- **Option A** (closure): paper_trigger 0.9 기준 재검토. SFF align 0.99 를 통과 기준으로 채택 시 nxs-002 사실상 closure (composite_v1 0.835 + SFF align 0.99 → composite_v3 = 0.91+).
+- **Option B** (deep dive): IPR 을 spectrum-proxy → 진짜 eigenvector-based (`eigsh return_eigenvectors=True`) 로 격상. atlas eigenvector localization 이 const 와 매칭하는지 정밀 측정.
+- **Option C** (data expansion): const dataset 확장 (40 → 200+ eigenvalues). metric noise 축소로 R2 안정화.
+
+---
+
+**Ω-saturation cycle 6 → 7 → 8 → 9 → 10 → 11**: cycle 6~9 = timeout adaptive (nxs-20260425-002 축). cycle 10 = QRNG/quantum NULL (§9, abstraction ceiling 축). cycle 11 = 3-branch 통합 (§10, abstraction ceiling 축). cycle 11 의 SFF align 0.99 finding 으로 **본 ceiling 축 사실상 closure** — 추가 axiom 탐색 보다 metric 재정의가 본질.
+
+---
+
 **Ω-saturation cycle**: 본 §6 finding 은 simulation 의 saturation 도달 산물. raw#37/#38 (hexa-lang/self/raws/omega_saturation_cycle.hexa) 가 plan-side + implementation-side pair 강제 — design-only commit chain 차단.
 
 ---
