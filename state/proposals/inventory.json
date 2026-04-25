@@ -720,6 +720,23 @@
         "Phase 3: hook 자동 cron disable opt — NEXUS_HOOK_CRON_DISABLE env 또는 cron 빈도 줄이기",
         "Phase 4: drill slot 동시성 — multiple session 발사 시 queue 또는 reject + clear emit"
       ],
+      "phase4_explicit_exit_cycle46": {
+        "result": "Phase 4 explicit exit code — flock -E 64 추가 (lock timeout 시 명시 fail)",
+        "code_change": {
+          "file": "scripts/bin/hexa_remote",
+          "lines": "985-988 (heavy compute lock prefix)",
+          "before": "flock -w $_LOCK_W /tmp/hexa_real.lock",
+          "after": "flock -E 64 -w $_LOCK_W /tmp/hexa_real.lock"
+        },
+        "rationale": "flock default exit code on timeout = 1 (silent ambiguous). flock -E 64 → exit 64 명시 → ssh client 측 (Mac) NEXUS_REMOTE_ERROR exit_code:64 자동 propagate. 본 세션 cycle 13b/16 silent hang 대체.",
+        "expected_emit_path": "ssh exit 64 → hexa_remote 의 NEXUS_REMOTE_ERROR JSON emit (이미 처리) → user 가 명시적 lock contention 표시 받음.",
+        "remaining_phase4_open": [
+          "host-side explicit emit (NEXUS_LOCK_TIMEOUT JSON before exit) — flock 자체 stderr 부재로 wrapper script 필요",
+          "drill slot semaphore (multiple parallel slot) — design",
+          "FIFO queue + reject — architecture"
+        ],
+        "consistency_with_zero_dependency": "shell script line 985 변경만 — Claude hooks 제거 + git hooks 미설치 + launchd 미설치 정책 일관."
+      },
       "phase4_lock_timeout_cycle45": {
         "result": "Phase 4 (cross-session lock) partial fix — _LOCK_W default 60s → 30s",
         "code_change": {

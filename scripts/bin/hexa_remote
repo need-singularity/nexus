@@ -987,7 +987,11 @@ REMOTE_TRAP="trap 'rc=\$?; exit \$rc' EXIT INT TERM"
 # (HEXA_REMOTE_REMOTE_LOCK_WAIT) 우선 보존.
 _LOCK_W="${HEXA_REMOTE_REMOTE_LOCK_WAIT:-30}"
 if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_REMOTE_LOCK:-0}" != "1" ]; then
-    _REMOTE_LOCK_PREFIX="flock -w $_LOCK_W /tmp/hexa_real.lock "
+    # nxs-20260425-003 Phase 4 (cycle 46, 2026-04-25): flock -E 64 추가 —
+    # lock timeout (default exit 1) → exit 64 명시. ssh client 측 NEXUS_REMOTE
+    # _ERROR exit_code:64 자동 propagate. silent hang 대신 cross-session
+    # contention 명시 fail.
+    _REMOTE_LOCK_PREFIX="flock -E 64 -w $_LOCK_W /tmp/hexa_real.lock "
 else
     _REMOTE_LOCK_PREFIX=""
 fi
