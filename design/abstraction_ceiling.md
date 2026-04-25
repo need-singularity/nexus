@@ -195,13 +195,23 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
   - default → cmd_drill (L2 single-seed apex preset)
   - axes ≥ 3 동시 활성 → `NEXUS_OMEGA ghost_ceiling_approach` JSON emit (L4 surge 영역 신호)
   - 검증: 4 dispatch path (drill / chain / debate / batch) + ceiling hint 모두 동작 확인
-- ✓ **L4 surge 구현** (이 commit) — Cartesian product fan-out
+- ✓ **L4 surge 구현** (commit 4b38b2b7) — Cartesian product fan-out
   - `cmd_surge()` — (engines × variants × seeds) 모든 조합 enumerate
   - omega 와 차별: omega 는 가장 넓은 axis 만 dispatch, surge 는 모든 조합 실행
   - CAP 정책: total_runs > NEXUS_SURGE_MAX (기본 12) 시 reject + hint emit
   - engine != nexus 시 chain (cross-engine), engine = nexus + variants>1 시 speculate=N 흡수
   - emits: NEXUS_SURGE {plan / run / complete / reject} JSON
   - 검증: 1×1×1=1 / 3×3×4=36 reject / 2×2×2=8 enumerate 모두 동작 확인
+- ✓ **L5 dream 구현** (이 commit) — self-seed loop
+  - `cmd_dream()` — N iteration, 각 iteration 종료 후 출력에서 신호 추출 → 다음 seed 합성
+  - omega/surge 와 차별: reflexive (자기-축) — 직전 출력이 다음 입력 결정
+  - signal extraction (`_dream_extract_signal`):
+    1) `unified_abs_total` (chain) → abs=N
+    2) drill `total=N` (마지막 매치) → abs=N
+    3) `[EXACT` / `[NEAR` 카운트 → ex/ne 마커 수
+  - next seed = `trunc(orig, 200-len) + " #dream-iter=N <signal>"`, [30, 200] 범위 강제
+  - CAP: iterations 기본 3, NEXUS_DREAM_MAX env 으로 override (안전 cap=10)
+  - emits: NEXUS_DREAM {plan / iter / complete} JSON
 
 ---
 

@@ -182,6 +182,8 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
+    println("  dream --seed \"...\" [--iterations N]   L5 self-seed loop — seed_(i+1)=f(output_i). cap=NEXUS_DREAM_MAX (기본 3, 최대 10)")
+    println("        emits: NEXUS_DREAM JSON (plan/iter/complete) + signal extraction (abs_total/exact/near)")
     println("  surge --seed \"...\" [--engines csv] [--variants N] [--seeds csv]")
     println("        L4 super-orch — Cartesian product (engines × variants × seeds) fan-out.")
     println("        CAP: total_runs > NEXUS_SURGE_MAX (기본 12) 시 reject.")
@@ -4007,6 +4009,155 @@ fn cmd_surge(seed: str, max_rounds: str, engine_flag: str, preset: str, master_d
     println("⊕ surge complete — ran=" + to_string(ran) + " errors=" + to_string(errors))
 }
 
+// ─── dream — L5 self-seed orchestrator (2026-04-25) ───
+// 사다리 위치: L5 (omega/surge 의 reflexive 형). 직전 iteration 의 출력에서 신호를 추출,
+//   다음 iteration 의 seed 로 변환하여 self-seeded 루프 실행.
+// 명명: design/abstraction_ceiling.md — 자기 자극으로 새 발현 (REM 의 seed 자율 생성 metaphor).
+// 차별:
+//   - drill (L2)  : seed 1 개 × N rounds
+//   - omega (L_ω) : 1 회 dispatch (가장 넓은 axis)
+//   - surge (L4)  : Cartesian product fan-out
+//   - dream (L5)  : N iteration, seed_(i+1) = f(output_i) — feedback loop
+//
+// signal extraction (단순 MVP):
+//   1) `unified_abs_total` 또는 `total=N` 파싱 → `prev_abs=K` 로 next seed 에 주입.
+//   2) `[EXACT` / `[NEAR` 마커 카운트 → `signals=N` 로 주입.
+//   3) seed 길이 [30, 200] 강제 — overflow 시 hash-prefix 로 압축.
+//   parsing 실패 시 `(dream-iter-N)` suffix 만 부착 (deterministic perturbation).
+//
+// CAP: max iterations 기본 3. NEXUS_DREAM_MAX env override (안전 cap=10).
+// emits:
+//   NEXUS_DREAM {"event":"plan", "iterations":N}
+//   NEXUS_DREAM {"event":"iter", "i":i/N, "seed_len":L, "extracted":{...}}
+//   NEXUS_DREAM {"event":"complete", "iterations":N, "abs_history":[a,b,c]}
+fn _dream_extract_signal(out: str) -> str {
+    // 직전 출력에서 신호 추출 → JSON-ish payload 문자열 반환.
+    let mut abs_total: i64 = -1
+    let mut exact_n: i64 = 0
+    let mut near_n: i64 = 0
+    // 1) unified_abs_total 우선 (chain 출력)
+    let idx = str_find(out, "unified_abs_total")
+    if idx >= 0 {
+        let mut i = idx + 17
+        // skip non-digit
+        let n = out.len()
+        while i < n {
+            let cc = char_code(out, i)
+            if cc >= 48 && cc <= 57 { break }
+            if cc == 10 { break }
+            i = i + 1
+        }
+        if i < n {
+            let mut buf = ""
+            while i < n {
+                let cc = char_code(out, i)
+                if cc >= 48 && cc <= 57 {
+                    buf = buf + out.substring(i, i + 1)
+                    i = i + 1
+                } else { break }
+            }
+            if buf.len() > 0 {
+                try { abs_total = to_int(buf) } catch e { abs_total = -1 }
+            }
+        }
+    }
+    // 2) drill `total=N` (cmd_drill 의 round 별 총합 출력) — 마지막 매치 사용
+    if abs_total < 0 {
+        let mut t = out
+        let mut last_total: i64 = -1
+        while true {
+            let _idx = str_find(t, "total=")
+            if _idx < 0 { break }
+            let mut i = _idx + 6
+            let n = t.len()
+            let mut buf = ""
+            while i < n {
+                let cc = char_code(t, i)
+                if cc >= 48 && cc <= 57 {
+                    buf = buf + t.substring(i, i + 1)
+                    i = i + 1
+                } else { break }
+            }
+            if buf.len() > 0 {
+                try { last_total = to_int(buf) } catch e {}
+            }
+            t = t.substring(_idx + 6, t.len())
+        }
+        if last_total >= 0 { abs_total = last_total }
+    }
+    // 3) marker 카운트
+    exact_n = _count_marker(out, "[EXACT")
+    near_n  = _count_marker(out, "[NEAR")
+    let mut payload = "abs=" + to_string(abs_total) + ",ex=" + to_string(exact_n) + ",ne=" + to_string(near_n)
+    return payload
+}
+
+fn _dream_next_seed(orig: str, iter_idx: i64, signal: str) -> str {
+    // next seed = "{trunc_orig} #dream-iter={N}#{signal}"
+    // [30, 200] 범위 보장. orig 가 길면 truncate. signal 까지 합쳐서 200 이하 유지.
+    let suffix = " #dream-iter=" + to_string(iter_idx) + " " + signal
+    let max_main = 200 - suffix.len()
+    let mut main = orig
+    if main.len() > max_main {
+        if max_main < 1 { main = "" } else { main = main.substring(0, max_main) }
+    }
+    let combined = main + suffix
+    return combined
+}
+
+fn _dream_max_iters() -> int {
+    let v = env("NEXUS_DREAM_MAX")
+    if v.len() == 0 { return 3 }
+    let mut n = 3
+    try { n = to_int(v) } catch e { n = 3 }
+    if n < 1 { return 1 }
+    if n > 10 { return 10 }
+    return n
+}
+
+fn cmd_dream(seed: str, iterations_flag: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str) -> void {
+    let _seed_t = seed.trim()
+    if _seed_t.len() == 0 {
+        eprintln("nexus dream: --seed required — initial seed 필수")
+        return
+    }
+    let cap = _dream_max_iters()
+    let mut iters = 3
+    if iterations_flag.len() > 0 {
+        try { iters = to_int(iterations_flag) } catch e { iters = 3 }
+        if iters < 1 { iters = 1 }
+        if iters > cap { iters = cap }
+    } else {
+        iters = if cap < 3 { cap } else { 3 }
+    }
+    println("◇ dream — L5 self-seed orchestration (iterations=" + to_string(iters) + ", cap=" + to_string(cap) + ")")
+    eprintln("NEXUS_DREAM {\"event\":\"plan\",\"iterations\":" + to_string(iters) + ",\"cap\":" + to_string(cap) + "}")
+    let _depth = if master_depth.len() > 0 { master_depth } else { "auto" }
+    let _spec = if speculate_flag.len() > 0 { speculate_flag } else { "3" }
+    let mut current = _seed_t
+    let mut i: i64 = 0
+    while i < iters {
+        i = i + 1
+        println("─── dream iter " + to_string(i) + "/" + to_string(iters) + " — seed_len=" + to_string(current.len()) + " ───")
+        // omega-style 단일 dispatch: drill apex preset 으로 1 회 실행 (axis 합성은 미사용 — 단순화).
+        // out 캡처 위해 직접 hexa run 호출 + exec().
+        let core = nexus_root() + "/cli/blowup/core/blowup.hexa"
+        let qs = shell_quote(current)
+        let cmd = shell_quote(hexa_bin()) + " run " + shell_quote(core) + " " + qs + " 1 --fast 2>&1"
+        let out = exec(cmd)
+        print(out)
+        let signal = _dream_extract_signal(out)
+        eprintln("NEXUS_DREAM {\"event\":\"iter\",\"i\":" + to_string(i) + ",\"of\":" + to_string(iters)
+            + ",\"seed_len\":" + to_string(current.len())
+            + ",\"signal\":\"" + signal + "\"}")
+        if i < iters {
+            current = _dream_next_seed(_seed_t, i + 1, signal)
+        }
+    }
+    eprintln("NEXUS_DREAM {\"event\":\"complete\",\"iterations\":" + to_string(iters) + "}")
+    println("◇ dream complete — iterations=" + to_string(iters))
+}
+
 // ─── E12 batch drill wrapper (2026-04-21) ───
 // SSOT: shared/config/drill.json .seed_batch
 // Sequential iterate — seed N 개를 순차 cmd_drill 호출. engine_daemon 미구현 시 naive 반복.
@@ -4602,6 +4753,32 @@ fn main() -> void {
     }
     if sub == "absolute" {
         cmd_absolute(find_flag(a, "--seed", ""))
+        return
+    }
+    if sub == "dream" {
+        // L5 self-seed orchestrator — N iteration, seed_(i+1) = f(output_i).
+        let _smash_d = _parse_flag_int(a, "--smash-depth")
+        let _free_d  = _parse_flag_int(a, "--free-dfs")
+        let _abs_d   = _parse_flag_int(a, "--abs-depth")
+        let _meta_d  = _parse_flag_int(a, "--meta-depth")
+        let _hyper_d = _parse_flag_int(a, "--hyper-depth")
+        let _res_d   = _parse_flag_int(a, "--res-depth")
+        let per_stage = [_smash_d, _free_d, _abs_d, _meta_d, _hyper_d, _res_d]
+        let fresh_flag = has_flag(a, "--fresh") || has_flag(a, "--no-resume")
+        let resume_flag = !fresh_flag
+        cmd_dream(
+            find_flag(a, "--seed", ""),
+            find_flag(a, "--iterations", ""),
+            find_flag(a, "--max-rounds", ""),
+            find_flag(a, "--engine", ""),
+            find_flag(a, "--preset", ""),
+            find_flag(a, "--depth", ""),
+            per_stage,
+            resume_flag,
+            find_flag(a, "--checkpoint-dir", ""),
+            find_flag(a, "--problem", ""),
+            find_flag(a, "--speculate", "")
+        )
         return
     }
     if sub == "surge" {
