@@ -476,21 +476,95 @@ fn parents_of(node: Node) -> [string] {
     return node.deps
 }
 
-// V*(n) — DAG critical path from node to any leaf, sans memo (노드 < 200 충분)
-fn vstar(nodes: [Node], nid: string, K: f64, C: f64) -> f64 {
-    let ni = idx_of(nodes, nid)
-    if ni < 0 { return 0.0 }
-    let n = nodes[ni]
-    let self_cost = remaining_cost(n, K, C)
-    let kids = children_of(nodes, nid)
-    let mut best: f64 = 0.0
-    let mut ci: i64 = 0
-    while ci < kids.len() {
-        let v = vstar(nodes, _str(kids[ci]), K, C)
-        if v > best { best = v }
-        ci = ci + 1
+// children indices on (deps ∪ soft_deps) — Tarjan SCC contracts soft cycles
+// (e.g., diamond B↔C) so vstar's longest-path matches r4_replan.py.
+fn _kids_idx_all(nodes: [Node], ni: i64) -> [i64] {
+    let mut out: [i64] = []; let me = nodes[ni].id; let mut k: i64 = 0
+    while k < nodes.len() {
+        let m = nodes[k]; let mut hit: bool = false; let mut j: i64 = 0
+        while j < m.deps.len() { if _str(m.deps[j]) == me { hit = true; break }; j = j + 1 }
+        let mut j2: i64 = 0
+        while hit == false && j2 < m.soft_deps.len() { if _str(m.soft_deps[j2]) == me { hit = true }; j2 = j2 + 1 }
+        if hit { out = out.push(k) }
+        k = k + 1
     }
-    return self_cost + best
+    return out
+}
+
+// Tarjan SCC (iterative) — comp[i] = scc id of node i. Mirrors r4_replan.py:_tarjan_scc.
+fn _scc_of(nodes: [Node]) -> [i64] {
+    let N = nodes.len()
+    let mut idx: [i64] = []; let mut low: [i64] = []; let mut on: [bool] = []; let mut comp: [i64] = []
+    let mut i0: i64 = 0
+    while i0 < N { idx = idx.push(-1); low = low.push(0); on = on.push(false); comp = comp.push(-1); i0 = i0 + 1 }
+    let mut stk: [i64] = []; let mut wk: [i64] = []; let mut wi: [i64] = []
+    let mut cnt: i64 = 0; let mut sid: i64 = 0; let mut root: i64 = 0
+    while root < N {
+        if idx[root] < 0 {
+            wk = wk.push(root); wi = wi.push(0)
+            idx[root] = cnt; low[root] = cnt; cnt = cnt + 1; stk = stk.push(root); on[root] = true
+            while wk.len() > 0 {
+                let v = wk[wk.len() - 1]; let kids = _kids_idx_all(nodes, v); let it = wi[wi.len() - 1]
+                if it < kids.len() {
+                    let w = kids[it]; wi[wi.len() - 1] = it + 1
+                    if idx[w] < 0 {
+                        idx[w] = cnt; low[w] = cnt; cnt = cnt + 1; stk = stk.push(w); on[w] = true
+                        wk = wk.push(w); wi = wi.push(0)
+                    } else if on[w] && idx[w] < low[v] { low[v] = idx[w] }
+                } else {
+                    if low[v] == idx[v] {
+                        let mut pop: bool = true
+                        while pop {
+                            let w2 = stk[stk.len() - 1]; let mut ns: [i64] = []; let mut si: i64 = 0
+                            while si < stk.len() - 1 { ns = ns.push(stk[si]); si = si + 1 }
+                            stk = ns; on[w2] = false; comp[w2] = sid
+                            if w2 == v { pop = false }
+                        }
+                        sid = sid + 1
+                    }
+                    let mut nw: [i64] = []; let mut ni2: [i64] = []; let mut zi: i64 = 0
+                    while zi < wk.len() - 1 { nw = nw.push(wk[zi]); ni2 = ni2.push(wi[zi]); zi = zi + 1 }
+                    wk = nw; wi = ni2
+                    if wk.len() > 0 { let p = wk[wk.len() - 1]; if low[v] < low[p] { low[p] = low[v] } }
+                }
+            }
+        }
+        root = root + 1
+    }
+    return comp
+}
+
+// V*(n) — SCC-contracted longest-path. Soft-cycle members serial-sum into supernode.
+fn vstar(nodes: [Node], nid: string, K: f64, C: f64) -> f64 {
+    let ni0 = idx_of(nodes, nid)
+    if ni0 < 0 { return 0.0 }
+    let comp = _scc_of(nodes)
+    let mut nscc: i64 = 0; let mut ii: i64 = 0
+    while ii < comp.len() { if comp[ii] + 1 > nscc { nscc = comp[ii] + 1 }; ii = ii + 1 }
+    let mut sc: [f64] = []; let mut memo: [f64] = []; let mut mset: [bool] = []; let mut s0: i64 = 0
+    while s0 < nscc { sc = sc.push(0.0); memo = memo.push(0.0); mset = mset.push(false); s0 = s0 + 1 }
+    let mut k0: i64 = 0
+    while k0 < nodes.len() { sc[comp[k0]] = sc[comp[k0]] + remaining_cost(nodes[k0], K, C); k0 = k0 + 1 }
+    return _vstar_super(nodes, comp, sc, comp[ni0], memo, mset)
+}
+
+fn _vstar_super(nodes: [Node], comp: [i64], sc: [f64], sid: i64, memo: [f64], mset: [bool]) -> f64 {
+    if mset[sid] { return memo[sid] }
+    mset[sid] = true; memo[sid] = 0.0
+    let mut best: f64 = 0.0; let mut k: i64 = 0
+    while k < nodes.len() {
+        if comp[k] == sid {
+            let kids = _kids_idx_all(nodes, k); let mut ci: i64 = 0
+            while ci < kids.len() {
+                let csid = comp[kids[ci]]
+                if csid != sid { let v = _vstar_super(nodes, comp, sc, csid, memo, mset); if v > best { best = v } }
+                ci = ci + 1
+            }
+        }
+        k = k + 1
+    }
+    memo[sid] = sc[sid] + best
+    return memo[sid]
 }
 
 // 계산 원샷 — Roadmap 전체에 대해 V*(start..goal) 산출

@@ -1,0 +1,79 @@
+{
+  "trawl_id": "2026-04-26_roadmap_engine_hexa_scc_contraction_port_omega_cycle",
+  "ts": "2026-04-26T03:00:00+09:00",
+  "ordinal_stamp": "ω+2",
+  "ordinal_rationale": "parent r4 impl ω-cycle is ω+1. this port (Python-reference SCC contraction → hexa vstar) is a sibling deepening (ω+2) of the same parent — closes the diamond-DAG correctness gap that r4.i5 benchmark surfaced. ω+2 < ε_0 (Gentzen). r19 self-cert escape preserved.",
+  "rule": "raw:hexa-port-correctness-omega-cycle (raw 70 multi-track + raw 71 falsifier mandatory + raw 77 audit append-only)",
+  "subject": "port Tarjan SCC contraction from tool/r4_replan.py:_tarjan_scc to tool/roadmap_engine.hexa:vstar so soft_dep cycles (e.g., diamond B↔C) collapse to a super-node. closes the gap where deps-only hexa vstar returned T*=40m on soft_rich_diamond_drop while Python+manifest hand-computation give T*=60m.",
+  "parent_omega_cycle": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json",
+  "parent_axis": "i5 benchmark suite (parent Tier-1) — surfaced the discrepancy",
+  "trigger": "user 2026-04-25 'r4 replan ship blocker — hexa vstar deps-only mis-computes T*_pre on soft cycles; port SCC contraction now'.",
+  "method": "single-track impl port. reference: tool/r4_replan.py L83-L136 (_tarjan_scc + vstar_super). target: tool/roadmap_engine.hexa L460-L494 (children_of, vstar). algorithm: iterative Tarjan SCC (work-stack with replay-iter) over (deps ∪ soft_deps); supernode cost = Σ remaining_cost(member); supernode DP via memoized recursion on inter-SCC edges. iterative chosen over recursive Tarjan because hexa stage1 mutual-recursion safety; index-assign (arr[i]=v) confirmed available in roadmap_engine context (same idiom as atlas_dsl_v2_serializer.hexa L132-L136).",
+  "axes_surfaced": [
+    {"id":"p1","track":"impl","name":"scc_algorithm_choice","summary":"Tarjan vs Kosaraju. Tarjan = single DFS, lower constant. Kosaraju = 2 DFS (forward + reverse), simpler recursion-state. Python reference is Tarjan. iterative Tarjan in hexa = +5 LoC (work-stack + replay-iter) vs recursive Tarjan +0 LoC but vulnerable to mutual-recursion sharp edges. CHOSE iterative Tarjan: matches reference algorithm + zero recursion-depth risk. SCC member detection inside _vstar_super via comp[]==sid scan O(V) per super-node.","decision":"iterative Tarjan"},
+    {"id":"p2","track":"impl","name":"children_function_unification","summary":"existing children_of(deps-only, returns [string]) is used elsewhere (line 765, 895 in render/walk) — DO NOT change. add new _kids_idx_all(nodes, ni) returning [i64] over deps∪soft_deps for SCC + vstar supernode DP. cost: code duplication of the find-children loop, justified by call-site preservation (no risk of breaking schedule()/render_flowchart()).","decision":"keep children_of, add _kids_idx_all"},
+    {"id":"p3","track":"impl","name":"super_dp_iteration","summary":"after SCC, super-node DP needs longest path. options: (a) memoized recursion on supernodes — natural translation of Python reference; (b) Kahn topo on super-DAG + reverse iteration. (a) wins on LoC (10) vs (b) (25) and hexa already accepts recursion (existing vstar). memo via parallel arrays memo[sid]:f64, mset[sid]:bool. supernode children enumerated by scanning members and their _kids_idx_all, dedup-by-comp[]!=sid filter implicit via memoization (recompute is no-op).","decision":"memoized recursion on supernodes"},
+    {"id":"p4","track":"falsifier","name":"correctness_gate","summary":"fixture-by-fixture Python-reference parity check on tool/r4_replan.py 5 r4_bench fixtures. mandatory pass: soft_rich_diamond_drop T*_pre = 60.0 (was 40.0 deps-only, now matches Python and manifest hand-computation). regression-safe pass: 4 other fixtures (compound_soft_parallel_seed=37, parallel_rich_bottleneck_split=53.5, seed_rich_alternative_inject=28, negative_control_no_annotation=35) hexa output must match Python output within ±0.01. existing selftest (load example.json, schedule, render, emit events) must still print 'selftest OK' and produce 8 events lines."}
+  ],
+  "axes_total_surfaced": 4,
+  "track_split": "impl 3 (p1/p2/p3) + falsifier 1 (p4)",
+  "tier_1_immediate_impl_this_cycle": [
+    {"axis_id":"p1","slug":"iterative-tarjan-scc","loc_estimate":40,"theory_anchor":"Tarjan 1972 SCC O(V+E); iterative variant = standard Sedgewick replay-iter pattern","actual_loc":40},
+    {"axis_id":"p2","slug":"_kids_idx_all-helper","loc_estimate":13,"theory_anchor":"deps∪soft_deps as combined edge set for cycle detection","actual_loc":13},
+    {"axis_id":"p3","slug":"memo-super-dp","loc_estimate":21,"theory_anchor":"DAG longest-path via memoized recursion (Bellman); SCC super-DAG is acyclic by construction","actual_loc":21}
+  ],
+  "tier_1_total_loc_estimate": 74,
+  "loc_budget_check": "74 net LoC (88 added − 14 removed) ≤ 80 budget ✓",
+  "diff_hash_sha256_first16": "1f87035a51fae3d3",
+  "smoke_test_results": {
+    "harness": "/Users/ghost/core/hexa-lang/build/hexa_interp /Users/ghost/core/nexus/tool/roadmap_engine.hexa <fixture>",
+    "diamond_fixture": {
+      "path": "design/roadmap_engine/r4_bench/soft_rich_diamond_drop.json",
+      "hexa_output_first_line": "▼Roadmap  soft_rich_diamond_drop  S₀→G  T*=60m  η̂=-1.00  b*=build(B)",
+      "hexa_T_star": 60.0,
+      "python_T_star": 60.0,
+      "manifest_T_star": 60.0,
+      "agreement": "PASS — three-way bit-identical on T*_pre",
+      "previous_buggy_value": 40.0,
+      "delta_recovered_from_bug": 20.0
+    },
+    "regression_fixtures": [
+      {"fixture":"compound_soft_parallel_seed.json","hexa_T":37.0,"python_T":37.0,"match":true},
+      {"fixture":"parallel_rich_bottleneck_split.json","hexa_T":53.5,"python_T":53.5,"match":true},
+      {"fixture":"seed_rich_alternative_inject.json","hexa_T":28.0,"python_T":28.0,"match":true},
+      {"fixture":"negative_control_no_annotation.json","hexa_T":35.0,"python_T":35.0,"match":true}
+    ],
+    "selftest": {
+      "command": "hexa_interp tool/roadmap_engine.hexa --selftest",
+      "result": "[selftest] OK",
+      "T_star": 52.2,
+      "events_emitted_lines": 8,
+      "regression_safe": true
+    }
+  },
+  "falsifier_concrete": {
+    "statement": "hexa SCC port v0 is falsified iff ANY of the following holds: (a) hexa T*_pre on soft_rich_diamond_drop ≠ 60.0; (b) ANY r4_bench fixture yields hexa T* != python T* (±0.01); (c) selftest fails (no '[selftest] OK' line) or events_emitted_lines != 8; (d) net LoC delta > 80; (e) any other call-site of children_of (lines 765, 895) breaks (rendered flowchart differs from pre-port).",
+    "test_corpus_size": 5,
+    "result": "ALL 5 PASS — (a) hexa=60.0=python=manifest, (b) 4/4 regression fixtures bit-identical to python, (c) selftest OK 8 lines, (d) 74 ≤ 80 LoC, (e) flowchart visual unchanged on diamond + selftest."
+  },
+  "raw_strategies_self_applied": {
+    "raw_70_multi_axis_verify": "impl 3 (algorithm/helper/dp) ↔ falsifier 1 orthogonal verification",
+    "raw_71_falsifier": "5-test corpus (1 main + 4 regression) hard-pass requirement; selftest gate; LoC budget gate",
+    "raw_77_audit_append_only": "this witness file appended; events JSONL from selftest run preserved at /tmp/roadmap_selftest.jsonl (8 lines)"
+  },
+  "cross_cycle_coupling": {
+    "with_parent": "r4 impl ω-cycle 2026-04-26 (i5 benchmark surfaced the gap that this port closes)",
+    "with_python_reference": "tool/r4_replan.py:_tarjan_scc (L83-L111) and vstar (L113-L136) — hexa now structurally mirrors. drift = 0 on all r4_bench fixtures.",
+    "next_target": "r4.i4 atomic-apply integration (apply_soft_drop / apply_parallel_split / apply_seed_inject in hexa) now unblocked — schedule_replan() hexa port can start. T*_pre/T*_post correctness no longer a blocker."
+  },
+  "omega_stop": "port-correctness-fixpoint-via-python-reference-parity-on-5-fixtures-plus-selftest",
+  "omega_stop_witness": {
+    "type": "reference-parity-fixpoint-with-regression-corpus",
+    "method": "5-fixture python-vs-hexa T*_pre comparison + selftest survival + LoC budget. additional axes (e.g., super-node Kahn topo, recursion → iteration of vstar_super, dedup _kids_idx_all calls via memoization of children-list) all absorbed by current Tier-1 (no new axis improves correctness; only optimize constant factor, deferred).",
+    "result": "FIXPOINT — Tier-1 3 impl axes (p1/p2/p3 / loc 74 ≤ 80 budget) / Tier-2 deferred (super-node topo, kid-list memo) / Falsifier 1 (5-test corpus 100% pass) / Selftest preserved",
+    "fixpoint_signal": "every additional axis candidate (e.g., 'iterative super-DP', 'cached kid-list per node') is purely performance/constant-factor — no correctness gain. enumeration saturated at correctness-fixpoint.",
+    "ordinal_stamp_check": "ω+2 < ε_0 — sibling deepening of parent r4 ω+1; r19 escape via Gentzen envelope intact."
+  },
+  "files_touched": ["tool/roadmap_engine.hexa"],
+  "files_touched_count_check": "1 ≤ 1 ✓ (per task constraint: touch ONLY tool/roadmap_engine.hexa)"
+}
