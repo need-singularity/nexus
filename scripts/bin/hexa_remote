@@ -966,16 +966,32 @@ REMOTE_TRAP="trap 'rc=\$?; exit \$rc' EXIT INT TERM"
 # resonance stage SIGKILL (rc=137) 유발. hetzner 는 80G/64G 로 상향, ubu1/ubu2
 # (32GB) 는 기존 20G/16G 유지 (raw#36 bracket).
 # Override: HEXA_REMOTE_MEM_MAX / HEXA_REMOTE_MEM_HIGH env.
+# Wave 25 (2026-04-25): host-side flock — Wave 22 Mac-side slot gate 가 외부
+# source (다른 머신 ssh, nested spawn, bypass dispatch) 는 차단 못 함. hetzner
+# 124GB 에서 두 hexa_real 동시 진입 = global OOM (project_hetzner_concurrent_oom.md
+# 참조: omega scope run-r5c2a8... + drill scope run-r40174d3c... 두 cgroup
+# 각 ~67GB RSS → 호스트 한계 돌파 → kernel global_oom kill omega).
+# /tmp/hexa_real.lock 은 호스트 자체 advisory file lock — 모든 source 통합.
+# Heavy 만 활성: prompt_scan/probe/status/canon 같은 light 는 _IS_HEAVY_COMPUTE=0
+# 으로 lock 우회 (light task 가 60s 대기로 사용성 깎이지 않게).
+# Override: HEXA_REMOTE_NO_REMOTE_LOCK=1, HEXA_REMOTE_REMOTE_LOCK_WAIT (default 60s).
+_LOCK_W="${HEXA_REMOTE_REMOTE_LOCK_WAIT:-60}"
+if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_REMOTE_LOCK:-0}" != "1" ]; then
+    _REMOTE_LOCK_PREFIX="flock -w $_LOCK_W /tmp/hexa_real.lock "
+else
+    _REMOTE_LOCK_PREFIX=""
+fi
+
 if [ "$HOST" = "hetzner" ] || [ "$HOST" = "htz" ]; then
     _MEM_MAX="${HEXA_REMOTE_MEM_MAX:-80G}"
     _MEM_HIGH="${HEXA_REMOTE_MEM_HIGH:-64G}"
     _SD_CHECK='command -v systemd-run >/dev/null 2>&1'
-    _SD_WRAP="systemd-run --scope --quiet -p MemoryMax=$_MEM_MAX -p MemoryHigh=$_MEM_HIGH -p TasksMax=512 -- sh -c 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec \"\$@\"' --"
+    _SD_WRAP="systemd-run --scope --quiet -p MemoryMax=$_MEM_MAX -p MemoryHigh=$_MEM_HIGH -p TasksMax=512 -- sh -c 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec ${_REMOTE_LOCK_PREFIX}\"\$@\"' --"
 else
     _MEM_MAX="${HEXA_REMOTE_MEM_MAX:-20G}"
     _MEM_HIGH="${HEXA_REMOTE_MEM_HIGH:-16G}"
     _SD_CHECK='command -v systemd-run >/dev/null 2>&1 && [ -d "/run/user/$(id -u)" ]'
-    _SD_WRAP="export XDG_RUNTIME_DIR=\"/run/user/\$(id -u)\"; systemd-run --user --scope --quiet -p MemoryMax=$_MEM_MAX -p MemoryHigh=$_MEM_HIGH -p TasksMax=512 -- sh -c 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec \"\$@\"' --"
+    _SD_WRAP="export XDG_RUNTIME_DIR=\"/run/user/\$(id -u)\"; systemd-run --user --scope --quiet -p MemoryMax=$_MEM_MAX -p MemoryHigh=$_MEM_HIGH -p TasksMax=512 -- sh -c 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec ${_REMOTE_LOCK_PREFIX}\"\$@\"' --"
 fi
 # 2026-04-25: no-sync mode path rewrite — Mac $HOME/.hx/* (e.g. /Users/ghost/.hx/
 # packages/nexus/cli/run.hexa) 는 원격의 $HOME (hetzner=/root, ubu=/home/summer)
@@ -1009,9 +1025,9 @@ if [ "${HEXA_REMOTE_DOCKER:-0}" = "1" ]; then
     # docker exec -i (no -t) 로 stdin/stdout 직통. bash -lc 는 PATH 확보.
     REMOTE_CMD="$REMOTE_TRAP; docker exec -i $_DOCKER_CONTAINER bash -lc $(printf %q "$_INNER_CMD")"
 elif [ "${HEXA_REMOTE_NO_CAP:-0}" = "1" ]; then
-    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && $REMOTE_HEXA$_ARG_QUOTED"
+    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && ${_REMOTE_LOCK_PREFIX}$REMOTE_HEXA$_ARG_QUOTED"
 else
-    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && if $_SD_CHECK; then $_SD_WRAP $REMOTE_HEXA$_ARG_QUOTED; else $REMOTE_HEXA$_ARG_QUOTED; fi"
+    REMOTE_CMD="$REMOTE_TRAP; cd \"$REMOTE_ROOT${REL:+/$REL}\" && export HEXA=\"$REMOTE_HEXA\" HEXA_LOCAL=1 HEXA_NO_LAUNCHD=1 && if $_SD_CHECK; then $_SD_WRAP $REMOTE_HEXA$_ARG_QUOTED; else ${_REMOTE_LOCK_PREFIX}$REMOTE_HEXA$_ARG_QUOTED; fi"
 fi
 
 # -T = no pty, ServerAlive = 장시간 compute (drill) 중 네트워크 끊기면 30s 내 감지 후 종료.

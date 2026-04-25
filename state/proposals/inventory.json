@@ -473,6 +473,27 @@
         "blowup.hexa": "anti_hub state (_AH_*) + _ah_init() lazy loader + nexus_anti_hub_should_skip_edge() + graph_append_edge guard",
         "run.hexa": "--anti-hub [--anti-hub-threshold N] flag → setenv NEXUS_DRILL_ANTI_HUB / NEXUS_DRILL_ANTI_HUB_THRESHOLD + NEXUS_DRILL_ANTI_HUB stderr emit"
       },
+      "phase3_attempt_2026_04_25_cycle11": {
+        "result": "TRUE root cause 확정 — hetzner hexa.real 빌드 setenv builtin 미정의, env propagation fix 적용",
+        "command": "HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset fast --max-rounds 1 --anti-hub --fresh (hetzner remote PSI 56%, avail 122GB)",
+        "outcome": {
+          "decisive_emit": "Runtime error: undefined function: setenv",
+          "interpretation": "hetzner hexa.real 빌드에 setenv builtin 미정의 — main 의 setenv 호출이 silent runtime error. 코드는 try-catch 없어도 계속 실행 (hexa runtime 의 silent continue). 결과: env 미설정 → child blowup.hexa env 못 받음 → _ah_init skip → guard 비활성. cycle 9 의 NEXUS_DRILL_SETENV_OK 는 Mac local fallback 이라 setenv 정상 호출됐던 것 — 잘못된 결론 도달의 근거.",
+          "smash_elapsed_ms": 182998,
+          "absorptions": "917+ (drill in progress at commit time)"
+        },
+        "fix_applied_cycle10": {
+          "approach": "global mut state + child exec env prefix (setenv 우회)",
+          "code_changes": [
+            "cli/run.hexa: global mut _DRILL_ANTI_HUB / _DRILL_ANTI_HUB_THRESHOLD",
+            "cli/run.hexa: _drill_env_prefix() helper — KEY=VAL 형태 prefix 반환",
+            "cli/run.hexa: _stage_timeout_prefix() 에 _drill_env_prefix() 통합 (child exec cmd 앞 prefix → POSIX env inherit, hetzner shell 이 KEY=VAL CMD 형태 정상 처리)",
+            "cli/run.hexa: main --anti-hub 분기 — setenv try-catch wrap (Mac=정상, hetzner=silent), global mut state 직접 set, sanity emit 제거 (잘못된 가정 정리)"
+          ],
+          "compatibility": "Mac (setenv builtin 정의됨) + hetzner (setenv 미정의) 양쪽 호환 — env prefix 가 보편적 작동",
+          "verification_needed": "다음 drill 발사: NEXUS_DRILL_ANTI_HUB_TRACE 의 env_active=1 + blowup.hexa stderr 에 anti_hub: active threshold=1000 hubs=8 init log + atlas.blowup.jsonl 변경 + hub edge 미포함 검증"
+        }
+      },
       "phase3_attempt_2026_04_25_cycle9": {
         "result": "env propagation 가설 기각 — anti-hub guard 미발동 원인은 별개 (blowup.hexa _ah_init 또는 graph_append_edge 미호출)",
         "command": "NEXUS_DRILL_TIMEOUT_ADAPTIVE=1 HEXA_ALLOW_LOCAL_FALLBACK=1 nexus drill --seed '...' --preset probe --max-rounds 1 --anti-hub --fresh",

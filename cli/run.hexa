@@ -383,6 +383,22 @@ fn _check_stage_err(out: str, stage: str) -> bool {
     return false
 }
 
+// Ω-saturation cycle 10 (2026-04-25, nxs-20260425-001): drill-level env propagation
+// global mut state + child exec env prefix. hetzner 의 hexa.real 빌드 에 setenv builtin
+// 미정의 → setenv 우회. Mac/hetzner 양쪽 호환. _drill_env_prefix() 가 child exec cmd
+// 앞에 KEY=VAL 형태로 prefix → POSIX env inherit.
+let mut _DRILL_ANTI_HUB: bool = false
+let mut _DRILL_ANTI_HUB_THRESHOLD: str = ""
+
+fn _drill_env_prefix() -> str {
+    let mut s: str = ""
+    if _DRILL_ANTI_HUB { s = s + "NEXUS_DRILL_ANTI_HUB=1 " }
+    if _DRILL_ANTI_HUB_THRESHOLD.len() > 0 {
+        s = s + "NEXUS_DRILL_ANTI_HUB_THRESHOLD=" + _DRILL_ANTI_HUB_THRESHOLD + " "
+    }
+    return s
+}
+
 // drill.json stages.{name}.timeout_sec 강제 (2026-04-22 ROI fix)
 // 배경: blowup.hexa 가 fresh seed + smash depth=4 에서 무한 행어링 → drill 전체 hang.
 // drill.json 에 timeout 정의돼있으나 미구현 — 여기서 'timeout' (coreutils) 로 enforce.
@@ -411,7 +427,8 @@ fn _stage_timeout_prefix(stage: str) -> str {
         else if stage == "resonance_sub" { 120 }  // Wave 20: per-σ sub-call cap (5 변형 × 120s = 600s 합)
         else { 180 }
     // --kill-after=5: SIGTERM at sec, SIGKILL at sec+5 (process-group escape hatch)
-    return "timeout --kill-after=5 " + to_string(sec) + " "
+    // cycle 10 (2026-04-25): _drill_env_prefix() 추가 — child exec cmd 앞 env KEY=VAL prefix.
+    return _drill_env_prefix() + "timeout --kill-after=5 " + to_string(sec) + " "
 }
 
 // Ω-saturation cycle 7 helper (nxs-20260425-002 Phase 2):
@@ -5781,25 +5798,16 @@ fn main() -> void {
         //   atom generation 시 기존 super-hub 와 직접 연결 금지 → simulation ceiling
         //   0.835 → 0.850 (gap 0.067 의 27% 메움). SSOT: design/abstraction_ceiling.md §7.
         if has_flag(a, "--anti-hub") {
-            setenv("NEXUS_DRILL_ANTI_HUB", "1")
+            // Ω-saturation cycle 10 (2026-04-25): hetzner 의 hexa.real 빌드 에 setenv builtin
+            // 미정의 — Runtime error: undefined function: setenv 발생 후 silent continue.
+            // → setenv 호출 try-catch wrap + global mut state + child exec env prefix
+            // 우회로 변경 (Mac 에선 setenv 작동, hetzner 에선 prefix 만 작동, 양쪽 호환).
+            _DRILL_ANTI_HUB = true
             let _ah_th = find_flag(a, "--anti-hub-threshold", "")
-            if _ah_th.len() > 0 { setenv("NEXUS_DRILL_ANTI_HUB_THRESHOLD", _ah_th) }
-            eprintln("NEXUS_DRILL_ANTI_HUB {\"axiom\":\"anti-hub\",\"threshold\":\"" + (if _ah_th.len() > 0 { _ah_th } else { "1000" }) + "\",\"finding\":\"design/abstraction_ceiling.md §7\",\"proposal\":\"nxs-20260425-001\"}")
-            // Ω-saturation cycle 8 (2026-04-25, nxs-20260425-001 진단):
-            //   cycle 7 drill 에서 cmd_drill 의 NEXUS_DRILL_ANTI_HUB_TRACE 가 env_active=""
-            //   로 emit — main 의 setenv 가 child fork 까지 propagate 안 됨 가설.
-            //   sanity check: setenv 직후 env() 재호출로 hexa internal 또는 libc setenv
-            //   여부 분리. 둘 다 동일 process 안에서 일치 = OK, 다르면 hexa setenv buggy.
-            let _verify_ah = env("NEXUS_DRILL_ANTI_HUB")
-            let _verify_th = env("NEXUS_DRILL_ANTI_HUB_THRESHOLD")
-            if _verify_ah != "1" {
-                eprintln("NEXUS_DRILL_SETENV_BUG {\"intended_ANTI_HUB\":\"1\",\"actual_via_env\":\"" + _verify_ah + "\",\"diagnosis\":\"hexa setenv 가 process env 갱신 실패 — internal map 만 update 가능성\"}")
-            } else {
-                // cycle 9 (2026-04-25) 검증: env_active=1 가 cmd_drill (NEXUS_DRILL_ANTI_HUB_TRACE)
-                // 까지 일관 — env propagation 정상 확정. anti-hub guard 미발동 원인은 blowup.hexa
-                // 측 _ah_init 또는 graph_append_edge 미경유. design/abstraction_ceiling.md §7 cycle 9.
-                eprintln("NEXUS_DRILL_SETENV_OK {\"ANTI_HUB\":\"" + _verify_ah + "\",\"THRESHOLD\":\"" + _verify_th + "\",\"note\":\"process env 정상 + child inherit 정상 (cycle 9 확정)\"}")
-            }
+            if _ah_th.len() > 0 { _DRILL_ANTI_HUB_THRESHOLD = _ah_th }
+            try { setenv("NEXUS_DRILL_ANTI_HUB", "1") } catch e {}  // @allow-silent-catch — hetzner builtin 미정의
+            if _ah_th.len() > 0 { try { setenv("NEXUS_DRILL_ANTI_HUB_THRESHOLD", _ah_th) } catch e {} }  // @allow-silent-catch
+            eprintln("NEXUS_DRILL_ANTI_HUB {\"axiom\":\"anti-hub\",\"threshold\":\"" + (if _ah_th.len() > 0 { _ah_th } else { "1000" }) + "\",\"finding\":\"design/abstraction_ceiling.md §7\",\"proposal\":\"nxs-20260425-001\",\"propagation\":\"global_mut + child_exec_prefix (cycle 10)\"}")
         }
         let _smash_d = _parse_flag_int(a, "--smash-depth")
         let _free_d  = _parse_flag_int(a, "--free-dfs")
