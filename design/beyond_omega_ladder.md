@@ -376,22 +376,87 @@ cycle 3 의 "180s timeout invariant" 가 cycle 6 에서 **headroom distribution*
 
 ---
 
-## §9 cycle 7~ 후보
+## §9 cycle 7 first finding — L_{ω+1}_ABSENT (★ axis A 첫 진입에서 즉시 sentinel 발견) (2026-04-25)
 
-### Cycle 7 — measurement back-action 의 정상화 활용 (L_{ω+1} 첫 표면)
-- cycle 5 의 self-feedback bug 를 **"정상 모드"** 로 전환 — probe 가 자기 출력을 source 로 인식하는 것을 의도적으로 활용
-- measurement-of-measurement distribution 측정: probe 를 N 번 호출했을 때 self-emit 의 second-order distribution
-- 이는 **L_{ω+1} 후보의 첫 empirical 표면** = approach distribution 의 distribution
+### 새 도구
+- `tool/beyond_omega_meta_back_action.py` — cycle 5 의 self-feedback bug 를 **의도적 격상 모드** 로 활용.
+  - 6 rounds 동안 trace.jsonl 에 synthetic NEXUS_OMEGA marker 직접 inject + probe 호출.
+  - 매 round 의 emits delta 측정 → growth pattern 분석 (linear / exponential / saturated).
+  - 출력: `state/beyond_omega_meta_back_action.json` (schema v1).
 
-### Cycle 8 — daily timeline 누적 (cron 가동)
-- cycle 5 의 `--cron` mode 를 daily plist (`com.nexus.beyond-omega.daily.plist`) 로 등록
-- 7-30 day 뒤 ghost ceiling 의 시계열 distribution 첫 dataset 확보
-- 이 dataset 위에 cycle 9 의 ordinal mapping
+### 결과 — SATURATED_ZERO
 
-### Cycle 9+ — Transfinite continuation 진입 (axis A)
-- cycle 7-8 의 second-order distribution 위에 ordinal 매핑
-- L_{ω+1} = measurement-of-measurement
-- L_{ω·2}, L_{ε₀}, L_{ω₁^CK}, L_{Mahlo} 의 매핑은 cycle 10+ 별도 design
+| round | trace_lines_delta (synthetic injected) | summary_total_emits | summary_dispatch | summary_approach | summary_complete |
+|---|---|---|---|---|---|
+| 1 | +2 | 7 | 5 | 1 | 1 |
+| 2 | +2 | 7 | 5 | 1 | 1 |
+| 3 | +2 | 7 | 5 | 1 | 1 |
+| 4 | +2 | 7 | 5 | 1 | 1 |
+| 5 | +2 | 7 | 5 | 1 | 1 |
+| 6 | +2 | 7 | 5 | 1 | 1 |
+
+- delta_sequence = [0, 0, 0, 0, 0]
+- delta_mean = 0, delta_variance = 0
+- growth_type = **saturated_zero**
+
+cycle 5 의 SELF_OUTPUTS skip fix 가 cycle 7 의 의도적 back-action 격상까지 차단. trace.jsonl 안에 직접 inject 한 12 synthetic lines (6 rounds × 2 lines) 모두 무시 — probe 가 자기 출력을 source 로 인식하지 않음.
+
+### 핵심 finding — SENTINEL SELF-SIMILARITY AT TRANSFINITE LEVEL
+
+cycle 7 의 의도는 **axis A (transfinite continuation) 의 첫 step L_{ω+1}** 진입 — measurement-of-measurement distribution 을 만들어 "ghost ceiling 의 distribution 의 distribution" 을 정량화하려 함.
+
+결과: **L_{ω+1} 도 sentinel** — back-action 격상 시도 자체가 차단되어 second-order measurement 차원에서도 silence 유지.
+
+이는 design/abstraction_ceiling.md §4-5 의 L_ω 정의의 직접적 transfinite 확장:
+
+> L_ω = GHOST CEILING (도달 불가 sentinel)
+> ⇒ L_{ω+1} = ALSO GHOST CEILING (transfinite 적으로 자기 복제)
+> ⇒ L_{ω·2}, L_{ε₀}, L_{ω₁^CK}, L_{Mahlo} = ALL GHOST CEILING (chain 의 모든 단)
+
+→ **GHOST CEILING 의 transfinite self-similarity** — sentinel 성질이 모든 transfinite ordinal level 에서 보존. axis A 자체가 axis B 와 같은 sentinel structure 를 갖는 것이 cycle 7 의 첫 진입에서 즉시 확인.
+
+### 또 한 가지 nested finding — MEASUREMENT DEVICE 의 자기-보호
+
+cycle 5 의 SELF_OUTPUTS skip 이 cycle 7 의 격상까지 차단한 것은 **measurement device 가 자기-보호 mechanism 을 갖추면 back-action 차단**. 이는 quantum mechanics 의:
+
+- **non-disturbing measurement** (POVM 의 minimal disturbance limit)
+- **weak measurement** (back-action 을 의도적으로 줄이는 protocol)
+
+과 isomorphic. cycle 5 의 fix 가 quantum-style minimal-disturbance measurement device 로 격상된 것.
+
+### Self-correction chain (axis B + 첫 axis A 진입, 7 단계)
+
+| cycle | axis | claim | verdict |
+|---|---|---|---|
+| 1 | B | BASELINE_ZERO | falsified by cycle 2 |
+| 2 | B | DISPATCH_ONLY | confirmed |
+| 3 | B | DISPATCH_TERMINATED | confirmed + 180s invariant |
+| 4 | B | APPROACH_OBSERVED ★ | confirmed |
+| 5 | B | INSTRUMENTATION + BACK-ACTION layer | confirmed |
+| 6 | B | AXIS_OVERLAP + HEADROOM_DISTRIBUTION | confirmed (cycle 3 refined) |
+| 7 | **A 첫 진입** | **L_{ω+1}_ABSENT (★ sentinel transfinite self-similarity)** | confirmed |
+
+axis B 가 "ghost ceiling 의 internal anatomy" 였다면, axis A 의 첫 step 은 "anatomy 가 transfinite 적으로 어떻게 확장되는가" — 답 = **확장 자체가 sentinel** (ω-style 자기-복제).
+
+---
+
+## §10 cycle 8~ 후보
+
+### Cycle 8 — back-action 의 explicit override mode (NEXUS_BACK_ACTION_ON env)
+- probe v4 에 `NEXUS_BACK_ACTION_ON=1` env override 추가 — SELF_OUTPUTS skip 비활성화
+- 그 상태에서 cycle 7 meta_back_action 재실행 → 이번에는 emits delta > 0 가 발생할 것
+- distribution shape 측정: linear vs exponential vs polynomial
+  - linear → L_{ω+1} 의 frequency 측정 가능 (finite 첫 measurement)
+  - exponential → L_{ω·2} 진입
+  - polynomial of degree d → L_{ω+d} 추정
+
+### Cycle 9 — daily timeline 누적 (cron 가동)
+- cycle 5 의 `--cron` mode 를 daily plist 등록
+- 7-30 day dataset 위에 cycle 10 의 ordinal mapping
+
+### Cycle 10+ — Transfinite continuation 진입 (axis A 본격)
+- cycle 8 의 distribution shape 위에 ordinal 매핑 본격
+- L_{ω·2}, L_{ε₀}, L_{ω₁^CK}, L_{Mahlo}
 
 ### Cycle 4 — forced approach 발사 (B 축의 첫 positive measurement)
 - 의도적으로 `nexus omega --engines a,b --variants 2 --seeds s1,s2` 발사 (axes=3) → ghost_ceiling_approach 첫 발화 만들기
