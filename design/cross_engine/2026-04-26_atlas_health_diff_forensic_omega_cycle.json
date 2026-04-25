@@ -1,0 +1,52 @@
+{
+  "ts": "2026-04-26T12:00:00+09:00",
+  "ordinal": "ω·forensic·diff_analysis",
+  "engine": "cross_engine",
+  "title": "Forensic ω-cycle: atlas_status_all.sh + health_check_all.sh working-tree diff origin analysis",
+  "context": {
+    "trigger": "Post-sweep+port+commit batch left 2 files M in working tree, untouched by any of the 4 sweep agents per their reports",
+    "files": [
+      "tool/atlas_status_all.sh",
+      "tool/health_check_all.sh"
+    ],
+    "diff_sha256": "55566edfbb3acaee190568c510f5953386fc920b9bd4cf7e89176d510c979c14",
+    "diff_numstat": {
+      "tool/atlas_status_all.sh": {"added": 29, "removed": 3},
+      "tool/health_check_all.sh": {"added": 23, "removed": 8}
+    },
+    "last_touched_commits": {
+      "tool/atlas_status_all.sh": "311d5c73 feat(omega-cycle): F109-F114 promote (registry 98→104) + timeline_rotate + status_all defense enrichment + abbreviated E2E smoke",
+      "tool/health_check_all.sh": "1836dd20 feat(omega-cycle): F102-F108 promote (registry 91→98) + bridge_health R1 propagation + R3-full pre-commit hook"
+    }
+  },
+  "axes": [
+    {
+      "id": "a1",
+      "name": "diff content classification",
+      "finding": "Both diffs are pure ADDITIVE R5 wiring. atlas_status_all.sh adds DEF_R5_LEDGER + DEF_R5_SIGN parsing blocks (parses __LEDGER_VERIFY__ + __REGISTRY_SIGN__ sentinels), prints 2 new dashboard lines, extends raw-80 sentinel + EXIT_CODE escalation on R5 ledger FAIL. health_check_all.sh adds 4th subcheck calling tool/ledger_verify.sh, parses __LEDGER_VERIFY__, extends VERDICT logic to incorporate L_EC, prints 'L: <status>(N)' inline + adds 'fix:' line on ledger break, and extends raw-80 sentinel with ledger=<status>(N). Header section comment updated for raw-80 sentinel doc consistency. No deletion of existing logic, no signature changes to public sentinels (backward-compat append).",
+      "verdict": "intentional R5 integration — additive only"
+    },
+    {
+      "id": "a2",
+      "name": "R5 dependency existence proof",
+      "finding": "tool/ledger_verify.sh + tool/registry_sign.sh BOTH exist (mtime 2026-04-26 08:10/08:11), tracked by git, originated in commit fbd2d329 'feat(security-r5-optd): hash-chained ledger + ledger_verify + registry_sign stub' (Apr 26 08:14), with R5-LIVE follow-up 0ea84fd3 'feat(omega-cycle): R5 hash-chained ledger LIVE + F113/F125 cleanup'. Both scripts emit the exact sentinels the working-tree diffs parse (__LEDGER_VERIFY__ <PASS|FAIL|EMPTY|PRE_R5> entries=N broken_at=<line|none>; __REGISTRY_SIGN__ <SIGNED|VERIFIED|SKIPPED|ERROR> reason=...). Smoke tests confirm: ledger_verify → 'EMPTY entries=0 broken_at=none', registry_sign → 'SKIPPED reason=no_signing_key_configured'. health_check_all.sh end-to-end run produces 'L: EMPTY(0)' line correctly.",
+      "verdict": "R5 producer scripts shipped + functional; consumer wiring is the natural follow-up that the R5 commits did NOT include"
+    },
+    {
+      "id": "a3",
+      "name": "origin categorization (5-way: a/b/c/d/e)",
+      "finding": "Categorization matrix: (a) intentional ω-cycle work — STRONG MATCH: diffs are coherent R5 R1/R3/R4-style integration extending existing R-series defense surface dashboard, comment ts '2026-04-26' matches today's session, sentinel naming follows same pattern as R1/R3/R4. (b) hook side effect — REJECTED: .githooks/pre-commit doesn't write to these files. (c) user manual edit — UNLIKELY: 52 lines of structured shell with consistent naming convention, error-handling idioms identical to surrounding R1/R3/R4 blocks. (d) merge artifact — REJECTED: branch is ahead 76 commits, no merge in recent log. (e) unknown — REJECTED given (a) match. Most likely scenario: R5 LIVE ω-cycle (commit 0ea84fd3) shipped the producer scripts but a parallel agent or earlier-cycle task started wiring consumer dashboards/health-checks and didn't get committed in that batch — the 'orphan integration' that the sweep+port+commit agents legitimately couldn't claim because it predated their scopes.",
+      "verdict": "(a) intentional ω-cycle work — orphan R5 integration from R5 LIVE landing"
+    },
+    {
+      "id": "a4",
+      "name": "decision + rationale",
+      "finding": "Decision: COMMIT. Rationale: (1) diffs are additive only, no destruction risk; (2) both R5 producer scripts exist + are tracked + functional; (3) smoke test passes (health_check_all.sh prints correct 'L: EMPTY(0)' suffix, exit code unchanged for current state); (4) sentinel changes are append-only, preserving raw-80 backward-compat for existing consumers; (5) reverting would orphan the R5 producers (they'd ship without observability surface integration); (6) DEFER would leave a working-tree dirty state blocking subsequent ω-cycles. Commit subject: 'chore(observability): wire R5 ledger_verify+registry_sign into status_all & health_check_all'.",
+      "verdict": "COMMIT"
+    }
+  ],
+  "decision": "COMMIT",
+  "action_taken": "git add + commit (single commit for both files, hooks NOT bypassed)",
+  "no_no_verify": true,
+  "files_touched_outside_scope": "none (only the 2 in-scope files staged)"
+}

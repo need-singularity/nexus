@@ -14,8 +14,9 @@
 #   76 if any subcheck FAIL
 #
 # Sentinel (raw 80):
-#   __HEALTH_CHECK_ALL__ <PASS|FAIL> falsifier=C/T bridge=P/T tampered=Ft+Bt status=ok|fail
-#   (Ft = falsifier tampered count, Bt = bridge tampered count — R1 propagation)
+#   __HEALTH_CHECK_ALL__ <PASS|FAIL> falsifier=C/T bridge=P/T tampered=Ft+Bt status=ok|fail ledger=<status>(N)
+#   (Ft = falsifier tampered count, Bt = bridge tampered count — R1 propagation;
+#    ledger = R5 hash-chain status (PASS|FAIL|EMPTY|PRE_R5) with entry count)
 #
 # Compliance: raw 66 + raw 71 + raw 80
 # Origin: design/hexa_sim/2026-04-26_health_check_productionization_omega_cycle.json
@@ -57,24 +58,38 @@ S_LINE=$(printf '%s\n' "$S_OUT" | grep '__ATLAS_STATUS_ALL__' | tail -1)
 S_STATE="ok"
 [ "$S_EC" != "0" ] && S_STATE="fail"
 
+# 4th subcheck: R5 ledger_verify (hash-chain integrity of rotation ledger)
+L_STATUS="MISSING"; L_ENTRIES=0; L_EC=0
+if [ -f "$TOOL_DIR/ledger_verify.sh" ]; then
+    L_OUT=$(bash "$TOOL_DIR/ledger_verify.sh" --quiet 2>&1); L_EC=$?
+    L_LINE=$(printf '%s\n' "$L_OUT" | grep '__LEDGER_VERIFY__' | tail -1)
+    L_STATUS=$(printf '%s' "$L_LINE" | awk '{print $2}')
+    [ -z "$L_STATUS" ] && L_STATUS="UNKNOWN"
+    L_ENTRIES=$(printf '%s' "$L_LINE" | sed -nE 's/.*entries=([0-9]+).*/\1/p')
+    [ -z "$L_ENTRIES" ] && L_ENTRIES=0
+fi
+
 VERDICT="PASS"
 EXIT_CODE=0
-if [ "$F_EC" != "0" ] || [ "$B_EC" != "0" ] || [ "$S_EC" != "0" ]; then
+if [ "$F_EC" != "0" ] || [ "$B_EC" != "0" ] || [ "$S_EC" != "0" ] || [ "$L_EC" != "0" ]; then
     VERDICT="FAIL"
     EXIT_CODE=76
 fi
 
 if [ "$QUIET" = "0" ]; then
-    printf 'F: %d/%d CLEAN | B: %d/%d PASS | tampered=%d (F=%d B=%d) | S: status_all_%s\n' \
-        "$F_CLEAN" "$F_TOTAL" "$B_PASS" "$B_TOTAL" "$TAMP_TOTAL" "$F_TAMP" "$B_TAMP" "$S_STATE"
+    printf 'F: %d/%d CLEAN | B: %d/%d PASS | tampered=%d (F=%d B=%d) | S: status_all_%s | L: %s(%d)\n' \
+        "$F_CLEAN" "$F_TOTAL" "$B_PASS" "$B_TOTAL" "$TAMP_TOTAL" "$F_TAMP" "$B_TAMP" "$S_STATE" "$L_STATUS" "$L_ENTRIES"
     if [ "$EXIT_CODE" = "76" ]; then
-        echo "  reason: subcheck failure (falsifier_ec=$F_EC bridge_ec=$B_EC status_ec=$S_EC tampered=$TAMP_TOTAL)"
-        echo "  fix:    bash $TOOL_DIR/falsifier_health.sh ; bash $TOOL_DIR/bridge_health.sh ; bash $TOOL_DIR/atlas_status_all.sh --full"
+        echo "  reason: subcheck failure (falsifier_ec=$F_EC bridge_ec=$B_EC status_ec=$S_EC ledger_ec=$L_EC tampered=$TAMP_TOTAL)"
+        echo "  fix:    bash $TOOL_DIR/falsifier_health.sh ; bash $TOOL_DIR/bridge_health.sh ; bash $TOOL_DIR/atlas_status_all.sh --full ; bash $TOOL_DIR/ledger_verify.sh"
         if [ "$TAMP_TOTAL" -gt 0 ]; then
             echo "  fix:    R1 tamper detected — audit git log of mutated files; refresh baseline if intended"
+        fi
+        if [ "$L_EC" != "0" ]; then
+            echo "  fix:    R5 ledger chain broken — see ledger_verify output for broken_at line; investigate prev_hash mismatch"
         fi
     fi
 fi
 
-echo "__HEALTH_CHECK_ALL__ $VERDICT falsifier=$F_CLEAN/$F_TOTAL bridge=$B_PASS/$B_TOTAL tampered=$TAMP_TOTAL status=$S_STATE"
+echo "__HEALTH_CHECK_ALL__ $VERDICT falsifier=$F_CLEAN/$F_TOTAL bridge=$B_PASS/$B_TOTAL tampered=$TAMP_TOTAL status=$S_STATE ledger=$L_STATUS($L_ENTRIES)"
 exit $EXIT_CODE
