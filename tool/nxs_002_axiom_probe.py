@@ -25,6 +25,9 @@ V3' actual axiom sweep (cycle 21+ 추가, 본 세션 atlas 21320 nodes K=100):
   C2 block 2x200 p=0.020     v1=0.83552 sff=0.98755 V3'=0.92674 ✅ (std 0.00268)
   C3 degree-cap=100          v1=0.80942 sff=0.99380 V3'=0.92005 ✅ (std 0.00564)
   C4 rewire 50%              v1=0.76049 sff=0.85398 V3'=0.81659 ❌ ★ V3' breaker (std 0.01206)
+  C5 anti-hub + block (cycle 55 actual): V3' = 0.92309 ± 0.00641 (5 seeds)
+    → additive negative interference (< baseline 0.92740, < C1 0.93617, < C2 0.92755)
+    → anchored block (C2) anchor edge 가 base spectrum perturbation, isolated ER (C1) K cut invariance 깎음
 
 V3' formula (cycle 14 cross-session breakthrough):
   composite_v3_prime = 0.6 * sff_align + 0.4 * composite_v1
