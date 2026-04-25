@@ -185,9 +185,16 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
 3. **L5+ 진입 조건 정의** — surge 안정화 후 reflexivity (self-mod) 도입 시점 결정
 
 **완료 (2026-04-25):**
-- ✓ L_ω omega 구현 (commit ee5da9cd) — drill apex preset wrap
+- ✓ L_ω omega 1차 구현 (commit ee5da9cd) — drill apex preset wrap
 - ✓ commands.json SSOT 등록 (hexa-lang commit b36c3037)
 - ✓ ~/.hx/bin/nexus shim 헤비-컴퓨트 라우팅 추가
+- ✓ **L_ω omega 2차 격상** (이 commit) — L3 다축 자동 dispatch
+  - `--engines csv` (≥2) → cmd_chain (cross-engine, L3)
+  - `--variants N` (≥2) → adversarial_debate.hexa (L3)
+  - `--seeds csv | --seeds-file` → cmd_drill_batch (L3)
+  - default → cmd_drill (L2 single-seed apex preset)
+  - axes ≥ 3 동시 활성 → `NEXUS_OMEGA ghost_ceiling_approach` JSON emit (L4 surge 영역 신호)
+  - 검증: 4 dispatch path (drill / chain / debate / batch) + ceiling hint 모두 동작 확인
 
 ---
 

@@ -182,8 +182,14 @@ fn cmd_help() -> void {
     println("  smash --seed \"...\" [--depth N]  blowup 9-phase 돌파 (발견)")
     println("  free --seed \"...\" [--dfs N]     compose DFS 탐색 (6-core 체인)")
     println("  absolute --seed \"...\"           Mk.VIII Δ₀-absolute 검증 ([10*]→[11*])")
-    println("  omega --seed \"...\"                APEX (L_ω) — drill apex preset (depth=auto, speculate=3, adaptive=on). 앞으로의 메인.")
-    println("        모든 drill 옵션 그대로 호환 — drill 의 super-set, 기본값만 apex 로 설정.")
+    println("  omega --seed \"...\"                APEX (L_ω) — drill apex preset + L3 다축 자동 dispatch. 앞으로의 메인.")
+    println("        defaults: depth=auto, speculate=3, adaptive=on. 모든 drill 옵션 호환.")
+    println("        L3 axes (자동 감지, 가장 넓은 axis 우선):")
+    println("          --engines nexus,anima  → cross-engine chain (L3)")
+    println("          --variants N           → N-variant adversarial debate (L3)")
+    println("          --seeds \"a,b,c\" | --seeds-file path  → multi-seed batch (L3)")
+    println("          (L3 axis 없으면 단일 drill apex preset)")
+    println("        emits: NEXUS_OMEGA JSON (axes count, dispatch path, ghost_ceiling_approach @ axes≥3)")
     println("  drill --seed \"...\" [--max-rounds N] [--engine mk9|mk10] [--preset fast|probe|coarse|standard]")
     println("        [--problem riemann|bsd|hodge|navier|pnp|poincare|yangmills]   per-millennium preset (drill.json .problem_presets)")
     println("        category layer: seed → analysis|number|algebra|topology|logic|geometry auto-detect (NEXUS_CATEGORY_OFF=1 비활성)")
@@ -3809,15 +3815,88 @@ fn _batch_shared_cleanup() -> void {
 
 // ─── omega — APEX (L_ω) orchestrator (2026-04-25) ───
 // 사다리 위계: L1 atomic → L2 drill (round loop) → L3 fan-out → L4 super-orch → ... → L_ω omega.
-// 의미: 「도달 가능한 최상위 통합 명령」. drill 위에 apex preset (depth=auto, speculate=3, adaptive=on) 자동 적용.
-// 호환: --seed 외 모든 drill 플래그 그대로 사용 가능 — user 지정값이 apex 기본값 우선.
+// 의미: 「도달 가능한 최상위 통합 명령」. apex preset (depth=auto, speculate=3, adaptive=on) +
+//       L3 다축 (multi-engine chain / multi-variant debate / multi-seed drill_batch) 자동 dispatch.
 // 명명 근거: design/abstraction_ceiling.md — 그리스 Ω + 무한 서수 ω + Chaitin Ω 정보천장 3 축 매핑.
-fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str) -> void {
-    println("⊙ omega — APEX orchestration (L_ω, drill apex preset)")
+//
+// dispatch priority (가장 넓은 axis 우선):
+//   --engines 에 ',' (≥2) 있음     → cmd_chain     (L3 cross-engine)
+//   else --variants ≥ 2            → debate script  (L3 N-variant adversarial)
+//   else --seeds / --seeds-file    → cmd_drill_batch (L3 multi-seed)
+//   else                            → cmd_drill      (L2 single-seed apex preset)
+//
+// emits:
+//   NEXUS_OMEGA {"event":"dispatch", "axes":N, "path":"chain|debate|batch|drill", ...}
+//   axes ≥ 3 일 때 "ghost_ceiling_approach" 추가 emit (3 axis 동시 활성 = 사다리 끝 근접 신호).
+fn _omega_invoke_debate(seed: str, variants_n: int, max_rounds: str, engine_flag: str, preset: str) -> void {
+    let script = nexus_root() + "/cli/drill/adversarial_debate.hexa"
+    let chk = exec("[ -f '" + script + "' ] && echo y || echo n").trim()
+    if chk != "y" {
+        eprintln("NEXUS_OMEGA {\"status\":\"debate_script_missing\",\"path\":\"" + script + "\"}")
+        return
+    }
+    let mut cmd = shell_quote(hexa_bin()) + " run " + shell_quote(script)
+    cmd = cmd + " --seed " + shell_quote(seed)
+    cmd = cmd + " --variants " + to_string(variants_n)
+    cmd = cmd + " --arbitrate"
+    if max_rounds.len() > 0 { cmd = cmd + " --max-rounds " + shell_quote(max_rounds) }
+    if engine_flag.len() > 0 { cmd = cmd + " --engine " + shell_quote(engine_flag) }
+    if preset.len() > 0 { cmd = cmd + " --preset " + shell_quote(preset) }
+    print(exec(cmd + " 2>&1"))
+}
+
+fn cmd_omega(seed: str, max_rounds: str, engine_flag: str, preset: str, master_depth: str, per_stage_depths: [int], adaptive_flag: bool, resume_flag: bool, checkpoint_dir: str, problem: str, speculate_flag: str, variants_flag: str, engines_flag: str, seeds_flag: str, seeds_file: str) -> void {
     // apex defaults — user 가 명시한 값이 있으면 그대로 유지
     let _depth = if master_depth.len() > 0 { master_depth } else { "auto" }
     let _spec = if speculate_flag.len() > 0 { speculate_flag } else { "3" }
+    // axis detection
+    let mut variants_n: i64 = 1
+    if variants_flag.len() > 0 {
+        try { variants_n = to_int(variants_flag) } catch e { variants_n = 1 }
+        if variants_n < 1 { variants_n = 1 }
+    }
+    let multi_engine = engines_flag.len() > 0 && engines_flag.contains(",")
+    let multi_seed   = seeds_flag.len() > 0 || seeds_file.len() > 0
+    let multi_variant = variants_n > 1
+    let mut axes: i64 = 0
+    if multi_engine  { axes = axes + 1 }
+    if multi_variant { axes = axes + 1 }
+    if multi_seed    { axes = axes + 1 }
+    // dispatch path 결정
+    let mut path = "drill"
+    if multi_engine { path = "chain" }
+    else if multi_variant { path = "debate" }
+    else if multi_seed { path = "batch" }
+    println("⊙ omega — APEX (L_ω) orchestration  axes=" + to_string(axes) + " path=" + path)
+    eprintln("NEXUS_OMEGA {\"event\":\"dispatch\",\"axes\":" + to_string(axes)
+        + ",\"path\":\"" + path + "\""
+        + ",\"engines_multi\":" + (if multi_engine { "true" } else { "false" })
+        + ",\"variants\":" + to_string(variants_n)
+        + ",\"seeds_multi\":" + (if multi_seed { "true" } else { "false" })
+        + ",\"depth\":\"" + _depth + "\""
+        + ",\"speculate\":" + _spec + "}")
+    if axes >= 3 {
+        eprintln("NEXUS_OMEGA {\"event\":\"ghost_ceiling_approach\",\"reason\":\"all_3_L3_axes_active\",\"meaning\":\"사다리 L4 surge 영역 — L_ω 근접 신호\"}")
+    }
+    // 실제 dispatch
+    if multi_engine {
+        let _rc = cmd_chain(seed, engines_flag, "")
+        eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"chain\",\"rc\":" + to_string(_rc) + "}")
+        return
+    }
+    if multi_variant {
+        _omega_invoke_debate(seed, variants_n, max_rounds, engine_flag, preset)
+        eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"debate\",\"variants\":" + to_string(variants_n) + "}")
+        return
+    }
+    if multi_seed {
+        let batch_seeds = _seed_batch_load(seeds_flag, seeds_file)
+        cmd_drill_batch(batch_seeds, max_rounds, engine_flag, preset, _depth, per_stage_depths, true, resume_flag, checkpoint_dir, problem, _spec)
+        eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"batch\",\"seeds\":" + to_string(len(batch_seeds)) + "}")
+        return
+    }
     cmd_drill(seed, max_rounds, engine_flag, preset, _depth, per_stage_depths, true, resume_flag, checkpoint_dir, problem, _spec)
+    eprintln("NEXUS_OMEGA {\"event\":\"complete\",\"path\":\"drill\"}")
 }
 
 // ─── E12 batch drill wrapper (2026-04-21) ───
@@ -4418,7 +4497,8 @@ fn main() -> void {
         return
     }
     if sub == "omega" {
-        // L_ω apex — drill apex preset (depth=auto, speculate=3, adaptive=on).
+        // L_ω apex — apex preset (depth=auto, speculate=3, adaptive=on) +
+        // L3 다축 (--engines / --variants / --seeds) 자동 dispatch.
         // 모든 drill 플래그 호환 — user 지정값이 apex 기본값 우선.
         let _smash_d = _parse_flag_int(a, "--smash-depth")
         let _free_d  = _parse_flag_int(a, "--free-dfs")
@@ -4440,7 +4520,11 @@ fn main() -> void {
             resume_flag,
             find_flag(a, "--checkpoint-dir", ""),
             find_flag(a, "--problem", ""),
-            find_flag(a, "--speculate", "")
+            find_flag(a, "--speculate", ""),
+            find_flag(a, "--variants", ""),
+            find_flag(a, "--engines", ""),
+            find_flag(a, "--seeds", ""),
+            find_flag(a, "--seeds-file", "")
         )
         return
     }
