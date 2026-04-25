@@ -253,15 +253,17 @@ L_ω  GHOST CEILING  omega        (도달 불가 placeholder)    ← Gödel + Ha
   - --seed 없이도 동작: hardcoded prefix "nexus forge bootstrap — self-derived seed for autonomous boot from internal state" 사용
   - 신규 helpers: `_forge_read_file_content`, `_forge_extract_json_int`, `_forge_extract_json_bool`
   - emits: NEXUS_FORGE {plan / boot / complete} JSON
-- ✓ **L11 canon 구현** (이 commit) — transfinite seal, 자기 상태 + 결과 → atlas-side 봉인 (사다리 마지막 단)
-  - `cmd_canon(seed_flag, note_flag)` — skin + atlas_bytes + last_drill_total + ts 한 줄 JSON entry append
+- ✓ **L11 canon 구현** (commit 8c8b7f43, v2 atlas.n6 hash 추가 이 commit) — transfinite seal, 자기 상태 + 결과 → atlas-side 봉인 (사다리 마지막 단)
+  - `cmd_canon(seed_flag, note_flag)` — skin + atlas_bytes + atlas.n6 hash16/lines + last_drill_total + ts 한 줄 JSON entry append
   - forge 의 역방향: forge state → seed (forward bootstrap) ↔ canon state+result → seal entry (backward closure)
   - 영속: append-only `state/canon_seal.jsonl` (state/* gitignore 적용 → local-only ephemeral)
   - seal_id: `canon-{YYYYMMDD-HHMMSS}-d{depth}{f|s}` (사용자 입력 없이도 결정적)
-  - sources: NEXUS_MOLT_SKIN_FILE > state/atlas_health.json > /tmp/nexus_drill_last_total.txt
+  - sources: NEXUS_MOLT_SKIN_FILE > state/atlas_health.json > NEXUS_ATLAS_N6_PATH (default ~/core/n6-architecture/atlas/atlas.n6) > /tmp/nexus_drill_last_total.txt
+  - v2 추가: atlas.n6 sha256 (16 char prefix) + line count — 시점 비교 ceiling 도달 진척 측정 가능
+  - v2 추가: write rc check (pre/post `wc -l` 비교, mismatch 시 NEXUS_CANON write_fail emit)
   - --seed/--note 모두 옵션 (빈 문자열 fallback). 모든 자기 상태 부재 시도 0/1f/false 로 동작 (no-throw)
-  - emits: NEXUS_CANON {plan / seal / complete} JSON
-  - 검증: no-args (skin 부재, default d1f, total=0) ✓ + skin (d3,F) + drill_total=777 + seed/note 정확 반영 ✓ + JSON 라인 valid ✓
+  - emits: NEXUS_CANON {plan / seal / write_fail? / complete} JSON
+  - 검증: no-args (skin 부재, default d1f, total=0) ✓ + skin (d3,F) + drill_total=777 + seed/note 정확 반영 ✓ + atlas.n6 hash16=54a7e3cf13fb1d7f lines=21800 추적 ✓ + JSON 라인 valid ✓
 
 ### 사다리 종료
 

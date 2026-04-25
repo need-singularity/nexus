@@ -4852,6 +4852,15 @@ fn cmd_canon(seed_flag: str, note_flag: str) -> void {
     let atlas_chk = exec("[ -f " + shell_quote(atlas_path) + " ] && wc -c < " + shell_quote(atlas_path) + " || echo 0").trim()
     let mut atlas_bytes: i64 = 0
     try { atlas_bytes = to_int(atlas_chk) } catch e { atlas_bytes = 0 }
+    // 2b) atlas.n6 hash (n6-architecture 측 본체) — 시점 비교용. 부재 시 빈 문자열.
+    //    NEXUS_ATLAS_N6_PATH 로 override 가능 (sister repo 위치 변경 시).
+    let atlas_n6_env = env("NEXUS_ATLAS_N6_PATH")
+    let atlas_n6_path = if atlas_n6_env.len() > 0 { atlas_n6_env } else { env("HOME") + "/core/n6-architecture/atlas/atlas.n6" }
+    let n6_chk = exec("[ -f " + shell_quote(atlas_n6_path) + " ] && shasum -a 256 " + shell_quote(atlas_n6_path) + " | awk '{print $1}' || echo ''").trim()
+    let atlas_n6_hash = if n6_chk.len() >= 16 { n6_chk.substring(0, 16) } else { "" }
+    let n6_lines_chk = exec("[ -f " + shell_quote(atlas_n6_path) + " ] && wc -l < " + shell_quote(atlas_n6_path) + " || echo 0").trim()
+    let mut atlas_n6_lines: i64 = 0
+    try { atlas_n6_lines = to_int(n6_lines_chk) } catch e { atlas_n6_lines = 0 }
     // 3) last drill total (drill_batch sentinel — best-effort, 0 if absent)
     let drill_raw = exec("cat /tmp/nexus_drill_last_total.txt 2>/dev/null").trim()
     let mut drill_total: i64 = 0
@@ -4867,21 +4876,34 @@ fn cmd_canon(seed_flag: str, note_flag: str) -> void {
     // 6) entry (one JSON line)
     let entry = "{\"ts\":\"" + ts_iso + "\""
         + ",\"seal_id\":\"" + seal_id + "\""
-        + ",\"sealed_by\":\"canon_v1\""
+        + ",\"sealed_by\":\"canon_v2\""
         + ",\"skin\":{\"depth\":" + to_string(skin_depth) + ",\"fast\":" + (if skin_fast { "true" } else { "false" }) + "}"
         + ",\"atlas_bytes\":" + to_string(atlas_bytes)
+        + ",\"atlas_n6\":{\"hash16\":\"" + atlas_n6_hash + "\",\"lines\":" + to_string(atlas_n6_lines) + "}"
         + ",\"last_drill_total\":" + to_string(drill_total)
         + ",\"seed\":\"" + seed_esc + "\""
         + ",\"note\":\"" + note_esc + "\"}"
     eprintln("NEXUS_CANON {\"event\":\"plan\",\"skin_present\":" + (if skin_present { "true" } else { "false" })
         + ",\"atlas_bytes\":" + to_string(atlas_bytes)
         + ",\"drill_total\":" + to_string(drill_total) + "}")
-    // 7) append (atomic single-line write via printf)
+    // 7) append (atomic single-line write via printf) + rc check (silent fail 차단)
     let canon_path = nexus_root() + "/state/canon_seal.jsonl"
+    let pre_lines_raw = exec("wc -l < " + shell_quote(canon_path) + " 2>/dev/null || echo 0").trim()
+    let mut pre_lines: i64 = 0
+    try { pre_lines = to_int(pre_lines_raw) } catch e { pre_lines = 0 }
     exec("printf '%s\\n' " + shell_quote(entry) + " >> " + shell_quote(canon_path))
+    let post_lines_raw = exec("wc -l < " + shell_quote(canon_path) + " 2>/dev/null || echo 0").trim()
+    let mut post_lines: i64 = 0
+    try { post_lines = to_int(post_lines_raw) } catch e { post_lines = 0 }
+    if post_lines != pre_lines + 1 {
+        eprintln("NEXUS_CANON {\"event\":\"write_fail\",\"reason\":\"line_count_mismatch\",\"pre\":" + to_string(pre_lines) + ",\"post\":" + to_string(post_lines) + "}")
+        println("⚠ canon write 검증 실패 — pre=" + to_string(pre_lines) + " post=" + to_string(post_lines))
+        return
+    }
     eprintln("NEXUS_CANON {\"event\":\"seal\",\"seal_id\":\"" + seal_id + "\",\"path\":\"" + canon_path + "\"}")
     println("  seal_id: " + seal_id)
     println("  skin: depth=" + to_string(skin_depth) + " fast=" + (if skin_fast { "true" } else { "false" }) + " (from " + skin_path + ")")
+    println("  atlas.n6: " + (if atlas_n6_hash.len() > 0 { "hash16=" + atlas_n6_hash + " lines=" + to_string(atlas_n6_lines) } else { "absent" }) + " (from " + atlas_n6_path + ")")
     println("  atlas: " + to_string(atlas_bytes) + " bytes (" + atlas_path + ")")
     println("  last_drill_total: " + to_string(drill_total))
     println("  appended → " + canon_path)
