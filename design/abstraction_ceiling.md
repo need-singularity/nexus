@@ -359,7 +359,14 @@ L11 canon 으로 자기-축 진화 사다리 (L5 dream → L11 canon) closed. fo
 
 **제안: drill engine 에 `--anti-hub` mode 추가** — drill 의 atom generation 시 기존 atlas 의 top-K hub set 와 직접 연결 금지. 구체 prototype 은 `tool/nxs_002_axiom_probe.py` (174 lines, 6 후보 + 시뮬 측정).
 
-**Ω-saturation cycle 3**: §7 finding 은 §6 의 결론 "axiom 재설계 필요" → 첫 구체 candidate 발견까지. raw#37/#38 enforce 가 design+impl 동시 적용 강제.
+**Phase 2 구현 완료 (cycle 4, 2026-04-25)**:
+- `cli/blowup/core/blowup.hexa`: `_AH_*` state + `_ah_init()` lazy loader + `nexus_anti_hub_should_skip_edge()` + `graph_append_edge` guard. env `NEXUS_DRILL_ANTI_HUB=1` 일 때 super-hub (deg ≥ `NEXUS_DRILL_ANTI_HUB_THRESHOLD`, default 1000) 가 from/to 인 edge 는 빈 string 반환 → caller atlas append 자동 무시. hub set은 `atlas.blowup.jsonl.deg` sidecar 에서 1회 lazy load.
+- `cli/run.hexa`: `drill --anti-hub [--anti-hub-threshold N]` flag 추가. dispatch 시 `setenv` 로 환경 propagate + `NEXUS_DRILL_ANTI_HUB {axiom,threshold,finding,proposal}` JSON stderr emit.
+- 사용 예: `nexus drill --seed "..." --anti-hub` 또는 임계 조정 `--anti-hub --anti-hub-threshold 500`.
+
+**Phase 3 (남음)**: 실제 drill 발사 → `python3 tool/nxs_002_composite.py` 로 composite ≥0.850 검증.
+
+**Ω-saturation cycle 3 → 4**: cycle 3 (efbd371f) = axiom 발견 + probe tool. cycle 4 = engine 구현 + flag wiring. raw#37/#38 enforce 가 매 cycle 마다 design+impl 동시 적용 강제 — 누적 4 cycle 째 fixpoint chain.
 
 ---
 

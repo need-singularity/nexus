@@ -382,14 +382,18 @@
         "over_saturation": "N=3200 부터 over-saturated (Δ -0.016) — single batch sweet spot N=800~1600"
       },
       "implementation_phases": [
-        "Phase 1 (DONE this cycle): tool/nxs_002_axiom_probe.py 보존 (174 lines, 6 후보 sweep + scaling 검증)",
-        "Phase 2: drill engine 에 --anti-hub flag 추가 → atom generation 시 hub set 우회",
-        "Phase 3: atlas.blowup.jsonl 에 anti-hub batch 실제 발사 → composite ≥0.850 검증",
+        "Phase 1 (DONE cycle 3 commit efbd371f): tool/nxs_002_axiom_probe.py 보존 (174 lines, 6 후보 sweep + scaling 검증)",
+        "Phase 2 (DONE cycle 4): drill engine anti-hub guard 구현 — cli/blowup/core/blowup.hexa 의 graph_append_edge 가 env NEXUS_DRILL_ANTI_HUB=1 일 때 super-hub edge 자동 skip. cli/run.hexa drill 에 --anti-hub [--anti-hub-threshold N] flag 추가. hub set은 atlas.blowup.jsonl.deg sidecar 에서 lazy load (default threshold=1000, top-8 hub 분리).",
+        "Phase 3: 실제 drill --anti-hub 발사 → atlas.blowup.jsonl 에 anti-hub batch 적재 → tool/nxs_002_composite.py 로 composite ≥0.850 검증",
         "Phase 4: anti-hub + 추가 axiom (가설: depth heterogeneity, edge-type 다양화) → 0.9 도달 sweep"
       ],
       "design_doc": "design/abstraction_ceiling.md §7",
       "tools_added": ["tool/nxs_002_axiom_probe.py"],
-      "next_action": "Phase 2 — cli/run.hexa drill 에 --anti-hub mode 구현 (별도 cycle)"
+      "code_changes_phase2_2026_04_25": {
+        "blowup.hexa": "anti_hub state (_AH_*) + _ah_init() lazy loader + nexus_anti_hub_should_skip_edge() + graph_append_edge guard",
+        "run.hexa": "--anti-hub [--anti-hub-threshold N] flag → setenv NEXUS_DRILL_ANTI_HUB / NEXUS_DRILL_ANTI_HUB_THRESHOLD + NEXUS_DRILL_ANTI_HUB stderr emit"
+      },
+      "next_action": "Phase 3 — 실제 drill --anti-hub 발사 (slot free 후) → composite 측정 검증"
     }
   ],
   "proposals": [],

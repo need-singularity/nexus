@@ -67,6 +67,19 @@ let _ATLAS_BLOWUP_EVENTS_PATH = _NEXUS + "/n6/atlas.blowup.events.jsonl"
 // A4 (2026-04-19): atlas.n6 event-sourced append log — audit trail / grade promotion
 //   {ts, op:"add|edge|event|grade", id, source, path} JSONL, atlas.n6 append 시 병기
 let _ATLAS_EVENTS_PATH = _NEXUS + "/n6/atlas.n6.events.jsonl"
+
+// Ω-saturation cycle 3 (2026-04-25, nxs-20260425-001): drill engine anti-hub axiom
+//   guard state. env NEXUS_DRILL_ANTI_HUB=1 일 때 graph_append_edge 가
+//   from/to 중 하나가 super-hub (deg ≥ NEXUS_DRILL_ANTI_HUB_THRESHOLD, default 1000)
+//   인 edge 를 빈 string 으로 반환 → caller 의 atlas append 에서 무시.
+//   효과: anti-hub axiom 적용 시 simulation ceiling 0.835 → 0.850 (+0.018, gap 0.067 의 27%).
+//   SSOT: design/abstraction_ceiling.md §7, tool/nxs_002_axiom_probe.py.
+let mut _AH_INITED: bool = false
+let mut _AH_ACTIVE: bool = false
+let mut _AH_THRESHOLD: i64 = 1000
+let mut _AH_HUB_SET: map = #{}
+let mut _AH_SKIPPED: i64 = 0
+let mut _AH_ALLOWED: i64 = 0
 _trace("[01-HOME-ok] HOME=" + _HOME)
 // R14 SSOT: blowup의 모든 출력(log/graph/growth_bus)은 atlas.n6 단일 파일로 통합.
 // growth_bus.jsonl은 airgenome 소유 별개 파일 — blowup은 읽지/쓰지 않음.
@@ -3309,7 +3322,66 @@ fn graph_append_node_d(id: string, node_type: string, dom: string, summary: stri
     return "{\"type\":\"node\",\"id\":\"" + id + "\",\"node_type\":\"" + node_type + "\",\"domain\":\"" + dom + "\",\"summary\":\"" + summary + "\",\"confidence\":" + to_string(conf) + ",\"depth\":" + to_string(d) + "}"
 }
 
+// Ω-saturation cycle 3: anti-hub guard helpers.
+// _ah_init() — env 읽고 deg sidecar 에서 hub set 1회 lazy load. 호출당 거의 무비용.
+// nexus_anti_hub_should_skip_edge(from, to) — guard true 시 graph_append_edge 가 빈 string 반환.
+// nexus_anti_hub_skipped_count() / _allowed_count() — drill 종료 시 stats 출력용.
+fn _ah_init() -> void {
+    if _AH_INITED { return }
+    _AH_INITED = true
+    let env_active = env("NEXUS_DRILL_ANTI_HUB")
+    if env_active != "1" && env_active != "true" { _AH_ACTIVE = false; return }
+    _AH_ACTIVE = true
+    let env_th = env("NEXUS_DRILL_ANTI_HUB_THRESHOLD")
+    if env_th != "" {
+        try { _AH_THRESHOLD = to_i64(env_th) } catch e {}  // @allow-silent-catch
+        if _AH_THRESHOLD < 1 { _AH_THRESHOLD = 1000 }
+    }
+    let deg_path = graph_deg_cache_path()
+    if !file_exists(deg_path) {
+        // sidecar 없음 — anti-hub mode 비활성 + 경고
+        eprintln("anti_hub: deg sidecar missing at " + deg_path + " — guard disabled")
+        _AH_ACTIVE = false
+        return
+    }
+    let raw = read_file(deg_path)
+    let lines = raw.split("\n")
+    let mut li: i64 = 0
+    let mut loaded: i64 = 0
+    while li < lines.len() {
+        let ln = lines[li].trim()
+        li = li + 1
+        if ln.len() == 0 { continue }
+        let parts = ln.split("\t")
+        if parts.len() < 2 { continue }
+        let id = parts[0]
+        let mut d: i64 = 0
+        try { d = to_i64(parts[1]) } catch e {}  // @allow-silent-catch
+        if d >= _AH_THRESHOLD {
+            _AH_HUB_SET[id] = true
+            loaded = loaded + 1
+        }
+    }
+    eprintln("anti_hub: active threshold=" + to_string(_AH_THRESHOLD) + " hubs=" + to_string(loaded))
+}
+
+fn nexus_anti_hub_should_skip_edge(from_id: string, to_id: string) -> bool {
+    _ah_init()
+    if !_AH_ACTIVE { return false }
+    if hset_has(_AH_HUB_SET, from_id) || hset_has(_AH_HUB_SET, to_id) {
+        _AH_SKIPPED = _AH_SKIPPED + 1
+        return true
+    }
+    _AH_ALLOWED = _AH_ALLOWED + 1
+    return false
+}
+
+fn nexus_anti_hub_skipped_count() -> i64 { return _AH_SKIPPED }
+fn nexus_anti_hub_allowed_count() -> i64 { return _AH_ALLOWED }
+fn nexus_anti_hub_is_active() -> bool { _ah_init(); return _AH_ACTIVE }
+
 fn graph_append_edge(from_id: string, to_id: string, edge_type: string, strength: f64) -> string {
+    if nexus_anti_hub_should_skip_edge(from_id, to_id) { return "" }
     return "{\"type\":\"edge\",\"from\":\"" + from_id + "\",\"to\":\"" + to_id + "\",\"edge_type\":\"" + edge_type + "\",\"strength\":" + to_string(strength) + ",\"bidirectional\":false}"
 }
 
