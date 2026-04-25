@@ -349,6 +349,31 @@ zig cc -target x86_64-linux-musl -O2 -std=gnu11 -D_GNU_SOURCE \
 - random hub: 0.068 / 0.001 ≈ 68 batches × 200 atoms ≈ **13,600 새 atoms**
 - drill axiom-driven hub: 더 효율 (1000~5000 atoms 추정)
 - drill 1 round 의 평균 새 atom 발견율 측정 후 정확한 round 수 추정 가능
+
+### 2026-04-25 ROI 정밀 측정 (transition point + k_edges)
+**N_new transition (k=2)**:
+| N_new | Δ baseline | per_atom |
+|---|---|---|
+| 100 | 0.00000 | 0 (insufficient) |
+| **200~500** | **+0.00095** | +0.000002 ~ +0.000005 |
+| 700+ | −0.00331 | (transition!) |
+| 1500 | −0.00509 | (over-saturation) |
+
+**k_edges sweep (N=300)**: k=1,2,3,5,7,10 모두 +0.00095 동일.
+
+**확정 mechanism**:
+1. 새 atom 자체가 contribution source (k_edges 무관 — 1개 연결로 충분)
+2. batch sweet spot = 200~500 atoms / call
+3. N_new 700+ → transition (spectral 이 const alignment 손상)
+
+**최적 incremental 패턴**:
+- 한 번에 큰 batch ❌ (over-saturation)
+- 작은 batch 200~500 × 여러 번 + canon sealing ✓ (각 +0.00095 누적)
+
+**0.068 → 0.9 정밀 ROI**:
+- random hub: ~72 batches × 200 atoms = ~14,400 새 atoms
+- drill axiom-driven (가정): ~8,000~12,000 atoms
+- **drill incremental + canon sealing 패턴이 cron loop 와 자연 align**
 - nxs-002 resolution 4단 pipeline:
   1. atlas.blowup.jsonl **재생성** (소스 추적 필요 — atlas.n6 → blowup.jsonl 변환 도구 위치)
   2. `bisociation/spectra/atlas_eig.hexa` (CSR + Lanczos, ~/Dev/... default path 는 stale)
