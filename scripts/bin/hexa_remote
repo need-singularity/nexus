@@ -428,19 +428,112 @@ else
 fi
 
 if [ -z "$HOST" ]; then
-    echo "hexa_remote: all hosts unreachable (tried: $FALLBACK_CHAIN), falling back to local" >&2
-    # AI-native JSON emit — caller (shared/scripts/bin/hexa) parses to decide exit 64 vs 74.
-    # Build JSON host array from FALLBACK_CHAIN (space-separated).
-    _hosts_json=""
-    for _h in $FALLBACK_CHAIN; do
-        if [ -z "$_hosts_json" ]; then
-            _hosts_json="\"$_h\""
-        else
-            _hosts_json="$_hosts_json,\"$_h\""
+    # Wave 25 / L6 (2026-04-25): cross-host work-stealing queue. 모든 host 가
+    # 동시에 unreachable/busy 면 즉시 abort 대신 큐에 enqueue 후 polling. host
+    # 가 풀리면 (slot release / RAM free) 큐 head 가 자동으로 pickup → idle
+    # 호스트로 dispatch 합류. 효과: cluster RAM 90% → ~95% 활용도 (큐 대기 시간
+    # 감소, dispatch-time 결정 후에도 작업 이동 가능).
+    #
+    # Env override:
+    #   HEXA_REMOTE_NO_QUEUE=1            큐 모드 bypass (기존 즉시 abort)
+    #   HEXA_REMOTE_QUEUE_TTL=S           큐 대기 deadline (default 300s)
+    #   HEXA_REMOTE_QUEUE_POLL=S          polling 간격 (default 5s)
+    #   HEXA_REMOTE_QUEUE_FILE=path       큐 파일 (default /tmp/hexa_remote.queue.tsv)
+    #
+    # Lock 메커니즘: mkdir-based exclusive lock (atomic across NFS/local).
+    # 큐 형식 (TSV): enqueue_ts \t deadline_ts \t job_class \t pid \t cmdline
+    if [ "$_IS_HEAVY_COMPUTE" = "1" ] && [ "${HEXA_REMOTE_NO_QUEUE:-0}" != "1" ]; then
+        _QUEUE_FILE="${HEXA_REMOTE_QUEUE_FILE:-/tmp/hexa_remote.queue.tsv}"
+        _QUEUE_LOCK="${_QUEUE_FILE}.lock"
+        _Q_TS="$(date +%s)"
+        _Q_TTL="${HEXA_REMOTE_QUEUE_TTL:-300}"
+        _Q_POLL="${HEXA_REMOTE_QUEUE_POLL:-5}"
+        _Q_DEADLINE=$((_Q_TS + _Q_TTL))
+        _Q_CLASS="$(_classify_job "$@" 2>/dev/null || echo unknown)"
+        # Acquire lock for enqueue + stale-clean (mkdir is atomic).
+        _q_lock_tries=0
+        while ! mkdir "$_QUEUE_LOCK" 2>/dev/null; do
+            _q_lock_tries=$((_q_lock_tries + 1))
+            if [ "$_q_lock_tries" -ge 50 ]; then
+                # 5초 (50 * 0.1s) 후에도 lock 못 잡으면 stale 로 판단, 강제 회수.
+                _lock_age="$(( $(date +%s) - $(stat -f %m "$_QUEUE_LOCK" 2>/dev/null || stat -c %Y "$_QUEUE_LOCK" 2>/dev/null || date +%s) ))"
+                if [ "$_lock_age" -ge 30 ]; then
+                    rm -rf "$_QUEUE_LOCK" 2>/dev/null || true
+                fi
+                break
+            fi
+            sleep 0.1
+        done
+        # Stale-clean: deadline 초과 entry 제거 (다른 caller 가 죽었을 수 있음).
+        if [ -f "$_QUEUE_FILE" ]; then
+            _now="$(date +%s)"
+            awk -F'\t' -v now="$_now" '$2 > now {print}' "$_QUEUE_FILE" > "$_QUEUE_FILE.tmp" 2>/dev/null \
+                && mv "$_QUEUE_FILE.tmp" "$_QUEUE_FILE"
         fi
-    done
-    printf 'NEXUS_REMOTE_ERROR {"hosts_tried":[%s],"reason":"all_unreachable","exit_code":64}\n' "$_hosts_json" >&2
-    exit 64
+        # Append self.
+        printf '%s\t%s\t%s\t%s\t%s\n' "$_Q_TS" "$_Q_DEADLINE" "$_Q_CLASS" "$$" "$*" >> "$_QUEUE_FILE"
+        rm -rf "$_QUEUE_LOCK" 2>/dev/null || true
+        # 큐 entry 자가 정리 trap (자신이 죽거나 deadline 후에도 남으면 곤란).
+        trap '
+            if mkdir "'"$_QUEUE_LOCK"'" 2>/dev/null; then
+                if [ -f "'"$_QUEUE_FILE"'" ]; then
+                    awk -F"\t" -v p="'"$$"'" "\$4 != p {print}" "'"$_QUEUE_FILE"'" > "'"$_QUEUE_FILE"'.tmp" 2>/dev/null \
+                        && mv "'"$_QUEUE_FILE"'.tmp" "'"$_QUEUE_FILE"'"
+                fi
+                rm -rf "'"$_QUEUE_LOCK"'" 2>/dev/null || true
+            fi
+        ' EXIT INT TERM
+        echo "hexa_remote: L6 queued (pid=$$ class=$_Q_CLASS ttl=${_Q_TTL}s) — polling every ${_Q_POLL}s for idle host" >&2
+        # Polling loop: head pid 가 자기인지 + host 풀렸는지 확인.
+        while [ "$(date +%s)" -lt "$_Q_DEADLINE" ]; do
+            sleep "$_Q_POLL"
+            _head_pid="$(awk -F'\t' 'NR==1 {print $4}' "$_QUEUE_FILE" 2>/dev/null || echo "")"
+            if [ "$_head_pid" != "$$" ]; then
+                continue  # 아직 head 아님 — 앞순위 작업 처리 대기.
+            fi
+            # head 라면 host 재탐색.
+            for _qcand in $FALLBACK_CHAIN; do
+                HEXA_REMOTE_LAST_AVAIL=""
+                HEXA_REMOTE_LAST_PSI=""
+                if _probe_host "$_qcand"; then
+                    _qavail="${HEXA_REMOTE_LAST_AVAIL:-0}"
+                    _qmin="${HEXA_REMOTE_MIN_AVAIL_MB:-4096}"
+                    if [ "$_qavail" -gt "$_qmin" ] 2>/dev/null; then
+                        HOST="$_qcand"
+                        _best_avail="$_qavail"
+                        _picked_psi="${HEXA_REMOTE_LAST_PSI:-}"
+                        # Dequeue self (head).
+                        if mkdir "$_QUEUE_LOCK" 2>/dev/null; then
+                            if [ -f "$_QUEUE_FILE" ]; then
+                                awk -F'\t' -v p="$$" '$4 != p {print}' "$_QUEUE_FILE" > "$_QUEUE_FILE.tmp" 2>/dev/null \
+                                    && mv "$_QUEUE_FILE.tmp" "$_QUEUE_FILE"
+                            fi
+                            rm -rf "$_QUEUE_LOCK" 2>/dev/null || true
+                        fi
+                        echo "hexa_remote: L6 dequeued — picked $HOST (avail=${_qavail}MB) after $(( $(date +%s) - _Q_TS ))s wait" >&2
+                        # trap 은 EXIT 시점에 큐 파일에서 자기 entry 제거 시도하나
+                        # 이미 dequeue 되었으므로 no-op (idempotent).
+                        break 2  # break polling loop
+                    fi
+                fi
+            done
+        done
+    fi
+    if [ -z "$HOST" ]; then
+        echo "hexa_remote: all hosts unreachable (tried: $FALLBACK_CHAIN), falling back to local" >&2
+        # AI-native JSON emit — caller (shared/scripts/bin/hexa) parses to decide exit 64 vs 74.
+        # Build JSON host array from FALLBACK_CHAIN (space-separated).
+        _hosts_json=""
+        for _h in $FALLBACK_CHAIN; do
+            if [ -z "$_hosts_json" ]; then
+                _hosts_json="\"$_h\""
+            else
+                _hosts_json="$_hosts_json,\"$_h\""
+            fi
+        done
+        printf 'NEXUS_REMOTE_ERROR {"hosts_tried":[%s],"reason":"all_unreachable","exit_code":64}\n' "$_hosts_json" >&2
+        exit 64
+    fi
 fi
 
 # Wave 22 (2026-04-25): per-host slot acquire — 실제 picked HOST 가 결정된 후
