@@ -1,0 +1,180 @@
+{
+  "schema_version": "v0",
+  "ts": "2026-04-26T12:30:00+09:00",
+  "ordinal_stamp": "ω+1",
+  "title": "cross_engine r4 deeper integration plan — r4 replan ω-cycle witnesses + dossier + geo-mean invariant import into hexa_sim atlas vocabulary",
+  "trigger": "F126-F132 cross-engine integration covers tool/r4_replan.py via F128 (geo_mean=0.707 runtime) + r4_bench/MANIFEST.json via F129 (SHA); r4 system internals (5 ω-cycle witnesses + closed-loop dossier + 1 load-bearing geo-mean invariant) remain unanchored. Same B+C pattern as m3 deeper plan (cross_engine_m3_deeper_integration_plan.json), m3 fixpoint.next_omega_cycle_trigger explicitly named r4 as next target.",
+  "parent_audit": "design/hexa_sim/2026-04-26_cross_engine_integration_omega_cycle.json (F126-F132)",
+  "parent_pattern": "design/hexa_sim/2026-04-26_cross_engine_m3_deeper_integration_plan.json (F154-F160 — 6 @T + 1 @M)",
+  "subject_inventory": {
+    "r4_source_artifacts": [
+      {"path": "tool/r4_replan.py", "sha256_prefix": "c44fa1de89ed", "covered_by": "F128", "role": "Python reference impl 241 LoC — vstar SCC contraction + 3 strategies + UCB1 MCTS"},
+      {"path": "tool/r4_replan_test.py", "sha256_prefix": "857f65fad5d6", "covered_by": "F128 (runtime)", "role": "5-fixture harness — geo_mean + worst-case + action match assertions"},
+      {"path": "design/roadmap_engine/r4_bench/MANIFEST.json", "sha256_prefix": "512803099a64", "covered_by": "F129", "role": "5-fixture manifest with sha256 per file + expected_T_star envelopes"},
+      {"path": "design/roadmap_engine/r4_bench/{soft_rich_diamond_drop,parallel_rich_bottleneck_split,seed_rich_alternative_inject,compound_soft_parallel_seed,negative_control_no_annotation}.json", "sha256_prefix": "anchored via MANIFEST hash", "covered_by": "F129 transitive", "role": "5 canonical DAG fixtures — JSON-only schema-first ground truth"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_5dag_fixtures_omega_cycle.json", "sha256_prefix": "1e7cde55e2b3", "covered_by": "NONE", "role": "spec-first fixture-witness ω-cycle (i5a1 realization — 5 fixtures + manifest deliverable witness)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_i1_mcts_rollout_omega_cycle.json", "sha256_prefix": "05edd14a9fb1", "covered_by": "NONE", "role": "i1 MCTS rollout policy ω-cycle (UCB1 c=√2 + depth≤3 + rollouts≤32 + reward bound)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_i3_budget_envelope_omega_cycle.json", "sha256_prefix": "1aa5d759c56c", "covered_by": "NONE", "role": "i3 budget envelope ω-cycle (wall-clock + rollout cap + atomic rollback)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_i4_atomic_apply_omega_cycle.json", "sha256_prefix": "8f918070a3c0", "covered_by": "NONE", "role": "i4 atomic apply ω-cycle (in-memory clone + delta accept-or-discard + cycle-check)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_i5_benchmark_suite_omega_cycle.json", "sha256_prefix": "cc78dabb4477", "covered_by": "NONE", "role": "i5 benchmark-suite-generator ω-cycle (5-fixture geo-mean falsifier scaffold + worst-case gate)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json", "sha256_prefix": "8f6f557af4f0", "covered_by": "NONE", "role": "r4 impl meta ω-cycle (parent — surfaces i1/i3/i4/i5 axes)"},
+      {"path": "design/roadmap_engine/2026-04-26_r4_code_emission_omega_cycle.json", "sha256_prefix": "d68adb251c63", "covered_by": "NONE", "role": "r4 Python code-emission ω-cycle (sibling at ω+2 — operationalizes i5a1 with r4_replan.py 241 LoC)"},
+      {"path": "design/roadmap_engine/r4_replanning_continuous_dossier.md", "sha256_prefix": "3e1466600390", "covered_by": "NONE", "role": "r4 closed-loop design dossier — 7 sections (problem + 3 strategies + MCTS + falsifier + NFL + failure modes + LoC)"}
+    ],
+    "r4_invariants_identified_from_dossier_and_omega_cycles": [
+      "I1 geo_mean_drop_threshold_below_1 — falsifier (dossier §4 + r4_replanning_continuous_dossier.md L95): geo_mean(T*_post / T*_pre) < 1 - ε for ε=0.01 across N≥5 triggering DAGs; ≥2 of N regressing falsifies the strategy pool. Currently 0.707 (F128 runtime). Load-bearing — drift > 0.99 = strategy worse than dead path.",
+      "I2 mcts_rollout_budget_32 — i3 budget envelope (dossier §3): rollouts ≤ 32 hard cap, depth ≤ 3, wall ≤ 2000ms hard / 1500ms soft warn; tree size ≤ |M|^3 bounded by depth (text-anchored in i3 ω-cycle).",
+      "I3 ucb1_c_sqrt_2_textbook — i1 MCTS rollout (dossier §3 L63): UCB1 exploration constant c=√2≈1.41421356 — textbook (Auer 2002), NOT problem-tuned; deviation requires r17 NFL re-derivation.",
+      "I4 atomic_in_memory_clone_no_disk_write — i4 atomic apply (dossier §6): roadmap.json on disk NEVER written; apply_delta operates on copy.deepcopy clone; either entire delta accepted or original proceeds to exit(1); no partial mutation surface (raw 77 audit append-only analog).",
+      "I5 recursion_guard_replan_depth_le_1 — i4 atomic apply (dossier §6 row 4): mutated DAG schedule() re-triggers replan → replan_depth ≤ 1 guard fires → return None, propagate exit(1); prevents infinite mutation cascade.",
+      "I6 reward_clamp_sign_correct_bounded — i1 MCTS (dossier §3 L83): reward(s0,s2) = clamp((s0.T_star - s2.T_star) / max(s0.T_star, ε), -1.0, +1.0); sign-correct (improvement positive), bounded (UCB1 stability requirement).",
+      "I7 brent_floor_parallel_split_honors_T_inf — pre-req limit (dossier §Cross-axis touch): parallel_split MUST NOT drive T* below user-declared T_∞ floor on bottleneck node; r15 Brent inviolable (theorem: Brent 1974).",
+      "I8 nfl_three_strategies_domain_priors_not_universal — r17 NFL (dossier §5 + Wolpert-Macready 1997): soft_drop / parallel_split / seed_inject = roadmap-domain priors, NOT algorithm priors; on adversarial DAGs lacking annotations → schedule_replan returns None, fallback exit(1) preserved.",
+      "I9 manifest_sha256_per_fixture_audit_anchor — i5 benchmark suite (5dag witness deliverables block): MANIFEST.json carries sha256 per fixture file; transitive integrity — fixture mutation breaks F129 grep on 512803099a64 (raw 77 audit append-only).",
+      "I10 vstar_scc_contraction_for_soft_cycles — code-emission ω-cycle (ce_a1 axis): Python r4_replan.py vstar EXTENDS hexa schedule() (deps-only) with Tarjan SCC contraction over deps∪soft_deps to handle soft-cycle T*_pre (soft_rich_diamond_drop B↔C cycle); divergence DOCUMENTED, NOT silently fixed; hexa parallel update deferred."
+    ]
+  },
+  "candidate_categorization_for_atlas": {
+    "OPT_A_strategy_field_S_entries": "r4 strategy fields (soft_drop / parallel_split / seed_inject signatures) → @S structure entries. Verdict: REJECTED — duplicates dossier §2 type signatures; F129 already MANIFEST-anchors fixture corpus that exercises strategies; field-level @S adds atlas noise without falsifier leverage (m3 deeper rejected analogous OPT-A).",
+    "OPT_B_invariant_M_meta_entries": "r4 dossier invariants → @M meta-axis entries analog to F132/F160. Each invariant becomes one @M entry in NEW shard atlas.append.r4-deeper-2026-04-26.n6 with grep-based falsifier (cmd-level). Captures load-bearing INVARIANTS not file content. Verdict: SELECTED for I1 (geo-mean drop threshold) — matches m3 deeper pattern of 1 @M per cluster (load-bearing only).",
+    "OPT_C_omega_cycle_T_trace_entries": "r4 ω-cycles + dossier → @T trace entries (verify each artifact exists by SHA). @T r4_5dag_fixtures_omega_v0 / @T r4_i1_mcts_omega_v0 / @T r4_i3_budget_omega_v0 / @T r4_i4_atomic_omega_v0 / @T r4_i5_benchmark_omega_v0 / @T r4_dossier_v0. Each SHA-stable, idempotent, verifies ω-cycle witness reachability. Verdict: SELECTED — covers 6 r4 design artifacts not in F128/F129.",
+    "chosen": "B + C combination (matches m3 deeper plan exactly) — 6 @T file-SHA entries (5 ω-cycles + dossier) + 1 @M meta-axis (I1 geo-mean drop threshold, the load-bearing falsifier). Total 7 atlas entries (matches F126-F132 + F154-F160 cadence). r4_impl_omega_cycle + r4_code_emission_omega_cycle deferred to Tier-2 — meta-parent + sibling-implementation cycles, redundant with i1/i3/i4/i5 children which are the load-bearing axis carriers. Other I-invariants (I2..I10) deferred to Tier-2 — they require dedicated runtime telemetry (rollout counter, reward log, vstar SCC test corpus) not yet on disk; SHA-only anchoring would be premature."
+  },
+  "draft_falsifiers": [
+    {
+      "id": "F168",
+      "slug": "r4-5dag-fixtures-omega-sha",
+      "claim": "atlas entry @T r4_5dag_fixtures_omega_v0 = sha256:1e7cde55e2b3 :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/2026-04-26_r4_5dag_fixtures_omega_cycle.json | grep -q 1e7cde55e2b3 && echo R4_5DAG_FIXTURES_OMEGA_INTACT",
+      "pass": "R4_5DAG_FIXTURES_OMEGA_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "5ef340f48bc2af36",
+      "atlas_target": "@T r4_5dag_fixtures_omega_v0 = sha256:1e7cde55e2b3 :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I9 (MANIFEST sha256 per fixture audit anchor — witness deliverables block)"
+    },
+    {
+      "id": "F169",
+      "slug": "r4-i1-mcts-rollout-omega-sha",
+      "claim": "atlas entry @T r4_i1_mcts_rollout_omega_v0 = sha256:05edd14a9fb1 :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/2026-04-26_r4_i1_mcts_rollout_omega_cycle.json | grep -q 05edd14a9fb1 && echo R4_I1_MCTS_OMEGA_INTACT",
+      "pass": "R4_I1_MCTS_OMEGA_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "f453c3efded9a884",
+      "atlas_target": "@T r4_i1_mcts_rollout_omega_v0 = sha256:05edd14a9fb1 :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I3 + I6 (UCB1 c=√2 textbook + reward clamp sign-correct bounded)"
+    },
+    {
+      "id": "F170",
+      "slug": "r4-i3-budget-envelope-omega-sha",
+      "claim": "atlas entry @T r4_i3_budget_envelope_omega_v0 = sha256:1aa5d759c56c :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/2026-04-26_r4_i3_budget_envelope_omega_cycle.json | grep -q 1aa5d759c56c && echo R4_I3_BUDGET_OMEGA_INTACT",
+      "pass": "R4_I3_BUDGET_OMEGA_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "369ba14b666dbb69",
+      "atlas_target": "@T r4_i3_budget_envelope_omega_v0 = sha256:1aa5d759c56c :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I2 (rollouts≤32 hard cap + depth≤3 + wall≤2000ms hard / 1500ms soft warn)"
+    },
+    {
+      "id": "F171",
+      "slug": "r4-i4-atomic-apply-omega-sha",
+      "claim": "atlas entry @T r4_i4_atomic_apply_omega_v0 = sha256:8f918070a3c0 :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/2026-04-26_r4_i4_atomic_apply_omega_cycle.json | grep -q 8f918070a3c0 && echo R4_I4_ATOMIC_OMEGA_INTACT",
+      "pass": "R4_I4_ATOMIC_OMEGA_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "07c9b8b7b2e49d6d",
+      "atlas_target": "@T r4_i4_atomic_apply_omega_v0 = sha256:8f918070a3c0 :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I4 + I5 (in-memory clone no disk write + replan_depth≤1 recursion guard)"
+    },
+    {
+      "id": "F172",
+      "slug": "r4-i5-benchmark-suite-omega-sha",
+      "claim": "atlas entry @T r4_i5_benchmark_suite_omega_v0 = sha256:cc78dabb4477 :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/2026-04-26_r4_i5_benchmark_suite_omega_cycle.json | grep -q cc78dabb4477 && echo R4_I5_BENCH_OMEGA_INTACT",
+      "pass": "R4_I5_BENCH_OMEGA_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "0efb113f697e710c",
+      "atlas_target": "@T r4_i5_benchmark_suite_omega_v0 = sha256:cc78dabb4477 :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I1 + I9 (geo-mean falsifier scaffold + manifest audit anchor scaffold)"
+    },
+    {
+      "id": "F173",
+      "slug": "r4-replanning-continuous-dossier-sha",
+      "claim": "atlas entry @T r4_replanning_continuous_dossier_v0 = sha256:3e1466600390 :: roadmap_engine [10*REPO_INVARIANT] remains intact",
+      "cmd": "shasum -a 256 design/roadmap_engine/r4_replanning_continuous_dossier.md | grep -q 3e1466600390 && echo R4_DOSSIER_INTACT",
+      "pass": "R4_DOSSIER_INTACT",
+      "validated_2026_04_26": true,
+      "cmd_sha256": "19a5d8b830723f8c",
+      "atlas_target": "@T r4_replanning_continuous_dossier_v0 = sha256:3e1466600390 :: roadmap_engine [10*REPO_INVARIANT]",
+      "captures_invariant": "I1 + I4 + I5 + I7 + I8 (load-bearing design root — geo-mean + atomicity + Brent floor + NFL acknowledgment)"
+    },
+    {
+      "id": "F174",
+      "slug": "r4-replan-geo-mean-drop-threshold-below-1-meta",
+      "claim": "atlas entry @M r4_replan_geo_mean_drop_threshold_below_1 = falsifier REJECTS strategy pool when geo_mean(T*_post/T*_pre) >= 0.99 OR >=2 of N regress :: roadmap_engine [11*REPO_INVARIANT] remains intact",
+      "cmd": "grep -qE '^@M r4_replan_geo_mean_drop_threshold_below_1' /Users/ghost/core/nexus/n6/atlas.append.r4-deeper-2026-04-26.n6 && echo R4_GEO_MEAN_META_INTACT",
+      "pass": "R4_GEO_MEAN_META_INTACT",
+      "validated_2026_04_26": "deferred — shard does not yet exist (creation gated on user merge approval)",
+      "cmd_sha256": "670fe1600530e330",
+      "atlas_target": "@M r4_replan_geo_mean_drop_threshold_below_1 = falsifier REJECTS strategy pool when geo_mean(T*_post/T*_pre) >= 0.99 OR >=2 of N regress :: roadmap_engine [11*REPO_INVARIANT]",
+      "captures_invariant": "I1 (load-bearing — strategy pool worse than dead path = falsified, theorem: NFL Wolpert-Macready 1997)",
+      "pattern_analog": "F132 cross-engine-atlas-anchor-gap-meta + F160 m3-lob-gate-self-trust-keys-blocked-meta"
+    }
+  ],
+  "axes": [
+    {"name": "inventory", "result": "12 r4 source artifacts identified (3 already covered: tool/r4_replan.py via F128 + r4_bench/MANIFEST.json + 5 fixtures via F129 transitive; 7 uncovered: 5 i-axis ω-cycles + impl meta + code-emission sibling + dossier) + 10 invariants extracted from dossier + 6 r4 ω-cycles"},
+    {"name": "candidate_categorization", "result": "OPT-A strategy-field @S rejected (duplicates dossier signatures); OPT-B invariant @M selected for I1 geo-mean drop threshold (load-bearing falsifier); OPT-C ω-cycle @T selected for 5 i-axis ω-cycles + dossier; B+C combination = 7 entries; r4_impl_omega + r4_code_emission_omega deferred to Tier-2 (meta-parent + sibling redundant with axis-children)"},
+    {"name": "OPT_decision", "result": "B + C — 6 @T file-SHA entries (5 r4 ω-cycle witnesses + 1 dossier) + 1 @M meta-axis (I1 geo-mean drop threshold, analog of F132/F160); other I-invariants Tier-2 (need runtime telemetry before atlas anchor)"},
+    {"name": "draft_falsifiers", "result": "F168-F174 (7 candidates) — F168-F173 SHA-anchored + validated PASS 2026-04-26 (6 cmds reproduce byte-identical); F174 grep-meta-axis on future shard (deferred validation, parallels F132/F160)"},
+    {"name": "F_id_partitioning_safety", "result": "falsifiers.jsonl current max F-id = F132; F133-F167 unused; F154-F160 reserved by m3 deeper plan witness (not yet appended); F161-F167 reserved per task constraint (m5 deeper assumed); chosen F168-F174 strictly disjoint"},
+    {"name": "test_idempotency", "result": "6/6 SHA cmds re-run 2x byte-identical (shasum + grep deterministic); F174 grep on future shard idempotent by construction; idempotency_score=7/7 modulo F174 shard-creation precondition"},
+    {"name": "shard_proposal", "result": "NEW shard atlas.append.r4-deeper-2026-04-26.n6 — disjoint from cross-engine shard (which only covers F128 r4_replan.py runtime + F129 MANIFEST SHA); 7 entries (6 @T + 1 @M); header analog to cross-engine shard + m3-deeper shard"}
+  ],
+  "tier_1": [
+    {"atlas_entry": "@T r4_5dag_fixtures_omega_v0 = sha256:1e7cde55e2b3 :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F168"},
+    {"atlas_entry": "@T r4_i1_mcts_rollout_omega_v0 = sha256:05edd14a9fb1 :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F169"},
+    {"atlas_entry": "@T r4_i3_budget_envelope_omega_v0 = sha256:1aa5d759c56c :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F170"},
+    {"atlas_entry": "@T r4_i4_atomic_apply_omega_v0 = sha256:8f918070a3c0 :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F171"},
+    {"atlas_entry": "@T r4_i5_benchmark_suite_omega_v0 = sha256:cc78dabb4477 :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F172"},
+    {"atlas_entry": "@T r4_replanning_continuous_dossier_v0 = sha256:3e1466600390 :: roadmap_engine [10*REPO_INVARIANT]", "falsifier_id": "F173"},
+    {"atlas_entry": "@M r4_replan_geo_mean_drop_threshold_below_1 = falsifier REJECTS strategy pool when geo_mean(T*_post/T*_pre) >= 0.99 OR >=2 of N regress :: roadmap_engine [11*REPO_INVARIANT]", "falsifier_id": "F174"}
+  ],
+  "tier_2_backlog_invariants_and_artifacts": [
+    {"invariant_or_artifact": "design/roadmap_engine/2026-04-26_r4_impl_omega_cycle.json (sha256:8f6f557af4f0)", "blocker": "meta-parent ω-cycle — surfaces i1/i3/i4/i5 axes which are SHA-anchored as F169/F170/F171/F172; parent SHA-anchor would double-count axis identity; activate if r4_impl gains independent invariants beyond axis-surfacing"},
+    {"invariant_or_artifact": "design/roadmap_engine/2026-04-26_r4_code_emission_omega_cycle.json (sha256:d68adb251c63)", "blocker": "sibling-at-ω+2 code-emission witness for tool/r4_replan.py — runtime already covered by F128 (geo_mean=0.707 PASS); SHA on the witness adds design-trail anchor but is redundant with F128 runtime check; activate if Python ↔ hexa parity (I10 vstar SCC contraction) becomes contested"},
+    {"invariant": "I2 mcts_rollout_budget_32", "blocker": "no runtime telemetry — rollout counter not exported as state file; F170 SHA-anchors the design; runtime falsifier needs r4_replan.py to emit rollout_count to events JSONL"},
+    {"invariant": "I3 ucb1_c_sqrt_2_textbook", "blocker": "covered by F169 design SHA + tool/r4_replan.py constant (F128 covers runtime); if r4_replan.py regresses c≠√2, F128 geo-mean would drift — implicit catch; explicit grep-on-source @M deferred"},
+    {"invariant": "I4 atomic_in_memory_clone_no_disk_write", "blocker": "covered by F171 design SHA + dossier §6; runtime falsifier would need disk-write watcher (inotify/fswatch) on roadmap.json during r4_replan.py — infrastructure not yet shipped"},
+    {"invariant": "I5 recursion_guard_replan_depth_le_1", "blocker": "covered by F171 design SHA; runtime falsifier needs depth-counter export + adversarial DAG that re-triggers replan post-mutation — test corpus absent"},
+    {"invariant": "I6 reward_clamp_sign_correct_bounded", "blocker": "covered by F169 design SHA; runtime falsifier would assert observed reward ∈ [-1.0, +1.0] across rollouts — events JSONL reward field not yet emitted"},
+    {"invariant": "I7 brent_floor_parallel_split_honors_T_inf", "blocker": "covered by F173 dossier SHA; runtime falsifier needs benchmark DAG with explicit T_∞ annotation + assertion that parallel_split T*_post >= T_∞ — fixture absent in current 5-DAG suite"},
+    {"invariant": "I8 nfl_three_strategies_domain_priors_not_universal", "blocker": "covered by F172 (i5 benchmark suite includes negative_control_no_annotation.json which exercises this) + F173 dossier; F128 already validates schedule_replan returns None on negative_control — implicit runtime catch; explicit @M deferred (NFL is meta-theorem, not falsifiable per-cycle)"},
+    {"invariant": "I9 manifest_sha256_per_fixture_audit_anchor", "blocker": "covered by F129 MANIFEST SHA + F168 5dag witness SHA (deliverables block lists per-fixture sha256); runtime monotonicity falsifier (manifest line-count append-only) deferred until manifest gains rotation events"},
+    {"invariant": "I10 vstar_scc_contraction_for_soft_cycles", "blocker": "covered by F128 runtime (r4_replan_test.py geo_mean=0.707 includes soft_rich_diamond_drop B↔C cycle PASS); design covered by code_emission ω-cycle (Tier-2); explicit hexa-parity @M deferred until hexa schedule() updated to match Python (acknowledged divergence in code_emission ce_a1)"}
+  ],
+  "tier_3_defer_or_split": [
+    {"option": "OPT-A strategy-field @S entries", "blocker": "dossier §2 already type-signature-anchored; @S field-level entries duplicate without falsifier leverage; revisit only if strategies acquire load-bearing identity beyond signature shape"}
+  ],
+  "main_thread_action_required": "atlas mutation + falsifiers.jsonl append GATED on user explicit go (raw 71). When approved: (1) write n6/atlas.append.r4-deeper-2026-04-26.n6 with 7 entries (6 @T + 1 @M), (2) append F168-F174 to design/hexa_sim/falsifiers.jsonl, (3) refresh state/falsifier_registry.sha256, (4) re-run atlas_index / hot-shard / deg, (5) collision-check via grep against existing shards (r4_replan_geo_mean_0707 + r4_replan_5_canonical_dags already in F128/F129 cross-engine shard — 6 new @T slugs + 1 @M slug all disjoint), (6) run F168-F174: 6/7 PASS expected (F174 shard-creation gated), (7) single atomic commit",
+  "fixpoint": {
+    "marker": "deeper_r4_proposal_complete",
+    "reason": "r4 source corpus (12 artifacts) substantively SHA-anchored after merge (F128 tool + F129 manifest + F168-F173 6 deeper); load-bearing geo-mean drop threshold invariant captured as @M meta-axis (F174); other I-invariants explicitly Tier-2 with blocker rationale (need runtime telemetry / fixture extension); r4_impl_omega + r4_code_emission_omega Tier-2 (meta-parent + sibling redundant); no further deeper anchors discoverable without runtime artifacts",
+    "next_omega_cycle_trigger": "user merge approved → re-run cross-engine integration audit to confirm 7 new falsifiers PASS (105+7+7=119 → 126 PASS after m3 deeper + r4 deeper) and zero collision; THEN apply same B+C pattern to m5 ordinal (8 ω-cycles + bnf + dossier) and r10 coupling systems (m10 coupling dossier + ω-cycles); after r10 deeper → cross-engine cluster fully anchored at design level; runtime invariants (I2..I10) await meta_decision_cert.jsonl + events JSONL telemetry export from r4_replan.py + meta_engine pipeline"
+  },
+  "constraints_honored": {
+    "read_only_atlas": true,
+    "read_only_falsifiers_jsonl": true,
+    "read_only_roadmap_engine_corpus": true,
+    "read_only_tool_corpus": true,
+    "witness_under_200_lines": true,
+    "no_commit": true,
+    "raw_71_deferral_explicit": true,
+    "raw_73_admissibility": "all 7 entries testable + non-trivial; F168-F173 SHA-stable + validated PASS 2026-04-26 (6 cmds reproduce); F174 meta-axis grep analog of F132/F160 (validated as pattern by F132 shipped intact + F160 m3-deeper plan accepted)",
+    "F_id_partitioning_strict": "F133-F139 unused (gap after F132); F140-F146 anima reserved + F147-F153 n6-arch assumed + F154-F160 m3-deeper reserved + F161-F167 m5-deeper reserved per task constraint → F168-F174 chosen strictly disjoint",
+    "no_other_agent_F_range_intrusion": true
+  },
+  "cross_engine_pattern_extensibility": {
+    "applicable_to_m5_ordinal": "YES — m5 has 8 ω-cycles (ordinal_infra/i1i2_parser/i4_schema/i5_fixpoint/i6_23round/bnf_augment/spec_corpus/i1i2_emission) + dossier + bnf spec; analogous SHA @T entries for each ω-cycle + 1-2 @M meta-axes (e.g., @M m5_ordinal_descent_strict_or_axes_acted_nonempty); F127+F130 already cover tool + bnf SHA — deeper covers ω-cycle witnesses (F161-F167 reserved range)",
+    "applicable_to_r10_coupling": "YES — r10 has m10 coupling dossier + likely ω-cycle witnesses; F131 covers dossier SHA — deeper would expand to ω-cycle SHAs once r10 ω-cycle inventory complete",
+    "shared_pattern_now_thrice_validated": "B+C combination per cross-engine system: N @T (file-SHA per ω-cycle/dossier/spec) + 1 @M (load-bearing invariant); shard naming convention atlas.append.<axis>-deeper-2026-04-26.n6; m3 (F154-F160) + r4 (F168-F174) both fit 7-entry cadence matching original cross-engine F126-F132"
+  }
+}
