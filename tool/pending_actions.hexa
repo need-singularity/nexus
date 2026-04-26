@@ -51,25 +51,35 @@ while i < len(args) {
 
 fn _say(msg: string) { if !QUIET { println(msg) } }
 
-// 1. F78-F80 atlas merge proposal
-//    위트너스: 2026-04-26_synthesis_multi_decomp_formalization_omega_cycle.json
+// 1. F78-F80 atlas merge proposal — registry에 F78 존재 시 ALREADY_DONE
 let p1_witness = NEXUS + "/design/hexa_sim/2026-04-26_synthesis_multi_decomp_formalization_omega_cycle.json"
+let p1_check = to_string(exec("grep -c '\"id\":\"F78\"\\|\"id\": \"F78\"' /Users/ghost/core/nexus/design/hexa_sim/falsifiers.jsonl 2>/dev/null")).trim()
 let mut p1 = "BLOCKED"
-if file_exists(p1_witness) { p1 = "READY" }
+if file_exists(p1_witness) {
+    if p1_check != "0" && len(p1_check) > 0 { p1 = "ALREADY_DONE" }
+    else { p1 = "READY" }
+}
 _say("1. F78-F80 atlas merge       : " + p1 + " (multi-decomp @X 23/168/1728; ~5min user execute)")
 
-// 2. F126-F132 cross-engine merge proposal
+// 2. F126-F132 cross-engine merge — registry에 F126 존재 시 ALREADY_DONE
 let p2_audit = NEXUS + "/design/hexa_sim/2026-04-26_cross_engine_integration_audit.md"
 let p2_witness = NEXUS + "/design/hexa_sim/2026-04-26_cross_engine_integration_omega_cycle.json"
+let p2_check = to_string(exec("grep -c '\"id\":\"F126\"\\|\"id\": \"F126\"' /Users/ghost/core/nexus/design/hexa_sim/falsifiers.jsonl 2>/dev/null")).trim()
 let mut p2 = "BLOCKED"
-if file_exists(p2_audit) && file_exists(p2_witness) { p2 = "READY" }
+if file_exists(p2_audit) && file_exists(p2_witness) {
+    if p2_check != "0" && len(p2_check) > 0 { p2 = "ALREADY_DONE" }
+    else { p2 = "READY" }
+}
 _say("2. F126-F132 cross-engine    : " + p2 + " (m3/m5/r4/r10 anchors; ~10min)")
 
-// 3. xpoll cleanup
-//    F46/F47 HIT 상태가 'xpoll convention violation 존재' 신호
+// 3. xpoll cleanup — atlas.n6에 'sigma(12) = 12' 패턴 있으면 READY, 없으면 ALREADY_DONE
 let p3_convention = NEXUS + "/design/atlas_function_call_convention.md"
+let p3_violations = to_string(exec("grep -cE '= sigma\\(12\\) = 12|= tau\\(4\\) = 4' /Users/ghost/core/nexus/n6/atlas.n6 2>/dev/null")).trim()
 let mut p3 = "BLOCKED"
-if file_exists(p3_convention) { p3 = "READY" }
+if file_exists(p3_convention) {
+    if p3_violations == "0" || len(p3_violations) == 0 { p3 = "ALREADY_DONE" }
+    else { p3 = "READY" }
+}
 _say("3. xpoll cleanup             : " + p3 + " (21 atlas lines; ~10min mechanical rewrite)")
 
 // 4. n6-arch (f) populate — cross-repo write
