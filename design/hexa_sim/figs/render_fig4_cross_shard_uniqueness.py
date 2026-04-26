@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # render_fig4_cross_shard_uniqueness.py
 # ----------------------------------------------------------------------
-# Paper Fig 4 — Cross-shard uniqueness: 11 shards / 9165 tuples / 0 collisions.
+# Paper Fig 4 — Cross-shard uniqueness: 16 shards / 9174 tuples / 0 collisions.
 # Source data:
 #   state/atlas_sha256.tsv                             (per-shard line counts)
-#   tool/atlas_cross_shard_collision.sh witness        (9165 unique / 0 collisions)
+#   tool/atlas_cross_shard_collision.sh witness        (9174 unique / 0 collisions)
+# History: 11 shards / 9165 unique (initial) -> 16 / 9174 (2026-04-26 deeper
+# integration: cross-engine-meta-roadmap + m3/m5/r4/r10/r2-r6-r8 deeper shards).
 # Outputs:
 #   design/hexa_sim/figs/fig4_cross_shard_uniqueness.svg (vector)
 #   design/hexa_sim/figs/fig4_cross_shard_uniqueness.png (300 dpi raster)
@@ -14,7 +16,7 @@
 import os, sys
 TSV = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'state', 'atlas_sha256.tsv')
 OUT = os.path.dirname(os.path.abspath(__file__))
-UNIQUE_TUPLES = 9165   # tool/atlas_cross_shard_collision.sh sentinel
+UNIQUE_TUPLES = 9174   # tool/atlas_cross_shard_collision.sh sentinel (2026-04-26)
 COLLISIONS    = 0      # tool/atlas_cross_shard_collision.sh sentinel
 
 def short_label(p):
@@ -69,7 +71,7 @@ def main():
     ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel('shard line count (raw .n6 entries)')
-    ax.set_title('Cross-shard uniqueness: 11 shards / 9,165 tuples / 0 collisions')
+    ax.set_title(f'Cross-shard uniqueness: {len(rows)} shards / {UNIQUE_TUPLES:,} tuples / {COLLISIONS} collisions')
     ax.set_xlim(0, max(counts) * 1.15)
     ax.grid(axis='x', alpha=0.25, linestyle=':')
     caption = (f'cumulative raw lines = {total:,}  ->  dedup primitive  ->  '

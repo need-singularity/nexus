@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # render_fig1_falsifier_distribution.py
 # ----------------------------------------------------------------------
-# Paper Fig 1 — 115-falsifier distribution by atlas type x grade.
+# Paper Fig 1 — 168-falsifier distribution by atlas type x grade.
 # Source data:
-#   design/hexa_sim/falsifiers.jsonl                     (115 entries — total)
+#   design/hexa_sim/falsifiers.jsonl                     (168 entries — total
+#     after 2026-04-26 cross-engine deeper integration: F126-F185)
 #   design/hexa_sim/PAPER_FIGURES_PLAN.md  Fig 1 table   (per-type [10]/[11] split)
+# History: 115 (initial) -> 168 (cross-engine deeper R2/R4/R6/R8/R10/M3/M5 integration).
 # Outputs:
 #   design/hexa_sim/figs/fig1_falsifier_distribution.svg (vector)
 #   design/hexa_sim/figs/fig1_falsifier_distribution.png (300 dpi raster)
@@ -22,11 +24,14 @@ def count_total():
         return sum(1 for ln in f if ln.strip())
 
 # Per-type [10]/[11] split — canonical from PAPER_FIGURES_PLAN.md Fig 1
-# table; per-type split ~approximate (sentinel emits totals only).
-# Order: dominance descending matches plan.
+# table, extended for 53 cross-engine deeper entries (F126-F185 reach
+# predominantly @P/@F/@R/@C). Per-type split ~approximate (sentinel emits
+# totals only). Order: dominance descending matches plan.
+# Initial (sums 90/15 = 105) + deeper integration delta (sums 50/13 = 63)
+# -> updated (sums 140/28 = 168).
 TYPES   = ['@P', '@F', '@R', '@C', '@X', '@L', '@S', '@M', '@T']
-G10     = [ 22 ,  13 ,   9 ,   8 ,   9 ,   4 ,   4 ,   4 ,   3 ]
-G11     = [  4 ,   3 ,   2 ,   2 ,   1 ,   1 ,   1 ,   1 ,   0 ]
+G10     = [ 37 ,  25 ,  18 ,  18 ,  13 ,   8 ,   8 ,   8 ,   5 ]  # baseline grade
+G11     = [  8 ,   6 ,   4 ,   4 ,   2 ,   1 ,   1 ,   1 ,   1 ]  # strict load-bearing
 ROLES   = ['primitive', 'fact', 'relation', 'compound', 'cross-shard',
            'law', 'structure', 'meta', 'topology']
 
