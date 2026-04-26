@@ -1,0 +1,141 @@
+// tool/falsifier_id_gaps.hexa — registry F# slot gap 자동 식별 (hexa-native)
+//
+// raw 9 hexa-only-suffix. registry의 빈 F# slot (e.g. F13-F18 reserved, F45 declined,
+// F95 reservation released, F115-F124 partial) 자동 식별 + 레이블링. 향후 expansion
+// 계획 시 next-available F# 빠른 확인.
+//
+// @tool(slug="falsifier_id_gaps", desc="registry F# gaps + provenance labels")
+// @usage:
+//   hexa run tool/falsifier_id_gaps.hexa
+//   HEXA_ARGV='--quiet' hexa run tool/falsifier_id_gaps.hexa
+//
+// 점검:
+//   1. registry 모든 F#id 추출 + 정렬
+//   2. F1..max 사이 missing slot 식별
+//   3. 각 gap에 known label 매핑 (declined / reservation_released / partial / reserved)
+//   4. next-available F# (max+1) 명시
+//
+// sentinel: __FALSIFIER_ID_GAPS__ max=N total=T present=P gaps=G next=N+1
+//
+// raw 71 read-only / raw 73 admissibility / raw 80 sentinel
+
+let REGISTRY = "/Users/ghost/core/nexus/design/hexa_sim/falsifiers.jsonl"
+let mut QUIET = false
+
+fn _argv() -> array {
+    let raw = to_string(exec("printf '%s' \"${HEXA_ARGV:-}\""))
+    let parts = split(raw, " ")
+    let mut out = []
+    let mut k = 0
+    while k < len(parts) {
+        if len(parts[k]) > 0 { out.push(parts[k]) }
+        k = k + 1
+    }
+    return out
+}
+
+let args = _argv()
+let mut i = 0
+while i < len(args) {
+    let a = args[i]
+    if a == "--quiet" { QUIET = true }
+    if a == "--help" || a == "-h" {
+        println("usage: HEXA_ARGV='--quiet' hexa run tool/falsifier_id_gaps.hexa")
+        println("  registry F# slot gap 식별 + next-available 안내")
+        return
+    }
+    i = i + 1
+}
+
+fn _say(msg: string) { if !QUIET { println(msg) } }
+
+fn _jget(line: string, key: string) -> string {
+    let n1 = "\"" + key + "\":\""
+    let n2 = "\"" + key + "\": \""
+    let mut idx = line.index_of(n1)
+    let mut nlen = len(n1)
+    if idx < 0 {
+        idx = line.index_of(n2)
+        nlen = len(n2)
+    }
+    if idx < 0 { return "" }
+    let start = idx + nlen
+    let rest = line.substring(start, len(line))
+    let endi = rest.index_of("\"")
+    if endi < 0 { return "" }
+    return rest.substring(0, endi)
+}
+
+// known gap labels — 본 세션 history 기반
+fn _gap_label(n: int) -> string {
+    if n >= 13 && n <= 18 { return "RESERVED (F13-F18 reserved-during-F19+ batch)" }
+    if n == 45 { return "DECLINED (cross-bridge triplet rigor decline; SECURITY_AUDIT.md)" }
+    if n >= 78 && n <= 80 { return "RESERVED (F78-F80 multi-decomp @X atlas-merge user-go pending)" }
+    if n == 95 { return "DECLINED (cross-bridge correlation v2 declined; reservation released)" }
+    if n >= 115 && n <= 124 { return "RESERVED (F115-F124 partial gap during F125 doc-hash master)" }
+    if n >= 126 && n <= 132 { return "RESERVED (F126-F132 cross-engine atlas-merge user-go pending)" }
+    return "UNCLAIMED (no known reason; available)"
+}
+
+// Read registry + collect IDs
+if !file_exists(REGISTRY) {
+    println("__FALSIFIER_ID_GAPS__ max=0 total=0 present=0 gaps=0 next=1 reason=registry_missing")
+    exit(76)
+}
+
+let content = to_string(read_file(REGISTRY))
+let lines = split(content, "\n")
+let mut ids = []
+for line in lines {
+    let t = line.trim()
+    if len(t) == 0 { continue }
+    let id = _jget(t, "id")
+    if len(id) == 0 { continue }
+    if id.substring(0, 1) != "F" { continue }
+    let num_str = id.substring(1, len(id))
+    let n = to_int(num_str)
+    if n > 0 { ids.push(n) }
+}
+
+// find max
+let mut max_id = 0
+for n in ids {
+    if n > max_id { max_id = n }
+}
+
+// build present set via sequential scan (hexa array of small ints OK for ~150 entries)
+fn _has(arr: array, target: int) -> bool {
+    for x in arr { if x == target { return true } }
+    return false
+}
+
+let mut gaps = []
+let mut present_count = 0
+let mut k = 1
+while k <= max_id {
+    if _has(ids, k) {
+        present_count = present_count + 1
+    } else {
+        gaps.push(k)
+    }
+    k = k + 1
+}
+
+// Output
+_say("═══ Falsifier registry F# slot inventory ═══")
+_say("")
+_say("max:     F" + to_string(max_id))
+_say("present: " + to_string(present_count))
+_say("gaps:    " + to_string(len(gaps)))
+_say("next:    F" + to_string(max_id + 1))
+_say("")
+if len(gaps) > 0 {
+    _say("Gap details:")
+    for g in gaps {
+        let label = _gap_label(g)
+        _say("  F" + to_string(g) + " → " + label)
+    }
+    _say("")
+}
+
+println("__FALSIFIER_ID_GAPS__ max=" + to_string(max_id) + " total=" + to_string(len(ids)) + " present=" + to_string(present_count) + " gaps=" + to_string(len(gaps)) + " next=" + to_string(max_id + 1))
