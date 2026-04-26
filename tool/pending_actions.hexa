@@ -1,0 +1,113 @@
+// tool/pending_actions.hexa — 5 user-go pending items quick status (hexa-native)
+//
+// raw 9 hexa-only-suffix. 본 세션 마지막 핸드오프 (NEXT_SESSION_HANDOFF_v3.md)
+// 의 5 pending items 자동 status 체크 — 사용자가 어느 것 승인 가능한지 한눈에.
+//
+// @tool(slug="pending_actions", desc="user-go pending items status (5 items)")
+// @usage:
+//   hexa run tool/pending_actions.hexa
+//   HEXA_ARGV='--quiet' hexa run tool/pending_actions.hexa  # sentinel only
+//
+// 점검 항목:
+//   1. F78-F80 atlas merge 대기 (multi-decomp @X 23/168/1728)
+//   2. F126-F132 cross-engine merge 대기 (m3/m5/r4/r10)
+//   3. xpoll cleanup 대기 (atlas.n6의 19 sigma + 11 tau xpoll-* 규약 위반)
+//   4. n6-arch precondition (f) populate 대기 (cross-repo defense doc)
+//   5. R5 SSH key activation 대기 (~/.ssh/id_ed25519 reuse, ~5 min)
+//
+// sentinel: __PENDING_ACTIONS__ count=5 ready=R blocked=B
+//   ready = 자율 안전 (user 1-cmd 실행 가능)
+//   blocked = cross-repo write OR 사용자 검토 필요 (1+분)
+//
+// raw 71 read-only / raw 73 admissibility / raw 80 sentinel
+
+let NEXUS = "/Users/ghost/core/nexus"
+let mut QUIET = false
+
+fn _argv() -> array {
+    let raw = to_string(exec("printf '%s' \"${HEXA_ARGV:-}\""))
+    let parts = split(raw, " ")
+    let mut out = []
+    let mut k = 0
+    while k < len(parts) {
+        if len(parts[k]) > 0 { out.push(parts[k]) }
+        k = k + 1
+    }
+    return out
+}
+
+let args = _argv()
+let mut i = 0
+while i < len(args) {
+    let a = args[i]
+    if a == "--quiet" { QUIET = true }
+    if a == "--help" || a == "-h" {
+        println("usage: HEXA_ARGV='--quiet' hexa run tool/pending_actions.hexa")
+        println("  5 user-go pending items status (READY|BLOCKED)")
+        return
+    }
+    i = i + 1
+}
+
+fn _say(msg: string) { if !QUIET { println(msg) } }
+
+// 1. F78-F80 atlas merge proposal
+//    위트너스: 2026-04-26_synthesis_multi_decomp_formalization_omega_cycle.json
+let p1_witness = NEXUS + "/design/hexa_sim/2026-04-26_synthesis_multi_decomp_formalization_omega_cycle.json"
+let mut p1 = "BLOCKED"
+if file_exists(p1_witness) { p1 = "READY" }
+_say("1. F78-F80 atlas merge       : " + p1 + " (multi-decomp @X 23/168/1728; ~5min user execute)")
+
+// 2. F126-F132 cross-engine merge proposal
+let p2_audit = NEXUS + "/design/hexa_sim/2026-04-26_cross_engine_integration_audit.md"
+let p2_witness = NEXUS + "/design/hexa_sim/2026-04-26_cross_engine_integration_omega_cycle.json"
+let mut p2 = "BLOCKED"
+if file_exists(p2_audit) && file_exists(p2_witness) { p2 = "READY" }
+_say("2. F126-F132 cross-engine    : " + p2 + " (m3/m5/r4/r10 anchors; ~10min)")
+
+// 3. xpoll cleanup
+//    F46/F47 HIT 상태가 'xpoll convention violation 존재' 신호
+let p3_convention = NEXUS + "/design/atlas_function_call_convention.md"
+let mut p3 = "BLOCKED"
+if file_exists(p3_convention) { p3 = "READY" }
+_say("3. xpoll cleanup             : " + p3 + " (21 atlas lines; ~10min mechanical rewrite)")
+
+// 4. n6-arch (f) populate — cross-repo write
+let p4_n6arch = "/Users/ghost/core/n6-architecture"
+let mut p4 = "BLOCKED"
+if file_exists(p4_n6arch) {
+    // n6-arch에 SECURITY 류 doc 있는지 직접 확인
+    let check_cmd = "ls /Users/ghost/core/n6-architecture/SECURITY* /Users/ghost/core/n6-architecture/doc/security/* 2>/dev/null | wc -l | tr -d ' '"
+    let n = to_string(exec(check_cmd)).trim()
+    if n != "0" { p4 = "ALREADY_DONE" }
+    else { p4 = "BLOCKED" }
+}
+_say("4. n6-arch precondition (f)  : " + p4 + " (cross-repo write; user-only ~15min)")
+
+// 5. R5 SSH key activation
+let p5_runbook = NEXUS + "/design/hexa_sim/R5_SSH_ACTIVATION_RUNBOOK.md"
+let p5_signing_check = "git config --get user.signingkey 2>/dev/null"
+let signing = to_string(exec(p5_signing_check)).trim()
+let mut p5 = "BLOCKED"
+if file_exists(p5_runbook) {
+    if len(signing) > 0 { p5 = "ALREADY_DONE" }
+    else { p5 = "READY" }
+}
+_say("5. R5 SSH key activation     : " + p5 + " (Path A reuse ~/.ssh/id_ed25519; ~5min)")
+
+// Tally
+let mut ready = 0
+let mut blocked = 0
+let mut done = 0
+for s in [p1, p2, p3, p4, p5] {
+    if s == "READY" { ready = ready + 1 }
+    if s == "BLOCKED" { blocked = blocked + 1 }
+    if s == "ALREADY_DONE" { done = done + 1 }
+}
+
+if !QUIET {
+    println("")
+    println("Summary: " + to_string(ready) + " READY (자율 user 1-cmd) / " + to_string(blocked) + " BLOCKED (cross-repo or 미준비) / " + to_string(done) + " ALREADY_DONE")
+}
+
+println("__PENDING_ACTIONS__ count=5 ready=" + to_string(ready) + " blocked=" + to_string(blocked) + " done=" + to_string(done))
