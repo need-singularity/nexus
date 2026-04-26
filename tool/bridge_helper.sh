@@ -41,6 +41,11 @@
 #   BRIDGE_HELPER_CACHE_MAX_BYTES  : max total cache dir size in bytes (default 50000000 = 50 MB)
 #   BRIDGE_HELPER_GC_PROBABILITY   : probabilistic gc trigger frequency on fetch (1 in N; default 100)
 #                                    set to 0 to disable; set to 1 to gc every fetch (test mode)
+#   BRIDGE_HELPER_AUTH             : if set, full Authorization header value (e.g. "Bearer xyz").
+#                                    Passed to curl via --header @<tempfile> (no argv leak).
+#                                    Cache key includes sha1(auth)[0:8] so distinct tokens get
+#                                    distinct cache entries. Tempfile is mode 0600 and removed
+#                                    on EXIT trap. Verbose logs redact this value.
 #
 # ω-bridge-4 (2026-04-26): UA / extra-headers / per-call-timeout pass-through restored
 #   for the 8 bridges that lost them in the ω-bridge-3 sweep (cmb/nanograv/icecube/arxiv/
@@ -54,6 +59,19 @@
 #   enforces CACHE_MAX_BYTES by evicting oldest-first. fetch invokes cache-gc inline with
 #   1/GC_PROBABILITY probability (default 1/100 → ~1% overhead). See
 #   state/omega_bridge_5_cache_gc.json.
+#
+# ω-bridge-11 (2026-04-26): secrets / API-key support.
+#   New env: BRIDGE_HELPER_AUTH (full Authorization header value, e.g. "Bearer eyJ…").
+#   When set:
+#     - written to a mode-0600 tempfile and passed to curl via `--header @<tempfile>`
+#       (no token in argv ⇒ ps-safe; trap on EXIT scrubs the tempfile)
+#     - cache key incorporates sha1(auth)[0:8] so distinct tokens get distinct cache
+#       entries (no cross-tenant cache poisoning) without exposing the raw token in
+#       the filename
+#     - any verbose log line containing the raw auth string is scrubbed and replaced
+#       with "Authorization: <REDACTED>"
+#   When unset: behaviour identical to ω-bridge-6 (zero-overhead backward-compat).
+#   See state/omega_bridge_11_secrets.json.
 #
 # ω-bridge-6 (2026-04-26): JSON schema-drift detection.
 #   Addresses latent regression risk for the 9 silently-PASS bridges in
@@ -89,8 +107,25 @@ GC_PROBABILITY="${BRIDGE_HELPER_GC_PROBABILITY:-100}"
 SCHEMA_FP_TSV="${BRIDGE_HELPER_SCHEMA_FP_TSV:-$NEXUS_ROOT/state/bridge_schema_fingerprint.tsv}"
 
 _log() {
-    [ "$VERBOSE" = "1" ] && echo "[bridge_helper] $*" >&2
+    if [ "$VERBOSE" = "1" ]; then
+        local msg="$*"
+        # ω-bridge-11: redact the AUTH value if it appears verbatim in the log line.
+        if [ -n "${BRIDGE_HELPER_AUTH:-}" ]; then
+            # bash parameter substitution — replace all literal occurrences with REDACTED token.
+            msg="${msg//${BRIDGE_HELPER_AUTH}/<REDACTED>}"
+            # Also normalize "Authorization: <REDACTED>" form when the header label is present.
+            msg="${msg//Authorization: <REDACTED>/Authorization: <REDACTED>}"
+        fi
+        echo "[bridge_helper] $msg" >&2
+    fi
     return 0
+}
+
+_auth_hash() {
+    # ω-bridge-11: short stable hash of the auth value (first 8 hex of sha1).
+    # Empty input ⇒ empty output (so cache key is unchanged when AUTH unset).
+    [ -z "${1:-}" ] && return 0
+    printf '%s' "$1" | shasum -a 1 2>/dev/null | awk '{print substr($1,1,8)}'
 }
 
 _url_hash() {
@@ -131,6 +166,24 @@ cmd_fetch() {
         _log "timeout override: $effective_max_time"
     fi
 
+    # ω-bridge-11: if BRIDGE_HELPER_AUTH set, write to mode-0600 tempfile and pass via
+    #   curl --header @<file>. This keeps the secret out of argv (ps-safe) and out of
+    #   any error log curl might emit (curl uses the file content as the header value
+    #   without echoing the path back). The tempfile is removed on EXIT.
+    local _auth_tmp=""
+    if [ -n "${BRIDGE_HELPER_AUTH:-}" ]; then
+        _auth_tmp=$(mktemp 2>/dev/null) || _auth_tmp="/tmp/bridge_helper_auth_$$_${RANDOM}.tmp"
+        # Mode 0600 — owner-only — defence in depth against multi-user systems.
+        chmod 600 "$_auth_tmp" 2>/dev/null
+        # curl --header @<file> reads the file content as the header value (single header).
+        printf 'Authorization: %s' "$BRIDGE_HELPER_AUTH" > "$_auth_tmp"
+        # Trap EXIT to scrub on any return path (success / 4xx / persistent fail).
+        # shellcheck disable=SC2064  # intentional early-expansion of $_auth_tmp
+        trap "rm -f '$_auth_tmp' 2>/dev/null" EXIT
+        extra_args+=(--header "@$_auth_tmp")
+        _log "AUTH header configured via tempfile (value redacted)"
+    fi
+
     # bypass mode = raw passthrough (preserves legacy single-attempt behaviour for debug)
     if [ "${BRIDGE_HELPER_DISABLE:-0}" = "1" ]; then
         _log "DISABLE=1, raw curl passthrough"
@@ -144,8 +197,16 @@ cmd_fetch() {
     _maybe_gc_trigger
 
     local hash; hash=$(_url_hash "$url")
-    local cache_body="$CACHE_DIR/${bridge}_${hash}.body"
-    local cache_meta="$CACHE_DIR/${bridge}_${hash}.meta"
+    # ω-bridge-11: when AUTH is set, append sha1(auth)[0:8] to the cache key so different
+    # tokens yield different cached bodies (no cross-tenant leakage), without putting the
+    # raw token in any filename. Auth-unset path: key unchanged ⇒ backward compatible.
+    local auth_suffix=""
+    if [ -n "${BRIDGE_HELPER_AUTH:-}" ]; then
+        local _ah; _ah=$(_auth_hash "$BRIDGE_HELPER_AUTH")
+        [ -n "$_ah" ] && auth_suffix="_a${_ah}"
+    fi
+    local cache_body="$CACHE_DIR/${bridge}_${hash}${auth_suffix}.body"
+    local cache_meta="$CACHE_DIR/${bridge}_${hash}${auth_suffix}.meta"
     local lock_file="$CACHE_DIR/${bridge}.lastcall"
 
     # 1. Cache check
