@@ -19,10 +19,17 @@
 // ─── helpers ───
 
 fn _json_str_get(line: string, key: string) -> string {
-    let needle = "\"" + key + "\":\""
-    let i = line.index_of(needle)
+    // Tolerate both "key":"v" (compact) and "key": "v" (python json.dumps default with space)
+    let needle_compact = "\"" + key + "\":\""
+    let needle_spaced = "\"" + key + "\": \""
+    let mut i = line.index_of(needle_compact)
+    let mut needle_len = len(needle_compact)
+    if i < 0 {
+        i = line.index_of(needle_spaced)
+        needle_len = len(needle_spaced)
+    }
     if i < 0 { return "" }
-    let start = i + len(needle)
+    let start = i + needle_len
     let rest = line.substring(start, len(line))
     let end = rest.index_of("\"")
     if end < 0 { return "" }
