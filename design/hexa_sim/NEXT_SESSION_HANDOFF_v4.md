@@ -89,7 +89,14 @@ ls design/hexa_sim/falsifiers.jsonl.sig  # signature artifact 존재 확인
 | R3-full pre-commit hook | NO (intentional, OS-locked) | NO | NO |
 | R4 forensic ledger | LIVE | LIVE | LIVE |
 | R5 hash-chained ledger | LIVE | LIVE (2 entries) | LIVE (3 entries) |
-| R5 SSH signature | **PREVENTIVE** (SIGNED+VERIFIED) | STUB (skip) | STUB (skip) |
+| R5 SSH signature | **PREVENTIVE** (SIGNED+VERIFIED) | **PREVENTIVE** (commit `2285f130`) | **PREVENTIVE** (commit `2285f130`) |
+
+**3-domain R5 SSH propagation** (post-v4 commit `2285f130`): `tool/registry_sign.sh` 확장 — `--target {falsifier|bridge|atlas|PATH}` flag. 3 signature artifacts:
+- `design/hexa_sim/falsifiers.jsonl.sig` (registry; commit `368209c0`)
+- `state/bridge_sha256.tsv.sig` (bridge; commit `2285f130`)
+- `state/atlas_sha256.tsv.sig` (atlas; commit `2285f130`)
+
+3 domains 모두 `__REGISTRY_SIGN__ VERIFIED identity=nexus@local`. 이로써 3 R5 layers (chain + SSH) × 3 domains (falsifier + bridge + atlas) = **9 cell defense matrix 완전 채움**. 잔여 attack surface: signing key compromise만 (single key for 3 domains — single point of failure; mitigation: chmod 600 + macOS Keychain).
 
 ## Hexa-only ecosystem (본 세션 13 도구)
 
@@ -129,5 +136,32 @@ __SESSION_OVERVIEW__ PASS defense=PASS falsifiers=115 bridges=16/0_tampered
 - `368209c0` 5 user-go all-go 일괄 처리 (F78-F80 + F126-F132 + xpoll + R5 SSH)
 - `3f12168e` (n6-architecture) SECURITY.md 추가 (precondition (f) populate)
 - `a75b707f` post-all-go 정리 (atlas R5 chain 정합 + SECURITY_AUDIT R5 ACTIVATED 반영)
+- `1f0fb76d` HANDOFF_v4 작성
+- `6124c304` cross_repo_dashboard 자동 regen (n6-arch 6/6 반영)
+- `2285f130` R5 SSH propagation to bridge + atlas (defense matrix 9-cell 완성)
+- `c70b25c3` pending_actions 검증 정확화 (3 stale READY → ALREADY_DONE)
 
-본 세션 commits: ~333 (since 2026-04-25), +67000 LoC, 21 explicit ω-cycle commits.
+**최종 sentinel** (post-v4 closure):
+```
+__SESSION_OVERVIEW__ PASS defense=PASS falsifiers=115 bridges=16/0_tampered
+atlas=11/0_tampered honesty=3/3 pending_ready=0/5 next_f=F133
+commits=336+ hexa_tools=203 omegas=71 unique=PASS reg_growth=+115/21
+```
+
+본 세션 commits: ~336+ (since 2026-04-25), +67000 LoC, 21 explicit ω-cycle commits.
+
+## 본 세션 closure status
+
+- **5 pending user-go = 0** (all-go 처리 + post-cleanup 모두 완료)
+- **defense parity 9-cell 완성** (R5 chain×3 + R5 SSH×3 + R1×3 — falsifier/bridge/atlas)
+- **honesty mode-6: 3/4 6_6** (hexa-lang OPT-A architectural ceiling 유지)
+- **115 falsifiers** (CLEAN 113 + HIT-as-designed 0 — F46/F47 cleanup-target 충족 후 PASS)
+- **13 hexa-only tool ecosystem** (`HEXA_TOOLS_README.md` 카탈로그)
+- **모든 metric green** — 추가 자율-안전 deep work 거의 소진
+
+**다음 세션 기회**:
+1. Paper draft (META_ROI 권고: depth ON / cron OFF)
+2. 새 도메인 ω-cycle (hexa-sim 외)
+3. F133+ 신규 expansion (cross-engine 통합 후 deeper)
+4. m3 anchor system import to atlas
+5. Bridge fallback hardening (uniprot OFFLINE-FALLBACK 표준화)
