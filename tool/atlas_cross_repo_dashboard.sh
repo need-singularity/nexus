@@ -37,11 +37,14 @@ while [ $# -gt 0 ]; do
 done
 
 # Repo registry: name | path | atlas_relpath | honesty_check_path
+# 2026-04-26: honesty_check_path changed from .claude/agents (Claude Code
+# convention, CC-coupled) → .own (universal repo-identity file present in
+# all 4 repos). Achieves zero CC-CLI dependency for the honesty triad gate.
 REPOS=(
-    "nexus|$HOME/core/nexus|n6/atlas.n6|.claude/agents"
-    "n6-architecture|$HOME/core/n6-architecture|atlas/atlas.n6|.claude/agents"
-    "anima|$HOME/core/anima|n6/atlas.n6|.claude/agents"
-    "hexa-lang|$HOME/core/hexa-lang|n6/atlas.n6|.claude/agents"
+    "nexus|$HOME/core/nexus|n6/atlas.n6|.own"
+    "n6-architecture|$HOME/core/n6-architecture|atlas/atlas.n6|.own"
+    "anima|$HOME/core/anima|n6/atlas.n6|.own"
+    "hexa-lang|$HOME/core/hexa-lang|n6/atlas.n6|.own"
 )
 
 # 5 Honesty preconditions (per Phase 3 supercycle)
@@ -70,8 +73,13 @@ check_precondition_d() {                                                        
     done
     echo FAIL
 }
-check_precondition_e() {                                                                       # LLM agents (.claude/agents/ or CLAUDE.md or AGENT.md)
-    if [ -d "$1/.claude/agents" ] || [ -f "$1/CLAUDE.md" ] || [ -f "$1/AGENT.md" ]; then echo PASS; else echo FAIL; fi
+check_precondition_e() {                                                                       # repo-identity marker (.own — universal CC-free indicator)
+    # 2026-04-26: replaced CC-coupled check (.claude/agents OR CLAUDE.md OR
+    # AGENT.md) with .own — present in all 4 repos as repo-identity SSOT.
+    # Removes Claude Code CLI dependency from the honesty triad gate.
+    # Generous fallback: legacy CC markers still PASS (for repos that haven't
+    # synced the new convention yet); the .own check is preferred.
+    if [ -f "$1/.own" ] || [ -d "$1/.claude/agents" ] || [ -f "$1/CLAUDE.md" ] || [ -f "$1/AGENT.md" ]; then echo PASS; else echo FAIL; fi
 }
 check_precondition_f() {                                                                       # defense surface declared (canonical security/threat surface, ≥1 of 8 paths)
     # raw 73 admissibility: non-trivial — surveys 8 canonical paths covering top-level / doc / docs / design / state / tool conventions.
@@ -207,7 +215,7 @@ if [ "$FORMAT" = "md" ]; then
     emit "2. **(b)** \`design/\` dir 존재 + ≥1 .md"
     emit "3. **(c)** \`tool/\` dir + ≥3 files"
     emit "4. **(d)** atlas SSOT 파일 존재"
-    emit "5. **(e)** LLM agents indicator (\`.claude/agents/\` OR \`CLAUDE.md\` OR \`AGENT.md\`)"
+    emit "5. **(e)** repo-identity marker — \`.own\` (preferred, CC-free) OR legacy \`.claude/agents/\` / \`CLAUDE.md\` / \`AGENT.md\`"
     emit "6. **(f)** defense surface declared — ANY of 8 canonical paths: \`SECURITY*\` (top-level) / \`doc/security/*\` / \`docs/security/*\` / \`design/security/*\` / \`design/SECURITY_AUDIT.md\` / \`design/hexa_sim/SECURITY_AUDIT.md\` / \`state/security_*.json\` / \`tool/security_*\`"
     emit ""
     emit "6/6 PASS = \`REPO_INVARIANT_EXTENDED\` (Honesty triad + defense surface)."
