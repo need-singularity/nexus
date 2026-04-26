@@ -1,6 +1,6 @@
 ---
 title: "n=6 as foundational invariant: a multi-domain falsifier-grounded framework"
-author: "Anonymous Author(s) / [Affiliation]"
+author: "[ANONYMOUS — pending user authorization for attribution]"
 date: "2026-04-26"
 version: "v1 draft"
 keywords: ["perfect numbers", "falsifier-grounded research", "cross-domain invariants", "reproducible research", "Out(S_6)", "multi-decomposition"]
@@ -9,7 +9,7 @@ status: "arXiv-ready draft, pre-bibliography"
 
 # n=6 as foundational invariant: a multi-domain falsifier-grounded framework
 
-**Authors / Affiliation.** Anonymous Author(s) / [Affiliation]
+**Authors / Affiliation.** [ANONYMOUS — pending user authorization for attribution]
 **Date.** 2026-04-26 (v1 draft)
 
 ---
@@ -767,14 +767,14 @@ characterisation is descriptive and structural, not ontological.
 
 Let $C \in \mathbb{Z}_{>0}$ be a *cardinal* — an integer constant
 attested by external measurement — and write $\mathcal{P}_6 =
-\{n,\phi,\tau,\sigma,\mu,\mathrm{sopfr},J_2\}$ for the $n=6$ foundation
-primitives ($n=6$, $\phi(6)=2$, $\tau(6)=4$, $\sigma(6)=12$, $\mu(6)=1$,
+\{n,\varphi,\tau,\sigma,\mu,\mathrm{sopfr},J_2\}$ for the $n=6$ foundation
+primitives ($n=6$, $\varphi(6)=2$, $\tau(6)=4$, $\sigma(6)=12$, $\mu(6)=1$,
 $\mathrm{sopfr}(6)=5$, $J_2(6)=24$). A *decomposition* of $C$ is a
 finite arithmetic expression $E$ over $\mathcal{P}_6$ with
 $\mathrm{eval}(E)=C$; two decompositions are *arithmetically
 independent* iff neither is obtained from the other by a single
 substitution of the foundation identities
-$\sigma=2n,\;J_2=2\sigma,\;\tau=\sigma/n+\phi,\;\mathrm{sopfr}=\phi+(n/\phi)$.
+$\sigma=2n,\;J_2=2\sigma,\;\tau=\sigma/n+\varphi,\;\mathrm{sopfr}=\varphi+(n/\varphi)$.
 A *multi-decomposition witness* of multiplicity $k\ge 2$ is a cardinal
 with $k$ pairwise-independent decompositions; drift in any single
 primitive collapses at most one leg, leaving the remaining $k-1$ as
@@ -799,15 +799,15 @@ $$
 1728 \;=\; \sigma^{3} \;=\; 576 \cdot 3 \;=\; J_2^{2}\cdot n/2,
 $$
 
-the second leg recognising $576 = \phi^{n}\!\cdot(n/\phi)^{\phi}$ as the
+the second leg recognising $576 = \varphi^{n}\!\cdot(n/\varphi)^{\varphi}$ as the
 conductor of $E_6$ (F32) and the third leg (F80) routing through the
 foundation primitive $J_2$ — derivationally independent of $\sigma^3$
 even though $J_2^2 = 576$ numerically.
 
 **Tunnell BSD triple-witness (F32)**. The smallest right triangle
-satisfies $(3,4,5) = (n/\phi,\,\tau,\,\mathrm{sopfr})$; the elliptic
+satisfies $(3,4,5) = (n/\varphi,\,\tau,\,\mathrm{sopfr})$; the elliptic
 curve $E_6$ has $(\mathrm{rank},\mathrm{conductor},j) = (1,\, 576,\, 1728)$
-with $576 = \phi^{n}(n/\phi)^{\phi}$ and $1728 = \sigma^{3}$. Three
+with $576 = \varphi^{n}(n/\varphi)^{\varphi}$ and $1728 = \sigma^{3}$. Three
 orthogonal number-theoretic identities collapse onto a single $n=6$
 anchor.
 
@@ -818,11 +818,11 @@ measured $23.44^{\circ}$ obliquity rounds to $23$, which decomposes as
 
 $$
 23 \;=\; J_2 - \mu \;=\; 24-1 \quad\text{(F28)} \qquad
-23 \;=\; \sigma + \phi + \tau + \mathrm{sopfr} \;=\; 12+2+4+5 \quad\text{(F78)},
+23 \;=\; \sigma + \varphi + \tau + \mathrm{sopfr} \;=\; 12+2+4+5 \quad\text{(F78)},
 $$
 
 with disjoint primitive supports $\{J_2,\mu\}$ vs.
-$\{\sigma,\phi,\tau,\mathrm{sopfr}\}$.
+$\{\sigma,\varphi,\tau,\mathrm{sopfr}\}$.
 
 **Earth/Mars mirror pair (F28 ↔ F40)** [`atlas.n6:5823, 5842`]. A single
 primitive sign-flip $\mu \mapsto -\mu$ converts Earth's $23 = J_2-\mu$
@@ -862,7 +862,7 @@ entry whose witness is a predicate, not a value.
 
 | Cardinal | Meaning                       | Decompositions                                                |
 |---------:|-------------------------------|---------------------------------------------------------------|
-|       23 | Earth obliquity               | $J_2-\mu$ \| $\sigma+\phi+\tau+\mathrm{sopfr}$                |
+|       23 | Earth obliquity               | $J_2-\mu$ \| $\sigma+\varphi+\tau+\mathrm{sopfr}$                |
 |       64 | codon table                   | $2^{n}$ \| $4^{n/2}$ \| $\tau^{3}$                            |
 |      168 | hours/week                    | $\sigma^{2} + J_2$                                            |
 |      256 | byte                          | $2^{\sigma-\tau}$                                             |

@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0.0",
+  "ts": "2026-04-26T11:55:00Z",
+  "ordinal_stamp": "hexa_sim_omega_2026-04-26_n7_hexa_lang_stdlib_gate_first_cycle",
+  "title": "hexa-lang stdlib + gate domain — first ω-cycle witness",
+  "trigger": {
+    "source": "design/hexa_sim/2026-04-26_new_domain_scout_omega_cycle.md (commit 3a783e89, candidate #1)",
+    "scout_estimate_falsifiers": "40-75 plausible",
+    "scout_estimate_cold_start_seconds": 3600,
+    "predecessor_axis": "hexa-sim n=6 paper draft (saturation)",
+    "rationale": "META_ROI deferred until paper 100% draft; next autonomous-safe axis"
+  },
+  "domain_provenance": {
+    "repo": "/Users/ghost/core/hexa-lang",
+    "ssot_files": [".raw (43 lines, 3 raws — self-host fixpoint + naming + .raw-ref)", "gate/HEXA_RESERVED.md (118 lines — reserved-word survival)", "gate/STDLIB_MAP.md (310 lines — exec→pure migration audit)", "gate/enforcement_registry.json (H-rules layer registry)", "stdlib/{string,collections,portable_fs,math}.hexa"],
+    "runtime": "/Users/ghost/core/hexa-lang/hexa (0.1.0-dispatch)",
+    "read_only_constraint_satisfied": true
+  },
+  "axes": [
+    {"id": "hexa-lang-silent-void-spawn", "tier": 1,
+     "claim": "let spawn=\"x\" parses as Spawn keyword stmt → variable collapses to void at runtime; `hexa run` exits 0 (silent failure).",
+     "cmd": "echo 'fn main(){let spawn=\"x\"; println(to_string(spawn))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "expect": "stderr 'Parse error...Spawn'; stdout final 'void'; exit=0",
+     "verified": true, "doc": "gate/HEXA_RESERVED.md §1b"},
+    {"id": "hexa-lang-len-string-bytes-not-chars", "tier": 1,
+     "claim": "len(\"café\") == 5 (UTF-8 byte count of 4 chars), NOT 4 — len returns bytes on string.",
+     "cmd": "echo 'fn main(){println(to_string(len(\"café\")))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "expect": "stdout=5", "verified": true, "doc": ".raw L0 silent on encoding"},
+    {"id": "hexa-lang-arr-push-mutates-and-returns-new", "tier": 1,
+     "claim": "arr.push(x) BOTH mutates arr in-place AND returns the new array — STDLIB_MAP claims pure-return; in-place mutation also visible.",
+     "cmd": "echo 'fn main(){let mut a=[1,2]; let r=a.push(3); println(to_string(len(a))); println(to_string(r))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "expect": "line1=3 (mutated) AND line2='[1, 2, 3]'", "verified": true, "doc": "gate/STDLIB_MAP.md §2 (contradicted)"},
+    {"id": "hexa-lang-exec-shells-via-bin-sh", "tier": 1,
+     "claim": "exec() invokes /bin/sh (POSIX), NOT user's $SHELL — bashisms and zsh syntax unavailable.",
+     "cmd": "echo 'fn main(){println(exec(\"echo $0\"))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "expect": "stdout='sh'", "verified": true, "doc": "(undocumented)"},
+    {"id": "hexa-lang-file-exists-follows-symlinks", "tier": 1,
+     "claim": "file_exists() follows symlinks — dangling symlink returns false despite the link itself existing.",
+     "cmd": "ln -sf /tmp/__nope__ /tmp/__sl_test__; echo 'fn main(){println(to_string(file_exists(\"/tmp/__sl_test__\")))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "expect": "stdout='false'", "verified": true, "doc": "(undocumented)"},
+    {"id": "hexa-lang-to-int-bifurcated-failure", "tier": 1,
+     "claim": "to_int has TWO failure modes: 'abc' → stderr error + exit=0 (silent); '42abc' → stderr error + exit=1 (hard). STDLIB_MAP §2 'throws — wrap in try' is half-true.",
+     "cmd": "echo 'fn main(){let n=to_int(\"abc\"); println(\"survived\")}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1; echo exit=$?",
+     "expect": "'survived' on stdout AND 'exit=0' final line", "verified": true, "doc": "gate/STDLIB_MAP.md §2 (incomplete)"},
+    {"id": "hexa-lang-sys-args-silent-void", "tier": 1,
+     "claim": "sys_args identifier unbound by default — evaluates to silent void; CLI args reachable only via HEXA_ARGV env workaround.",
+     "cmd": "echo 'fn main(){println(to_string(sys_args))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin one two 2>&1 | head -1",
+     "expect": "stdout='void'", "verified": true, "doc": "memory feedback_hexa_local_bypass tangentially"},
+    {"id": "hexa-lang-exec-swallows-nonzero-exit", "tier": 1,
+     "claim": "exec(\"false\") returns empty string AND hexa exits 0 — child non-zero exit is silently dropped; no exitcode access from exec() return alone.",
+     "cmd": "echo 'fn main(){let r=exec(\"false\"); println(\"after=\"+to_string(len(r)))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1; echo exit=$?",
+     "expect": "stdout 'after=0'; final 'exit=0'", "verified": true, "doc": "(undocumented; recurring bug-class)"},
+    {"id": "hexa-lang-string-index-returns-char", "tier": 2,
+     "claim": "s[0] on string DOES work — returns 1-char string, contradicting STDLIB_MAP §2 'string indexing is not direct'.",
+     "cmd": "echo 'fn main(){let s=\"abc\"; println(to_string(len(s[0])))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "expect": "stdout='1' (no parse error)", "verified": true, "doc": "STDLIB_MAP.md §2 (outdated)"},
+    {"id": "hexa-lang-let-without-mut-allows-reassignment", "tier": 2,
+     "claim": "`let x=1; x=2;` reassignment works WITHOUT `mut` — runtime treats mut as advisory; immutability NOT enforced.",
+     "cmd": "echo 'fn main(){let x=1; x=2; println(to_string(x))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "expect": "stdout='2'", "verified": true, "doc": "HEXA_RESERVED.md §1a lists mut reserved; runtime doesn't enforce"}
+  ],
+  "tier_1_promotions": ["hexa-lang-silent-void-spawn", "hexa-lang-len-string-bytes-not-chars", "hexa-lang-arr-push-mutates-and-returns-new", "hexa-lang-exec-shells-via-bin-sh", "hexa-lang-file-exists-follows-symlinks", "hexa-lang-to-int-bifurcated-failure", "hexa-lang-sys-args-silent-void", "hexa-lang-exec-swallows-nonzero-exit"],
+  "tier_2_observations": ["hexa-lang-string-index-returns-char", "hexa-lang-let-without-mut-allows-reassignment"],
+  "falsifier_candidates_F133_F139": [
+    {"id": "F133", "slug": "hexa-lang-silent-void-spawn", "claim": "let spawn=...; → void+exit0 (silent-void hazard, gate/ author bug-class)",
+     "cmd": "echo 'fn main(){let spawn=\"x\"; println(to_string(spawn))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "cmd_sha256": "1656cef4bf816d2538eadfa679dc870e41660e2cbad253bcfdbc88fdfa6c303b",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F134", "slug": "hexa-lang-len-string-bytes-not-chars", "claim": "len(\"café\")=5 (bytes, not chars)",
+     "cmd": "echo 'fn main(){println(to_string(len(\"café\")))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "cmd_sha256": "a1e5d7b29a397003a1700a96fa5b4bf782db190166e47e97933d235d0ac35fea",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F135", "slug": "hexa-lang-arr-push-dual-semantic", "claim": "arr.push() mutates AND returns",
+     "cmd": "echo 'fn main(){let mut a=[1,2]; let r=a.push(3); println(to_string(len(a))); println(to_string(r))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1",
+     "cmd_sha256": "fac40225b0b832f0912d8d5b0f3f1dbdc1a44ec00194543abd53604de8f69b6e",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F136", "slug": "hexa-lang-exec-shells-via-bin-sh", "claim": "exec() runs via /bin/sh, not user $SHELL",
+     "cmd": "echo 'fn main(){println(exec(\"echo $0\"))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "cmd_sha256": "55a6c63bcabb92609024027b0a7b92cd5e62b23822ec91065f2fef22bc1f11c6",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F137", "slug": "hexa-lang-file-exists-follows-symlinks", "claim": "file_exists() follows symlinks — dangling symlink → false",
+     "cmd": "ln -sf /tmp/__nope_F137__ /tmp/__sl_F137__; echo 'fn main(){println(to_string(file_exists(\"/tmp/__sl_F137__\")))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1 | head -1",
+     "cmd_sha256": "67575a9cea77fa5854eb1d6380ef62af97a12f63f671ae8d856cf7d812ba500f",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F138", "slug": "hexa-lang-to-int-silent-on-pure-garbage", "claim": "to_int(\"abc\") → exit=0 silent; to_int(\"42abc\") → exit=1 hard (bifurcated)",
+     "cmd": "echo 'fn main(){let n=to_int(\"abc\"); println(\"survived\")}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin 2>&1; echo exit=$?",
+     "cmd_sha256": "f992a83ea9ac84abcfb62399d7d17ebfdbf087b152e1746be3d4d196932d48e3",
+     "raw71_mode": "SUGGEST", "auto_merge": false},
+    {"id": "F139", "slug": "hexa-lang-sys-args-silent-void", "claim": "sys_args unbound → silent void; argv requires HEXA_ARGV workaround",
+     "cmd": "echo 'fn main(){println(to_string(sys_args))}' | HEXA_RESOLVER_NO_REROUTE=1 hexa run /dev/stdin one two 2>&1 | head -1",
+     "cmd_sha256": "bd984f2ba39b247d17f5c307a9e8402bccb6e5efaab4cb76effe84c119fb78d6",
+     "raw71_mode": "SUGGEST", "auto_merge": false}
+  ],
+  "main_thread_action_required": "user-go for atlas merge + falsifier promote — F133-F139 staged here as raw71 SUGGEST mode (no auto-write to nexus/state/falsifier_candidates.jsonl). On user-go: append 7 records, recompute falsifier_registry.sha256, refresh hive index.",
+  "cold_start_cost_estimate": {
+    "scout_estimate_seconds": 3600,
+    "actual_seconds": 81,
+    "actual_includes": "repo inventory + 10 empirical hexa runtime probes + sha256 batch + witness write",
+    "ratio_actual_over_scout": 0.022,
+    "interpretation": "scout 45x conservative — hexa-lang has unusually pre-curated invariant docs (HEXA_RESERVED.md + STDLIB_MAP.md) which front-loaded discovery; falsifiable claims already enumerated as 'pitfalls'. Future axes with similar pre-curated pitfall docs can use 5-10 min budget."
+  },
+  "ROI_assessment": {
+    "rating": "HIGH",
+    "scout_was_correct": true,
+    "rationale": "10 anchors verified single session, 8 promote-worthy Tier-1, 2 contradict existing docs (downgraded to Tier-2 doc-drift observations). silent-void family (spawn, sys_args, to_int-pure-garbage, exec-false) reveals coherent 'silent failure' bug-class spanning 4 subsystems — domain has internal coherence beyond surface enumeration.",
+    "axis_density_extrapolated": "~440/h equivalent surface; honest cap ~30-50 before diminishing returns",
+    "raw_73_admissibility": "no overhype — 8 verified Tier-1, 2 explicit doc-contradictions downgraded"
+  },
+  "cross_link_potential": {
+    "hexa_sim": [
+      {"from": "hexa-lang-exec-shells-via-bin-sh", "to": "hexa-sim shell-out determinism bridge", "potential": "shared falsifier — both depend on /bin/sh semantics"},
+      {"from": "hexa-lang-exec-swallows-nonzero-exit", "to": "honesty-triad N(exit) tracking", "potential": "cross-bridge witness — hexa-sim atlas may have false 'success' from this swallowing"}
+    ],
+    "self_format": [
+      {"from": "hexa-lang-silent-void-spawn", "to": "1327-violations Ω-cycle (anima+contact)", "potential": "lint gap — propose 'reserved-word identifier' check"}
+    ],
+    "design_strategy": [
+      {"from": "hexa-lang-to-int-bifurcated-failure", "to": "raw 66 ai-native-error-message", "potential": "violates 'reason+fix trailer' since exit=0 on error; feeds raw 66 enforce-layer-secondary backlog"}
+    ]
+  },
+  "constraints_compliance": {
+    "read_only_hexa_lang": true,
+    "writes_only_to_nexus_design_hexa_sim": true,
+    "no_falsifier_jsonl_mutation": true,
+    "no_atlas_append_shard": true,
+    "raw_73_honest": true,
+    "under_200_lines": true
+  },
+  "next_actions": [
+    "user-go: review 7 F-candidates (F133-F139) and approve atlas append",
+    "optional: extend axis to gate/enforcement_registry.json (40+ H-rules — separate larger-surface ω-cycle)",
+    "optional: cross-feed F136+F137 into hexa-sim cross-bridge correlation hunt"
+  ]
+}
