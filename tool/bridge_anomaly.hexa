@@ -1,0 +1,285 @@
+// tool/bridge_anomaly.hexa — cross-bridge anomaly detector (ω-bridge-14)
+//
+// raw 9 hexa-only-suffix (sweeper-safe .hexa). bridge_health.sh emits aggregate
+// totals to state/atlas_health_timeline.jsonl but NOT per-bridge timing. Per-
+// bridge $DUR is computed in-loop and printed to stdout, never persisted.
+// Without history, a bridge that was 100ms yesterday and 5000ms today never
+// trips a flag.
+//
+// This cycle introduces the *analyzer* + a documented stub schema for
+// state/bridge_health_history.tsv. Wiring bridge_health.sh to APPEND a row per
+// bridge per sweep is deferred to ω-bridge-15 (per session brief).
+//
+// schema: state/bridge_health_history.tsv
+//   # ts<TAB>bridge<TAB>status<TAB>duration_ms<TAB>ec
+//   # one row per bridge per sweep; append-only (raw 77).
+//   # status ∈ {PASS, FAIL, OFFLINE, TAMPERED}
+//   # duration_ms is integer wall time of the per-bridge selftest invocation.
+//
+// @tool(slug="bridge_anomaly", desc="rolling per-bridge anomaly flagger")
+// @usage:
+//   hexa run tool/bridge_anomaly.hexa                                 # check (default)
+//   HEXA_ARGV='check' hexa run tool/bridge_anomaly.hexa
+//   HEXA_ARGV='check --window 7' hexa run tool/bridge_anomaly.hexa
+//   HEXA_ARGV='check --history /tmp/fake_hist.tsv' hexa run tool/bridge_anomaly.hexa
+//   HEXA_ARGV='check --multiplier 3.0' hexa run tool/bridge_anomaly.hexa
+//   HEXA_ARGV='--help' hexa run tool/bridge_anomaly.hexa
+//
+// sentinel (raw 80):
+//   __BRIDGE_ANOMALY__ <PASS|WARN|INSUFFICIENT_DATA> bridges=B samples=N flagged=F window=W mult=M
+//
+// algorithm:
+//   1. Read history TSV (default state/bridge_health_history.tsv).
+//   2. Group rows by bridge; keep last `window` samples (default 7) per bridge.
+//   3. If a bridge has < 3 samples → contributes to insufficient_count.
+//   4. For each bridge with ≥ 3 samples:
+//        - duration median over the prior samples (all but the last)
+//        - current = last sample's duration
+//        - flag DURATION_SPIKE if current > multiplier * median AND current >= 200ms floor
+//          (the floor avoids flagging 30ms→100ms cache-warmup jitter)
+//        - flag FRESH_FAILURE if last sample status ∈ {FAIL,OFFLINE,TAMPERED}
+//          AND prior fail_rate < 0.5 (a fresh failure spike vs. mostly-passing prior)
+//   5. If history file missing OR every bridge has <3 samples → emit
+//      INSUFFICIENT_DATA sentinel and exit 0 (network-3 deferred-recommendation
+//      pattern — report-only, raw 71).
+//
+// Implementation note: numerical median + comparisons are delegated to one
+// `awk` invocation per bridge. This avoids an exec()-per-digit fan-out which
+// makes hexa stage1 unusable for arrays >10 elements. Single awk call per
+// bridge ⇒ ~16 exec() calls for the full registry, sub-second total.
+//
+// raw compliance: 71 report-only / 73 admissibility / 77 append-only-respect
+//                 / 80 sentinel
+//
+// Origin: design/hexa_sim/cross_repo_dashboard.md ω-bridge-14 entry
+//         /Users/ghost/core/anima/state/omega_bridge_14_anomaly_detect.json
+
+let NEXUS = "/Users/ghost/core/nexus"
+let DEFAULT_HISTORY = NEXUS + "/state/bridge_health_history.tsv"
+let DEFAULT_WINDOW = "7"
+let DEFAULT_MULT = "3.0"
+let DURATION_FLOOR_MS = "200"
+
+let mut QUIET = false
+
+fn _argv() -> array {
+    let raw = to_string(exec("printf '%s' \"${HEXA_ARGV:-}\""))
+    let parts = split(raw, " ")
+    let mut out = []
+    let mut k = 0
+    while k < len(parts) {
+        if len(parts[k]) > 0 { out.push(parts[k]) }
+        k = k + 1
+    }
+    return out
+}
+
+fn _say(msg: string) { if !QUIET { println(msg) } }
+
+let args = _argv()
+let mut history_path = DEFAULT_HISTORY
+let mut window_str = DEFAULT_WINDOW
+let mut mult_str = DEFAULT_MULT
+let mut i = 0
+while i < len(args) {
+    let a = args[i]
+    if a == "--quiet" { QUIET = true }
+    if a == "--history" && i + 1 < len(args) { history_path = args[i+1]; i = i + 1 }
+    if a == "--window"  && i + 1 < len(args) { window_str = args[i+1]; i = i + 1 }
+    if a == "--multiplier" && i + 1 < len(args) { mult_str = args[i+1]; i = i + 1 }
+    if a == "--help" || a == "-h" {
+        println("usage: HEXA_ARGV='check [--history PATH] [--window N] [--multiplier F] [--quiet]' hexa run tool/bridge_anomaly.hexa")
+        println("  default: check state/bridge_health_history.tsv, window=7, multiplier=3.0")
+        println("  flags an anomaly when current_duration_ms > mult * median(prior_window)")
+        println("  AND current >= " + DURATION_FLOOR_MS + "ms (jitter floor)")
+        println("  also flags fresh failure spike (status flips PASS-dominant -> failing)")
+        println("  emits __BRIDGE_ANOMALY__ INSUFFICIENT_DATA when history is absent or all bridges have <3 samples")
+        return
+    }
+    i = i + 1
+}
+
+// ─── load history ────────────────────────────────────────────────────────────
+if !file_exists(history_path) {
+    println("__BRIDGE_ANOMALY__ INSUFFICIENT_DATA bridges=0 samples=0 flagged=0 window=" + window_str + " mult=" + mult_str + " reason=history_missing path=" + history_path)
+    println("  fix:    seed history TSV via bridge_health.sh wiring (ω-bridge-15) or pass --history PATH")
+    println("  schema: # ts<TAB>bridge<TAB>status<TAB>duration_ms<TAB>ec")
+    return
+}
+
+let raw = to_string(read_file(history_path))
+let lines = split(raw, "\n")
+
+// Per-bridge sample arrays: parallel arrays of bridge_names and arrays of "ts|status|dur|ec".
+let mut bridge_names = []
+let mut samples_per_bridge = []
+let mut total_samples = 0
+
+fn _index_of(arr: array, key: string) -> i64 {
+    let mut k = 0
+    while k < len(arr) {
+        if arr[k] == key { return k }
+        k = k + 1
+    }
+    return -1
+}
+
+for line in lines {
+    let t = line.trim()
+    if len(t) == 0 { continue }
+    if t.substring(0, 1) == "#" { continue }
+    let parts = split(t, "\t")
+    if len(parts) < 4 { continue }
+    let ts = parts[0]
+    let bridge = parts[1]
+    let status = parts[2]
+    let dur = parts[3]
+    let mut ec = "0"
+    if len(parts) >= 5 { ec = parts[4] }
+    let encoded = ts + "|" + status + "|" + dur + "|" + ec
+    let idx = _index_of(bridge_names, bridge)
+    if idx < 0 {
+        bridge_names.push(bridge)
+        samples_per_bridge.push([encoded])
+    } else {
+        samples_per_bridge[idx].push(encoded)
+    }
+    total_samples = total_samples + 1
+}
+
+if len(bridge_names) == 0 {
+    println("__BRIDGE_ANOMALY__ INSUFFICIENT_DATA bridges=0 samples=0 flagged=0 window=" + window_str + " mult=" + mult_str + " reason=no_data_rows path=" + history_path)
+    return
+}
+
+// ─── per-bridge analysis ─────────────────────────────────────────────────────
+// All numeric work (median + comparison + ratio) is performed in a single awk
+// invocation per bridge, fed the prior durations + current values via stdin.
+let mut analyzed = 0
+let mut insufficient = 0
+let mut flagged_lines = []
+let mut flagged_count = 0
+
+let mut bi = 0
+while bi < len(bridge_names) {
+    let name = bridge_names[bi]
+    let samples = samples_per_bridge[bi]
+    let n = len(samples)
+
+    // Tail to last `window` samples. window_str is small int; trust upstream
+    // chronological append order (raw 77).
+    let win = window_str
+    let win_int = to_string(exec("printf '%d' " + win)).trim()
+    // Rather than parse win_int in hexa, trim via shell:
+    let mut all_encoded = ""
+    let mut s = 0
+    while s < n {
+        all_encoded = all_encoded + samples[s] + "\n"
+        s = s + 1
+    }
+    let trimmed = to_string(exec("printf '%s' '" + all_encoded + "' | tail -" + win_int)).trim()
+    let sl_lines = split(trimmed, "\n")
+    let m = len(sl_lines)
+
+    if m < 3 {
+        insufficient = insufficient + 1
+        bi = bi + 1
+        continue
+    }
+    analyzed = analyzed + 1
+
+    // current = last entry; prior = first m-1
+    let cur = sl_lines[m - 1]
+    let cur_parts = split(cur, "|")
+    let cur_status = cur_parts[1]
+    let cur_dur = cur_parts[2]
+
+    // Build prior_durs newline-separated string + count prior failures.
+    let mut prior_durs_lines = ""
+    let mut prior_fail = 0
+    let mut p = 0
+    while p < m - 1 {
+        let pp = split(sl_lines[p], "|")
+        prior_durs_lines = prior_durs_lines + pp[2] + "\n"
+        if pp[1] != "PASS" { prior_fail = prior_fail + 1 }
+        p = p + 1
+    }
+    let prior_n = m - 1
+    let prior_fail_str = to_string(prior_fail)
+    let prior_n_str = to_string(prior_n)
+
+    // Single awk call: compute median(prior), threshold, fail_ratio, decisions.
+    // Output format: "<median> <threshold> <fail_ratio> <SPIKE|.> <FRESH|.>"
+    let awk_prog = "" +
+        "{ a[NR]=$1+0 } " +
+        "END { " +
+        "  n=NR; " +
+        "  if (n==0) { print \"0 0 0 . .\"; exit } " +
+        "  for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) if (a[i]>a[j]) { t=a[i]; a[i]=a[j]; a[j]=t } " +
+        "  if (n%2==1) m=a[(n+1)/2]; else m=(a[n/2]+a[n/2+1])/2.0; " +
+        "  cur=" + cur_dur + "+0; " +
+        "  mult=" + mult_str + "+0; " +
+        "  floor=" + DURATION_FLOOR_MS + "+0; " +
+        "  thr=mult*m; " +
+        "  spike=\".\"; if (cur>=floor && m>0 && cur>thr) spike=\"SPIKE\"; " +
+        "  fr=(" + prior_n_str + "+0>0)?(" + prior_fail_str + "+0)/(" + prior_n_str + "+0):0; " +
+        "  fresh=\".\"; cs=\"" + cur_status + "\"; if (cs!=\"PASS\" && fr<0.5) fresh=\"FRESH\"; " +
+        "  printf \"%.2f %.2f %.3f %s %s\\n\", m, thr, fr, spike, fresh; " +
+        "}"
+    let awk_cmd = "printf '%s' '" + prior_durs_lines + "' | awk '" + awk_prog + "'"
+    let awk_out = to_string(exec(awk_cmd)).trim()
+    let aparts = split(awk_out, " ")
+    if len(aparts) < 5 {
+        // defensive: skip silently if awk failed
+        bi = bi + 1
+        continue
+    }
+    let med_s = aparts[0]
+    let thr_s = aparts[1]
+    let fr_s  = aparts[2]
+    let spike = aparts[3]
+    let fresh = aparts[4]
+
+    let mut bridge_flags = []
+    if spike == "SPIKE" {
+        bridge_flags.push("DURATION_SPIKE current_ms=" + cur_dur + " median_ms=" + med_s + " threshold_ms=" + thr_s)
+    }
+    if fresh == "FRESH" {
+        bridge_flags.push("FRESH_FAILURE current_status=" + cur_status + " prior_fail_ratio=" + fr_s)
+    }
+
+    if len(bridge_flags) > 0 {
+        flagged_count = flagged_count + 1
+        let mut combined = ""
+        let mut ff = 0
+        while ff < len(bridge_flags) {
+            if ff > 0 { combined = combined + "; " }
+            combined = combined + bridge_flags[ff]
+            ff = ff + 1
+        }
+        flagged_lines.push("  FLAG  " + name + "  " + combined)
+    }
+
+    bi = bi + 1
+}
+
+// ─── verdict + sentinel ──────────────────────────────────────────────────────
+let mut verdict = "PASS"
+if flagged_count > 0 { verdict = "WARN" }
+if analyzed == 0 { verdict = "INSUFFICIENT_DATA" }
+
+if !QUIET {
+    println("═══ BRIDGE ANOMALY — history=" + history_path)
+    println("  bridges_seen=" + to_string(len(bridge_names)) + "  samples=" + to_string(total_samples) + "  window=" + window_str + "  mult=" + mult_str)
+    println("  analyzed=" + to_string(analyzed) + "  insufficient=" + to_string(insufficient) + "  flagged=" + to_string(flagged_count))
+    if flagged_count > 0 {
+        let mut fl = 0
+        while fl < len(flagged_lines) {
+            println(flagged_lines[fl])
+            fl = fl + 1
+        }
+        println("  fix:    investigate flagged bridge(s); check upstream API latency / outage / cache state")
+    }
+}
+
+println("__BRIDGE_ANOMALY__ " + verdict + " bridges=" + to_string(len(bridge_names)) + " samples=" + to_string(total_samples) + " flagged=" + to_string(flagged_count) + " window=" + window_str + " mult=" + mult_str)
