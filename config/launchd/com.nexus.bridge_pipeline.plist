@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.nexus.bridge_pipeline — ω-bridge-20 hourly bridge_health full pipeline.
+
+  Pairs with /Users/ghost/core/nexus/tool/bridge_health.sh (-A -L --quiet).
+  Wires the ω-bridge-18 chain:
+    bridge_health.sh
+      -> bridge_health_history.tsv  (ω-bridge-15 per-bridge timing rows)
+      -> bridge_anomaly  (-A flag, ω-bridge-14/16 sentinel emitter)
+      -> atlas_alert_subscriber (-L flag, ω-bridge-17/18 alert escalator)
+      -> state/atlas_health_timeline.jsonl  (aggregate JSONL row)
+
+  Cadence: hourly at :15 (StartCalendarInterval Minute=15).
+    - Avoids :00 cron stampedes shared with atlas-meta-scan / omega-metrics.
+    - 24 fires/day, each <30s wall (5 bridges * 30s timeout cap, parallel).
+
+  Manual install (NOT performed by ω-bridge-20 — operator-initiated only):
+    cp /Users/ghost/core/nexus/config/launchd/com.nexus.bridge_pipeline.plist \
+       ~/Library/LaunchAgents/
+    mkdir -p ~/.hx/log
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.nexus.bridge_pipeline.plist
+    launchctl enable     gui/$UID/com.nexus.bridge_pipeline
+    # next fire is the upcoming :15. Force first run:
+    launchctl kickstart -k gui/$UID/com.nexus.bridge_pipeline
+
+  Discoverable install help:
+    hexa run /Users/ghost/core/nexus/tool/bridge_pipeline_install_help.hexa
+
+  Status / logs:
+    launchctl print gui/$UID/com.nexus.bridge_pipeline
+    tail -F ~/.hx/log/bridge_pipeline.log ~/.hx/log/bridge_pipeline.err
+    tail -n 5 /Users/ghost/core/nexus/state/atlas_health_timeline.jsonl
+    tail -n 5 /Users/ghost/core/nexus/state/bridge_health_history.tsv
+
+  Uninstall:
+    launchctl bootout gui/$UID/com.nexus.bridge_pipeline
+    rm ~/Library/LaunchAgents/com.nexus.bridge_pipeline.plist
+
+  Notes:
+    - RunAtLoad=false: don't fire on bootstrap; wait for next :15.
+    - KeepAlive=false: one-shot per schedule, not a daemon.
+    - Nice=1: low priority, yields to foreground.
+    - bridge_health.sh resolves NEXUS_ROOT/HEXA_BIN internally; we set only
+      PATH/HOME so the script's defaults take effect (avoids env duplication).
+    - --quiet suppresses per-bridge stdout — only sentinel + JSONL appended,
+      kept in StandardOutPath log if anomalies/alerts surface.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexus.bridge_pipeline</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/ghost/core/nexus/tool/bridge_health.sh</string>
+    <string>-A</string>
+    <string>-L</string>
+    <string>--quiet</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>Nice</key>
+  <integer>1</integer>
+
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ghost/.hx/log/bridge_pipeline.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/ghost/.hx/log/bridge_pipeline.err</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ghost/core/nexus</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/ghost</string>
+    <!-- bridge_health.sh resolves NEXUS_ROOT and HEXA_BIN internally
+         (NEXUS_ROOT defaults to $HOME/core/nexus, HEXA_BIN auto-detected
+         per ω-bridge-8 container-context resolution). Set HEXA_LANG to
+         match other plists (com.nexus.omega-metrics) for resolver fallback. -->
+    <key>HEXA_LANG</key>
+    <string>/Users/ghost/core/hexa-lang</string>
+  </dict>
+</dict>
+</plist>
