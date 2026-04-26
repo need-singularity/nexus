@@ -27,22 +27,33 @@
 #      (Caller can keep its own fallback path — bridges already have hardcoded fallbacks.)
 #
 # Env overrides (test affordances):
-#   BRIDGE_HELPER_CACHE_DIR   : cache root (default $NEXUS_ROOT/state/bridge_cache)
-#   BRIDGE_HELPER_DISABLE     : if "1", bypass cache + retry + rate-limit (raw curl)
-#   BRIDGE_HELPER_FORCE_FAIL  : if "1", skip live curl entirely (synthetic 429-style)
-#   BRIDGE_HELPER_MAX_RETRY   : override retry count (default 3)
-#   BRIDGE_HELPER_MAX_TIME    : per-request curl --max-time (default 12)
-#   BRIDGE_HELPER_VERBOSE     : if "1", emit diagnostic trace to stderr
-#   BRIDGE_HELPER_UA          : if set, passed to curl as `-A "$BRIDGE_HELPER_UA"` (polite User-Agent)
-#   BRIDGE_HELPER_HEADERS     : if set, multi-line newline-separated; each non-empty line passed as `-H "$line"`
-#                                (e.g. "accept: application/json", "Authorization: Bearer ...")
-#   BRIDGE_HELPER_TIMEOUT     : if set, passed as `--max-time "$BRIDGE_HELPER_TIMEOUT"` (overrides MAX_TIME for caller-scoped tightening)
+#   BRIDGE_HELPER_CACHE_DIR        : cache root (default $NEXUS_ROOT/state/bridge_cache)
+#   BRIDGE_HELPER_DISABLE          : if "1", bypass cache + retry + rate-limit (raw curl)
+#   BRIDGE_HELPER_FORCE_FAIL       : if "1", skip live curl entirely (synthetic 429-style)
+#   BRIDGE_HELPER_MAX_RETRY        : override retry count (default 3)
+#   BRIDGE_HELPER_MAX_TIME         : per-request curl --max-time (default 12)
+#   BRIDGE_HELPER_VERBOSE          : if "1", emit diagnostic trace to stderr
+#   BRIDGE_HELPER_UA               : if set, passed to curl as `-A "$BRIDGE_HELPER_UA"` (polite User-Agent)
+#   BRIDGE_HELPER_HEADERS          : if set, multi-line newline-separated; each non-empty line passed as `-H "$line"`
+#                                    (e.g. "accept: application/json", "Authorization: Bearer ...")
+#   BRIDGE_HELPER_TIMEOUT          : if set, passed as `--max-time "$BRIDGE_HELPER_TIMEOUT"` (overrides MAX_TIME for caller-scoped tightening)
+#   BRIDGE_HELPER_CACHE_GC_AGE_S   : age threshold in seconds for cache-gc deletion (default 7200 = 2h)
+#   BRIDGE_HELPER_CACHE_MAX_BYTES  : max total cache dir size in bytes (default 50000000 = 50 MB)
+#   BRIDGE_HELPER_GC_PROBABILITY   : probabilistic gc trigger frequency on fetch (1 in N; default 100)
+#                                    set to 0 to disable; set to 1 to gc every fetch (test mode)
 #
 # ω-bridge-4 (2026-04-26): UA / extra-headers / per-call-timeout pass-through restored
 #   for the 8 bridges that lost them in the ω-bridge-3 sweep (cmb/nanograv/icecube/arxiv/
 #   openalex/lhc previously sent polite-UA; wikipedia/uniprot previously sent Accept).
 #   Default behaviour unchanged when env vars unset (backward-compat with the 16 already
 #   migrated bridges). See state/omega_bridge_4_header_passthrough.json.
+#
+# ω-bridge-5 (2026-04-26): cache-gc subcommand + probabilistic GC + size-limit eviction.
+#   Addresses monotonic cache growth: stale entries (older than TTL) were bypassed on read
+#   but never deleted. cache-gc deletes .body/.meta files older than CACHE_GC_AGE_S, then
+#   enforces CACHE_MAX_BYTES by evicting oldest-first. fetch invokes cache-gc inline with
+#   1/GC_PROBABILITY probability (default 1/100 → ~1% overhead). See
+#   state/omega_bridge_5_cache_gc.json.
 #
 # Compliance: raw 66 (reason+fix on diags), raw 71 (report-only diagnostics on stderr,
 #             body unchanged on stdout), raw 73 (deterministic 4xx no-retry).
@@ -54,6 +65,9 @@ CACHE_DIR="${BRIDGE_HELPER_CACHE_DIR:-$NEXUS_ROOT/state/bridge_cache}"
 MAX_RETRY="${BRIDGE_HELPER_MAX_RETRY:-3}"
 MAX_TIME="${BRIDGE_HELPER_MAX_TIME:-12}"
 VERBOSE="${BRIDGE_HELPER_VERBOSE:-0}"
+CACHE_GC_AGE_S="${BRIDGE_HELPER_CACHE_GC_AGE_S:-7200}"
+CACHE_MAX_BYTES="${BRIDGE_HELPER_CACHE_MAX_BYTES:-50000000}"
+GC_PROBABILITY="${BRIDGE_HELPER_GC_PROBABILITY:-100}"
 
 _log() {
     [ "$VERBOSE" = "1" ] && echo "[bridge_helper] $*" >&2
@@ -106,6 +120,10 @@ cmd_fetch() {
     fi
 
     mkdir -p "$CACHE_DIR" 2>/dev/null
+
+    # ω-bridge-5: probabilistic inline cache GC (default 1/100; silent side-effect).
+    _maybe_gc_trigger
+
     local hash; hash=$(_url_hash "$url")
     local cache_body="$CACHE_DIR/${bridge}_${hash}.body"
     local cache_meta="$CACHE_DIR/${bridge}_${hash}.meta"
@@ -216,6 +234,111 @@ cmd_fetch() {
     return 1
 }
 
+_file_mtime() {
+    # cross-platform mtime in epoch seconds
+    stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+_file_size() {
+    stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null
+}
+
+cmd_cache_gc() {
+    # Sweep $CACHE_DIR: delete .body (and matching .meta) older than CACHE_GC_AGE_S,
+    # then enforce CACHE_MAX_BYTES by oldest-first eviction.
+    # Emits TSV summary to stdout: scanned\tkept\tdeleted\tbytes_freed
+    local age_s="${1:-$CACHE_GC_AGE_S}"
+    local max_bytes="${2:-$CACHE_MAX_BYTES}"
+
+    if [ ! -d "$CACHE_DIR" ]; then
+        printf 'scanned=0\tkept=0\tdeleted=0\tbytes_freed=0\n'
+        _log "cache-gc: no cache dir at $CACHE_DIR"
+        return 0
+    fi
+
+    local now scanned=0 kept=0 deleted=0 bytes_freed=0
+    now=$(_now_epoch)
+
+    # Phase A: age-based eviction (single-pass, race-safe via stat-then-rm; if file
+    # vanishes between stat and rm, rm -f silently no-ops).
+    local f mtime size age
+    for f in "$CACHE_DIR"/*.body; do
+        [ -f "$f" ] || continue
+        scanned=$(( scanned + 1 ))
+        mtime=$(_file_mtime "$f")
+        if [ -z "$mtime" ]; then
+            kept=$(( kept + 1 ))
+            continue
+        fi
+        age=$(( now - mtime ))
+        if [ "$age" -ge "$age_s" ]; then
+            size=$(_file_size "$f")
+            [ -z "$size" ] && size=0
+            rm -f "$f" 2>/dev/null
+            rm -f "${f%.body}.meta" 2>/dev/null
+            deleted=$(( deleted + 1 ))
+            bytes_freed=$(( bytes_freed + size ))
+            _log "cache-gc: deleted (age=${age}s ≥ ${age_s}s) $f"
+        else
+            kept=$(( kept + 1 ))
+        fi
+    done
+
+    # Phase B: size-limit eviction. Compute total size of remaining .body files.
+    if [ "$max_bytes" -gt 0 ]; then
+        local total=0
+        for f in "$CACHE_DIR"/*.body; do
+            [ -f "$f" ] || continue
+            size=$(_file_size "$f")
+            [ -z "$size" ] && size=0
+            total=$(( total + size ))
+        done
+        if [ "$total" -gt "$max_bytes" ]; then
+            _log "cache-gc: size $total > limit $max_bytes — oldest-first eviction"
+            # build "<mtime> <size> <path>" list, sort numeric ascending by mtime
+            local sorted_list
+            sorted_list=$(
+                for f in "$CACHE_DIR"/*.body; do
+                    [ -f "$f" ] || continue
+                    mtime=$(_file_mtime "$f")
+                    size=$(_file_size "$f")
+                    [ -z "$mtime" ] && mtime=0
+                    [ -z "$size" ] && size=0
+                    printf '%s\t%s\t%s\n' "$mtime" "$size" "$f"
+                done | sort -n
+            )
+            # iterate eldest first; delete until under limit
+            while IFS=$'\t' read -r mtime size f; do
+                [ "$total" -le "$max_bytes" ] && break
+                [ -z "$f" ] && continue
+                rm -f "$f" 2>/dev/null
+                rm -f "${f%.body}.meta" 2>/dev/null
+                deleted=$(( deleted + 1 ))
+                bytes_freed=$(( bytes_freed + size ))
+                total=$(( total - size ))
+                kept=$(( kept - 1 ))
+                _log "cache-gc: size-evicted (mtime=$mtime size=$size) $f"
+            done <<< "$sorted_list"
+        fi
+    fi
+
+    printf 'scanned=%d\tkept=%d\tdeleted=%d\tbytes_freed=%d\n' \
+        "$scanned" "$kept" "$deleted" "$bytes_freed"
+    return 0
+}
+
+_maybe_gc_trigger() {
+    # Probabilistic inline cache-gc — silent (stdout suppressed; verbose still goes to stderr).
+    # Disabled when GC_PROBABILITY=0. Triggers when ($RANDOM % N) == 0.
+    [ "$GC_PROBABILITY" = "0" ] && return 0
+    [ "$GC_PROBABILITY" -le "0" ] 2>/dev/null && return 0
+    if [ "$(( RANDOM % GC_PROBABILITY ))" = "0" ]; then
+        _log "probabilistic-gc fired (1/$GC_PROBABILITY)"
+        cmd_cache_gc "$CACHE_GC_AGE_S" "$CACHE_MAX_BYTES" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
 cmd_cache_clear() {
     local bridge="${1:-}"
     if [ -z "$bridge" ]; then
@@ -257,13 +380,17 @@ case "${1:-}" in
     cache-stat)
         cmd_cache_stat
         ;;
+    cache-gc)
+        shift
+        cmd_cache_gc "$@"
+        ;;
     --help|-h|"")
-        sed -n '3,50p' "$0"
+        sed -n '3,60p' "$0"
         exit 0
         ;;
     *)
         echo "bridge_helper: unknown subcommand: $1" >&2
-        echo "  reason: not in {fetch, cache-clear, cache-stat, --help}" >&2
+        echo "  reason: not in {fetch, cache-clear, cache-stat, cache-gc, --help}" >&2
         echo "  fix:    bash tool/bridge_helper.sh --help" >&2
         exit 1
         ;;
