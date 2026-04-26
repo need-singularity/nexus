@@ -15,6 +15,8 @@
 #   tool/bridge_health.sh -F                    # short form of --fingerprint-check
 #   tool/bridge_health.sh --anomaly-check       # after sweep, hexa run bridge_anomaly.hexa (CLI-only)
 #   tool/bridge_health.sh -A                    # short form of --anomaly-check
+#   tool/bridge_health.sh --alert-check         # after anomaly check, hexa run atlas_alert_subscriber.hexa (CLI-only)
+#   tool/bridge_health.sh -L                    # short form of --alert-check
 #   tool/bridge_health.sh --no-history          # skip per-bridge TSV append (testing)
 #
 # Exit:
@@ -32,6 +34,15 @@
 #   Defeats silent .hexa rewrite (e.g. selftest sentinel injected into mutated body).
 #   Bridges face higher attack risk than falsifiers because external API selftest
 #   paths could be subverted. Propagated from falsifier_health.sh R1 (Ω-cycle).
+# ω-bridge-18 (2026-04-26): --alert-check opt-in flag.
+#   After the existing -A anomaly check, optionally invoke
+#     HEXA_ARGV='--quiet' hexa run tool/atlas_alert_subscriber.hexa
+#   to evaluate trend rules over recent bridge_anomaly JSONL rows and emit
+#     __ATLAS_ALERT__ FIRED|PASS|SKIP ...
+#   Default OFF (backward compat). Read-only on the timeline JSONL (raw 71 / 77).
+#   Alert firing is purely diagnostic — does NOT alter the script exit code
+#   (raw 71 report-only). One single CLI invocation now drives the full
+#   health → anomaly → alert pipeline. See state/omega_bridge_18_*.json (anima).
 # ω-bridge-7 (2026-04-26): --fingerprint-check opt-in flag.
 #   After each bridge PASSES selftest, optionally invoke
 #     bash tool/bridge_helper.sh fingerprint-check <bridge> <url>
@@ -78,6 +89,7 @@ JSON=0
 STRICT=0
 FP_CHECK=0
 ANOMALY_CHECK=0
+ALERT_CHECK=0
 NO_HISTORY=0
 
 while [ $# -gt 0 ]; do
@@ -87,12 +99,13 @@ while [ $# -gt 0 ]; do
         --strict) STRICT=1; shift ;;
         --fingerprint-check|-F) FP_CHECK=1; shift ;;
         --anomaly-check|-A) ANOMALY_CHECK=1; shift ;;
+        --alert-check|-L)       ALERT_CHECK=1; shift ;;
         --no-history)           NO_HISTORY=1; shift ;;
-        --help|-h) sed -n '3,47p' "$0"; exit 0 ;;
+        --help|-h) sed -n '3,58p' "$0"; exit 0 ;;
         *)
             echo "usage error: unknown flag: $1" >&2
             echo "  reason: unrecognised CLI argument" >&2
-            echo "  fix:    use --quiet | --json | --strict | --fingerprint-check | --anomaly-check | --no-history | --help" >&2
+            echo "  fix:    use --quiet | --json | --strict | --fingerprint-check | --anomaly-check | --alert-check | --no-history | --help" >&2
             exit 1
             ;;
     esac
@@ -405,6 +418,32 @@ EOF_PARSE
         fi
     else
         echo "__BRIDGE_ANOMALY__ SKIP reason=hexa_bin_missing path=$HEXA_BIN" >&2
+    fi
+fi
+
+# ω-bridge-18: opt-in alert-check (CLI-only inter-call into hexa runtime).
+# Reads $TIMELINE (atlas_health_timeline.jsonl) and emits __ATLAS_ALERT__.
+# Read-only on the JSONL — does NOT append (the bridge-16 anomaly row already
+# represents this sweep). Failure here is non-fatal (raw 71 report-only) — main
+# exit code is preserved regardless of FIRED/PASS/SKIP. Single CLI invocation
+# of bridge_health.sh -A -L now drives the full pipeline.
+ALERT_WARN_THR="${ALERT_WARN_THR:-0.4}"
+ALERT_INSUF_THR="${ALERT_INSUF_THR:-0.6}"
+ALERT_LAST_N="${ALERT_LAST_N:-10}"
+if [ "$ALERT_CHECK" = "1" ]; then
+    if [ -x "$HEXA_BIN" ] || [ -f "$HEXA_BIN" ]; then
+        ALERT_OUT=$(HEXA_ARGV="--quiet --timeline $TIMELINE --last $ALERT_LAST_N --warn-threshold $ALERT_WARN_THR --insufficient-threshold $ALERT_INSUF_THR" \
+            HEXA_RESOLVER_NO_REROUTE=1 \
+            "$HEXA_BIN" run "$NEXUS_ROOT/tool/atlas_alert_subscriber.hexa" 2>/dev/null) || ALERT_OUT=""
+        if [ -n "$ALERT_OUT" ]; then
+            # Subscriber already prints __ATLAS_ALERT__ sentinel(s). Forward stdout
+            # verbatim. Do NOT write back to $TIMELINE (raw 71/77 read-only).
+            printf '%s\n' "$ALERT_OUT"
+        else
+            echo "__ATLAS_ALERT__ SKIP reason=subscriber_no_output path=$NEXUS_ROOT/tool/atlas_alert_subscriber.hexa" >&2
+        fi
+    else
+        echo "__ATLAS_ALERT__ SKIP reason=hexa_bin_missing path=$HEXA_BIN" >&2
     fi
 fi
 
