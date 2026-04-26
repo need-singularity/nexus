@@ -38,7 +38,24 @@
 set -uo pipefail
 
 NEXUS_ROOT="${NEXUS_ROOT:-$HOME/core/nexus}"
-HEXA_BIN="${HEXA_BIN:-$HOME/core/hexa-lang/hexa}"
+# HEXA_BIN container-context resolution (ω-bridge-8 fix):
+#   On host (Mac): default is the wrapper at $HOME/core/hexa-lang/hexa which
+#     routes through the resolver/build/hexa.real (Mach-O).
+#   Inside Linux container (hexa-runner): the wrapper would exec the Mach-O
+#     hexa.real → "Exec format error". The container ships a native ELF
+#     dispatcher at /usr/local/bin/hexa — prefer it when container markers
+#     are present (/.dockerenv exists, or HEXA_IN_CONTAINER=1, or the host
+#     wrapper path is absent while the container path exists).
+#   Override always wins via explicit HEXA_BIN env var.
+_default_hexa_bin="$HOME/core/hexa-lang/hexa"
+if [ -z "${HEXA_BIN:-}" ]; then
+    if [ -f /.dockerenv ] || [ "${HEXA_IN_CONTAINER:-0}" = "1" ]; then
+        [ -x /usr/local/bin/hexa ] && _default_hexa_bin=/usr/local/bin/hexa
+    elif [ ! -x "$_default_hexa_bin" ] && [ -x /usr/local/bin/hexa ]; then
+        _default_hexa_bin=/usr/local/bin/hexa
+    fi
+fi
+HEXA_BIN="${HEXA_BIN:-$_default_hexa_bin}"
 TIMELINE="${ATLAS_HEALTH_TIMELINE:-$NEXUS_ROOT/state/atlas_health_timeline.jsonl}"
 BRIDGE_SHA_TSV="${BRIDGE_SHA_TSV:-$NEXUS_ROOT/state/bridge_sha256.tsv}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-gtimeout}"
