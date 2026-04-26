@@ -1,0 +1,104 @@
+// tool/registry_diff.hexa — falsifiers.jsonl git diff 추세 분석 (hexa-native)
+//
+// raw 9 hexa-only-suffix. registry 변동 추적 — added/removed/modified entries
+// since N 시간. META_ROI 보강 + 신규 F# growth tracking.
+//
+// @tool(slug="registry_diff", desc="falsifiers.jsonl git diff added/removed/modified")
+// @usage:
+//   hexa run tool/registry_diff.hexa
+//   HEXA_ARGV='--since 2026-04-26' hexa run tool/registry_diff.hexa
+//   HEXA_ARGV='--last N' hexa run tool/registry_diff.hexa  # last N commits
+//
+// 분석 (since DATE 기준):
+//   - added entries (line +): 신규 promotion
+//   - removed entries (line -): retire / replace
+//   - net delta = added - removed
+//   - touched commits = falsifiers.jsonl 수정한 commits 수
+//
+// sentinel: __REGISTRY_DIFF__ since=DATE added=A removed=R net=N commits=C
+//
+// raw 71 read-only / raw 73 admissibility / raw 80 sentinel
+
+let mut QUIET = false
+let mut SINCE = "2026-04-25"
+let mut LAST_N = 0
+
+fn _argv() -> array {
+    let raw = to_string(exec("printf '%s' \"${HEXA_ARGV:-}\""))
+    let parts = split(raw, " ")
+    let mut out = []
+    let mut k = 0
+    while k < len(parts) {
+        if len(parts[k]) > 0 { out.push(parts[k]) }
+        k = k + 1
+    }
+    return out
+}
+
+let args = _argv()
+let mut i = 0
+while i < len(args) {
+    let a = args[i]
+    if a == "--quiet" { QUIET = true }
+    if a == "--since" && i + 1 < len(args) { SINCE = args[i+1]; i = i + 1 }
+    if a == "--last" && i + 1 < len(args) { LAST_N = to_int(args[i+1]); i = i + 1 }
+    if a == "--help" || a == "-h" {
+        println("usage: HEXA_ARGV='[--since YYYY-MM-DD | --last N] [--quiet]' hexa run tool/registry_diff.hexa")
+        println("  registry git diff: added/removed/modified entries")
+        return
+    }
+    i = i + 1
+}
+
+fn _say(msg: string) { if !QUIET { println(msg) } }
+
+// Build git log range
+let mut range_clause = "--since='" + SINCE + " 00:00'"
+if LAST_N > 0 {
+    range_clause = "-n " + to_string(LAST_N + 1)  // need N+1 to get N diffs
+}
+
+// Count touched commits
+let cmd_commits = "cd /Users/ghost/core/nexus && git log " + range_clause + " --oneline -- design/hexa_sim/falsifiers.jsonl 2>/dev/null | wc -l | tr -d ' '"
+let n_commits = to_string(exec(cmd_commits)).trim()
+
+// Aggregated diff: count added/removed entries lines (only F# json lines, not metadata)
+let cmd_added = "cd /Users/ghost/core/nexus && git log " + range_clause + " -p -- design/hexa_sim/falsifiers.jsonl 2>/dev/null | grep -cE '^\\+\\{\"id\":' || echo 0"
+let n_added = to_string(exec(cmd_added)).trim()
+
+let cmd_removed = "cd /Users/ghost/core/nexus && git log " + range_clause + " -p -- design/hexa_sim/falsifiers.jsonl 2>/dev/null | grep -cE '^-\\{\"id\":' || echo 0"
+let n_removed = to_string(exec(cmd_removed)).trim()
+
+// Net delta (computed shell-side)
+let cmd_net = "echo $((" + n_added + " - " + n_removed + "))"
+let n_net = to_string(exec(cmd_net)).trim()
+
+// First/last commit hashes in range
+let cmd_first = "cd /Users/ghost/core/nexus && git log " + range_clause + " --oneline -- design/hexa_sim/falsifiers.jsonl 2>/dev/null | tail -1 | awk '{print $1}'"
+let first_hash = to_string(exec(cmd_first)).trim()
+
+let cmd_last = "cd /Users/ghost/core/nexus && git log " + range_clause + " --oneline -- design/hexa_sim/falsifiers.jsonl 2>/dev/null | head -1 | awk '{print $1}'"
+let last_hash = to_string(exec(cmd_last)).trim()
+
+// Output
+_say("═══ Registry diff: falsifiers.jsonl ═══")
+_say("")
+let mut range_label = "since " + SINCE
+if LAST_N > 0 { range_label = "last " + to_string(LAST_N) + " commits" }
+_say("Range:           " + range_label)
+_say("Touched commits: " + n_commits)
+if len(first_hash) > 0 && len(last_hash) > 0 {
+    _say("First..last:     " + first_hash + " .. " + last_hash)
+}
+_say("")
+_say("Entry-level deltas (lines starting with {\"id\":):")
+_say("  + added:       " + n_added)
+_say("  - removed:     " + n_removed)
+_say("  = net delta:   " + n_net)
+_say("")
+let mut interpretation = "registry growing"
+if n_net == "0" { interpretation = "registry stable (modifications only)" }
+if n_net.substring(0, 1) == "-" { interpretation = "registry shrinking" }
+_say("Interpretation:  " + interpretation)
+
+println("__REGISTRY_DIFF__ since=" + SINCE + " added=" + n_added + " removed=" + n_removed + " net=" + n_net + " commits=" + n_commits)
