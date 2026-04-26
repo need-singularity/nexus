@@ -156,6 +156,34 @@ if file_exists(ledger_path) {
     _say("R5 chain:      EMPTY (no ledger file — genesis state)")
 }
 
+// ── R5 SSH 3-domain check (post-2285f130 propagation) ──────────
+fn _sig_present(domain: string) -> string {
+    let path_map = "" +
+        "falsifier=/Users/ghost/core/nexus/design/hexa_sim/falsifiers.jsonl.sig " +
+        "bridge=/Users/ghost/core/nexus/state/bridge_sha256.tsv.sig " +
+        "atlas=/Users/ghost/core/nexus/state/atlas_sha256.tsv.sig"
+    // 3 sigs presence는 단순 file check
+    let mut p = ""
+    if domain == "falsifier" { p = "/Users/ghost/core/nexus/design/hexa_sim/falsifiers.jsonl.sig" }
+    if domain == "bridge"    { p = "/Users/ghost/core/nexus/state/bridge_sha256.tsv.sig" }
+    if domain == "atlas"     { p = "/Users/ghost/core/nexus/state/atlas_sha256.tsv.sig" }
+    if file_exists(p) { return "SIGNED" }
+    return "ABSENT"
+}
+
+let r5ssh_fal = _sig_present("falsifier")
+let r5ssh_bri = _sig_present("bridge")
+let r5ssh_atl = _sig_present("atlas")
+let mut r5ssh_count = 0
+for s in [r5ssh_fal, r5ssh_bri, r5ssh_atl] {
+    if s == "SIGNED" { r5ssh_count = r5ssh_count + 1 }
+}
+_say("R5 SSH:        " + to_string(r5ssh_count) + "/3 SIGNED (falsifier=" + r5ssh_fal + " bridge=" + r5ssh_bri + " atlas=" + r5ssh_atl + ")")
+if r5ssh_count < 3 {
+    _say("  reason=r5_ssh_partial fix=bash tool/registry_sign.sh --target {falsifier|bridge|atlas} sign")
+    overall_pass = false
+}
+
 // ── final sentinel ────────────────────────────────────────────
 let mut verdict = "PASS"
 if !overall_pass { verdict = "FAIL" }
@@ -164,7 +192,8 @@ let sentinel = "__DEFENSE_SMOKE__ " + verdict +
                " r1_bridge=" + to_string(r1_bridge) +
                " r1_atlas=" + to_string(r1_atlas) +
                " r3_lite=" + r3_status +
-               " r5_chain=" + r5_status
+               " r5_chain=" + r5_status +
+               " r5_ssh=" + to_string(r5ssh_count) + "/3"
 println(sentinel)
 
 if !overall_pass { exit(76) }
