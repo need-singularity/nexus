@@ -1111,6 +1111,35 @@ bulk additions. We record this self-imposed brake as part of the
 methodology: the framework includes a saturation-detection canary
 whose recommendation was heeded.
 
+## 9.7 Bridge offline-replayability gap
+
+A scout-v2 audit (`2026-04-26_new_domain_scout_v2_omega_cycle.md`,
+commit `fa6ec2ec`) surfaced a determinism caveat. Of the $16$
+registered hexa-sim bridges,[^bridge-count] only $7$ ship a hard-coded
+reference-data fallback (codata, cmb, nanograv, nist_atomic, icecube,
+gaia, lhc); the remaining $9$ (`oeis_live`, `gw_observatory`, `horizons`,
+`arxiv_realtime`, `simbad`, `wikipedia_summary`, `openalex`, `pubchem`,
+`uniprot`) require a live network. Falsifiers anchored to these bridges
+(F4 oeis-drift, F9 horizons-ephemeris, F10 cmb-cross-bridge,
+F11 hubble-tension and downstream multi-shard probes) are therefore *not*
+formally deterministic-replayable on a network-restricted host.
+`tool/bridge_health.sh` emits an explicit `OFFLINE-FALLBACK` status on
+live-fetch failure — preserving bridge-health $\le 16/16$ but substituting
+a static value, a weaker guarantee than R1 cmd-fingerprint replay. An
+independent reproducer at `REPRODUCTION_PROTOCOL` Stage 4 may see
+$<\!16/16$, or a $16/16$ silently containing up to $9$
+`OFFLINE-FALLBACK` cells; such cells should be treated as
+provenance-degraded. A formal OFFLINE-FALLBACK contract (cached-payload
+`cmd_sha256` + freshness window + degraded-mode marker) across all $16$
+bridges is enumerated in `PAPER_OUTLINE_v1.md` §10.4 as a next-cycle
+hardening item.
+
+[^bridge-count]: The registry exposes $16$ bridges via `cli/run.hexa`;
+the disk-level `sim_bridge/` directory hosts $9$ orthogonal
+sub-experiments (anu_stream, anu_time, atlas_anu_corr, bostrom_test,
+godel_q, multiverse, ouroboros_qrng, qpu_bridge, sr_harness) not in the
+bridge-health roll-up. The two counts measure different objects.
+
 ---
 
 # 10. Discussion and future work

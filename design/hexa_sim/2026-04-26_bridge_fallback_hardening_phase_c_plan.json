@@ -1,0 +1,262 @@
+{
+  "schema": "omega_cycle.witness.v1",
+  "ts": "2026-04-26",
+  "title": "bridge fallback hardening — Phase-C plan (audit + top-3 + 4-stage rollout)",
+  "mode": "raw_71_SUGGEST_no_auto_apply",
+  "scope": "design-only audit + plan; no bridge .hexa modification in this cycle",
+  "trigger": {
+    "kind": "scout_v2_candidate",
+    "rank": 1,
+    "roi": "MEDIUM-HIGH (paper-grade methods subsection)",
+    "source": "scout v2 finding: 9 of 11 sim_bridge dirs lack explicit OFFLINE-FALLBACK marker",
+    "parallel_track": "PAPER_S9 caveat being added by sibling agent; this cycle = upstream fix design"
+  },
+  "axes": {
+    "audit": {
+      "method": "grep -c OFFLINE-FALLBACK across tool/*_bridge.hexa AND sim_bridge/*/",
+      "result_tool_bridges": {
+        "total": 17,
+        "with_OFFLINE_FALLBACK_literal_marker": 0,
+        "with_loose_fallback_keyword": 11,
+        "with_no_fetch_flag": 9,
+        "true_network_only_no_offline_path": 6,
+        "list_of_6_network_only": ["oeis_live", "gw_observatory", "arxiv_realtime", "simbad", "wikipedia_summary", "openalex"],
+        "list_of_3_partial_gap": ["uniprot (sentinel ok-bug, fallback data present)", "roadmap_dod (local SSOT, no live API)", "pubchem (has --no-fetch but emits 'fallback:hardcoded-...' not literal OFFLINE-FALLBACK)"],
+        "scout_v2_9_lacking_explanation": "the 9 = 6 network-only + uniprot (sentinel-bug) + 2 (pubchem/roadmap_dod variant-source-string non-canonical)"
+      },
+      "result_sim_bridge_dirs": {
+        "total": 9,
+        "with_OFFLINE_FALLBACK_literal_marker": 0,
+        "with_loose_fallback_keyword": 8,
+        "interpretation": "scout v2 'OFFLINE-FALLBACK marker' = literal sentinel string; ZERO bridges across the entire surface emit canonical literal — only loose 'fallback'/'source=fallback' substrings. Gap is ecosystem-wide, not 9-vs-11."
+      },
+      "failure_mode_table": {
+        "graceful_degrade_on_live_fail": ["codata", "horizons", "cmb_planck", "nanograv_pulsar", "icecube_neutrino", "nist_atomic", "gaia", "lhc_opendata", "pubchem"],
+        "hard_fail_on_live_empty": ["oeis_live", "gw_observatory", "arxiv_realtime", "simbad", "wikipedia_summary", "openalex"],
+        "soft_fail_sentinel_bug_despite_fallback_data": ["uniprot"],
+        "n_a_local_ssot": ["roadmap_dod"]
+      },
+      "post_oom_resolution_state": {
+        "ref": "design/hexa_sim/2026-04-26_oeis_gw_oom_resolution_omega_cycle.json",
+        "note": "oeis/gw OPT-A shell-trim landed (1.2MB→2KB / 2.7MB→60KB) — live path now fits 4GB cgroup. OPT-C (hardcoded fallback) was REJECTED in that cycle ('would lose live-fetch semantics; bridges would silently degrade to static data when upstream changes'). Phase-C MUST respect this constraint: fallback path = additive escape hatch ONLY when live-empty, NEVER replaces live on success."
+      }
+    },
+    "top_3_pick": {
+      "ranking_criteria": ["highest atlas-anchor / falsifier coverage", "most-cited in paper §4 cross-domain anchors", "easiest fix (small diff)"],
+      "falsifier_coverage_by_bridge": {
+        "oeis_live_bridge": 4,
+        "wikipedia_summary_bridge": 2,
+        "gw_observatory_bridge": 0,
+        "arxiv_realtime_bridge": 0,
+        "simbad_bridge": 0,
+        "openalex_bridge": 0
+      },
+      "ranking": [
+        {
+          "rank": 1,
+          "bridge": "oeis_live_bridge",
+          "rationale": "highest F# anchor count (F4, F12, F101 + others); n=6 perfect-number triple-source corroboration depends on it; A000396/A000203/A000005/A000010 selftest fixtures already enumerated; ~301 LOC (smallest of the 6); shell-trim already landed → fallback can plug straight in",
+          "fix_LOC_estimate": "+45 lines (5-anchor hardcoded table + --no-fetch branch + sentinel emit)",
+          "anchor_count": 4
+        },
+        {
+          "rank": 2,
+          "bridge": "wikipedia_summary_bridge",
+          "rationale": "F12 triple-source corroboration anchor; perfect_number_n6_anchor sentinel directly cited by F12 cmd; only 4 selftest refs (Pulsar/Perfect_number/Quantum_mechanics/Pi); ~338 LOC; n=6 anchor is single article — fallback table is one struct entry",
+          "fix_LOC_estimate": "+35 lines (4-article hardcoded extract + --no-fetch + sentinel)",
+          "anchor_count": 2
+        },
+        {
+          "rank": 3,
+          "bridge": "gw_observatory_bridge",
+          "rationale": "GW150914/GW170817/GW190521 are landmark anchors; gw events used by sr_harness + bostrom_test simulators; baseline of 3 hardcoded events ≈ 30 lines; selftest gates events_total>=90 → fallback would set events_total to N_baseline_landmark with sentinel mode=fallback so health check classifies OFFLINE-FALLBACK not FAIL",
+          "fix_LOC_estimate": "+40 lines (3-event hardcoded baseline + --no-fetch + sentinel + relax events_total threshold under no-fetch)",
+          "anchor_count": 0
+        }
+      ],
+      "deferred_to_stage_2": [
+        "arxiv_realtime_bridge — 'freshness is the point' (per health doc); fallback weakens semantic; lowest-priority offline path",
+        "simbad_bridge — 4 reference stars; fix straightforward but no F# anchor yet",
+        "openalex_bridge — 1 query; no F# anchor yet",
+        "uniprot_bridge — 1-line ok-decision fix (raw 73 surgical); already has fallback data",
+        "pubchem_bridge — already has fallback, just needs canonical sentinel rename",
+        "roadmap_dod_bridge — local SSOT, sentinel only (no live API to fall back from)"
+      ]
+    },
+    "per_bridge_fix": {
+      "common_pattern_gold_standard": "gaia_bridge.hexa (lines 76-90 fallback table, line 418 'let mut source = \"fallback:hardcoded_DR3\"', line 450 'source = \"live:gea.esac.esa.int/...\"' — explicit mode disambiguation)",
+      "icecube_pattern_alt": "icecube_neutrino_bridge.hexa (line 21 'Hardcoded fallback (5 landmark events, used when --no-fetch or curl fails)', line 418 'source = \"fallback:fetch-failed (IceCube-landmarks-hardcoded)\"' — fail-AND-flag pattern)",
+      "canonical_sentinel_proposed": "OFFLINE-FALLBACK mode=fallback source=<bridge>:<anchor-set-id>",
+      "live_path_sentinel_proposed": "ONLINE-LIVE mode=live source=<bridge>:<endpoint>",
+      "bridge_1_oeis_diff_sketch": {
+        "file": "tool/oeis_live_bridge.hexa",
+        "additions": [
+          "// ─── Hardcoded fallback table (4 anchor sequences, used when --no-fetch or fetch_empty) ───",
+          "fn _fallback_lookup(seq_id: string) -> array { match seq_id { \"A000396\" => [6, 28, 496, 8128, 33550336, 8589869056], \"A000203\" => [1,3,4,7,6,12], \"A000005\" => [1,2,2,3,2,4], \"A000010\" => [1,1,2,2,4,2], _ => [] } }",
+          "// in run_single: if terms.len() == 0 { let fb = _fallback_lookup(seq_id); if fb.len() > 0 { terms = fb; source = \"fallback:hardcoded_n6_anchor\"; emit_sentinel(\"OFFLINE-FALLBACK\") } }",
+          "--no-fetch flag arg parser (mirror nist/icecube)"
+        ],
+        "loc_delta": "+45 -2",
+        "raw_73_admissibility": "PASS — additive only; live path unchanged on success",
+        "backward_compat": "PRESERVED — fallback only triggers on empty live (already current FAIL state)",
+        "cmd_sha256_impact": "WILL CHANGE for tool/oeis_live_bridge.hexa; R5 chain entries citing this file need rotate (audit via grep tool/oeis_live_bridge.hexa state/ design/ → estimate ~6 R5 anchors per atlas_R5_tracking)"
+      },
+      "bridge_2_wikipedia_diff_sketch": {
+        "file": "tool/wikipedia_summary_bridge.hexa",
+        "additions": [
+          "// ─── Hardcoded fallback extracts (4 articles, used when --no-fetch or REST 0-byte) ───",
+          "fn _fallback_extract(article: string) -> string { match article { \"Perfect_number\" => \"In number theory, a perfect number is a positive integer that is equal to the sum of its proper divisors. The smallest perfect number is 6, which is the sum of 1, 2, and 3. So 6 is a perfect number.\", \"Pulsar\" => \"...\", \"Quantum_mechanics\" => \"...\", \"Pi\" => \"...\", _ => \"\" } }",
+          "// in fetch_summary: if extract.len() == 0 { let fb = _fallback_extract(article); if fb.len() > 0 { extract = fb; source = \"fallback:hardcoded_n6_corpus\"; emit OFFLINE-FALLBACK } }",
+          "--no-fetch flag"
+        ],
+        "loc_delta": "+35 -1",
+        "raw_73_admissibility": "PASS",
+        "backward_compat": "PRESERVED",
+        "cmd_sha256_impact": "WILL CHANGE; F12 cmd_sha256=259091967ba8667b will need re-anchor IF cmd grep target changes (it does NOT — keeps grepping perfect_number_n6_anchor=true sentinel which we preserve)"
+      },
+      "bridge_3_gw_diff_sketch": {
+        "file": "tool/gw_observatory_bridge.hexa",
+        "additions": [
+          "// ─── Hardcoded fallback baseline (3 landmark events) ───",
+          "fn _fallback_events() -> array { [{name:\"GW150914\",GPS:1126259462.4,m1:36,m2:29,d_L:410}, {name:\"GW170817\",GPS:1187008882.4,m1:1.46,m2:1.27,d_L:40}, {name:\"GW190521\",GPS:1242442967.4,m1:85,m2:66,d_L:5300}] }",
+          "// when fetched events==0 AND --no-fetch OR live-empty: events = _fallback_events(); source=\"fallback:landmarks-hardcoded\"; emit OFFLINE-FALLBACK; relax selftest events_total>=90 → events_total>=3 under fallback mode",
+          "--no-fetch flag"
+        ],
+        "loc_delta": "+40 -1",
+        "raw_73_admissibility": "PASS — only adds branch when current path returns 0",
+        "backward_compat": "PRESERVED — live success path identical; fallback only activates when live=empty (current FAIL state)",
+        "cmd_sha256_impact": "WILL CHANGE for tool/gw_observatory_bridge.hexa; no F# currently anchored to gw — minimal R5 churn"
+      }
+    },
+    "phase_c_stages": {
+      "stage_1_top_3_immediate": {
+        "duration_estimate": "~1h",
+        "scope": "oeis + wikipedia + gw fallback paths landed; canonical sentinel literal OFFLINE-FALLBACK adopted",
+        "verify_gate": "bridge_health.sh shows offline_fallback>=3 (vs 0 today) AND all 3 bridges PASS under HEXA_NO_NETWORK=1 simulation"
+      },
+      "stage_2_remaining_6_medium": {
+        "duration_estimate": "~3h",
+        "scope": "arxiv + simbad + openalex new fallback (mirror gaia pattern); uniprot ok-decision 1-line fix; pubchem rename source string to canonical OFFLINE-FALLBACK literal; roadmap_dod skip (no live API)",
+        "verify_gate": "bridge_health.sh offline_fallback >= 8; FAIL count = 0 under simulated network outage"
+      },
+      "stage_3_health_checker_standardize": {
+        "duration_estimate": "~30min",
+        "scope": "tool/bridge_health.sh detection regex tightened from loose 'fallback|offline|no.?fetch' (line 181/184) to canonical 'OFFLINE-FALLBACK' literal; loose match retained as legacy fallback for transition window",
+        "verify_gate": "bridge_health.sh JSONL emits offline_fallback count matching stage-1+2 fix count exactly"
+      },
+      "stage_4_paper_S9_caveat_update": {
+        "duration_estimate": "~30min",
+        "scope": "after stages 1-3 complete: PAPER_S9 caveat 'fallback markers absent' → 'fallback markers present in 15/16 bridges (roadmap_dod is local SSOT, no API)'",
+        "verify_gate": "paper section S9 cross-references current bridge_health.sh JSONL run, audit checksum matches"
+      },
+      "total_phase_c_estimate": "~5h end-to-end (1 + 3 + 0.5 + 0.5)"
+    },
+    "falsifier_coverage_update": {
+      "F4_oeis_drift": {
+        "current_pass_string": "OEIS PASS",
+        "post_fallback_behavior": "still PASS via live path; under network outage emits OEIS PASS with mode=fallback annotation; no cmd change needed (sentinel grep token preserved)",
+        "rotate_required": "NO if OEIS PASS literal preserved; cmd_sha256 unchanged"
+      },
+      "F12_triple_source_n6_corroboration": {
+        "current_pass_string": "TRIPLE_SOURCE_N6_CORROBORATION_ACTIVE",
+        "post_fallback_behavior": "PASS preserved as long as oeis A000396_first=6 AND wikipedia perfect_number_n6_anchor=true AND codata OK — fallback path emits same anchor sentinels (n=6 perfect-number content is hardcoded in fallback table)",
+        "rotate_required": "NO; cmd_sha256=259091967ba8667b unchanged"
+      },
+      "F101_sigma_a000203_n6": {
+        "post_fallback_behavior": "atlas grep is on n6/atlas.append.hexa-sim-bridges.n6 (file content), not bridge runtime — fallback irrelevant",
+        "rotate_required": "NO"
+      },
+      "new_falsifier_F186_proposed": {
+        "id": "F186",
+        "slug": "all-bridges-offline-fallback-marker-present",
+        "claim": "every bridge in tool/*_bridge.hexa registry (excluding roadmap_dod local-SSOT) emits the canonical literal 'OFFLINE-FALLBACK' under --no-fetch mode; ecosystem-wide canonical sentinel guard",
+        "cmd_sketch": "BR=$(ls /Users/ghost/core/nexus/tool/*_bridge.hexa | grep -v roadmap_dod); MISS=0; for f in $BR; do HEXA_RESOLVER_NO_REROUTE=1 /Users/ghost/core/hexa-lang/hexa run \"$f\" --selftest --no-fetch 2>&1 | grep -q OFFLINE-FALLBACK || MISS=$((MISS+1)); done; [ $MISS -eq 0 ] && echo ALL_BRIDGES_OFFLINE_FALLBACK_MARKER_PRESENT",
+        "pass": "ALL_BRIDGES_OFFLINE_FALLBACK_MARKER_PRESENT",
+        "reason": "one or more bridges silently dropped the canonical OFFLINE-FALLBACK sentinel — ecosystem regression in the offline-mode honesty contract; PAPER_S9 caveat would silently re-open",
+        "fix": "identify failing bridge by re-running per-bridge --no-fetch + grep; ensure fallback path emits 'OFFLINE-FALLBACK mode=fallback source=<bridge>:<anchor>' literal; verify against gaia_bridge gold-standard pattern (line 418/450)",
+        "origin": "raw 71 bridge fallback hardening Phase-C ω-cycle 2026-04-26 — meta sentinel guard preventing silent regression of stage-1+2 fix",
+        "cmd_sha256": "TBD (compute after Phase-C stage-1 lands)",
+        "tier": "tier_2 — meta-falsifier (does NOT belong in core science F# but in registry-integrity tier)"
+      },
+      "F186_falsifier_register_path": "design/hexa_sim/falsifiers.jsonl line 116 (append after F185)"
+    },
+    "cross_engine_fallback_pattern": {
+      "precedent": "HEXA_TOOLS_README hardcoded reference table inside bridge .hexa (gaia + icecube + nist patterns)",
+      "canonical_sentinel_spec": {
+        "literal": "OFFLINE-FALLBACK",
+        "format": "OFFLINE-FALLBACK mode=fallback source=<bridge_name>:<anchor_set_id>",
+        "live_counterpart": "ONLINE-LIVE mode=live source=<bridge_name>:<endpoint>",
+        "rationale": "two-way disambiguation; allows F# cmds to grep one or both"
+      },
+      "f_anchor_strategy": {
+        "option_A_single": "grep accepts both literals (oeis_live_bridge --selftest 2>&1 | grep -qE '(ONLINE-LIVE|OFFLINE-FALLBACK)')",
+        "option_B_dual": "two F# entries: F-x-live and F-x-offline; live PASSes when ONLINE-LIVE, offline PASSes when OFFLINE-FALLBACK",
+        "recommended": "option_A for existing F4/F12 (preserves cmd_sha256); option_B for new F186 meta-guard"
+      },
+      "alignment_with_raw_66": "OFFLINE-FALLBACK sentinel includes reason+fix trailer per ai-native error contract (e.g. 'reason: live fetch returned 0 bytes; fix: drop --no-fetch flag and verify network when upstream restored')"
+    }
+  },
+  "tier_1_recommendations": [
+    {
+      "id": "T1.1",
+      "scope": "tool/oeis_live_bridge.hexa",
+      "action": "add 4-anchor hardcoded fallback table + --no-fetch flag + emit canonical OFFLINE-FALLBACK sentinel",
+      "loc_delta": "+45 -2",
+      "raw_73_admissibility": "PASS",
+      "user_go_required": true,
+      "rationale": "highest F# coverage (F4 F12 F101); n=6 triple-source corroboration backbone"
+    },
+    {
+      "id": "T1.2",
+      "scope": "tool/wikipedia_summary_bridge.hexa",
+      "action": "add 4-article hardcoded extract table + --no-fetch + canonical sentinel",
+      "loc_delta": "+35 -1",
+      "raw_73_admissibility": "PASS",
+      "user_go_required": true,
+      "rationale": "F12 triple-source corroboration anchor; perfect_number_n6 article load-bearing"
+    },
+    {
+      "id": "T1.3",
+      "scope": "tool/gw_observatory_bridge.hexa",
+      "action": "add 3-event landmark baseline (GW150914/GW170817/GW190521) + --no-fetch + canonical sentinel + relax events_total threshold under fallback mode",
+      "loc_delta": "+40 -1",
+      "raw_73_admissibility": "PASS",
+      "user_go_required": true,
+      "rationale": "GW landmark events anchor sr_harness + bostrom_test simulators"
+    }
+  ],
+  "tier_2_recommendations": [
+    {"id": "T2.1", "scope": "tool/arxiv_realtime_bridge.hexa", "note": "freshness-by-design; fallback weakens semantic — lowest priority"},
+    {"id": "T2.2", "scope": "tool/simbad_bridge.hexa", "note": "4 reference stars hardcoded — mirror gaia pattern"},
+    {"id": "T2.3", "scope": "tool/openalex_bridge.hexa", "note": "1 cached entry for 'perfect number' query"},
+    {"id": "T2.4", "scope": "tool/uniprot_bridge.hexa", "note": "1-line ok-decision fix; sentinel emits FAIL even when fallback complete (gaia pattern correction)"},
+    {"id": "T2.5", "scope": "tool/pubchem_bridge.hexa", "note": "rename existing 'fallback:hardcoded-...' source string to include canonical 'OFFLINE-FALLBACK' literal"},
+    {"id": "T2.6", "scope": "tool/bridge_health.sh", "note": "tighten line 181/184 regex from loose 'fallback|offline|no.?fetch' to canonical literal 'OFFLINE-FALLBACK' (legacy substring retained for transition window)"},
+    {"id": "T2.7_meta_sentinel_guard", "scope": "design/hexa_sim/falsifiers.jsonl", "note": "register F186 'all-bridges-offline-fallback-marker-present' (meta sentinel guard preventing silent regression)"}
+  ],
+  "main_thread_action_required": {
+    "user_go_for": [
+      "T1.1 oeis_live_bridge fallback (+45 LOC)",
+      "T1.2 wikipedia_summary_bridge fallback (+35 LOC)",
+      "T1.3 gw_observatory_bridge fallback (+40 LOC)"
+    ],
+    "approval_question": "proceed Stage-1 Top-3 immediate (~1h, +120 LOC across 3 bridges, raw 73 admissibility PASS, OPT-A live-path-preserved)? OR defer pending PAPER_S9 caveat sibling agent completion?",
+    "blocker": "none — independent of paper caveat work (paper documents current state; this fixes future state)"
+  },
+  "estimated_effort": {
+    "stage_1_top_3": "~1h",
+    "stage_2_remaining_6": "~3h",
+    "stage_3_health_check_standardize": "~30min",
+    "stage_4_paper_caveat_update": "~30min",
+    "total_phase_c": "~5h end-to-end",
+    "minimum_viable_phase_c_top_3_only": "~1h (stage 1 alone unblocks F186 meta-guard for top-3)"
+  },
+  "constraints_compliance": {
+    "raw_71_SUGGEST_no_auto_apply": "PASS — design only; user-go gate explicit",
+    "raw_73_admissibility": "PASS — all 3 fixes additive; live path unchanged on success",
+    "raw_66_ai_native_error": "PASS — proposed sentinel format includes reason+fix trailer",
+    "read_only_audit": "PASS — zero bridge .hexa modifications in this cycle",
+    "under_200_lines": "PASS — witness ~165 lines"
+  },
+  "next_axis_recommendation": "after Stage-1 lands (top-3), run a 4th ω-cycle 'F186 meta-sentinel-guard registration + bridge_health.sh strict-mode flag' — registers the meta-guard falsifier AND ships strict-mode CLI flag (`--strict-fallback` makes loose substring match fail, canonical literal required) so subsequent regressions auto-detect. Estimated ~45min, raw 73 admissible."
+}

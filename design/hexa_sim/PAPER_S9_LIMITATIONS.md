@@ -104,3 +104,30 @@ The subsequent F126–F132 promotions were justified narrowly as cross-engine
 gap closures, not bulk additions. We record this self-imposed brake as part
 of the methodology: the framework includes a saturation-detection canary
 whose recommendation was heeded.
+
+## §9.7 Bridge offline-replayability gap
+
+A scout-v2 audit (\texttt{2026-04-26\_new\_domain\_scout\_v2\_omega\_cycle.md},
+commit \texttt{fa6ec2ec}) surfaced a determinism caveat. Of the $16$
+registered hexa-sim bridges,\footnote{The registry exposes $16$ bridges via
+\texttt{cli/run.hexa}; the disk-level \texttt{sim\_bridge/} directory hosts
+$9$ orthogonal sub-experiments not in the bridge-health roll-up. The two
+counts measure different objects.} only $7$ ship a hard-coded reference-data
+fallback (codata, cmb, nanograv, nist\_atomic, icecube, gaia, lhc); the
+remaining $9$ (\texttt{oeis\_live}, \texttt{gw\_observatory},
+\texttt{horizons}, \texttt{arxiv\_realtime}, \texttt{simbad},
+\texttt{wikipedia\_summary}, \texttt{openalex}, \texttt{pubchem},
+\texttt{uniprot}) require a live network. Falsifiers anchored to these
+bridges (F4 oeis-drift, F9 horizons-ephemeris, F10 cmb-cross-bridge,
+F11 hubble-tension and downstream multi-shard probes) are therefore not
+formally deterministic-replayable on a network-restricted host.
+\texttt{tool/bridge\_health.sh} emits an explicit \texttt{OFFLINE-FALLBACK}
+status on live-fetch failure — preserving bridge-health $\le 16/16$ but
+substituting a static value, a weaker guarantee than R1 cmd-fingerprint
+replay. An independent reproducer at \texttt{REPRODUCTION\_PROTOCOL}
+Stage~4 may see $<\!16/16$, or a $16/16$ silently containing up to $9$
+\texttt{OFFLINE-FALLBACK} cells; such cells should be treated as
+provenance-degraded. A formal OFFLINE-FALLBACK contract (cached-payload
+\texttt{cmd\_sha256} + freshness window + degraded-mode marker) across all
+$16$ bridges is enumerated in \texttt{PAPER\_OUTLINE\_v1.md} \S 10.4 as a
+next-cycle hardening item.
