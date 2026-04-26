@@ -1,23 +1,28 @@
-// tool/session_overview.hexa — hexa-native sentinel 종합 패널 (defense+registry+pending)
+// tool/session_overview.hexa — hexa-native sentinel 종합 패널 (7 tools)
 //
-// raw 9 hexa-only-suffix. 본 세션의 3 hexa 도구 sentinel을 한 번에 호출 + parse하여
+// raw 9 hexa-only-suffix. 본 세션의 7 hexa 도구 sentinel을 한 번에 호출 + parse하여
 // 통합 status panel emit. cron-friendly: 1 stdout sentinel + (default) detail.
 //
-// @tool(slug="session_overview", desc="hexa-native 3-tool sentinel aggregator panel")
+// @tool(slug="session_overview", desc="hexa-native 7-tool sentinel aggregator panel")
 // @usage:
 //   hexa run tool/session_overview.hexa            # detail + sentinel
 //   HEXA_ARGV='--quiet' hexa run tool/session_overview.hexa  # sentinel only
 //
-// 호출 도구:
+// 호출 도구 (자기 자신 제외 7개):
 //   1. tool/defense_smoke.hexa     → __DEFENSE_SMOKE__
 //   2. tool/falsifier_quick.hexa   → __FALSIFIER_QUICK__
 //   3. tool/pending_actions.hexa   → __PENDING_ACTIONS__
+//   4. tool/falsifier_id_gaps.hexa → __FALSIFIER_ID_GAPS__
+//   5. tool/bridge_quick.hexa      → __BRIDGE_QUICK__
+//   6. tool/atlas_quick.hexa       → __ATLAS_QUICK__
+//   7. tool/honesty_quick.hexa     → __HONESTY_QUICK__
 //
-// sentinel: __SESSION_OVERVIEW__ <PASS|WARN|FAIL> defense=<P/F> falsifiers=<N> pending_ready=<N>/<N>
+// sentinel: __SESSION_OVERVIEW__ <PASS|WARN|FAIL> defense=<P/F> falsifiers=<N> bridges=<N>/<T> atlas=<N>/<T> honesty=<5_5>/<6_6> pending_ready=<R>/<C> next_f=<N>
 //
-// raw 71 read-only / raw 73 admissibility (3 독립 도구) / raw 80 sentinel
+// raw 71 read-only / raw 73 admissibility (7 독립 도구) / raw 80 sentinel
 
 let NEXUS = "/Users/ghost/core/nexus"
+let HEXA = "/Users/ghost/core/hexa-lang/hexa"
 let mut QUIET = false
 
 fn _argv() -> array {
@@ -39,7 +44,7 @@ while i < len(args) {
     if a == "--quiet" { QUIET = true }
     if a == "--help" || a == "-h" {
         println("usage: HEXA_ARGV='--quiet' hexa run tool/session_overview.hexa")
-        println("  3 hexa-native tool sentinel 종합 패널")
+        println("  7 hexa-native tool sentinel 종합 패널")
         return
     }
     i = i + 1
@@ -47,7 +52,6 @@ while i < len(args) {
 
 fn _say(msg: string) { if !QUIET { println(msg) } }
 
-// Helper: extract value after key= in sentinel string
 fn _sentinel_get(sentinel: string, key: string) -> string {
     let needle = key + "="
     let i = sentinel.index_of(needle)
@@ -59,7 +63,6 @@ fn _sentinel_get(sentinel: string, key: string) -> string {
     return rest.substring(0, endi)
 }
 
-// Helper: extract sentinel line (last line starting with __NAME__)
 fn _last_sentinel(out: string, name: string) -> string {
     let needle = "__" + name + "__"
     let lines = split(out, "\n")
@@ -70,57 +73,90 @@ fn _last_sentinel(out: string, name: string) -> string {
     return found
 }
 
-// 1. defense_smoke
-_say("═══ session overview (3 hexa-native sentinels) ═══")
+fn _run(tool: string) -> string {
+    let cmd = "HEXA_ARGV='--quiet' " + HEXA + " run " + NEXUS + "/tool/" + tool + " 2>&1"
+    return to_string(exec(cmd))
+}
+
+_say("═══ session overview (7 hexa-native sentinels) ═══")
 _say("")
-_say("▶ 1. defense_smoke (5-layer R1+R2+R3-lite+R4+R5)")
-let cmd_def = "HEXA_ARGV='--quiet' /Users/ghost/core/hexa-lang/hexa run " + NEXUS + "/tool/defense_smoke.hexa 2>&1"
-let out_def = to_string(exec(cmd_def))
-let sent_def = _last_sentinel(out_def, "DEFENSE_SMOKE")
-let def_verdict = ""
-if sent_def.index_of("PASS") >= 0 { def_verdict = "PASS" }
-if sent_def.index_of("FAIL") >= 0 { def_verdict = "FAIL" }
-let def_falsifier = _sentinel_get(sent_def, "r1_falsifier")
-let def_bridge = _sentinel_get(sent_def, "r1_bridge")
-let def_atlas = _sentinel_get(sent_def, "r1_atlas")
-let def_r3 = _sentinel_get(sent_def, "r3_lite")
-let def_r5 = _sentinel_get(sent_def, "r5_chain")
-_say("  verdict: " + def_verdict + " | r1=fals:" + def_falsifier + "/bridge:" + def_bridge + "/atlas:" + def_atlas + " | r3_lite=" + def_r3 + " | r5_chain=" + def_r5)
+
+// 1. defense_smoke
+_say("▶ 1. defense_smoke")
+let s_def = _last_sentinel(_run("defense_smoke.hexa"), "DEFENSE_SMOKE")
+let def_v = ""
+if s_def.index_of("PASS") >= 0 { def_v = "PASS" }
+if s_def.index_of("FAIL") >= 0 { def_v = "FAIL" }
+let def_r3 = _sentinel_get(s_def, "r3_lite")
+let def_r5 = _sentinel_get(s_def, "r5_chain")
+_say("  " + def_v + " | r3_lite=" + def_r3 + " r5_chain=" + def_r5)
 
 // 2. falsifier_quick
 _say("")
-_say("▶ 2. falsifier_quick (registry distribution)")
-let cmd_fq = "HEXA_ARGV='--quiet' /Users/ghost/core/hexa-lang/hexa run " + NEXUS + "/tool/falsifier_quick.hexa 2>&1"
-let out_fq = to_string(exec(cmd_fq))
-let sent_fq = _last_sentinel(out_fq, "FALSIFIER_QUICK")
-let fq_total = _sentinel_get(sent_fq, "total")
-let fq_matched = _sentinel_get(sent_fq, "matched")
-_say("  verdict: total=" + fq_total + " entries (matched=" + fq_matched + ")")
+_say("▶ 2. falsifier_quick")
+let s_fq = _last_sentinel(_run("falsifier_quick.hexa"), "FALSIFIER_QUICK")
+let fq_total = _sentinel_get(s_fq, "total")
+_say("  " + fq_total + " entries")
 
 // 3. pending_actions
 _say("")
-_say("▶ 3. pending_actions (5 user-go items)")
-let cmd_pa = "HEXA_ARGV='--quiet' /Users/ghost/core/hexa-lang/hexa run " + NEXUS + "/tool/pending_actions.hexa 2>&1"
-let out_pa = to_string(exec(cmd_pa))
-let sent_pa = _last_sentinel(out_pa, "PENDING_ACTIONS")
-let pa_count = _sentinel_get(sent_pa, "count")
-let pa_ready = _sentinel_get(sent_pa, "ready")
-let pa_blocked = _sentinel_get(sent_pa, "blocked")
-let pa_done = _sentinel_get(sent_pa, "done")
-_say("  verdict: " + pa_ready + " ready / " + pa_blocked + " blocked / " + pa_done + " done (of " + pa_count + ")")
+_say("▶ 3. pending_actions")
+let s_pa = _last_sentinel(_run("pending_actions.hexa"), "PENDING_ACTIONS")
+let pa_count = _sentinel_get(s_pa, "count")
+let pa_ready = _sentinel_get(s_pa, "ready")
+_say("  " + pa_ready + "/" + pa_count + " ready")
 
-// Aggregate verdict
+// 4. falsifier_id_gaps
+_say("")
+_say("▶ 4. falsifier_id_gaps")
+let s_ig = _last_sentinel(_run("falsifier_id_gaps.hexa"), "FALSIFIER_ID_GAPS")
+let ig_max = _sentinel_get(s_ig, "max")
+let ig_gaps = _sentinel_get(s_ig, "gaps")
+let ig_next = _sentinel_get(s_ig, "next")
+_say("  max=F" + ig_max + " gaps=" + ig_gaps + " next=F" + ig_next)
+
+// 5. bridge_quick
+_say("")
+_say("▶ 5. bridge_quick")
+let s_bq = _last_sentinel(_run("bridge_quick.hexa"), "BRIDGE_QUICK")
+let bq_total = _sentinel_get(s_bq, "total")
+let bq_tampered = _sentinel_get(s_bq, "tampered")
+_say("  " + bq_total + " bridges (tampered=" + bq_tampered + ")")
+
+// 6. atlas_quick
+_say("")
+_say("▶ 6. atlas_quick")
+let s_aq = _last_sentinel(_run("atlas_quick.hexa"), "ATLAS_QUICK")
+let aq_total = _sentinel_get(s_aq, "total")
+let aq_tampered = _sentinel_get(s_aq, "tampered")
+_say("  " + aq_total + " shards (tampered=" + aq_tampered + ")")
+
+// 7. honesty_quick
+_say("")
+_say("▶ 7. honesty_quick")
+let s_hq = _last_sentinel(_run("honesty_quick.hexa"), "HONESTY_QUICK")
+let hq_5_5 = _sentinel_get(s_hq, "honesty_5_5")
+let hq_6_6 = _sentinel_get(s_hq, "honesty_6_6")
+_say("  mode-6: 5/5=" + hq_5_5 + " | 6/6=" + hq_6_6)
+
+// Aggregate
 _say("")
 _say("═══ aggregate ═══")
+
 let mut overall = "PASS"
-if def_verdict == "FAIL" { overall = "FAIL" }
-if def_verdict == "" { overall = "WARN" }
+if def_v == "FAIL" { overall = "FAIL" }
+if def_v == "" { overall = "WARN" }
+if bq_tampered != "" && bq_tampered != "0" { overall = "FAIL" }
+if aq_tampered != "" && aq_tampered != "0" { overall = "FAIL" }
 
 if !QUIET {
-    println("  defense:   " + def_verdict)
-    println("  falsifier: " + fq_total + " entries")
-    println("  pending:   " + pa_ready + "/" + pa_count + " ready")
+    println("  defense:    " + def_v)
+    println("  falsifier:  " + fq_total + " entries (next F" + ig_next + ")")
+    println("  bridge:     " + bq_total + " (tampered=" + bq_tampered + ")")
+    println("  atlas:      " + aq_total + " (tampered=" + aq_tampered + ")")
+    println("  honesty:    mode-6 5_5=" + hq_5_5 + " 6_6=" + hq_6_6)
+    println("  pending:    " + pa_ready + "/" + pa_count + " ready")
     println("")
 }
 
-println("__SESSION_OVERVIEW__ " + overall + " defense=" + def_verdict + " falsifiers=" + fq_total + " pending_ready=" + pa_ready + "/" + pa_count)
+println("__SESSION_OVERVIEW__ " + overall + " defense=" + def_v + " falsifiers=" + fq_total + " bridges=" + bq_total + "/" + bq_tampered + "_tampered atlas=" + aq_total + "/" + aq_tampered + "_tampered honesty=" + hq_5_5 + "/" + hq_6_6 + " pending_ready=" + pa_ready + "/" + pa_count + " next_f=F" + ig_next)
