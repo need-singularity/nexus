@@ -1,0 +1,123 @@
+// tool/atlas_quick.hexa — atlas_sha256.tsv lookup (hexa-native, bridge_quick analog)
+//
+// raw 9 hexa-only-suffix. atlas_sha256.tsv (10 shards: atlas.n6 main + 9 append) 빠른
+// query/lookup. TSV format은 bridge_sha256.tsv와 약간 다름 — column header 라인 추가
+// 존재 ('shard_path	sha256_16	lines	last_verified_utc'). data 라인은 '/'로 시작
+// (절대 경로) — 이를 활용해 정확 식별.
+//
+// @tool(slug="atlas_quick", desc="atlas_sha256.tsv lookup + summary")
+// @usage:
+//   hexa run tool/atlas_quick.hexa                          # default: summary
+//   HEXA_ARGV='--shard append.hexa-sim-bridges' hexa run tool/atlas_quick.hexa
+//   HEXA_ARGV='--list' hexa run tool/atlas_quick.hexa       # list all
+//   HEXA_ARGV='--check' hexa run tool/atlas_quick.hexa      # live SHA verify
+//
+// sentinel: __ATLAS_QUICK__ <PASS|MISMATCH|NOT_FOUND> total=N matched=M tampered=T
+//
+// raw 71 read-only / raw 73 admissibility / raw 80 sentinel
+
+let TSV = "/Users/ghost/core/nexus/state/atlas_sha256.tsv"
+let mut QUIET = false
+
+fn _argv() -> array {
+    let raw = to_string(exec("printf '%s' \"${HEXA_ARGV:-}\""))
+    let parts = split(raw, " ")
+    let mut out = []
+    let mut k = 0
+    while k < len(parts) {
+        if len(parts[k]) > 0 { out.push(parts[k]) }
+        k = k + 1
+    }
+    return out
+}
+
+let args = _argv()
+let mut want_substr = ""
+let mut do_list = false
+let mut do_check = false
+let mut i = 0
+while i < len(args) {
+    let a = args[i]
+    if a == "--quiet" { QUIET = true }
+    if a == "--shard" && i + 1 < len(args) { want_substr = args[i+1]; i = i + 1 }
+    if a == "--list" { do_list = true }
+    if a == "--check" { do_check = true }
+    if a == "--help" || a == "-h" {
+        println("usage: HEXA_ARGV='[--shard SUBSTR | --list | --check]' hexa run tool/atlas_quick.hexa")
+        println("  default: 10-shard summary")
+        println("  --shard X  shard path substring lookup (e.g. 'append.hexa-sim')")
+        println("  --list     list all 10 shards")
+        println("  --check    live SHA verify (TAMPERED detection)")
+        return
+    }
+    i = i + 1
+}
+
+fn _say(msg: string) { if !QUIET { println(msg) } }
+
+if !file_exists(TSV) {
+    println("__ATLAS_QUICK__ NOT_FOUND total=0 matched=0 tampered=0 reason=tsv_missing")
+    exit(76)
+}
+
+let content = to_string(read_file(TSV))
+let lines = split(content, "\n")
+let mut total = 0
+let mut matched = 0
+let mut tampered = 0
+
+if !QUIET && !do_list && !do_check && len(want_substr) == 0 {
+    println("Atlas SHA256 baseline (state/atlas_sha256.tsv):")
+    println("")
+}
+
+for line in lines {
+    let t = line.trim()
+    if len(t) == 0 { continue }
+    if t.substring(0, 1) == "#" { continue }
+    // column header skip: 'shard_path' 로 시작 (data는 'n6/...' relative path)
+    if t.index_of("shard_path") == 0 { continue }
+    // Format: shard_path<TAB>sha256_16<TAB>lines<TAB>last_verified_utc
+    let parts = split(t, "\t")
+    if len(parts) < 3 { continue }
+    let shard_path = parts[0]
+    let sha = parts[1]
+    let mut lines_count = ""
+    if len(parts) >= 3 { lines_count = parts[2] }
+    let mut ts = ""
+    if len(parts) >= 4 { ts = parts[3] }
+    total = total + 1
+
+    // shard basename — show only last path segment for readability
+    let bsi = shard_path.last_index_of("/")
+    let mut basename = shard_path
+    if bsi >= 0 { basename = shard_path.substring(bsi + 1, len(shard_path)) }
+
+    let mut hit = true
+    if len(want_substr) > 0 && shard_path.index_of(want_substr) < 0 { hit = false }
+
+    if hit {
+        matched = matched + 1
+        if do_check {
+            // shard_path가 relative (n6/...) — nexus root prefix 추가
+            let abs_path = "/Users/ghost/core/nexus/" + shard_path
+            let cmd = "shasum -a 256 " + abs_path + " 2>/dev/null | awk '{print substr($1,1,16)}'"
+            let live = to_string(exec(cmd)).trim()
+            let mut status = "OK"
+            if live != sha { status = "TAMPERED"; tampered = tampered + 1 }
+            _say("  " + basename + "  " + status + "  declared=" + sha + " live=" + live)
+        } else if do_list || len(want_substr) > 0 {
+            _say("  " + basename + "  " + sha + "  (" + lines_count + " lines, " + ts + ")")
+        }
+    }
+}
+
+if !QUIET && !do_list && !do_check && len(want_substr) == 0 {
+    println("  total shards: " + to_string(total))
+    println("  use --list / --shard X / --check for detail")
+}
+
+let mut verdict = "PASS"
+if matched == 0 && len(want_substr) > 0 { verdict = "NOT_FOUND" }
+if tampered > 0 { verdict = "MISMATCH" }
+println("__ATLAS_QUICK__ " + verdict + " total=" + to_string(total) + " matched=" + to_string(matched) + " tampered=" + to_string(tampered))
