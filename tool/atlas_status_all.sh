@@ -164,6 +164,32 @@ if [ -x "$TOOL_DIR/ledger_verify.sh" ] || [ -f "$TOOL_DIR/ledger_verify.sh" ]; t
     DEF_R5_BRIDGE_LEDGER_BROKEN=$(printf '%s' "$BL_LINE" | sed -nE 's/.*broken_at=([^ ]+).*/\1/p')
     [ -z "$DEF_R5_BRIDGE_LEDGER_BROKEN" ] && DEF_R5_BRIDGE_LEDGER_BROKEN="none"
 fi
+# R5 atlas_ledger (chain extension to atlas_sha256 — Ω-cycle 2026-04-26 final-defense-gap)
+DEF_R5_ATLAS_LEDGER="missing"; DEF_R5_ATLAS_LEDGER_ENTRIES=0; DEF_R5_ATLAS_LEDGER_BROKEN="none"
+if [ -x "$TOOL_DIR/ledger_verify.sh" ] || [ -f "$TOOL_DIR/ledger_verify.sh" ]; then
+    AL_OUT=$(bash "$TOOL_DIR/ledger_verify.sh" --ledger atlas --quiet 2>&1 || true)
+    AL_LINE=$(printf '%s\n' "$AL_OUT" | grep '__LEDGER_VERIFY__' | tail -1)
+    DEF_R5_ATLAS_LEDGER=$(printf '%s' "$AL_LINE" | awk '{print $2}')
+    [ -z "$DEF_R5_ATLAS_LEDGER" ] && DEF_R5_ATLAS_LEDGER="unknown"
+    DEF_R5_ATLAS_LEDGER_ENTRIES=$(printf '%s' "$AL_LINE" | sed -nE 's/.*entries=([0-9]+).*/\1/p')
+    [ -z "$DEF_R5_ATLAS_LEDGER_ENTRIES" ] && DEF_R5_ATLAS_LEDGER_ENTRIES=0
+    DEF_R5_ATLAS_LEDGER_BROKEN=$(printf '%s' "$AL_LINE" | sed -nE 's/.*broken_at=([^ ]+).*/\1/p')
+    [ -z "$DEF_R5_ATLAS_LEDGER_BROKEN" ] && DEF_R5_ATLAS_LEDGER_BROKEN="none"
+fi
+# R5 atlas_health (per-shard SHA256 verification — Ω-cycle 2026-04-26)
+DEF_R5_ATLAS_HEALTH="missing"; DEF_R5_ATLAS_TOTAL=0; DEF_R5_ATLAS_PASS=0; DEF_R5_ATLAS_TAMPERED=0
+if [ -x "$TOOL_DIR/atlas_health.sh" ] || [ -f "$TOOL_DIR/atlas_health.sh" ]; then
+    AH_OUT=$(bash "$TOOL_DIR/atlas_health.sh" --quiet 2>&1 || true)
+    AH_LINE=$(printf '%s\n' "$AH_OUT" | grep '__ATLAS_HEALTH__' | tail -1)
+    DEF_R5_ATLAS_HEALTH=$(printf '%s' "$AH_LINE" | awk '{print $2}')
+    [ -z "$DEF_R5_ATLAS_HEALTH" ] && DEF_R5_ATLAS_HEALTH="unknown"
+    DEF_R5_ATLAS_TOTAL=$(printf '%s' "$AH_LINE" | sed -nE 's/.*total=([0-9]+).*/\1/p')
+    [ -z "$DEF_R5_ATLAS_TOTAL" ] && DEF_R5_ATLAS_TOTAL=0
+    DEF_R5_ATLAS_PASS=$(printf '%s' "$AH_LINE" | sed -nE 's/.*pass=([0-9]+).*/\1/p')
+    [ -z "$DEF_R5_ATLAS_PASS" ] && DEF_R5_ATLAS_PASS=0
+    DEF_R5_ATLAS_TAMPERED=$(printf '%s' "$AH_LINE" | sed -nE 's/.*tampered=([0-9]+).*/\1/p')
+    [ -z "$DEF_R5_ATLAS_TAMPERED" ] && DEF_R5_ATLAS_TAMPERED=0
+fi
 echo "  R1 falsifier baseline sha:  $DEF_FAL_SHA"
 echo "  R1 bridge sha entries:      $DEF_BRIDGE_COUNT (oldest=$DEF_BRIDGE_OLDEST)"
 echo "  R3-full pre-commit hook:    $DEF_R3_HOOK"
@@ -171,6 +197,8 @@ echo "  R4 rotation log entries:    $DEF_R4_ROT"
 echo "  R5 ledger_verify:           $DEF_R5_LEDGER (entries=$DEF_R5_LEDGER_ENTRIES broken_at=$DEF_R5_LEDGER_BROKEN)"
 echo "  R5 registry_sign:           $DEF_R5_SIGN (reason=$DEF_R5_SIGN_REASON)"
 echo "  R5 bridge_ledger:           $DEF_R5_BRIDGE_LEDGER (entries=$DEF_R5_BRIDGE_LEDGER_ENTRIES broken_at=$DEF_R5_BRIDGE_LEDGER_BROKEN)"
+echo "  R5 atlas_ledger:            $DEF_R5_ATLAS_LEDGER (entries=$DEF_R5_ATLAS_LEDGER_ENTRIES broken_at=$DEF_R5_ATLAS_LEDGER_BROKEN)"
+echo "  R5 atlas_health:            $DEF_R5_ATLAS_HEALTH (pass=$DEF_R5_ATLAS_PASS/$DEF_R5_ATLAS_TOTAL tampered=$DEF_R5_ATLAS_TAMPERED)"
 
 # ─── 8. timeline status (atlas_health_timeline rotation watch) ───
 echo ""
@@ -208,5 +236,7 @@ EXIT_CODE=0
 [ "$COLLISION_CONF" -gt 0 ] && EXIT_CODE=2
 [ "$DEF_R5_LEDGER" = "FAIL" ] && EXIT_CODE=2
 [ "$DEF_R5_BRIDGE_LEDGER" = "FAIL" ] && EXIT_CODE=2
-echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED collision_dup=$COLLISION_DUP collision_conflict=$COLLISION_CONF defense_r1_falsifier=$DEF_FAL_SHA defense_r1_bridge=$DEF_BRIDGE_COUNT defense_r3_full=$DEF_R3_HOOK defense_r4_rotations=$DEF_R4_ROT defense_r5_ledger=$DEF_R5_LEDGER defense_r5_ledger_entries=$DEF_R5_LEDGER_ENTRIES defense_r5_ledger_broken_at=$DEF_R5_LEDGER_BROKEN defense_r5_sign=$DEF_R5_SIGN defense_r5_sign_reason=$DEF_R5_SIGN_REASON defense_r5_bridge_ledger=$DEF_R5_BRIDGE_LEDGER($DEF_R5_BRIDGE_LEDGER_ENTRIES) defense_r5_bridge_ledger_broken_at=$DEF_R5_BRIDGE_LEDGER_BROKEN timeline_lines=$TL_LINES timeline_last_rot=$TL_LAST_ROT"
+[ "$DEF_R5_ATLAS_LEDGER" = "FAIL" ] && EXIT_CODE=2
+[ "$DEF_R5_ATLAS_HEALTH" = "FAIL" ] && EXIT_CODE=2
+echo "__ATLAS_STATUS_ALL__ runtime=$RUNTIME_STATUS dashboard_h=$DASHBOARD_HONESTY facts=$STATS_TOTAL shards=$STATS_SHARDS staged_atlas=$PRECOMMIT_STAGED collision_dup=$COLLISION_DUP collision_conflict=$COLLISION_CONF defense_r1_falsifier=$DEF_FAL_SHA defense_r1_bridge=$DEF_BRIDGE_COUNT defense_r3_full=$DEF_R3_HOOK defense_r4_rotations=$DEF_R4_ROT defense_r5_ledger=$DEF_R5_LEDGER defense_r5_ledger_entries=$DEF_R5_LEDGER_ENTRIES defense_r5_ledger_broken_at=$DEF_R5_LEDGER_BROKEN defense_r5_sign=$DEF_R5_SIGN defense_r5_sign_reason=$DEF_R5_SIGN_REASON defense_r5_bridge_ledger=$DEF_R5_BRIDGE_LEDGER($DEF_R5_BRIDGE_LEDGER_ENTRIES) defense_r5_bridge_ledger_broken_at=$DEF_R5_BRIDGE_LEDGER_BROKEN defense_r5_atlas_ledger=$DEF_R5_ATLAS_LEDGER($DEF_R5_ATLAS_LEDGER_ENTRIES) defense_r5_atlas_ledger_broken_at=$DEF_R5_ATLAS_LEDGER_BROKEN defense_r5_atlas_health=$DEF_R5_ATLAS_HEALTH atlas_pass=$DEF_R5_ATLAS_PASS/$DEF_R5_ATLAS_TOTAL atlas_tampered=$DEF_R5_ATLAS_TAMPERED timeline_lines=$TL_LINES timeline_last_rot=$TL_LAST_ROT"
 exit $EXIT_CODE

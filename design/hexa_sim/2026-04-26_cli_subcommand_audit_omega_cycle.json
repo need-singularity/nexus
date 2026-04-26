@@ -1,0 +1,124 @@
+{
+  "title": "nexus hexa-sim CLI subcommand integrity audit (Ω-cycle)",
+  "date": "2026-04-26",
+  "task": "audit dispatch ↔ help ↔ tool-existence ↔ executability ↔ smoke for all hexa-sim subcommands",
+  "raw": [71, 73, 77],
+  "axes": {
+    "inventory": {
+      "method": "regex 'sub == \"X\"' inside cmd_hexa_sim() body of cli/run.hexa",
+      "subcommands_total": 27,
+      "subcommands": [
+        "verify", "falsifier", "bridge", "ci", "search", "runtime-check",
+        "provenance", "diff-per-type", "dashboard", "precommit",
+        "collision-check", "status-all", "timeline-rotate",
+        "falsifier-health", "bridge-health", "health-check-all",
+        "grade-promote", "bridge-aging", "honesty-fix", "index",
+        "falsifier-spawn", "glob-since", "v2-regression",
+        "atlas-ingest", "omega-ingest", "supercycle", "doc"
+      ],
+      "aliases": {"status": "status-all"},
+      "bridge_subdispatch_count": 16,
+      "bridge_subdispatch": [
+        "codata", "oeis", "gw", "horizons", "arxiv",
+        "cmb", "nanograv", "simbad", "icecube", "nist_atomic",
+        "wikipedia", "openalex", "gaia", "lhc", "pubchem", "uniprot"
+      ]
+    },
+    "matrix": {
+      "schema": "subcommand | dispatch_path | exists | executable | in_help | smoke",
+      "rows_pass": 27,
+      "rows_fail_dispatch": 0,
+      "rows_fail_existence": 0,
+      "rows_fail_executable_for_bash_tools": 0,
+      "rows_fail_help_sync": 0,
+      "rows_fail_smoke": 0,
+      "bridge_rows_pass": 16,
+      "notes": ".hexa scripts intentionally not chmod +x — invoked via 'hexa run', not directly"
+    },
+    "brokens": {
+      "missing_tools": [],
+      "non_executable_bash_tools": [],
+      "dispatch_in_help_but_not_in_code": [],
+      "code_dispatch_but_not_in_help": [],
+      "help_text_stale_strings": [
+        {
+          "location": "_hexa_sim_help() println for 'bridge'",
+          "before": "8 외부 API bridge tools (Tier-1 5 + Tier-2 3)",
+          "after": "16 외부 API bridge tools (Tier-1 5 + Tier-2 11)",
+          "severity": "low (display-only, doesn't break dispatch)"
+        },
+        {
+          "location": "_hexa_sim_bridge_dispatch() docstring header (line 5478)",
+          "before": "<codata|oeis|gw|horizons|arxiv|cmb|nanograv|simbad>",
+          "after": "<codata|oeis|gw|horizons|arxiv|cmb|nanograv|simbad|icecube|nist_atomic|wikipedia|openalex|gaia|lhc|pubchem|uniprot>",
+          "severity": "low (comment-only)"
+        }
+      ]
+    },
+    "fixes": {
+      "applied_count": 2,
+      "applied": [
+        {
+          "type": "help-text-sync",
+          "file": "cli/run.hexa",
+          "function": "_hexa_sim_help",
+          "change": "bridge count 8 → 16, Tier-2 3 → 11"
+        },
+        {
+          "type": "comment-sync",
+          "file": "cli/run.hexa",
+          "function": "_hexa_sim_bridge_dispatch",
+          "change": "docstring lists all 16 bridges (was 8)"
+        }
+      ],
+      "deferred_for_user_review": [
+        {
+          "type": "tool-runtime-bug",
+          "subcommand": "falsifier --selftest",
+          "evidence": "[hexa_sim_falsifier selftest] FAIL: expected >=5 entries, got 0",
+          "scope": "tool/hexa_sim_falsifier.hexa selftest body — not dispatch (raw 71: not obvious bug, may indicate registry path drift)"
+        },
+        {
+          "type": "tool-runtime-bug",
+          "subcommand": "ci --skip 100",
+          "evidence": "summary: 17 PASS, 2 FAIL, 0 SKIP / 19",
+          "scope": "tool/hexa_sim_ci.hexa — 2 of 19 tools failing selftest; likely correlated with falsifier selftest bug above"
+        }
+      ]
+    },
+    "smoke": {
+      "method": "for each sub: invoke 'nexus hexa-sim <sub> --help' (or --selftest / --list / --text for those without --help) and verify exit=0 + sane first-line output",
+      "passes": 27,
+      "fails": 0,
+      "tool_runtime_failures_observed": 2,
+      "tool_runtime_failures_classification": "pre-existing tool-level bugs surfaced by smoke; dispatch path itself works"
+    },
+    "readme_cross_check": {
+      "file": "design/hexa_sim/README.md",
+      "synced": "N/A",
+      "rationale": "README is a corpus index (witnesses + tools by file path), not a CLI subcommand reference. Per-subcommand listing is owned by _hexa_sim_help in cli/run.hexa. No drift to fix."
+    }
+  },
+  "tier_1": {
+    "subcommands_audited": 27,
+    "bridges_audited": 16,
+    "fixes_applied": 2,
+    "chmod_fixes": 0,
+    "help_sync_fixes": 2,
+    "tools_missing": 0,
+    "smoke_pass_rate": "27/27 (100%) dispatch + 16/16 bridge = 43/43"
+  },
+  "fixpoint": {
+    "marker": true,
+    "claim": "Every dispatched subcommand resolves to an existing tool (.sh chmod +x or .hexa via 'hexa run'); help text strings synced to actual dispatch table; no orphan dispatches; no missing dispatches.",
+    "reproducer": "cd /Users/ghost/core/nexus && python3 -c 'import re; c=open(\"cli/run.hexa\").read(); ...' (see audit method in axes.inventory)",
+    "next_review_trigger": "next time _hexa_sim_help text count strings change OR new bridge added"
+  },
+  "constraints_honored": {
+    "raw_71_only_obvious_bugs": true,
+    "raw_73_admissibility_reproducible": true,
+    "raw_77_audit_append_only": true,
+    "no_breaking_existing": true,
+    "no_commits": true
+  }
+}

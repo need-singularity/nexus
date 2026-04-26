@@ -1,0 +1,195 @@
+{
+  "trawl_id": "2026-04-26_atlas_R5_tracking_omega_cycle",
+  "ts": "2026-04-26T09:02:00+09:00",
+  "rule": "raw:design-strategy-strategy-exploration-omega-cycle (hive raw 47) + raw:design-strategy-falsifier-retire-rule (hive raw 71, report-only) + raw:design-strategy-honesty-admissibility (hive raw 73) + raw:design-strategy-audit-append-only (hive raw 77) + raw:design-strategy-sentinel-update (hive raw 80) + raw:design-strategy-ai-native-error-message (hive raw 66)",
+  "purpose": "Close the final R5 defense gap. Registry + bridge files have per-file SHA256 tracking with hash-chained rotation ledgers, but atlas data files (n6/atlas.n6 + 9 active append shards) have no file-SHA tracking. A bulk silent edit to atlas.n6 touching values that no falsifier covers would slip past every existing defense. This Ω-cycle establishes per-shard SHA256 baseline (state/atlas_sha256.tsv), drift detector (atlas_health.sh), R5 chain rotator (atlas_sha256_rotate.sh + state/atlas_sha256_rotation_log.jsonl), and weaves both into the existing aggregator surfaces.",
+  "trigger": "user 2026-04-26 prompt: 'Ω-cycle (오메가 사이클) — extend R5 file-SHA tracking from registry+bridges to atlas data files themselves (CLOSE final defense gap)'",
+  "inputs": {
+    "donors": [
+      "tool/bridge_health.sh (R1+R5 over 16 .hexa bridges)",
+      "tool/bridge_sha256_rotate.sh (R5 OPT-D ledger + rotation, 217 lines)",
+      "tool/ledger_verify.sh (R5 chain walker, supports --ledger {bridge|falsifier|PATH})",
+      "state/bridge_sha256.tsv (per-bridge baseline)",
+      "state/bridge_sha256_rotation_log.jsonl (R5 chain log, 2 entries)"
+    ],
+    "recipient_shards": [
+      "n6/atlas.n6 (main, 21850 lines, 1507642 bytes)",
+      "n6/atlas.append.anima-historical-from-nexus-2026-04-26-cont.n6",
+      "n6/atlas.append.anima-historical-from-nexus-2026-04-26.n6",
+      "n6/atlas.append.forge-triple.n6",
+      "n6/atlas.append.hexa-lang-historical-from-nexus-2026-04-26-cont.n6",
+      "n6/atlas.append.hexa-lang-historical-from-nexus-2026-04-26.n6",
+      "n6/atlas.append.hexa-sim-bridges.n6",
+      "n6/atlas.append.n6-architecture-historical-from-nexus-2026-04-26-cont.n6",
+      "n6/atlas.append.n6-architecture-historical-from-nexus-2026-04-26.n6",
+      "n6/atlas.append.nexus-historical-absorption-2026-04-26.n6"
+    ],
+    "shard_count": 10,
+    "total_lines": 24264,
+    "out_of_scope": [
+      "n6/atlas.millennium.n6 (not part of atlas.n6 + atlas.append.* glob — separate millennium-problem ledger)",
+      "n6/atlas.signals.n6 (not part of atlas.n6 + atlas.append.* glob — separate signals ledger)",
+      "n6/_retired/atlas.append.chip-p5-2.n6 (retired before Ω-cycle, not in glob)"
+    ]
+  },
+  "constraint_compliance": {
+    "raw_66_reason_fix": "atlas_health TAMPERED line emits reason=atlas_sha256_mismatch + fix=audit_git_log_or_rotate_baseline + declared/live hashes; missing-shard line emits reason=shard_missing + fix=restore_from_git_or_remove_baseline_row; atlas_sha256_rotate ERROR line emits reason+fix in stderr",
+    "raw_71_report_only": "atlas_health REPORTS only — never modifies n6/atlas*.n6 contents; atlas_sha256_rotate ROTATES baseline TSV + appends ledger only — never modifies n6/atlas*.n6 contents either",
+    "raw_73_admissibility": "all classification deltas backed by real bash exec results captured in mutation_cycle below — no fabrication; --reason field on rotate entries records why rotation occurred",
+    "raw_77_audit_append_only": "additive patches — no existing logic deleted in ledger_verify.sh (only new 'atlas' case added in switch); no existing logic deleted in atlas_status_all.sh or health_check_all.sh (only new R5 atlas blocks appended); baseline TSV created additively at state/atlas_sha256.tsv",
+    "raw_80_sentinel": "__ATLAS_HEALTH__ <PASS|WARN|FAIL> total=N pass=P tampered=T duration_ms=DD (new surface — no prior version to break); __ATLAS_SHA256_ROTATE__ <ROTATED|SKIPPED|ERROR> per-shard + __ATLAS_ROTATE__ aggregate (new surface); __HEALTH_CHECK_ALL__ extended with atlas=P/T + atlas_ledger=<status>(N) fields (backward compatible — older sed scripts ignore extra fields); __ATLAS_STATUS_ALL__ extended with defense_r5_atlas_ledger + defense_r5_atlas_health + atlas_pass + atlas_tampered (backward compatible)"
+  },
+  "axes_surfaced": [
+    {
+      "id": "axis_1_inventory",
+      "name": "atlas_data_file_inventory",
+      "method": "ls n6/atlas.n6 n6/atlas.append.*.n6 + wc -l",
+      "outcome_count": 10,
+      "outcome_total_lines": 24264,
+      "main_shard_bytes": 1507642,
+      "rationale": "Main + 9 append shards form the atlas substrate. atlas.millennium.n6 + atlas.signals.n6 are intentionally excluded (separate ledgers — not appended via atlas.append.* convention). Retired chip-p5-2 lives in n6/_retired/ and is therefore not in the active glob."
+    },
+    {
+      "id": "axis_2_baseline_tsv",
+      "name": "per_shard_sha256_baseline",
+      "tsv_path": "/Users/ghost/core/nexus/state/atlas_sha256.tsv",
+      "tsv_lines": 15,
+      "tsv_byte_size": 1329,
+      "format": "shard_path<TAB>sha256_16<TAB>lines<TAB>last_verified_utc",
+      "method": "python3 hashlib.sha256 over raw bytes of each n6 file, truncated to 16 hex chars (matches falsifier sha256_16 + bridge sha256_16 helper convention)",
+      "outcome_hashes": {
+        "n6/atlas.n6": "8aa7e0f7e3075fd7",
+        "n6/atlas.append.anima-historical-from-nexus-2026-04-26-cont.n6": "db4f45ff132aa9d9",
+        "n6/atlas.append.anima-historical-from-nexus-2026-04-26.n6": "7fe28b034b6a14b7",
+        "n6/atlas.append.forge-triple.n6": "faa6d11e4cb27bbd",
+        "n6/atlas.append.hexa-lang-historical-from-nexus-2026-04-26-cont.n6": "556b5d6a44317845",
+        "n6/atlas.append.hexa-lang-historical-from-nexus-2026-04-26.n6": "2294d2153ac2424f",
+        "n6/atlas.append.hexa-sim-bridges.n6": "c0db6345274ed5f3",
+        "n6/atlas.append.n6-architecture-historical-from-nexus-2026-04-26-cont.n6": "1a7dcfd5a1440a60",
+        "n6/atlas.append.n6-architecture-historical-from-nexus-2026-04-26.n6": "fc71842c7223a33b",
+        "n6/atlas.append.nexus-historical-absorption-2026-04-26.n6": "db68fbd6ca3eb90b"
+      },
+      "git_visibility": "state/* ignored per existing precedent (matches falsifier_registry.sha256 + bridge_sha256.tsv)"
+    },
+    {
+      "id": "axis_3_atlas_health_sh",
+      "name": "drift_detector",
+      "tool_path": "/Users/ghost/core/nexus/tool/atlas_health.sh",
+      "lines": 164,
+      "under_200_cap": true,
+      "shape": "mirrors bridge_health.sh: --quiet | --json | --strict | --help; iterate TSV; sha256_file_16 helper; PASS/TAMPERED per shard; aggregate sentinel + JSONL append to state/atlas_health_timeline.jsonl (shared timeline)",
+      "exit_codes": {
+        "0": "all PASS",
+        "76": "any TAMPERED (raw 23 schema-guard analog)",
+        "1": "usage error"
+      },
+      "sentinel_format": "__ATLAS_HEALTH__ <PASS|WARN|FAIL> total=N pass=P tampered=T duration_ms=DD",
+      "differences_from_bridge_health": "no per-entry network selftest (atlas shards are inert data, not executable bridges) — only SHA verification + missing-file detection. No OFFLINE-FALLBACK counter (n/a). missing counter added (TAMPERED-class) for shards that drop off disk."
+    },
+    {
+      "id": "axis_4_atlas_sha256_rotate_sh",
+      "name": "r5_rotator",
+      "tool_path": "/Users/ghost/core/nexus/tool/atlas_sha256_rotate.sh",
+      "lines": 233,
+      "shape": "mirrors bridge_sha256_rotate.sh: default scan+rotate | --dry-run | --shard PATH | --reason TEXT | --quiet | --json",
+      "ledger_path": "/Users/ghost/core/nexus/state/atlas_sha256_rotation_log.jsonl",
+      "ledger_format": "per line: {ts, shard, old_sha, new_sha, old_lines, new_lines, trigger, reason, prev_hash}",
+      "chain_pattern": "R5 OPT-D — prev_hash = sha256(prev_line) | 'genesis' for first entry",
+      "tsv_rotation_columns": "col 2 sha256_16 + col 3 lines + col 4 last_verified_utc (line count tracked alongside SHA for forensic context)",
+      "per_shard_sentinel": "__ATLAS_SHA256_ROTATE__ <ROTATED|SKIPPED|ERROR> shard=<basename> old=<sha> new=<sha>",
+      "aggregate_sentinel": "__ATLAS_ROTATE__ <PASS|FAIL|EMPTY> scanned=N rotated=K dry_run=<0|1>"
+    },
+    {
+      "id": "axis_5_ledger_verify_generalize",
+      "name": "ledger_verify_atlas_shortcut",
+      "tool_path": "/Users/ghost/core/nexus/tool/ledger_verify.sh",
+      "lines": 200,
+      "patch": "switch case extended with `atlas) LOG=state/atlas_sha256_rotation_log.jsonl` between the existing bridge and falsifier cases; help-text + error-trailer fix lists updated to include atlas",
+      "back_compat": "no existing case touched; pre-R5 grandfathering still applies; --ledger PATH absolute/relative still works; default ledger unchanged (falsifier registry)",
+      "verify_run": "ledger_verify --ledger atlas → __LEDGER_VERIFY__ EMPTY entries=0 broken_at=none ledger=atlas_sha256_rotation_log.jsonl"
+    },
+    {
+      "id": "axis_6_aggregator_weave",
+      "name": "atlas_status_all_and_health_check_all",
+      "atlas_status_all_path": "/Users/ghost/core/nexus/tool/atlas_status_all.sh",
+      "atlas_status_all_lines": 242,
+      "atlas_status_all_new_blocks": [
+        "DEF_R5_ATLAS_LEDGER probe (ledger_verify --ledger atlas --quiet)",
+        "DEF_R5_ATLAS_HEALTH probe (atlas_health.sh --quiet)",
+        "two new human-readable echo lines under defense block",
+        "two new sentinel fields: defense_r5_atlas_ledger=<status>(<N>) defense_r5_atlas_health=<status> atlas_pass=<P/T> atlas_tampered=<N>",
+        "EXIT_CODE escalation if atlas_ledger=FAIL or atlas_health=FAIL"
+      ],
+      "health_check_all_path": "/Users/ghost/core/nexus/tool/health_check_all.sh",
+      "health_check_all_lines": 157,
+      "health_check_all_new_blocks": [
+        "6th subcheck: atlas_health.sh probe (parses __ATLAS_HEALTH__ for total/pass/tampered)",
+        "7th subcheck: atlas_ledger probe (ledger_verify --ledger atlas)",
+        "TAMP_TOTAL recomputed as F_TAMP + B_TAMP + A_TAMP",
+        "compact line extended: 'F: ... | B: ... | A: P/T STATUS | tampered=N (F=Ft B=Bt A=At) | S: ... | L: ... | BL: ... | AL: ...'",
+        "fix-trailer reasons extended with atlas_health + atlas_ledger remediation hints",
+        "wrapper sentinel extended: atlas=P/T + atlas_ledger=<status>(N)"
+      ],
+      "verify_run_atlas_status_all": "__ATLAS_STATUS_ALL__ ... defense_r5_atlas_ledger=EMPTY(0) defense_r5_atlas_ledger_broken_at=none defense_r5_atlas_health=PASS atlas_pass=10/10 atlas_tampered=0 ...",
+      "verify_run_health_check_all": "__HEALTH_CHECK_ALL__ FAIL falsifier=103/105 bridge=16/16 atlas=10/10 tampered=0 status=ok ledger=EMPTY(0) bridge_ledger=PASS(2) atlas_ledger=EMPTY(0) (FAIL is from pre-existing falsifier subcheck 103/105, not from new atlas wiring — atlas itself is 10/10 PASS tampered=0)"
+    },
+    {
+      "id": "axis_7_mutation_cycle",
+      "name": "end_to_end_validation",
+      "baseline_run": "bash tool/atlas_health.sh → __ATLAS_HEALTH__ PASS total=10 pass=10 tampered=0",
+      "mutation": "echo '// drift_test' >> n6/atlas.append.hexa-sim-bridges.n6 (after cp to /tmp/test_shard.bak)",
+      "detection_run": "bash tool/atlas_health.sh → 'atlas.append.hexa-sim-bridges.n6  TAMPERED   declared=c0db6345274ed5f3  live=a4d36a15548cbbe0  reason=atlas_sha256_mismatch  fix=audit_git_log_or_rotate_baseline' + __ATLAS_HEALTH__ FAIL total=10 pass=9 tampered=1",
+      "rotate_dry_run_during_mutation": "bash tool/atlas_sha256_rotate.sh --dry-run → '__ATLAS_SHA256_ROTATE__ SKIPPED shard=atlas.append.hexa-sim-bridges.n6 old=c0db6345274ed5f3 new=a4d36a15548cbbe0' + __ATLAS_ROTATE__ PASS scanned=10 rotated=1 dry_run=1; TSV unchanged (verified post-restore)",
+      "restore": "cp /tmp/test_shard.bak n6/atlas.append.hexa-sim-bridges.n6 && rm /tmp/test_shard.bak",
+      "post_restore_run": "bash tool/atlas_health.sh --quiet → __ATLAS_HEALTH__ PASS total=10 pass=10 tampered=0 (clean)",
+      "tsv_integrity_check": "grep hexa-sim-bridges atlas_sha256.tsv → row preserved (sha c0db6345274ed5f3, lines 185, ts 2026-04-25T23:58:55Z) — dry-run did not mutate TSV"
+    }
+  ],
+  "tier_1_artifacts": [
+    "tool/atlas_health.sh (164 lines, new — drift detector for 10 atlas shards)",
+    "tool/atlas_sha256_rotate.sh (233 lines, new — R5 OPT-D rotator + chain ledger)",
+    "tool/ledger_verify.sh (+1 case for 'atlas' shortcut — generalized)",
+    "tool/atlas_status_all.sh (+30 lines wiring R5 atlas ledger + atlas_health into defense block + sentinel)",
+    "tool/health_check_all.sh (+34 lines: 6th + 7th subchecks atlas_health + atlas_ledger; wrapper sentinel extended)",
+    "state/atlas_sha256.tsv (15 lines, 1329 bytes — per-shard SHA256 baseline)"
+  ],
+  "tier_1_count": {
+    "new_tools_shipped": 2,
+    "tools_generalized": 1,
+    "aggregators_enriched": 2,
+    "baseline_files_created": 1
+  },
+  "defense_parity_matrix": {
+    "registry": {
+      "r1_per_entry_sha": "falsifier_registry.sha256 (cmd_sha256 per-entry)",
+      "r5_chain_ledger": "state/falsifier_registry_rotation_log.jsonl",
+      "ledger_verify_shortcut": "--ledger falsifier (default)"
+    },
+    "bridges": {
+      "r1_per_entry_sha": "state/bridge_sha256.tsv (per-bridge file SHA)",
+      "r5_chain_ledger": "state/bridge_sha256_rotation_log.jsonl (2 entries)",
+      "ledger_verify_shortcut": "--ledger bridge"
+    },
+    "atlas": {
+      "r1_per_entry_sha": "state/atlas_sha256.tsv (per-shard file SHA — NEW)",
+      "r5_chain_ledger": "state/atlas_sha256_rotation_log.jsonl (EMPTY, ready for first legitimate rotation — NEW)",
+      "ledger_verify_shortcut": "--ledger atlas (NEW)"
+    }
+  },
+  "fixpoint_marker": {
+    "verdict": "REACHED",
+    "evidence": [
+      "all 10 shards baselined and verified PASS",
+      "mutation cycle: TAMPERED detected on hexa-sim-bridges shard, restoration verified clean",
+      "dry-run rotate detects drift without mutating TSV/ledger",
+      "ledger_verify --ledger atlas accepted; EMPTY status on fresh ledger",
+      "both aggregators (atlas_status_all + health_check_all) emit new R5 atlas fields",
+      "defense parity: registry + bridges + atlas all carry R1 per-entry SHA + R5 chain ledger + ledger_verify shortcut"
+    ],
+    "next_natural_step": "first legitimate atlas rotation will populate state/atlas_sha256_rotation_log.jsonl with chain root (prev_hash=genesis); subsequent rotations chain via prev_hash = sha256(prev_line); ledger_verify --ledger atlas will switch from EMPTY to PASS once entries land"
+  },
+  "out_of_band_observations": [
+    "atlas.millennium.n6 (490 lines) and atlas.signals.n6 (4451 lines) sit alongside but are out of scope for this Ω-cycle (different ledger lineage). Future Ω-cycle could extend atlas_sha256.tsv format to optionally include them, or create separate millennium_sha256.tsv / signals_sha256.tsv if they accrue independent rotation cadences.",
+    "ledger_verify default lookup uses git rev-parse —show-toplevel which from cwd=hive points to /Users/ghost/core/hive — recommendation: invoke ledger_verify with explicit NEXUS_ROOT=$HOME/core/nexus from cron or external invokers, or add a --root flag in a follow-up Ω-cycle. Within atlas_status_all + health_check_all this is already handled (both pass NEXUS_ROOT through env)."
+  ]
+}

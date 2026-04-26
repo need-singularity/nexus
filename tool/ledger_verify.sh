@@ -7,6 +7,7 @@
 # Default ledger: state/falsifier_registry_rotation_log.jsonl
 # Other ledgers (R5 chain extension, 2026-04-26 OPT-B generalization):
 #   --ledger bridge   → state/bridge_sha256_rotation_log.jsonl
+#   --ledger atlas    → state/atlas_sha256_rotation_log.jsonl   (Ω-cycle 2026-04-26)
 #   --ledger PATH     → arbitrary path (absolute or relative to NEXUS_ROOT)
 #
 # Modes:
@@ -45,11 +46,12 @@ while [ "$#" -gt 0 ]; do
             if [ "$#" -eq 0 ]; then
                 echo "ledger_verify.sh: --ledger requires an argument" >&2
                 echo "  reason: missing PATH after --ledger" >&2
-                echo "  fix: --ledger bridge | --ledger falsifier | --ledger /abs/path.jsonl" >&2
+                echo "  fix: --ledger bridge | --ledger atlas | --ledger falsifier | --ledger /abs/path.jsonl" >&2
                 exit 2
             fi
             case "${1}" in
                 bridge)    LOG="${NEXUS_ROOT}/state/bridge_sha256_rotation_log.jsonl" ;;
+                atlas)     LOG="${NEXUS_ROOT}/state/atlas_sha256_rotation_log.jsonl" ;;
                 falsifier) LOG="${NEXUS_ROOT}/state/falsifier_registry_rotation_log.jsonl" ;;
                 /*)        LOG="${1}" ;;
                 *)         LOG="${NEXUS_ROOT}/${1}" ;;
@@ -60,7 +62,7 @@ while [ "$#" -gt 0 ]; do
         *)
             echo "ledger_verify.sh: unknown arg '${1}'" >&2
             echo "  reason: only --quiet|--json|--ledger PATH|(none) supported" >&2
-            echo "  fix: re-run with one of --quiet/--json/--ledger {bridge|falsifier|PATH}" >&2
+            echo "  fix: re-run with one of --quiet/--json/--ledger {bridge|atlas|falsifier|PATH}" >&2
             exit 2
             ;;
     esac
