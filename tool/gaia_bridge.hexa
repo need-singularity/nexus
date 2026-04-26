@@ -118,7 +118,11 @@ fn fetch_gaia_by_id(source_id: string) -> string {
     let q = "SELECT+TOP+1+source_id,ra,dec,parallax,pmra,pmdec,phot_g_mean_mag,radial_velocity"
           + "+FROM+gaiadr3.gaia_source+WHERE+source_id=" + source_id
     let url = "https://gea.esac.esa.int/tap-server/tap/sync?REQUEST=doQuery&LANG=ADQL&FORMAT=csv&QUERY=" + q
-    let cmd = "curl -s --max-time 60 '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=86400s (DR3 stellar catalogue immutable).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch gaia '" + url + "' 86400 1 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 

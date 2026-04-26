@@ -75,7 +75,11 @@ fn _url_encode(s: string) -> string {
 
 fn fetch_simbad(name: string) -> string {
     let url = "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=" + _url_encode(name) + "&output.format=ASCII"
-    let cmd = "curl -s --max-time 20 '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=3600s (object catalog updates infrequent).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch simbad '" + url + "' 3600 1 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 

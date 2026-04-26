@@ -85,7 +85,11 @@ fn fetch_b_file(seq_id: string) -> string {
     let url = "https://oeis.org/" + seq_id + "/b" + tail + ".txt"
     // shell trim: pipe through head -n 100 (caps at ~2KB regardless of upstream size).
     // for --seq mode we still want full data so callers go through fetch_b_file_full.
-    let cmd = "curl -s --max-time 30 '" + url + "' | head -n 100"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh for cache + retry +
+    // polite-API rate-limit. ttl=86400s (OEIS b-files immutable per sequence ID).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch oeis '" + url + "' 86400 1 2>/dev/null | head -n 100"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 
@@ -101,7 +105,10 @@ fn fetch_sequence_full(seq_id: string) -> array {
     // OOM (200KB ÷ ~15B/line = ~13K terms, plenty for any practical use).
     let tail = seq_id.substring(1, len(seq_id))
     let url = "https://oeis.org/" + seq_id + "/b" + tail + ".txt"
-    let cmd = "curl -s --max-time 30 '" + url + "' | head -c 200000"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch oeis '" + url + "' 86400 1 2>/dev/null | head -c 200000"
     let text = _str(exec(cmd))  // @allow-bare-exec
     return parse_b_file(text)
 }

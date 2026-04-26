@@ -141,8 +141,11 @@ fn _parse_decimal_scaled(s: string) -> i64 {
 
 fn fetch_planck_h0_token() -> string {
     let url = "https://en.wikipedia.org/wiki/Planck_(spacecraft)"
-    // grep first H0-shaped token (67.xx). -m 1 stops at first match.
-    let cmd = "curl -s --max-time 15 -A 'Mozilla/5.0' '" + url + "' 2>/dev/null | grep -oE '67\\.[0-9]+' | head -1"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=86400s (Planck 2018 release immutable).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch cmb '" + url + "' 86400 1 2>/dev/null | grep -oE '67\\.[0-9]+' | head -1"
     let raw = exec(cmd)  // @allow-bare-exec
     return to_string(raw).trim()
 }

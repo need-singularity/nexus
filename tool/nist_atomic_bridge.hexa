@@ -142,8 +142,12 @@ fn _fmt_mev_to_ev(mev: i64) -> string { return _fmt_at_scale(mev, 3) }
 
 fn fetch_nist_text() -> string {
     let url = "https://physics.nist.gov/cuu/Constants/Table/allascii.txt"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=86400s (atomic spectra reference data).
     // grab three lines: Rydberg / Bohr / Hartree energy in eV
-    let cmd = "curl -s --max-time 12 '" + url + "' 2>/dev/null | grep -E '^(Rydberg constant +[0-9]|Bohr radius +[0-9]|Hartree energy in eV +[0-9])'"
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch nist_atomic '" + url + "' 86400 1 2>/dev/null | grep -E '^(Rydberg constant +[0-9]|Bohr radius +[0-9]|Hartree energy in eV +[0-9])'"
     let raw = exec(cmd)  // @allow-bare-exec
     return to_string(raw)
 }

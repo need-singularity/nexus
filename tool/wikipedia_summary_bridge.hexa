@@ -142,7 +142,13 @@ fn _url_for(title: string) -> string {
 
 fn fetch_summary(title: string) -> string {
     let url = _url_for(title)
-    let cmd = "curl -s --max-time 15 -H 'accept: application/json' '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=1800s (Wikipedia REST summary may revise; balance freshness vs polite-API).
+    // Note: bridge_helper invokes raw curl (no -H accept), but Wikipedia REST returns
+    // JSON by default for summary endpoint; explicit Accept header was belt-and-braces.
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch wikipedia '" + url + "' 1800 1 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 

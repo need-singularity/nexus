@@ -60,7 +60,11 @@ fn fetch_catalog(short: string) -> string {
     // short examples: "GWTC-3-confident", "allevents", "GWTC-2.1-confident"
     let url = "https://gwosc.org/eventapi/jsonfull/" + short + "/"
     // strip the strain[] payload (97% of bytes); keep only the 5 selftest fields.
-    let cmd = "curl -s --max-time 60 '" + url + "' | grep -E '\"commonName\"|\"GPS\":|\"mass_1_source\"|\"mass_2_source\"|\"luminosity_distance\"'"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=3600s (GWOSC catalogue grows; historical entries stable).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch gw '" + url + "' 3600 1 2>/dev/null | grep -E '\"commonName\"|\"GPS\":|\"mass_1_source\"|\"mass_2_source\"|\"luminosity_distance\"'"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 

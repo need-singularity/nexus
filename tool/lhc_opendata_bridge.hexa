@@ -263,8 +263,11 @@ fn parse_record(block: string) -> array {
 // ─── core fetch ───
 
 fn fetch_url(url: string) -> string {
-    // -L follows 301 (CERN OpenData redirects /api/records → /api/records/)
-    let cmd = "curl -sL --max-time 30 -A 'nexus-lhc-opendata-bridge/1.0' '" + url + "'"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=86400s (OpenData releases tagged per-year). CERN APIs accept anonymous.
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch lhc '" + url + "' 86400 1 2>/dev/null"
     let raw = _str(exec(cmd))   // @allow-bare-exec
     return raw
 }

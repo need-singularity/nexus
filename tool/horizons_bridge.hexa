@@ -79,7 +79,12 @@ fn fetch_horizons(target_id: string, start: string, stop: string) -> string {
             + "&CENTER=%27%40399%27&MAKE_EPHEM=YES&EPHEM_TYPE=OBSERVER"
             + "&START_TIME=%27" + start + "%27&STOP_TIME=%27" + stop + "%27"
             + "&STEP_SIZE=%271d%27&QUANTITIES=%2720%27"
-    let cmd = "curl -s --max-time 30 '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=600s (ephemeris time-of-day-sensitive but not minute-sensitive for selftest).
+    // min_interval=5s — NASA APIs are politer with stricter rate-limit.
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch horizons '" + url + "' 600 5 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 

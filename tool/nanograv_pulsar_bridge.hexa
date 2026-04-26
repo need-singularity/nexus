@@ -114,13 +114,20 @@ fn _fmt_gamma() -> string {
 // ─── live fetch (best-effort; fallback on any failure) ───
 fn fetch_arxiv_abs() -> string {
     let url = "https://arxiv.org/abs/2306.16213"
-    let cmd = "curl -sL --max-time 15 -A 'Mozilla/5.0 nanograv-bridge' '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    // ttl=86400s (pulsar timing data publishes annually).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch nanograv '" + url + "' 86400 1 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 
 fn fetch_nanograv_news() -> string {
     let url = "https://nanograv.org/news"
-    let cmd = "curl -sL --max-time 15 -A 'Mozilla/5.0 nanograv-bridge' '" + url + "' 2>/dev/null"
+    // ω-bridge-3 (2026-04-26): route through bridge_helper.sh (cache + retry).
+    let nexus_root = to_string(exec("printf '%s' \"${NEXUS_ROOT:-$HOME/core/nexus}\"")).trim()  // @allow-bare-exec
+    let helper = nexus_root + "/tool/bridge_helper.sh"
+    let cmd = "bash '" + helper + "' fetch nanograv '" + url + "' 86400 1 2>/dev/null"
     return _str(exec(cmd))  // @allow-bare-exec
 }
 
