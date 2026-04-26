@@ -13,6 +13,9 @@
 #   tool/bridge_health.sh --strict              # also verify each bridge file SHA256 vs pinned baseline
 #   tool/bridge_health.sh --fingerprint-check   # after each PASS, schema-fingerprint via bridge_helper
 #   tool/bridge_health.sh -F                    # short form of --fingerprint-check
+#   tool/bridge_health.sh --anomaly-check       # after sweep, hexa run bridge_anomaly.hexa (CLI-only)
+#   tool/bridge_health.sh -A                    # short form of --anomaly-check
+#   tool/bridge_health.sh --no-history          # skip per-bridge TSV append (testing)
 #
 # Exit:
 #   0 if all PASS
@@ -66,6 +69,7 @@ fi
 HEXA_BIN="${HEXA_BIN:-$_default_hexa_bin}"
 TIMELINE="${ATLAS_HEALTH_TIMELINE:-$NEXUS_ROOT/state/atlas_health_timeline.jsonl}"
 BRIDGE_SHA_TSV="${BRIDGE_SHA_TSV:-$NEXUS_ROOT/state/bridge_sha256.tsv}"
+BRIDGE_HISTORY_TSV="${BRIDGE_HISTORY_TSV:-$NEXUS_ROOT/state/bridge_health_history.tsv}"
 TIMEOUT_BIN="${TIMEOUT_BIN:-gtimeout}"
 TIMEOUT_SECS="${BRIDGE_TIMEOUT:-30}"
 
@@ -73,6 +77,8 @@ QUIET=0
 JSON=0
 STRICT=0
 FP_CHECK=0
+ANOMALY_CHECK=0
+NO_HISTORY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -80,11 +86,13 @@ while [ $# -gt 0 ]; do
         --json)   JSON=1; shift ;;
         --strict) STRICT=1; shift ;;
         --fingerprint-check|-F) FP_CHECK=1; shift ;;
-        --help|-h) sed -n '3,44p' "$0"; exit 0 ;;
+        --anomaly-check|-A) ANOMALY_CHECK=1; shift ;;
+        --no-history)           NO_HISTORY=1; shift ;;
+        --help|-h) sed -n '3,47p' "$0"; exit 0 ;;
         *)
             echo "usage error: unknown flag: $1" >&2
             echo "  reason: unrecognised CLI argument" >&2
-            echo "  fix:    use --quiet | --json | --strict | --fingerprint-check | --help" >&2
+            echo "  fix:    use --quiet | --json | --strict | --fingerprint-check | --anomaly-check | --no-history | --help" >&2
             exit 1
             ;;
     esac
@@ -119,6 +127,19 @@ uniprot|https://rest.uniprot.org/uniprotkb/P68871.json
 fp_url_for() {
     local _name="$1"
     printf '%s\n' "$BRIDGE_FP_URLS" | awk -F'|' -v n="$_name" '$1==n {print $2; exit}'
+}
+
+# ω-bridge-15: append a per-bridge-per-sweep row to BRIDGE_HISTORY_TSV.
+# Schema:  ts<TAB>bridge<TAB>status<TAB>duration_ms<TAB>ec  (raw 77 append-only).
+# Honoured by tool/bridge_anomaly.hexa as the canonical history input.
+# No-op when --no-history is set or when BRIDGE_HISTORY_TSV is unwritable.
+append_history_row() {
+    local _ts="$1" _name="$2" _status="$3" _dur_ms="$4" _ec="$5"
+    [ "$NO_HISTORY" = "1" ] && return 0
+    [ -z "$_ts" ] || [ -z "$_name" ] && return 0
+    # Single atomic append. Tab-separated. printf is shell-builtin so no exec fan-out.
+    printf '%s\t%s\t%s\t%s\t%s\n' "$_ts" "$_name" "$_status" "$_dur_ms" "$_ec" \
+        >> "$BRIDGE_HISTORY_TSV" 2>/dev/null || return 0
 }
 
 # Helper: SHA256 of a file (first 16 hex chars). Tries shasum (BSD) then sha256sum (GNU).
@@ -190,6 +211,7 @@ for entry in $BRIDGES; do
         if [ "$QUIET" = "0" ] && [ "$JSON" = "0" ]; then
             printf '  %-12s  FAIL       ec=N/A  reason=script_missing  fix=restore_from_git\n' "$NAME"
         fi
+        append_history_row "$NOW" "$NAME" "FAIL" "0" "NA"
         continue
     fi
     # R1 bridge_sha256 verification — recompute hash of bridge file; mismatch → TAMPERED
@@ -204,6 +226,7 @@ for entry in $BRIDGES; do
                 printf '  %-12s  %-9s  ec=N/A  reason=bridge_sha256_mismatch  fix=audit_git_log_or_refresh_baseline  declared=%s  live=%s\n' \
                     "$NAME" "$STATUS" "$SHA_DECL" "$SHA_LIVE"
             fi
+            append_history_row "$NOW" "$NAME" "TAMPERED" "0" "NA"
             continue
         fi
     fi
@@ -243,6 +266,10 @@ for entry in $BRIDGES; do
             printf '  %-12s  %-9s  ec=%-3s  %3ss\n' "$NAME" "$STATUS" "$EC" "$DUR"
         fi
     fi
+    # ω-bridge-15: per-bridge history row (raw 77 append-only). DUR is integer seconds
+    # from date +%s; multiply to get ms-grain matching the schema. Coarse but
+    # consistent with existing wall timing (see L210).
+    append_history_row "$NOW" "$NAME" "$STATUS" "$((DUR * 1000))" "$EC"
 
     # ω-bridge-7 fingerprint-check (opt-in, only after PASS, only if URL registered)
     if [ "$FP_CHECK" = "1" ] && [ "$STATUS" = "PASS" ]; then
@@ -341,4 +368,18 @@ echo "__BRIDGE_HEALTH__ $VERDICT total=$TOTAL pass=$PASS fail=$FAIL tampered=$TA
 if [ "$FP_CHECK" = "1" ]; then
     echo "__BRIDGE_FINGERPRINT__ checked=$FP_CHECKED matched=$FP_MATCHED drift=$FP_DRIFT non_json=$FP_NON_JSON baseline_recorded=$FP_BASELINE"
 fi
+
+# ω-bridge-15: opt-in anomaly check (CLI-only inter-call into hexa runtime).
+# Reads BRIDGE_HISTORY_TSV (now appended above) and emits __BRIDGE_ANOMALY__.
+# Failure here is non-fatal (raw 71 report-only) — main exit code is preserved.
+if [ "$ANOMALY_CHECK" = "1" ]; then
+    if [ -x "$HEXA_BIN" ] || [ -f "$HEXA_BIN" ]; then
+        HEXA_ARGV="--quiet --history $BRIDGE_HISTORY_TSV" \
+            HEXA_RESOLVER_NO_REROUTE=1 \
+            "$HEXA_BIN" run "$NEXUS_ROOT/tool/bridge_anomaly.hexa" 2>/dev/null || true
+    else
+        echo "__BRIDGE_ANOMALY__ SKIP reason=hexa_bin_missing path=$HEXA_BIN" >&2
+    fi
+fi
+
 exit $EXIT_CODE
